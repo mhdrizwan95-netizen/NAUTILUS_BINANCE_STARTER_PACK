@@ -244,6 +244,13 @@ symbols:
 
 M15 Calibration Notebook — validates RewardBook convergence and TinyMLP learning safety.
 
+#### Calibration
+
+Use `ops/calibrate_policy.py` after any session to validate online learning health.
+- Inspect reward_heatmap.png for per-state signs.
+- Inspect policy_boundary.png for smooth boundary drift.
+- Ensure rolling_winrate.png remains >0.50 on validation windows.
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |

@@ -1,0 +1,13 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Calibrate Policy (M15)",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["ops/calibrate_policy.py"],
+      "group": "build",
+      "problemMatcher": []
+    }
+  ]
+}
