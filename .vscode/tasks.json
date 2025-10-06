@@ -30,6 +30,21 @@
       "command": "${workspaceFolder}/ops/m16_reinforce.sh",
       "problemMatcher": [],
       "group": "build"
+    },
+    {
+      "label": "M19 — Meta Scheduler (run once)",
+      "type": "shell",
+      "command": "${workspaceFolder}/ops/m19_run_once.sh",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "M19 — Meta Scheduler (daemon 5m)",
+      "type": "shell",
+      "command": "${workspaceFolder}/ops/m19_daemon.sh",
+      "args": ["300"],
+      "problemMatcher": [],
+      "group": "build"
     }
   ]
 }

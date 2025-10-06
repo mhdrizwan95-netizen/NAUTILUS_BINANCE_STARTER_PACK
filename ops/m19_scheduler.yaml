@@ -1,0 +1,32 @@
+cooldowns:
+  m15_minutes: 60
+  m16_minutes: 120
+  m17_minutes: 360
+  m18_minutes: 90
+
+thresholds:
+  drift_score_warn: 0.50
+  drift_score_crit: 0.75
+  winrate_warn: 0.48
+  winrate_crit: 0.45
+  reward_drop_pct: 20        # vs 7d moving avg
+  macro_entropy_bits_warn: 0.90
+  cov_entropy_warn: 0.85
+  feedback_stale_minutes: 30
+  rollups_stale_minutes: 30
+
+priorities:
+  # Higher number = higher priority
+  m16_on_winrate_crit: 100
+  m17_on_macro_entropy: 90
+  m18_on_cov_entropy: 80
+  m16_on_drift_crit: 70
+  m15_on_drift_warn: 60
+  m18_on_corr_spike: 55
+  paper_seed_on_stale: 50
+  noop_small_fluctuations: 0
+
+safeguards:
+  min_feedback_rows: 1200
+  canary_require_pass: true
+  max_actions_per_hour: 2

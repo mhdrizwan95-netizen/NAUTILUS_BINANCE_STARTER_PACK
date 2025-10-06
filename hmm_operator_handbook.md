@@ -294,6 +294,13 @@ python ops/m18_cov_diag.py --demo  # Demo with synthetic data
 python ops/m18_cov_diag.py         # Production diagnostics
 ```
 
+### M19 Self-Maintenance
+- Reads KPIs (drift, winrate, entropy, freshness).
+- Decides minimal effective action with cooldowns & backoff.
+- Records decisions and last-run times; exports Prometheus-friendly counters.
+- Rate-limits to max 2 actions/hour by default.
+- Honors canary promotion gates.
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |

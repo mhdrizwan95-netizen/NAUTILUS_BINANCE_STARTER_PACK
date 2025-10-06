@@ -37,3 +37,18 @@ To activate shared risk allocation:
     strategy.enable_covariance_allocator(allocator)
 Diagnostics:
     python ops/m18_cov_diag.py
+
+### M19 Meta-Learning Scheduler
+Policy-driven orchestrator that triggers M15/M16/M17/M18 based on live KPIs.
+
+Run once:
+    ./ops/m19_run_once.sh
+Daemon (every 5 min):
+    ./ops/m19_daemon.sh 300
+
+Config:
+    ops/m19_scheduler.yaml (thresholds, cooldowns, safeguards, priorities)
+
+State & Logs:
+    data/processed/m19/scheduler_state.json
+    data/processed/m19/metrics_snapshot.json (input KPIs)
