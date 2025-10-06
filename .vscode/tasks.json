@@ -45,6 +45,28 @@
       "args": ["300"],
       "problemMatcher": [],
       "group": "build"
+    },
+    {
+      "label": "M23 — Heartbeat Daemon",
+      "type": "shell",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "args": ["ops/m23_heartbeat.py"],
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "Frontend — Next.js Dev",
+      "type": "shell",
+      "command": "cd",
+      "args": ["${workspaceFolder}/frontend", "&&", "npm", "run", "dev"],
+      "group": "build"
+    },
+    {
+      "label": "Frontend — Next.js Build",
+      "type": "shell",
+      "command": "cd",
+      "args": ["${workspaceFolder}/frontend", "&&", "npm", "run", "build"],
+      "group": "build"
     }
   ]
 }

@@ -1,9 +1,19 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pathlib import Path
+from fastapi.middleware.cors import CORSMiddleware
 import json, time, httpx, os, glob, subprocess, shlex
 
 APP = FastAPI(title="Ops API")
+
+# Enable CORS for React frontend integration
+APP.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Next.js dev
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
 ML_URL = os.getenv("HMM_URL", "http://127.0.0.1:8010")

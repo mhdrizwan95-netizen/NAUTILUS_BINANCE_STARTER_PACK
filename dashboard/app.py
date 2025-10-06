@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CollectorRegistry, CONTENT_TYPE_LATEST, generate_latest, multiprocess, Counter, Gauge
 from prometheus_client import CollectorRegistry
 from fastapi import Response
@@ -18,6 +19,15 @@ INCIDENT_LOG = DATA_DIR / "m20" / "incident_log.jsonl"
 app = FastAPI(title="HMM Trader Dashboard")
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=str(APP_ROOT / "templates"))
+
+# Enable CORS for React frontend integration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Next.js dev
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # FastAPI + WS topics --------------
 WS_CLIENTS = {"guardian": set(), "scheduler": set(), "lineage": set(), "calibration": set()}

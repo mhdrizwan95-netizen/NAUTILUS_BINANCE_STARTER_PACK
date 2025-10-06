@@ -19,7 +19,11 @@ import subprocess
 import shlex
 import time
 import logging
+import asyncio
+import aiohttp
 from typing import List, Callable, Dict, Any
+from datetime import datetime
+from strategies.hmm_policy import telemetry
 
 logger = logging.getLogger(__name__)
 
@@ -261,6 +265,16 @@ def get_playbook_actions(incident_type: str) -> List[Callable[[], bool]]:
     """
     return PLAYBOOKS.get(incident_type, [diagnostics_snapshot])
 
+# WS push identical to scheduler version
+async def telemetry_ws_push(topic: str, payload: dict):
+    DASH = os.environ.get("DASH_BASE", "http://127.0.0.1:8002")
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.ws_connect(f"{DASH}/ws/{topic}") as ws:
+                await ws.send_json(payload)
+    except Exception:
+        pass
+
 def execute(incidents: List[str]) -> Dict[str, Any]:
     """
     Execute appropriate playbooks for detected incidents.
@@ -290,6 +304,20 @@ def execute(incidents: List[str]) -> Dict[str, Any]:
 
                 # Execute the action
                 success = action_func()
+
+                # --- new: record guardian incident for successful exec ---
+                if success:
+                    telemetry.inc_guardian_incident(incident_type)
+                    payload = {
+                        "ts": datetime.utcnow().isoformat(),
+                        "incident": incident_type,
+                        "action": action_name,
+                    }
+                    try:
+                        import asyncio
+                        asyncio.create_task(telemetry_ws_push("guardian", payload))
+                    except Exception:
+                        pass
 
                 # Log the result
                 log_recovery_action([incident_type], action_name, success)

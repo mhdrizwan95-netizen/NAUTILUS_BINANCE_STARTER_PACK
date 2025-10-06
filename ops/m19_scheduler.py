@@ -23,6 +23,7 @@ import shlex
 from datetime import datetime, timedelta
 import yaml
 from typing import Dict, List, Any, Optional, Tuple
+from strategies.hmm_policy import telemetry
 
 CFG_PATH = os.path.join("ops", "m19_scheduler.yaml")
 STATE_PATH = os.path.join("data", "processed", "m19", "scheduler_state.json")
@@ -343,6 +344,23 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
             # Brief paper trading to refresh feedback data
             success = exec_shell("./ops/calibrate_paper.sh 300")  # 5 minutes
 
+        # --- new: record telemetry + WS broadcast ---
+        if success:
+            telemetry.inc_scheduler_action(action)
+            payload = {
+                "ts": now(),
+                "action": action,
+                "reason": cause,
+                "success": bool(success),
+            }
+            try:
+                import asyncio
+                asyncio.create_task(
+                    telemetry_ws_push("scheduler", payload)
+                )
+            except Exception:
+                pass
+
         if success:
             state["actions_in_last_hour"] += 1
             mark_run(state, action if action != "paper_seed" else "m15")
@@ -355,6 +373,20 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
         decision.update({"ok": False, "error": str(e)})
 
     return decision
+
+
+# helper for dashboard broadcast
+async def telemetry_ws_push(topic: str, payload: dict):
+    """Push to dashboard WS endpoint if reachable."""
+    import aiohttp
+    DASH = os.environ.get("DASH_BASE", "http://127.0.0.1:8002")
+    try:
+        async with aiohttp.ClientSession() as sess:
+            async with sess.ws_connect(f"{DASH}/ws/{topic}") as ws:
+                await ws.send_json(payload)
+    except Exception:
+        pass
+
 
 def main():
     """Main scheduler execution - evaluates system and decides on actions."""
