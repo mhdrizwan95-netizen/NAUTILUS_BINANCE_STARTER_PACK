@@ -72,6 +72,7 @@ def minimal_engine(cfg: dict, out_dir: Path):
 
     trades_log, states_log, blocks_log = [], [], []
     client = httpx.Client(base_url=os.getenv("HMM_URL","http://127.0.0.1:8010"), timeout=0.05)
+    HMM_TAG = os.getenv("HMM_TAG")
     mid_hist: list[float] = []
     prev_ts_ns = None
     prev_mid = None
@@ -98,7 +99,9 @@ def minimal_engine(cfg: dict, out_dir: Path):
         feats = compute_features(None, book, trades, state).astype("float32")
 
         try:
-            r = client.post("/infer", json={"symbol": symbol.split(".")[0], "features": feats.tolist(), "ts": ts_ns}).json()
+            payload = {"symbol": symbol.split(".")[0], "features": feats.tolist(), "ts": ts_ns}
+            if HMM_TAG: payload["tag"] = HMM_TAG
+            r = client.post("/infer", json=payload).json()
             m_state, probs, conf = int(r["state"]), r["probs"], float(r["confidence"])
         except Exception:
             m_state, probs, conf = 0, [1.0], 1.0
