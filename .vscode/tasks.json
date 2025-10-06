@@ -23,6 +23,13 @@
       "args": ["900"],
       "problemMatcher": [],
       "group": "build"
+    },
+    {
+      "label": "M16 — Reinforce + Canary + Promote",
+      "type": "shell",
+      "command": "${workspaceFolder}/ops/m16_reinforce.sh",
+      "problemMatcher": [],
+      "group": "build"
     }
   ]
 }

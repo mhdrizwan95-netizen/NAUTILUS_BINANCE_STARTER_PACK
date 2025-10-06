@@ -263,6 +263,12 @@ After calibration, inspect:
 
 Aim for several thousand rows in feedback_log.csv for smooth plots.
 
+### M16 Reinforcement (Online Policy Update)
+- Trigger via VS Code task "M16 — Reinforce + Canary + Promote"
+- Requires feedback_log.csv (use M15 FAST/PAPER to generate if empty)
+- Canary must pass to promote; otherwise policy stays unchanged
+- Tune env vars: M16_GAMMA, M16_ALPHA, M16_LAMBDA, M16_MU, M16_LR, M16_KL_MAX
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |
