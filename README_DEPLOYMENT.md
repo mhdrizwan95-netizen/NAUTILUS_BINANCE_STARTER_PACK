@@ -30,6 +30,19 @@ Outputs:
 Grafana:
     Scrape metrics.prom (file_sd or sidecar) to plot m16_avg_reward, m16_entropy, m16_winrate.
 
+### M20 Resilience & Self-Healing
+Guardian daemon monitors live metrics for anomalies and executes mitigation playbooks.
+
+Run:
+    ./ops/m20_guardian.sh 60
+
+Playbooks:
+- drawdown → halve risk temporarily
+- guardrail_spike → reset guardrails + throttle trading
+- exchange_lag → restart exchange connector
+- entropy_spike → reduce exposure
+Logs: data/processed/m20/{incident_log.jsonl, recovery_actions.jsonl}
+
 ### M18 Multi-Symbol Mode
 To activate shared risk allocation:
     import risk.covariance_allocator as cov

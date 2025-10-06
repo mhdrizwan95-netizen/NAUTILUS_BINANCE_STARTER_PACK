@@ -301,6 +301,13 @@ python ops/m18_cov_diag.py         # Production diagnostics
 - Rate-limits to max 2 actions/hour by default.
 - Honors canary promotion gates.
 
+### M20 Guardian Intelligence
+- Polls metrics every 60 seconds (default).
+- Executes context-specific playbooks when incidents detected.
+- Integrates with M19 scheduler (resilience layer for survival reflexes).
+- Recovery actions logged for auditing and improvement.
+- Graceful degradation maintains operation during troubleshooting.
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |
