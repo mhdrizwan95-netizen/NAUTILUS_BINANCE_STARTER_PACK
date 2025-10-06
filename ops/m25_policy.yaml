@@ -1,0 +1,14 @@
+risk_limits:
+  max_daily_loss_usd: 100.0
+  max_position_usd: 2000.0
+  max_leverage: 3.0
+  max_open_trades: 10
+
+human_review:
+  require_approval_for_promotion: true
+  approver_email: "compliance@yourdomain.com"
+
+compliance:
+  log_retention_days: 90
+  export_to_csv: true
+  notify_violation: true

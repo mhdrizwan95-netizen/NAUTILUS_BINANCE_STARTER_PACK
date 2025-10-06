@@ -111,6 +111,21 @@ Data:
     data/collective/aggregate.json      # consensus metrics
     data/collective/consensus.json      # local copy of aggregate
 
+### M25 Ethical Governor
+Applies hard policy constraints and human oversight to prevent unintended behavior.
+
+Run checks:
+    python ops/m25_governor.py
+
+Config:
+    ops/m25_policy.yaml (risk caps, human-review policy)
+
+If violations occur:
+    TRADING_ENABLED=false is set and compliance_log.jsonl updated.
+
+Optional:
+    python ops/m25_approval.py  → sends email for manual approval before promotion.
+
 ### M18 Multi-Symbol Mode
 To activate shared risk allocation:
     import risk.covariance_allocator as cov

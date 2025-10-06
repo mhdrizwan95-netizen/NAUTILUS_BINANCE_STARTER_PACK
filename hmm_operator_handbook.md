@@ -339,6 +339,12 @@ python ops/m18_cov_diag.py         # Production diagnostics
 - Nodes can pull consensus.json and blend into local policy calibration.
 - Enables decentralized ensemble learning while preserving privacy.
 
+### M25 Conscience & Governance
+- Defines strict risk and operational boundaries.
+- Performs automatic shutdown on violation.
+- Logs every compliance event for 90 days.
+- Supports manual approval workflow for high-impact actions (promotions, capital increases).
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |
