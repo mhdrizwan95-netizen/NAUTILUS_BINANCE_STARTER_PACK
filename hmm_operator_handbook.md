@@ -333,6 +333,12 @@ python ops/m18_cov_diag.py         # Production diagnostics
 - Dream insights JSON provides automated recommendations.
 - Runs during "sleep" cycles when live trading is inactive.
 
+### M24 Collective Mode
+- Each node periodically submits compressed metrics.
+- Hub aggregates into consensus averages.
+- Nodes can pull consensus.json and blend into local policy calibration.
+- Enables decentralized ensemble learning while preserving privacy.
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |
