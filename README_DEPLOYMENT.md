@@ -60,6 +60,24 @@ Artifacts:
     data/memory_vault/*/metadata.json
     data/memory_vault/lineage_graph.png
 
+### M22 Communication & Expression Layer
+FastAPI microservice exposes organism state and sends alerts to chat platforms.
+
+Run API:
+    uvicorn ops.m22_comms_service:APP --port 8080
+
+Endpoints:
+    /status       → Current organism status and last decisions
+    /decisions    → Last scheduler action
+    /alert (POST) → Push manual or system alerts
+
+Environment:
+    TELEGRAM_TOKEN, TELEGRAM_CHAT_ID, DISCORD_WEBHOOK
+
+Notification utility:
+    python ops/m22_notify.py --message "Custom alert" --severity critical
+    python ops/m22_notify.py --incident  # Send last incident
+
 ### M18 Multi-Symbol Mode
 To activate shared risk allocation:
     import risk.covariance_allocator as cov

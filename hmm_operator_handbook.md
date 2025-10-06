@@ -316,6 +316,14 @@ python ops/m18_cov_diag.py         # Production diagnostics
 - Automated archiving daemon maintains continuous record.
 - Performance fingerprinting ensures data integrity.
 
+### M22 Expression & Communication
+- REST API for live introspection and control at port 8080.
+- Chat alerting via Telegram/Discord/Slack webhooks.
+- Integrates with M19-M20 systems for automated incident reporting.
+- Enables human–organism dialogue and external monitoring.
+- Command-line notification utility for manual alerts.
+- Environment-configured for multiple deployment scenarios.
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |
