@@ -43,6 +43,23 @@ Playbooks:
 - entropy_spike → reduce exposure
 Logs: data/processed/m20/{incident_log.jsonl, recovery_actions.jsonl}
 
+### M21 Memory & Lineage
+Archives complete evolutionary lineage with performance tracking.
+
+Run once:
+    python ops/m21_memory_manager.py
+
+Daemon:
+    ./ops/m21_memory_daemon.sh 600
+
+Visualize lineage:
+    python ops/m21_memory_viz.py
+
+Artifacts:
+    data/memory_vault/lineage_index.json
+    data/memory_vault/*/metadata.json
+    data/memory_vault/lineage_graph.png
+
 ### M18 Multi-Symbol Mode
 To activate shared risk allocation:
     import risk.covariance_allocator as cov

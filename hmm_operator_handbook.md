@@ -308,6 +308,14 @@ python ops/m18_cov_diag.py         # Production diagnostics
 - Recovery actions logged for auditing and improvement.
 - Graceful degradation maintains operation during troubleshooting.
 
+### M21 Distributed Memory
+- Fossils every model generation with complete metadata.
+- Tracks complete evolutionary lineage across M15-M21 cycles.
+- Generates visual lineage graphs showing performance evolution.
+- Enables ancestral rollback for known-good configurations.
+- Automated archiving daemon maintains continuous record.
+- Performance fingerprinting ensures data integrity.
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |
