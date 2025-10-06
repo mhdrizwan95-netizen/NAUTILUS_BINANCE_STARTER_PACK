@@ -10,80 +10,120 @@ import pandas as pd
 from pathlib import Path
 import asyncio
 import time, json, os, requests
+import httpx
 
 APP_ROOT = Path(__file__).resolve().parent
 DATA_DIR = APP_ROOT.parent / "data" / "processed"
 FEEDBACK_CSV = DATA_DIR / "feedback_log.csv"
 INCIDENT_LOG = DATA_DIR / "m20" / "incident_log.jsonl"
 
-app = FastAPI(title="HMM Trader Dashboard")
-app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
+APP = FastAPI(title="HMM Trader Dashboard")
+APP.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=str(APP_ROOT / "templates"))
 
+OPS_BASE = os.getenv("OPS_BASE", "http://127.0.0.1:8001")
+
 # Enable CORS for React frontend integration
-app.add_middleware(
+APP.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Next.js dev
+    allow_origins=["*"],  # Allow all for testing
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# FastAPI + WS topics --------------
-WS_CLIENTS = {"guardian": set(), "scheduler": set(), "lineage": set(), "calibration": set()}
+# --- v2 compatibility shim ---------------------------------------------------
+from typing import Dict, List, Any
 
-@app.websocket("/ws/{topic}")
-async def ws_topic(websocket: WebSocket, topic: str):
-    await websocket.accept()
-    if topic not in WS_CLIENTS: WS_CLIENTS[topic] = set()
-    WS_CLIENTS[topic].add(websocket)
+# basic http helper
+async def _get_json(url: str) -> Any:
+    async with httpx.AsyncClient(timeout=2.5) as client:
+        r = await client.get(url)
+        r.raise_for_status()
+        return r.json()
+
+# 1) /api/metrics_snapshot → map legacy endpoints into a compact JSON
+@APP.get("/api/metrics_snapshot")
+async def api_metrics_snapshot():
+    metrics = {
+        "pnl_realized": 0.0,
+        "pnl_unrealized": 0.0,
+        "drift_score": 0.0,
+        "policy_confidence": 0.0,
+        "order_fill_ratio": 0.0,
+        "venue_latency_ms": 0.0,
+    }
     try:
-        while True:
-            # passive (server-push only)
-            await asyncio.sleep(60)
+        pnl = await _get_json("http://127.0.0.1:8002/api/pnl")
+        metrics["pnl_realized"] = float(pnl.get("realized", 0) or 0)
+        metrics["pnl_unrealized"] = float(pnl.get("unrealized", 0) or 0)
     except Exception:
         pass
-    finally:
-        WS_CLIENTS[topic].discard(websocket)
+    try:
+        st = await _get_json("http://127.0.0.1:8002/api/states")
+        # tolerate different field names
+        metrics["drift_score"] = float(st.get("drift", st.get("drift_score", 0)) or 0)
+        metrics["policy_confidence"] = float(st.get("confidence", st.get("policy_confidence", 0)) or 0)
+        metrics["order_fill_ratio"] = float(st.get("fill_ratio", st.get("order_fill_ratio", 0)) or 0)
+        metrics["venue_latency_ms"] = float(st.get("latency_ms", st.get("venue_latency_ms", 0)) or 0)
+    except Exception:
+        pass
+    return {"metrics": metrics, "ts": time.time()}
 
-async def _broadcast(topic: str, payload: dict):
+# 2) Proxy lineage & calibration to Ops API (M21 & M15)
+@APP.get("/api/lineage")
+async def api_lineage_proxy():
+    try:
+        return await _get_json(f"{OPS_BASE}/lineage")
+    except Exception:
+        return {"index": {"models": []}}
+
+@APP.get("/api/artifacts/m15")
+async def api_artifacts_proxy():
+    try:
+        return await _get_json(f"{OPS_BASE}/artifacts/m15")
+    except Exception:
+        return {"files": []}
+
+# 3) Topic WS hub: /ws/{topic}
+_connections: Dict[str, List[WebSocket]] = {"scheduler": [], "guardian": [], "lineage": [], "calibration": []}
+
+async def _broadcast(topic: str, payload: Any):
     dead = []
-    for ws in list(WS_CLIENTS.get(topic, [])):
+    for ws in list(_connections.get(topic, [])):
         try:
             await ws.send_text(json.dumps(payload))
         except Exception:
             dead.append(ws)
     for ws in dead:
-        WS_CLIENTS[topic].discard(ws)
+        try:
+            _connections[topic].remove(ws)
+        except Exception:
+            pass
 
-# Lightweight REST for UI --------------
-OPS_BASE = os.environ.get("OPS_BASE", "http://127.0.0.1:8001")  # point to ops_api service
+@APP.websocket("/ws/{topic}")
+async def ws_topic(websocket: WebSocket, topic: str):
+    await websocket.accept()
+    if topic not in _connections:
+        _connections[topic] = []
+    _connections[topic].append(websocket)
+    try:
+        # passive receive; this keeps the connection alive
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        try:
+            _connections[topic].remove(websocket)
+        except Exception:
+            pass
 
-@app.get("/api/metrics_snapshot")
-def metrics_snapshot():
-    """Compact strip for: pnl, drift, policy_conf, fill_ratio, latency, corr_regime."""
-    # Pull directly from local registry (these gauges are set by your loop)
-    snap = {
-        "pnl_realized": g_pnl_realized._value.get(),
-        "pnl_unrealized": g_pnl_unrealized._value.get(),
-        "drift_score": g_drift._value.get(),
-        "policy_confidence": g_policy_conf._value.get(),
-        "order_fill_ratio": g_fill_ratio._value.get(),
-        "venue_latency_ms": g_latency_ms._value.get(),
-    }
-    # Regime label if any
-    snap["corr_regime"] = "unknown"
-    return {"ok": True, "metrics": snap}
-
-@app.get("/api/artifacts/m15")
-def proxy_artifacts():
-    r = requests.get(f"{OPS_BASE}/artifacts/m15", timeout=3)
-    return r.json()
-
-@app.get("/api/lineage")
-def proxy_lineage():
-    r = requests.get(f"{OPS_BASE}/lineage", timeout=3)
-    return r.json()
+# 4) Debug publish endpoints so you can test feeds instantly (optional)
+@APP.post("/debug/publish/{topic}")
+async def debug_publish(topic: str, payload: Dict[str, Any]):
+    payload.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    await _broadcast(topic, payload)
+    return {"ok": True}
+# ---------------------------------------------------------------------------
 
 # Prometheus registry (single-process simple mode)
 _registry = CollectorRegistry()
@@ -121,11 +161,11 @@ def read_csv_safe(path: Path, n_tail: int | None = None) -> pd.DataFrame:
         except Exception:
             return pd.DataFrame()
 
-@app.get("/", response_class=HTMLResponse)
+@APP.get("/", response_class=HTMLResponse)
 def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/metrics")
+@APP.get("/metrics")
 def metrics():
     # Update gauges from CSV snapshots
     states = read_csv_safe(DATA_DIR / "state_timeline.csv", n_tail=1_000)
@@ -160,7 +200,7 @@ def metrics():
 
     return Response(generate_latest(_registry), media_type=CONTENT_TYPE_LATEST)
 
-@app.get("/api/states")
+@APP.get("/api/states")
 def get_states():
     s = read_csv_safe(DATA_DIR / "state_timeline.csv", n_tail=10000)
     hist = {}
@@ -184,7 +224,7 @@ def get_states():
             }
     return {"hist": hist, "macro_hist": macro_hist, "latest": latest}
 
-@app.get("/api/pnl")
+@APP.get("/api/pnl")
 def api_pnl():
     if not FEEDBACK_CSV.exists():
         return {"ts": [], "pnl": [], "equity": []}
@@ -198,7 +238,7 @@ def api_pnl():
         "equity": equity.round(6).tolist(),
     }
 
-@app.get("/api/guardrails")
+@APP.get("/api/guardrails")
 def api_guardrails():
     if not INCIDENT_LOG.exists():
         return {"count_5m": 0, "recent": []}
@@ -233,7 +273,7 @@ class WSManager:
 
 ws_manager = WSManager()
 
-@app.websocket("/ws")
+@APP.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws_manager.connect(ws)
     try:
