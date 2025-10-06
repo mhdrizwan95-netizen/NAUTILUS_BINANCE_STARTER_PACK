@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 cd "$ROOT"
+export PYTHONPATH="$ROOT"
 if [ ! -d "../.venv" ]; then
   python3 -m venv ../.venv
 fi

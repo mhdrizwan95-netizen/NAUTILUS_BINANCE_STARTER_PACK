@@ -12,6 +12,8 @@ import time, json
 
 APP_ROOT = Path(__file__).resolve().parent
 DATA_DIR = APP_ROOT.parent / "data" / "processed"
+FEEDBACK_CSV = DATA_DIR / "feedback_log.csv"
+INCIDENT_LOG = DATA_DIR / "m20" / "incident_log.jsonl"
 
 app = FastAPI(title="HMM Trader Dashboard")
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
@@ -24,6 +26,11 @@ c_guard = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], r
 g_pnl_realized = Gauge("pnl_realized", "Realized PnL", registry=_registry)
 g_pnl_unrealized = Gauge("pnl_unrealized", "Unrealized PnL", registry=_registry)
 g_drift = Gauge("drift_score", "Feature drift (KLD)", registry=_registry)
+
+# M14: cross-symbol correlation risk metrics
+g_corr_btc_eth = Gauge("corr_btc_eth", "BTC-ETH correlation coefficient", registry=_registry)
+g_port_vol = Gauge("port_vol", "Portfolio volatility percentage", registry=_registry)
+g_corr_regime = Gauge("corr_regime_state", "Correlation regime state", ["state"], registry=_registry)
 
 def read_csv_safe(path: Path, n_tail: int | None = None) -> pd.DataFrame:
     if not path.exists():
@@ -81,6 +88,60 @@ def metrics():
             pass
 
     return Response(generate_latest(_registry), media_type=CONTENT_TYPE_LATEST)
+
+@app.get("/api/states")
+def get_states():
+    s = read_csv_safe(DATA_DIR / "state_timeline.csv", n_tail=10000)
+    hist = {}
+    macro_hist = {}
+    latest = None
+    if not s.empty:
+        # Count micro states
+        if "state" in s.columns:
+            hist = s["state"].value_counts().sort_index().to_dict()
+        # Count macro states if available
+        if "macro_state" in s.columns:
+            macro_hist = s["macro_state"].value_counts().sort_index().to_dict()
+        # Latest state info
+        if len(s) > 0:
+            last_row = s.iloc[-1]
+            latest = {
+                "state": int(last_row.get("state", 0)),
+                "macro_state": int(last_row.get("macro_state", 1)),
+                "conf": float(last_row.get("conf", 0.0)),
+                "ts_ns": int(last_row.get("ts_ns", 0))
+            }
+    return {"hist": hist, "macro_hist": macro_hist, "latest": latest}
+
+@app.get("/api/pnl")
+def api_pnl():
+    if not FEEDBACK_CSV.exists():
+        return {"ts": [], "pnl": [], "equity": []}
+    df = pd.read_csv(FEEDBACK_CSV)
+    ts = pd.to_datetime(df["ts"], errors="coerce") if "ts" in df.columns else pd.Series(range(len(df)))
+    pnl = df.get("pnl", pd.Series([0]*len(df))).astype(float).fillna(0.0)
+    equity = pnl.cumsum()
+    return {
+        "ts": ts.astype(str).tolist(),
+        "pnl": pnl.round(6).tolist(),
+        "equity": equity.round(6).tolist(),
+    }
+
+@app.get("/api/guardrails")
+def api_guardrails():
+    if not INCIDENT_LOG.exists():
+        return {"count_5m": 0, "recent": []}
+    try:
+        lines = INCIDENT_LOG.read_text().strip().splitlines()[-100:]
+        records = []
+        for ln in lines:
+            try:
+                records.append(json.loads(ln))
+            except Exception:
+                pass
+        return {"count_5m": len(records), "recent": records[-10:]}
+    except Exception:
+        return {"count_5m": 0, "recent": []}
 
 # WebSocket: push JSON packets every second
 class WSManager:

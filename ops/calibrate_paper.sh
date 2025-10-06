@@ -4,6 +4,7 @@ set -euo pipefail
 DURATION="${1:-900}"   # default 15 minutes
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
+export PYTHONPATH="$ROOT"
 
 # venv & deps
 if [ ! -d "../.venv" ]; then
