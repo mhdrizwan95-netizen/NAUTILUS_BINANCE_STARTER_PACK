@@ -269,6 +269,31 @@ Aim for several thousand rows in feedback_log.csv for smooth plots.
 - Canary must pass to promote; otherwise policy stays unchanged
 - Tune env vars: M16_GAMMA, M16_ALPHA, M16_LAMBDA, M16_MU, M16_LR, M16_KL_MAX
 
+### M18 Covariance-Aware Allocation
+- Dynamic position sizing across correlated symbols (BTC, ETH, SOL, etc.)
+- Maintains constant portfolio variance using rolling covariance matrix
+- Allocations adjust automatically when correlations rise/fall
+- Enables true multi-symbol coordination vs independent trading
+
+**Key Metrics:**
+- `m18_port_var`: Portfolio variance achieved
+- `m18_symbol_weight{symbol}`: Current allocation per symbol
+- Eigen-risk charts visualize dominant correlation clusters
+
+**Activation:**
+```python
+from strategies.hmm_policy.covariance_allocator import get_covariance_allocator
+allocator = get_covariance_allocator(window=500, target_var=0.0001)
+# Update after each trade: allocator.update(symbol, realized_return)
+# Query before sizing: weights = allocator.weights()
+```
+
+**Diagnostics:**
+```bash
+python ops/m18_cov_diag.py --demo  # Demo with synthetic data
+python ops/m18_cov_diag.py         # Production diagnostics
+```
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |

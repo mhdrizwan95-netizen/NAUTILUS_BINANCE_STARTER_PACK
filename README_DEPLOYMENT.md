@@ -29,3 +29,11 @@ Outputs:
     data/processed/m16/{learning_curve.png, drift_vs_reward.png, metrics.prom}
 Grafana:
     Scrape metrics.prom (file_sd or sidecar) to plot m16_avg_reward, m16_entropy, m16_winrate.
+
+### M18 Multi-Symbol Mode
+To activate shared risk allocation:
+    import risk.covariance_allocator as cov
+    allocator = cov.CovarianceAllocator(window=500, target_var=0.0001)
+    strategy.enable_covariance_allocator(allocator)
+Diagnostics:
+    python ops/m18_cov_diag.py
