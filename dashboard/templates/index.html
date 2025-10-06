@@ -1,0 +1,38 @@
+
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>HMM Trader Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+  <header>
+    <h1>HMM Trader Dashboard</h1>
+    <div class="status" id="status">loading…</div>
+  </header>
+
+  <main class="grid">
+    <section>
+      <h2>PnL</h2>
+      <canvas id="pnlChart"></canvas>
+    </section>
+    <section>
+      <h2>Guardrails (counts)</h2>
+      <canvas id="guardChart"></canvas>
+    </section>
+    <section>
+      <h2>State Histogram</h2>
+      <canvas id="stateChart"></canvas>
+    </section>
+    <section>
+      <h2>Latest State</h2>
+      <div id="latestState">—</div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

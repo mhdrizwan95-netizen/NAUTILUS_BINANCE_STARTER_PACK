@@ -1,0 +1,137 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "HMM Trader Dashboard",
+    "tags": ["hmm", "trading", "prometheus"],
+    "timezone": "browser",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Current Active State",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "max(state_active)",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          }
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "PnL Realized",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "pnl_realized",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "PnL Unrealized",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "pnl_unrealized",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Drift Score (KLD)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "drift_score",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        }
+      },
+      {
+        "id": 5,
+        "title": "Guardrail Trigger Rate (per 5m)",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "sum(rate(guardrail_trigger_total[5m])) by (reason)",
+            "refId": "A",
+            "legendFormat": "{{reason}}"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 24,
+          "x": 0,
+          "y": 16
+        }
+      },
+      {
+        "id": 6,
+        "title": "State Activity Heatmap",
+        "type": "heatmap",
+        "targets": [
+          {
+            "expr": "state_active",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 12,
+          "w": 24,
+          "x": 0,
+          "y": 24
+        }
+      }
+    ],
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "refresh": "5s",
+    "schemaVersion": 27,
+    "version": 0,
+    "templating": {
+      "list": []
+    }
+  }
+}
