@@ -78,6 +78,25 @@ Notification utility:
     python ops/m22_notify.py --message "Custom alert" --severity critical
     python ops/m22_notify.py --incident  # Send last incident
 
+### M23 Dreaming Mode
+Offline imagination system that tests historical or synthetic market scenarios.
+
+Run once:
+    python ops/m23_dream_engine.py
+
+Daemon:
+    ./ops/m23_dream_daemon.sh 1800
+
+Visualize dream history:
+    python ops/m23_dream_viz.py
+
+Outputs:
+    data/dreams/*.json (dream records)
+    data/dreams/dream_timeline.png
+    data/dreams/dream_distributions.png
+    data/dreams/dream_generations.png
+    data/dreams/dream_insights.json
+
 ### M18 Multi-Symbol Mode
 To activate shared risk allocation:
     import risk.covariance_allocator as cov

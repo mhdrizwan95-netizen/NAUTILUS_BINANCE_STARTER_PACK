@@ -324,6 +324,15 @@ python ops/m18_cov_diag.py         # Production diagnostics
 - Command-line notification utility for manual alerts.
 - Environment-configured for multiple deployment scenarios.
 
+### M23 Dreaming
+- Uses archived models (M21) to simulate alternate realities safely.
+- Evaluates any ancestor against synthetic market conditions.
+- Generates dream_timeline.png showing performance evolution.
+- Produces multi-regime distribution plots and generational insights.
+- Reveals which ancestral traits excel in different conditions.
+- Dream insights JSON provides automated recommendations.
+- Runs during "sleep" cycles when live trading is inactive.
+
 ## 🔁 Daily Operator Routine
 
 | Time | Task | Command |
