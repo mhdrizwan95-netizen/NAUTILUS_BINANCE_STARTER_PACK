@@ -1,0 +1,27 @@
+# VCS / IDE
+.git
+.gitignore
+.vscode
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.swp
+
+# Python envs
+.venv/
+env/
+venv/
+
+# Node, misc
+node_modules/
+
+# Local artifacts & caches
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+.DS_Store
+
+# Data generated at runtime stays on a volume
+data/
+backup_legacy/

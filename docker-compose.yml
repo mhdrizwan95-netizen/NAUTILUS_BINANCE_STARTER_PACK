@@ -1,0 +1,57 @@
+version: "3.9"
+
+x-env-common: &env_common
+  PYTHONPATH: /app
+  PROMETHEUS_MULTIPROC_DIR: /tmp/prom_multiproc
+
+services:
+  ops:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hmm_ops
+    command: >
+      /usr/bin/tini -- uvicorn ops.ops_api:APP
+      --host 0.0.0.0 --port 8001 --workers 2
+    environment:
+      <<: *env_common
+      OPS_BASE: "http://ops:8001"
+      DASH_BASE: "http://dash:8002"
+      # Optional: point API to on-disk data (mounted below)
+      OPS_DATA_DIR: /app/data
+    volumes:
+      - ./data:/app/data:rw
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/status || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  dash:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hmm_dash
+    command: >
+      /usr/bin/tini -- uvicorn dashboard.app:APP
+      --host 0.0.0.0 --port 8002 --workers 2
+    environment:
+      <<: *env_common
+      OPS_BASE: "http://ops:8001"
+      DASH_BASE: "http://dash:8002"
+    volumes:
+      - ./data:/app/data:ro
+    ports:
+      - "8002:8002"
+    depends_on:
+      ops:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/ || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
