@@ -246,10 +246,22 @@ M15 Calibration Notebook — validates RewardBook convergence and TinyMLP learni
 
 #### Calibration
 
-Use `ops/calibrate_policy.py` after any session to validate online learning health.
-- Inspect reward_heatmap.png for per-state signs.
-- Inspect policy_boundary.png for smooth boundary drift.
-- Ensure rolling_winrate.png remains >0.50 on validation windows.
+Use FAST or PAPER calibration VS Code tasks or terminal scripts to generate diagnostic PNGs.
+
+**FAST (via Backtest):** Run 'Calibrate (FAST via Backtest)' to run backtest → calibration automatically.  
+**PAPER (Testnet):** Run 'Calibrate (PAPER 15m)' to run paper trading → calibration automatically.
+
+For manual runs:
+- `ops/calibrate_fast.sh` - BACKTEST mode
+- `ops/calibrate_paper.sh 900` - PAPER mode (default 15m)
+- `ops/calibrate_policy.py` - DIRECT mode (requires existing feedback_log.csv)
+
+After calibration, inspect:
+- `reward_heatmap.png` for per-state signs
+- `policy_boundary.png` for smooth boundary drift
+- `rolling_winrate.png` remains >0.50 on validation windows
+
+Aim for several thousand rows in feedback_log.csv for smooth plots.
 
 ## 🔁 Daily Operator Routine
 

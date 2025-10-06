@@ -8,6 +8,21 @@
       "args": ["ops/calibrate_policy.py"],
       "group": "build",
       "problemMatcher": []
+    },
+    {
+      "label": "Calibrate (FAST via Backtest)",
+      "type": "shell",
+      "command": "${workspaceFolder}/ops/calibrate_fast.sh",
+      "problemMatcher": [],
+      "group": "build"
+    },
+    {
+      "label": "Calibrate (PAPER 15m)",
+      "type": "shell",
+      "command": "${workspaceFolder}/ops/calibrate_paper.sh",
+      "args": ["900"],
+      "problemMatcher": [],
+      "group": "build"
     }
   ]
 }
