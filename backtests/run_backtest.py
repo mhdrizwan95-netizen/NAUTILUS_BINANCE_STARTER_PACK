@@ -73,11 +73,43 @@ def minimal_engine(cfg: dict, out_dir: Path):
     trades_log, states_log, blocks_log = [], [], []
     client = httpx.Client(base_url=os.getenv("HMM_URL","http://127.0.0.1:8010"), timeout=0.05)
     HMM_TAG = os.getenv("HMM_TAG")
+    use_h2 = cfg.get("use_h2", False)
     mid_hist: list[float] = []
     prev_ts_ns = None
     prev_mid = None
     prev_spread_bp = None
     dq_log = []
+    mm = MM() if use_h2 else None  # macroscopic feature accumulator
+    # MM class defined below for simplicity
+    class MM:
+        def __init__(self, maxlen=600):
+            from collections import deque
+            import numpy as np
+            self.mids = deque(maxlen=maxlen)
+            self.spreads_bp = deque(maxlen=maxlen)
+            self.vol_bp = deque(maxlen=maxlen)
+        def update(self, mid: float, spread_bp: float):
+            self.mids.append(mid)
+            self.spreads_bp.append(spread_bp)
+            if len(self.mids) > 2:
+                arr = np.asarray(self.mids, dtype=np.float64)
+                rets = np.diff(arr) / np.maximum(arr[:-1], 1e-9)
+                vol_bp = float(np.std(rets[-120:]) * 1e4 if len(rets) >= 2 else 0.0)
+            else:
+                vol_bp = 0.0
+            self.vol_bp.append(vol_bp)
+        def macro_feats(self):
+            if len(self.mids) < 30:
+                return np.zeros(6, dtype=np.float32)
+            mids = np.asarray(self.mids[-300:], dtype=np.float64)
+            x = np.arange(len(mids))
+            slope = float(np.polyfit(x, mids, 1)[0]) / max(np.mean(mids), 1e-9)
+            vol = float(np.median(self.vol_bp[-300:]) if self.vol_bp else 0.0)
+            spr = float(np.median(self.spreads_bp[-300:]) if self.spreads_bp else 0.0)
+            vol_q = float(np.quantile(self.vol_bp[-300:], 0.75) if len(self.vol_bp) > 10 else 0.0)
+            spr_q = float(np.quantile(self.spreads_bp[-300:], 0.75) if len(self.spreads_bp) > 10 else 0.0)
+            trend = float(np.sign(slope))
+            return np.array([vol, vol_q, spr, spr_q, slope, trend], dtype=np.float32)
 
     for i, row in df.iterrows():
         issues, ts_ns = check_row(i, row, prev_ts_ns)
@@ -98,16 +130,41 @@ def minimal_engine(cfg: dict, out_dir: Path):
 
         feats = compute_features(None, book, trades, state).astype("float32")
 
-        try:
-            payload = {"symbol": symbol.split(".")[0], "features": feats.tolist(), "ts": ts_ns}
-            if HMM_TAG: payload["tag"] = HMM_TAG
-            r = client.post("/infer", json=payload).json()
-            m_state, probs, conf = int(r["state"]), r["probs"], float(r["confidence"])
-        except Exception:
-            m_state, probs, conf = 0, [1.0], 1.0
+        # H2 path if enabled
+        macro_state = 1  # default neutral
+        if use_h2 and mm:
+            mm.update(book.mid, book.spread_bp)
+            macro_vec = mm.macro_feats().tolist()
+            try:
+                payload = {"symbol": symbol.split(".")[0], "macro_feats": macro_vec, "micro_feats": feats.tolist(), "ts": ts_ns}
+                if HMM_TAG: payload["tag"] = HMM_TAG
+                r = client.post("/infer_h2", json=payload).json()
+                macro_state, m_state, conf = int(r["macro_state"]), int(r["micro_state"]), float(r["confidence"])
+            except Exception:
+                m_state, conf = 0, 1.0
+        else:
+            try:
+                payload = {"symbol": symbol.split(".")[0], "features": feats.tolist(), "ts": ts_ns}
+                if HMM_TAG: payload["tag"] = HMM_TAG
+                r = client.post("/infer", json=payload).json()
+                m_state, probs, conf = int(r["state"]), r["probs"], float(r["confidence"])
+            except Exception:
+                m_state, probs, conf = 0, [1.0], 1.0
 
-        states_log.append({"ts_ns": ts_ns, "state": m_state, "conf": conf})
+        states_log.append({"ts_ns": ts_ns, "state": m_state, "macro_state": macro_state, "conf": conf})
         side, qty, limit_px = decide_action(m_state, conf, feats, scfg)
+        # macro-aware guardrails: shrink risk in risk-off
+        risk_bias = {0:0.5, 1:1.0, 2:1.5}.get(macro_state, 1.0)
+        qty *= risk_bias
+
+        # M14: log correlation metrics
+        if mm and corr_tracker.is_ready() and corr_tracker.is_ready():
+            corr = corr_tracker.get_pairwise_correlation(sym_base, "ETH" if "BTC" in sym_base else "BTC")
+            states_log[-1].update({
+                "corr_btc_eth": float(corr) if corr else 0.0,
+                "port_vol": float(0.0),  # Placeholder - needs portfolio calculation
+                "corr_regime": "normal"  # Placeholder - needs correlation regime calculation
+            })
 
         block = check_gates(
             context=type("C", (), {"cfg": scfg, "trading_enabled": True, "instrument_id": symbol, "last_flip_ns": 0})(),

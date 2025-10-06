@@ -1,0 +1,6 @@
+# backtests/configs/crypto_spot.yaml
+symbol: BTCUSDT.BINANCE
+venue: BINANCE
+data_parquet: data/processed/binance_spot_BTCUSDT_sample.parquet  # provide your file
+slippage_bps: 1.5
+fees_bps: 1.0

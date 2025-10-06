@@ -1,12 +1,11 @@
+
 async function getJSON(url){ const r = await fetch(url, {cache:'no-store'}); return r.json(); }
 const pnlCtx = document.getElementById('pnlChart').getContext('2d');
 const guardCtx = document.getElementById('guardChart').getContext('2d');
 const stateCtx = document.getElementById('stateChart').getContext('2d');
-const macroCtx = document.getElementById('macroChart').getContext('2d');
 const pnlChart = new Chart(pnlCtx, { type:'line', data:{labels:[], datasets:[{label:'PnL', data:[]}]}, options:{animation:false,responsive:true,scales:{x:{display:false}}} });
 const guardChart = new Chart(guardCtx, { type:'bar', data:{labels:[], datasets:[{label:'Guardrails', data:[]}]}, options:{animation:false,responsive:true} });
-const stateChart = new Chart(stateCtx, { type:'bar', data:{labels:[], datasets:[{label:'Micro States', data:[]}]}, options:{animation:false,responsive:true} });
-const macroChart = new Chart(macroCtx, { type:'bar', data:{labels:[], datasets:[{label:'Macro Regimes', data:[]}]}, options:{animation:false,responsive:true} });
+const stateChart = new Chart(stateCtx, { type:'bar', data:{labels:[], datasets:[{label:'States', data:[]}]}, options:{animation:false,responsive:true} });
 
 // WS live updates + polling fallback
 let ws;
@@ -37,11 +36,7 @@ async function refresh(){
   stateChart.data.labels = sKeys;
   stateChart.data.datasets[0].data = sKeys.map(k=> st.hist[k]);
   stateChart.update();
-  const mKeys = Object.keys(st.macro_hist || {});
-  macroChart.data.labels = mKeys;
-  macroChart.data.datasets[0].data = mKeys.map(k=> st.macro_hist[k]);
-  macroChart.update();
-  const latest = st.latest ? `μ${st.latest.state} M${st.latest.macro_state} (conf ${st.latest.conf.toFixed(2)})` : '—';
+  const latest = st.latest ? `state ${st.latest.state} (conf ${st.latest.conf.toFixed(2)})` : '—';
   document.getElementById('latestState').textContent = latest;
 }
 setInterval(refresh, 3000);

@@ -1,6 +1,14 @@
 # backtests/configs/crypto_spot.yaml
-symbol: BTCUSDT.BINANCE
-venue: BINANCE
-data_parquet: data/processed/binance_spot_BTCUSDT_sample.parquet  # provide your file
-slippage_bps: 1.5
+symbols:
+  - "BTCUSDT.BINANCE"
+  - "ETHUSDT.BINANCE"
+data_parquet: "data/processed/synth_BTCUSDT_ticks.parquet"   # for BTC
+data_parquet_secondary: "data/processed/synth_ETHUSDT_ticks.parquet"  # for ETH
 fees_bps: 1.0
+slippage_bps: 1.5
+use_h2: false  # Enable hierarchical HMM (macro/micro layers)
+enable_portfolio_risk: false  # Enable cross-symbol correlation risk management
+enable_adaptive_clustering: false  # M14.1: Enable adaptive correlation clustering
+portfolio_target_vol: 0.02  # Target portfolio volatility (fractional)
+enable_online_finetune: false  # M15: Enable online policy learning
+learn_from_backtests: true  # Whether backtests contribute to online learning

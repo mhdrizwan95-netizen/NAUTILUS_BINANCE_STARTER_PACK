@@ -1,7 +1,7 @@
-# ml_service/app.py  — M11: Auto-retrain & Blue/Green
+# ml_service/app.py  — M11: Auto-retrain & Blue/Green + M13: H2 Hierarchical HMM
 import os
 from pathlib import Path
-from typing import List, Optional, Literal, Tuple, Dict
+from typing import List, Optional, Dict, Tuple
 
 import asyncio
 import numpy as np
@@ -25,6 +25,9 @@ POL_PATH = MODEL_DIR / "policy_v1.joblib"
 # M11: versioning + blue/green serving
 MODELS: Dict[str, dict] = {}  # tag -> {"hmm":..., "scaler":..., "policy":...}
 ACTIVE_TAG_PATH = MODEL_DIR / "active_tag.txt"
+
+# M13: H2 hierarchical models
+H2_MODELS: Dict[str, dict] = {}  # tag -> {"macro": hmm, "micro": {macro_state:int -> hmm}, "scaler_macro":..., "scaler_micro":..., "policy":...}
 
 def _timestamp_tag(prefix="v"):
     return f"{prefix}-{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}"
@@ -152,6 +155,41 @@ def _load_models():
     hmm = load(HMM_PATH) if HMM_PATH.exists() else None
     scaler = load(SCL_PATH) if SCL_PATH.exists() else None
     policy = load(POL_PATH) if POL_PATH.exists() else None
+
+# --- new imports/schemas ---
+class H2TrainRequest(BaseModel):
+    symbol: str
+    macro_sequences: List[List[float]]   # list of macro feature vectors (slow cadence)
+    micro_sequences_by_macro: Dict[int, List[List[float]]]  # per macro label -> micro feature vectors
+    n_macro: int = 3
+    n_micro: int = 4
+    train_policy: bool = True
+
+class H2InferRequest(BaseModel):
+    symbol: str
+    macro_feats: List[float]
+    micro_feats: List[float]
+    ts: int
+    tag: Optional[str] = None
+
+class H2InferResponse(BaseModel):
+    macro_state: int
+    micro_state: int
+    confidence: float
+    action: dict  # side/qty/limit_px
+
+# --- helper taggers ---
+def _h2_timestamp_tag(): return f"h2-{datetime.utcnow().strftime('%Y%m%dT%H%M%SS')}"
+
+def _h2_tag_paths(tag: str):
+    base = MODEL_DIR / tag
+    return {
+        "macro": base.with_suffix(".macro.joblib"),
+        "microdict": base.with_suffix(".microdict.joblib"),
+        "scalermacro": base.with_suffix(".scalermacro.joblib"),
+        "scalermicro": base.with_suffix(".scalermicro.joblib"),
+        "policy": base.with_suffix(".policy.joblib"),
+    }
 
 # ---------- Lifecyle ----------
 
@@ -314,3 +352,115 @@ def infer(req: InferRequest):
     action = _decide_from_policy(state, conf, x[0])
 
     return InferResponse(state=state, probs=probs, confidence=conf, action=action)
+
+# --- endpoint: /train_h2 ---
+@app.post("/train_h2")
+def train_h2(req: H2TrainRequest):
+    import numpy as np
+    from sklearn.preprocessing import StandardScaler
+    from hmmlearn.hmm import GaussianHMM
+    # Macro HMM
+    X_macro = np.asarray(req.macro_sequences, dtype=np.float32)
+    scaler_macro = StandardScaler().fit(X_macro)
+    X_macro_s = scaler_macro.transform(X_macro)
+    macro_hmm = GaussianHMM(n_components=req.n_macro, covariance_type="diag", n_iter=200).fit(X_macro_s)
+
+    # Micro HMMs per macro
+    scaler_micro = StandardScaler()
+    # Fit scaler on concatenated micro
+    all_micro = []
+    for _, seq in req.micro_sequences_by_macro.items():
+        all_micro.extend(seq)
+    X_micro_all = np.asarray(all_micro, dtype=np.float32)
+    scaler_micro.fit(X_micro_all)
+
+    micro_by_macro = {}
+    for m_state, seq in req.micro_sequences_by_macro.items():
+        X_m = scaler_micro.transform(np.asarray(seq, dtype=np.float32))
+        micro_by_macro[m_state] = GaussianHMM(n_components=req.n_micro, covariance_type="diag", n_iter=200).fit(X_m)
+
+    # Optional policy head on (macro_state, micro_state, micro_feats)
+    policy = None
+    if req.train_policy and len(X_micro_all) > 100:
+        # simple logistic/gbdt placeholder; keep consistent with your existing policy trainer
+        from sklearn.linear_model import LogisticRegression
+        y = np.zeros(len(X_micro_all), dtype=int)  # replace with your PnL-derived labels
+        policy = LogisticRegression(max_iter=200).fit(X_micro_all, y)
+
+    tag = _h2_timestamp_tag()
+    H2_MODELS[tag] = {
+        "macro": macro_hmm, "micro": micro_by_macro,
+        "scaler_macro": scaler_macro, "scaler_micro": scaler_micro,
+        "policy": policy
+    }
+    # Persist to disk (similar to single-level)
+    base = MODEL_DIR / tag
+    dump(macro_hmm, base.with_suffix(".macro.joblib"))
+    dump(micro_by_macro, base.with_suffix(".microdict.joblib"))
+    dump(scaler_macro, base.with_suffix(".scalermacro.joblib"))
+    dump(scaler_micro, base.with_suffix(".scalermicro.joblib"))
+    if policy: dump(policy, base.with_suffix(".policy.joblib"))
+    # set active if none
+    if _active_tag() is None:
+        _set_active_tag(tag)
+    return {"ok": True, "tag": tag, "n_macro": req.n_macro, "n_micro": req.n_micro}
+
+def _try_load_h2(tag: str):
+    base = MODEL_DIR / tag
+    macro_p = base.with_suffix(".macro.joblib")
+    microdict_p = base.with_suffix(".microdict.joblib")
+    if not macro_p.exists() or not microdict_p.exists():
+        return None
+    mset = {
+        "macro": load(macro_p),
+        "micro": load(microdict_p),
+        "scaler_macro": load(base.with_suffix(".scalermacro.joblib")),
+        "scaler_micro": load(base.with_suffix(".scalermicro.joblib")),
+        "policy": load(base.with_suffix(".policy.joblib")) if base.with_suffix(".policy.joblib").exists() else None,
+    }
+    H2_MODELS[tag] = mset
+    return mset
+
+def _decide_h2_policy(M: int, S: int, conf: float, micro_vec, policy):
+    # simple gating example: macro 0=risk-off,1=neutral,2=risk-on
+    macro_bias = {0: 0.5, 1: 1.0, 2: 1.5}.get(M, 1.0)
+    # direction from micro state prior (reuse your STATE_EDGE or learned mapping)
+    from strategies.hmm_policy.policy import STATE_EDGE
+    prior = STATE_EDGE.get(S, 0.0)
+    edge = prior * (2*conf - 1.0) * macro_bias
+    if edge > 0: side = "BUY"
+    elif edge < 0: side = "SELL"
+    else: side = "HOLD"
+    qty = float(min(0.01, max(0.0005, abs(edge)/10.0)))
+    return {"side": side, "qty": qty, "limit_px": None}
+
+# --- endpoint: /infer_h2 ---
+@app.post("/infer_h2", response_model=H2InferResponse)
+def infer_h2(req: H2InferRequest):
+    import numpy as np
+    tag = req.tag or _active_tag()
+    mset = H2_MODELS.get(tag) or _try_load_h2(tag)
+    if mset is None:
+        # fallback to single-level
+        ir = infer(InferRequest(symbol=req.symbol, features=req.micro_feats, ts=req.ts, tag=tag))
+        return H2InferResponse(macro_state=0, micro_state=ir.state, confidence=ir.confidence, action=ir.action)
+
+    xM = np.asarray(req.macro_feats, dtype=np.float32).reshape(1, -1)
+    xM = mset["scaler_macro"].transform(xM)
+    _, postM = mset["macro"].score_samples(xM)
+    pM = postM[-1]; macro_state = int(np.argmax(pM)); macro_conf = float(np.max(pM))
+
+    xS = np.asarray(req.micro_feats, dtype=np.float32).reshape(1, -1)
+    xS = mset["scaler_micro"].transform(xS)
+    micro_hmm = mset["micro"].get(macro_state)
+    if micro_hmm is None:
+        # unseen macro -> pick any available
+        micro_hmm = next(iter(mset["micro"].values()))
+    _, postS = micro_hmm.score_samples(xS)
+    pS = postS[-1]; micro_state = int(np.argmax(pS)); micro_conf = float(np.max(pS))
+
+    conf = float(min(1.0, 0.5*macro_conf + 0.5*micro_conf))
+
+    # policy gating: macro controls aggression
+    action = _decide_h2_policy(macro_state, micro_state, conf, xS[0], mset["policy"])
+    return H2InferResponse(macro_state=macro_state, micro_state=micro_state, confidence=conf, action=action)
