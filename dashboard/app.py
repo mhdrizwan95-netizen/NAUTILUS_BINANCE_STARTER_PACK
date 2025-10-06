@@ -8,7 +8,7 @@ from fastapi import Response
 import pandas as pd
 from pathlib import Path
 import asyncio
-import time, json
+import time, json, os, requests
 
 APP_ROOT = Path(__file__).resolve().parent
 DATA_DIR = APP_ROOT.parent / "data" / "processed"
@@ -19,18 +19,79 @@ app = FastAPI(title="HMM Trader Dashboard")
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=str(APP_ROOT / "templates"))
 
+# FastAPI + WS topics --------------
+WS_CLIENTS = {"guardian": set(), "scheduler": set(), "lineage": set(), "calibration": set()}
+
+@app.websocket("/ws/{topic}")
+async def ws_topic(websocket: WebSocket, topic: str):
+    await websocket.accept()
+    if topic not in WS_CLIENTS: WS_CLIENTS[topic] = set()
+    WS_CLIENTS[topic].add(websocket)
+    try:
+        while True:
+            # passive (server-push only)
+            await asyncio.sleep(60)
+    except Exception:
+        pass
+    finally:
+        WS_CLIENTS[topic].discard(websocket)
+
+async def _broadcast(topic: str, payload: dict):
+    dead = []
+    for ws in list(WS_CLIENTS.get(topic, [])):
+        try:
+            await ws.send_text(json.dumps(payload))
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        WS_CLIENTS[topic].discard(ws)
+
+# Lightweight REST for UI --------------
+OPS_BASE = os.environ.get("OPS_BASE", "http://127.0.0.1:8001")  # point to ops_api service
+
+@app.get("/api/metrics_snapshot")
+def metrics_snapshot():
+    """Compact strip for: pnl, drift, policy_conf, fill_ratio, latency, corr_regime."""
+    # Pull directly from local registry (these gauges are set by your loop)
+    snap = {
+        "pnl_realized": g_pnl_realized._value.get(),
+        "pnl_unrealized": g_pnl_unrealized._value.get(),
+        "drift_score": g_drift._value.get(),
+        "policy_confidence": g_policy_conf._value.get(),
+        "order_fill_ratio": g_fill_ratio._value.get(),
+        "venue_latency_ms": g_latency_ms._value.get(),
+    }
+    # Regime label if any
+    snap["corr_regime"] = "unknown"
+    return {"ok": True, "metrics": snap}
+
+@app.get("/api/artifacts/m15")
+def proxy_artifacts():
+    r = requests.get(f"{OPS_BASE}/artifacts/m15", timeout=3)
+    return r.json()
+
+@app.get("/api/lineage")
+def proxy_lineage():
+    r = requests.get(f"{OPS_BASE}/lineage", timeout=3)
+    return r.json()
+
 # Prometheus registry (single-process simple mode)
 _registry = CollectorRegistry()
-g_state = Gauge("state_active", "Active HMM state", ["id"], registry=_registry)
-c_guard = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=_registry)
-g_pnl_realized = Gauge("pnl_realized", "Realized PnL", registry=_registry)
+g_state          = Gauge("state_active", "Active HMM state", ["id"], registry=_registry)
+c_guard          = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=_registry)
+g_pnl_realized   = Gauge("pnl_realized", "Realized PnL", registry=_registry)
 g_pnl_unrealized = Gauge("pnl_unrealized", "Unrealized PnL", registry=_registry)
-g_drift = Gauge("drift_score", "Feature drift (KLD)", registry=_registry)
+g_drift          = Gauge("drift_score", "Feature drift (KLD)", registry=_registry)
 
 # M14: cross-symbol correlation risk metrics
 g_corr_btc_eth = Gauge("corr_btc_eth", "BTC-ETH correlation coefficient", registry=_registry)
-g_port_vol = Gauge("port_vol", "Portfolio volatility percentage", registry=_registry)
-g_corr_regime = Gauge("corr_regime_state", "Correlation regime state", ["state"], registry=_registry)
+g_port_vol     = Gauge("port_vol", "Portfolio volatility percentage", registry=_registry)
+g_corr_regime  = Gauge("corr_regime_state", "Correlation regime state", ["state"], registry=_registry)
+
+# New: extra gauges (mirroring producers)
+g_policy_conf    = Gauge("policy_confidence", "Latest policy confidence", registry=_registry)
+g_fill_ratio     = Gauge("order_fill_ratio", "Recent fills/orders ratio", registry=_registry)
+g_latency_ms     = Gauge("venue_latency_ms", "Recent venue latency (ms)", registry=_registry)
 
 def read_csv_safe(path: Path, n_tail: int | None = None) -> pd.DataFrame:
     if not path.exists():
