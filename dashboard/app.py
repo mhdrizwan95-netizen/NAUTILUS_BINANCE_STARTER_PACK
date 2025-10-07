@@ -215,6 +215,13 @@ async def api_artifacts_proxy():
     except Exception:
         return {"files": []}
 
+@APP.get("/api/account_snapshot")
+async def api_account_snapshot():
+    try:
+        return await _get_json(f"{OPS_BASE}/account_snapshot")
+    except Exception:
+        return {"equity": 0.0, "cash": 0.0, "exposure": 0.0, "positions": [], "ts": time.time()}
+
 # 3) Topic WS hub: /ws/{topic}
 _connections: Dict[str, List[WebSocket]] = {"scheduler": [], "guardian": [], "lineage": [], "calibration": []}
 
@@ -425,11 +432,7 @@ async def ws_endpoint(ws: WebSocket):
         ws_manager.disconnect(ws)
 
 # --- Health & metrics endpoints for dash ------------------------------------
-from fastapi import APIRouter
-import os, json, time
 import urllib.request
-
-OPS_BASE = os.getenv("OPS_BASE", "http://ops:8001")
 
 @APP.get("/status")
 def dash_status():
@@ -443,36 +446,4 @@ def dash_ready():
         return {"ok": True, "ops": "ok"}
     except Exception:
         return {"ok": True, "ops": "degraded"}
-
-def _fetch(url, timeout=2.5):
-    with urllib.request.urlopen(url, timeout=timeout) as r:
-        return json.loads(r.read().decode("utf-8"))
-
-@APP.get("/api/metrics_snapshot")
-async def dash_metrics_snapshot():
-    """
-    Smart fallback: prefer ops /metrics_snapshot, degrade gracefully.
-    """
-    # 1) preferred
-    try:
-        data = _fetch(f"{OPS_BASE}/metrics_snapshot")
-        # annotate source so UI can show 'ops_snapshot'
-        data["source"] = data.get("source", "ops_snapshot")
-        return data
-    except Exception:
-        pass
-
-    # 2) try ops /metrics
-    try:
-        data = _fetch(f"{OPS_BASE}/metrics")
-        return {"metrics": data.get("metrics", {}), "ts": int(time.time()), "source": "ops_metrics"}
-    except Exception:
-        pass
-
-    # 3) last resort empty
-    return {"metrics": {
-        "pnl_realized": 0, "pnl_unrealized": 0,
-        "drift_score": 0, "policy_confidence": 0,
-        "order_fill_ratio": 0, "venue_latency_ms": 0,
-    }, "ts": int(time.time()), "source": "none"}
 # ---------------------------------------------------------------------------

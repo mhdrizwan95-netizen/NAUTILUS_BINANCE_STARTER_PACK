@@ -19,12 +19,28 @@ services:
       OPS_DATA_DIR: /app/data
       # LIVE-3: Environment variables for live metrics
       OPS_API_TOKEN: "dev-token"  # Set to actual token for production
+
+      # --- Binance mode & creds ---
+      BINANCE_MODE: ${BINANCE_MODE}
+      BINANCE_API_KEY: ${BINANCE_API_KEY}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET}
+      # live bases
+      BINANCE_SPOT_BASE: ${BINANCE_SPOT_BASE}
+      BINANCE_USDM_BASE: ${BINANCE_USDM_BASE}
+      BINANCE_COINM_BASE: ${BINANCE_COINM_BASE}
+      # demo bases
+      DEMO_SPOT_BASE: ${DEMO_SPOT_BASE}
+      DEMO_USDM_BASE: ${DEMO_USDM_BASE}
+      DEMO_COINM_BASE: ${DEMO_COINM_BASE}
+      # http settings
+      BINANCE_RECV_WINDOW: ${BINANCE_RECV_WINDOW}
+      BINANCE_API_TIMEOUT: ${BINANCE_API_TIMEOUT}
     volumes:
       - ./data:/app/data:rw
     ports:
       - "8001:8001"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/readyz | jq -e '.ok == true' || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/readyz | grep -q '\"ok\": true'"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -50,7 +66,7 @@ services:
       ops:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/ || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/readyz | grep -q '\"ok\": true'"]
       interval: 10s
       timeout: 3s
       retries: 10

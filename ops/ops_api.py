@@ -2,7 +2,10 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import WebSocket, WebSocketDisconnect
 import json, time, httpx, os, glob, subprocess, shlex
+import asyncio
+from pathlib import Path as Path2
 
 # --- metrics snapshot surface -----------------------------------------------
 from ops.telemetry_store import load as _load_snap, save as _save_snap, Metrics as _Metrics, Snapshot as _Snapshot
@@ -126,6 +129,22 @@ def retrain(req: RetrainReq, request: Request):
     except Exception as e:
         raise HTTPException(500, f"ML retrain failed: {e}")
 
+# ---------- New: mode metadata for dashboard ----------
+@APP.get("/meta")
+def meta():
+    """Return metadata including trading mode."""
+    from adapters.account_provider import BinanceAccountProvider
+    mode = os.getenv("BINANCE_MODE", "live")
+    exchanges = []
+    provider = BinanceAccountProvider()
+    if provider.spot_base != "":
+        exchanges.append("SPOT")
+    if provider.usdm_base != "":
+        exchanges.append("USDM")
+    if provider.coinm_base != "":
+        exchanges.append("COIN-M")
+    return {"ok": True, "mode": mode, "exchanges": exchanges}
+
 # ---------- New: artifacts + lineage ----------
 @APP.get("/artifacts/m15")
 def list_artifacts_m15():
@@ -179,45 +198,288 @@ def healthz():
 @APP.get("/readyz")
 def readyz():
     """Readiness check - verifies can reach at least one Ops data source."""
+    result = {
+        "ok": True,
+        "source": None,
+        "snap_persist": None
+    }
+
     try:
         # Try to reach one of the data sources we depend on
         # For simplicity, check if we can load metrics snapshot
         snap = _load_snap()
         if snap.metrics is not None:
-            return {"ok": True, "source": "snapshot"}
+            result["source"] = "snapshot"
     except Exception:
         pass
 
-    # Try other sources like the status endpoint itself
+    # Check if snapshot persistence is working
     try:
-        # If we can get any status info, we're ready
-        status()
-        return {"ok": True, "source": "status"}
-    except Exception:
-        pass
+        if SNAP_DIR.exists():
+            # Recent file should exist if writer is active
+            today_file = SNAP_DIR / (time.strftime("%Y-%m-%d") + ".jsonl")
+            if today_file.exists() or (time.time() - SNAP_DIR.stat().st_ctime) < 300:  # created within 5 mins
+                result["snap_persist"] = "ok"
+            else:
+                result["snap_persist"] = "stale"
+        else:
+            result["snap_persist"] = "no_dir"
+    except Exception as e:
+        result["snap_persist"] = f"error: {str(e)[:50]}"
 
-    # If all sources fail, return degraded state
-    return {"ok": False, "error": "no data sources available"}
+    return result
 # ---------------------------------------------------------------------------
 
-# ---------- ACC-5: Optional account snapshot endpoint ----------
-@APP.get("/account_snapshot")
-def account_snapshot():
-    """Return positions table and account summary."""
-    snap = _load_snap()
-    # Return latest cached values
+SNAP_DIR = Path2("data/ops_snapshots")
+SNAP_DIR.mkdir(parents=True, exist_ok=True)
+RET_DAYS = int(os.getenv("SNAP_RETENTION_DAYS", "14"))
+ALLOW_ACCOUNT_FALLBACK = os.getenv("ACCOUNT_DEMO_FALLBACK", "0").lower() in ("1", "true", "yes")
+
+from adapters.account_provider import BinanceAccountProvider
+
+# globals for account cache
+ACCOUNT_CACHE: dict = {
+    "balances": {"equity": 0.0, "cash": 0.0, "exposure": 0.0},
+    "positions": [],
+    "ts": 0,
+    "source": "init",
+}
+
+def _load_demo_account() -> dict | None:
+    """Return the most recent demo snapshot if Binance returns nothing."""
+    try:
+        files = sorted(SNAP_DIR.glob("*.jsonl"))
+    except Exception:
+        return None
+    best: dict | None = None
+    for path in reversed(files):
+        try:
+            lines = path.read_text().splitlines()
+        except Exception:
+            continue
+        for line in reversed(lines):
+            try:
+                payload = json.loads(line)
+            except Exception:
+                continue
+            acct = payload.get("account") or {}
+            eq = float(acct.get("equity") or 0.0)
+            cash = float(acct.get("cash") or 0.0)
+            exposure = float(acct.get("exposure") or 0.0)
+            positions = acct.get("positions") or []
+            if eq or cash or exposure or positions:
+                candidate = {
+                    "equity": eq if eq else cash,
+                    "cash": cash if cash else (eq if eq else 0.0),
+                    "exposure": exposure,
+                    "positions": positions,
+                    "ts": payload.get("ts", time.time()),
+                    "source": "fallback",
+                }
+                if positions:
+                    return candidate
+                if best is None:
+                    best = candidate
+    return best
+
+def _derive_account_state(raw: dict, *, allow_fallback: bool = True) -> dict:
+    """Normalize raw provider payload into the dashboard-friendly schema."""
+    prev = ACCOUNT_CACHE
+    prev_source = prev.get("source")
+    can_use_prev = prev_source in {"binance", "cache"}
+    used_prev = False
+    fallback_used = False
+
+    eq = float(raw.get("equity") or raw.get("account_equity_usd") or 0.0)
+    cash = float(raw.get("cash") or raw.get("cash_usd") or 0.0)
+    exposure = float(raw.get("exposure") or raw.get("gross_exposure_usd") or 0.0)
+    positions = raw.get("positions") or []
+
+    spot = float(raw.get("spot_equity_usdt") or 0.0)
+    usdm = float(raw.get("usdm_equity_usdt") or 0.0)
+    coinm = float(raw.get("coinm_equity_est") or 0.0)
+    if eq == 0.0:
+        eq = spot + usdm + coinm
+    if cash == 0.0:
+        cash = float(raw.get("balances", {}).get("cash", 0.0)) or eq
+    if exposure == 0.0:
+        exposure = float(raw.get("balances", {}).get("exposure", 0.0)) or exposure
+
+    # Preserve previous readings if Binance temporarily returns zeros
+    if eq == 0.0 and prev.get("equity") and can_use_prev:
+        eq = float(prev.get("equity"))
+        used_prev = True
+    if cash == 0.0 and prev.get("cash"):
+        if can_use_prev:
+            cash = float(prev.get("cash"))
+            used_prev = True
+    if exposure == 0.0 and prev.get("exposure") and can_use_prev:
+        exposure = float(prev.get("exposure"))
+        used_prev = True
+    if not positions and prev.get("positions") and can_use_prev:
+        positions = prev.get("positions")
+        used_prev = True
+
+    if (
+        allow_fallback
+        and ALLOW_ACCOUNT_FALLBACK
+        and eq == 0.0
+        and cash == 0.0
+        and exposure == 0.0
+        and not positions
+    ):
+        demo = _load_demo_account()
+        if demo:
+            eq = demo.get("equity", eq)
+            cash = demo.get("cash", cash if cash else eq)
+            exposure = demo.get("exposure", exposure)
+            positions = demo.get("positions", positions)
+            fallback_used = True
+
+    ts = raw.get("ts") if isinstance(raw.get("ts"), (int, float)) else time.time()
+    source = "binance" if raw else "none"
+    if fallback_used:
+        source = "fallback"
+    elif used_prev:
+        source = "cache"
+
     return {
-        "equity_usd": snap.metrics.account_equity_usd,
-        "cash_usd": snap.metrics.cash_usd,
-        "positions": []  # TODO: implement real positions fetching if needed
+        "equity": float(eq),
+        "cash": float(cash),
+        "exposure": float(exposure),
+        "positions": positions,
+        "ts": ts,
+        "source": source,
     }
 
-# --- health endpoints ---
-@APP.get("/status")
-def status():
+def _update_metrics_account_fields(equity: float, cash: float, exposure: float) -> None:
+    try:
+        snap = _load_snap()
+        metrics = snap.metrics.__dict__.copy()
+        updated = False
+        for key, val in {
+            "account_equity_usd": float(equity),
+            "cash_usd": float(cash),
+            "gross_exposure_usd": float(exposure),
+        }.items():
+            if abs(metrics.get(key, 0.0) - val) > 1e-6:
+                metrics[key] = val
+                updated = True
+        if updated:
+            _save_snap(_Snapshot(metrics=_Metrics(**metrics), ts=time.time()))
+    except Exception as exc:
+        print("account metrics update failed:", exc, flush=True)
+
+def _publish_account_snapshot(state: dict) -> None:
+    ACCOUNT_CACHE["equity"] = state.get("equity", 0.0)
+    ACCOUNT_CACHE["cash"] = state.get("cash", 0.0)
+    ACCOUNT_CACHE["exposure"] = state.get("exposure", 0.0)
+    ACCOUNT_CACHE["balances"] = {
+        "equity": ACCOUNT_CACHE["equity"],
+        "cash": ACCOUNT_CACHE["cash"],
+        "exposure": ACCOUNT_CACHE["exposure"],
+    }
+    ACCOUNT_CACHE["positions"] = state.get("positions", [])
+    ACCOUNT_CACHE["ts"] = state.get("ts", time.time())
+    ACCOUNT_CACHE["source"] = state.get("source", "binance")
+    if ACCOUNT_CACHE["source"] != "fallback":
+        _update_metrics_account_fields(ACCOUNT_CACHE["equity"], ACCOUNT_CACHE["cash"], ACCOUNT_CACHE["exposure"])
+
+INC = []
+INC_MAX = 200
+
+# account polling for real API integration
+def _poll_account():
+    try:
+        prov = BinanceAccountProvider()
+        while True:
+            try:
+                snap = prov.snapshot()
+                state = _derive_account_state(snap)
+                _publish_account_snapshot(state)
+            except Exception as e:
+                # keep running; log minimal in container
+                print("account poll error:", repr(e))
+            POLL_SEC = float(os.getenv("DEMO_POLL_SEC","5"))
+            time.sleep(POLL_SEC)
+    except Exception:
+        # Graceful degradation - don't crash if DEMO_API_BASE not set
+        if ALLOW_ACCOUNT_FALLBACK:
+            fallback = _load_demo_account()
+            if fallback:
+                _publish_account_snapshot(fallback)
+
+@APP.on_event("startup")
+def _start_poll():
+    import threading
+    threading.Thread(target=_poll_account, daemon=True).start()
+
+# expose account endpoints
+@APP.get("/account_snapshot")
+def account_snapshot():
+    return ACCOUNT_CACHE
+
+@APP.get("/positions")
+def positions():
+    return {"positions": ACCOUNT_CACHE.get("positions", [])}
+
+ACC = BinanceAccountProvider()  # fallback for compatibility
+
+@APP.post("/incidents")
+def create_incident(item: dict):
+    item.setdefault("ts", time.time())
+    INC.append(item)
+    del INC[:-INC_MAX]  # keep only last INC_MAX
+    # broadcast to WebSocket clients
+    for ws in list(WSS):
+        try:
+            ws.send_json(item)
+        except Exception:
+            pass
     return {"ok": True}
 
-@APP.get("/readyz")
-def readyz():
-    # keep it light; adjust if you want deeper checks
-    return {"ok": True}
+@APP.get("/incidents")
+def list_incidents():
+    return {"items": INC[-50:]}
+
+WSS = set()
+
+@APP.websocket("/ws/incidents")
+async def ws_incidents(websocket: WebSocket):
+    await websocket.accept()
+    WSS.add(websocket)
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    finally:
+        WSS.discard(websocket)
+
+async def _snap_loop():
+    while True:
+        try:
+            raw_account = await ACC.fetch()
+            state = _derive_account_state(raw_account)
+            _publish_account_snapshot(state)
+            snap = _load_snap()
+            payload = {
+                "ts": time.time(),
+                "metrics": snap.metrics.__dict__.copy(),
+                "account": state,
+            }
+            fn = SNAP_DIR / (time.strftime("%Y-%m-%d") + ".jsonl")
+            with fn.open("a") as f:
+                f.write(json.dumps(payload) + "\n")
+            # retention
+            cutoff = time.time() - RET_DAYS * 86400
+            for p in SNAP_DIR.glob("*.jsonl"):
+                if p.stat().st_mtime < cutoff:
+                    p.unlink(missing_ok=True)
+        except Exception as e:
+            print("snap_loop err:", e, flush=True)
+            fallback = _derive_account_state({}, allow_fallback=True)
+            _publish_account_snapshot(fallback)
+        await asyncio.sleep(60)
+
+@APP.on_event("startup")
+async def _bg():
+    asyncio.create_task(_snap_loop())

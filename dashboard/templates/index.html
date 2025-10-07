@@ -22,13 +22,20 @@
       .bad-outline { border: 2px solid #f87171 !important; }
       .good-bg { background: linear-gradient(90deg, rgba(34, 197, 94, 0.1), rgba(34, 197, 94, 0.05)) !important; }
       .warn-bg { background: linear-gradient(90deg, rgba(251, 191, 36, 0.1), rgba(251, 191, 36, 0.05)) !important; }
+      ._body { max-height: 300px; overflow-y: auto; }
+      div.row { display: grid; grid-template-columns: 1fr 0.5fr 1fr 1fr 1fr 1fr; gap: 8px; padding: 4px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+      div.row.head { font-weight: 700; color: var(--text); }
+      div.row.rowline { border-bottom: 1px solid rgba(255,255,255,.05); }
     </style>
   </head>
   <body>
     <div class="wrap">
       <div class="head">
         <div><div class="h1">HMM Command Center v2</div><div class="muted">Live Ops • Metrics • Lineage • Guardrails</div></div>
-        <div id="ws-indicators" class="muted"></div>
+        <div>
+          <span id="mode-badge" class="pill muted">mode: …</span>
+          <div id="ws-indicators" class="muted"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -48,10 +55,17 @@
           <svg class="spark" viewBox="0 0 120 36"><path id="spark-path" d="" fill="none" stroke="#9ca3af" stroke-width="2"/></svg>
         </div>
         <div class="card"><div class="head"><b>Scheduler (M19)</b></div><ul id="feed-scheduler" class="feed"></ul></div>
-        <div class="card"><div class="head"><b>Guardian (M20)</b></div><ul id="feed-guardian" class="feed"></ul></div>
+        <div class="card" id="card-guardian-feed">
+          <div class="head"><div class="h1">Guardian Feed</div></div>
+          <div id="guardian-body" class="_body"></div>
+        </div>
         <div class="card"><div class="head"><b>Policy Confidence</b></div><div class="row g3" id="policy-stats"></div></div>
         <div class="card"><div class="head"><b>Lineage (M21)</b></div><div id="lineage"></div></div>
         <div class="card"><div class="head"><b>Calibration Gallery (M15)</b></div><div id="gallery" class="row g3"></div></div>
+        <div class="card" id="card-positions">
+          <div class="head"><div class="h1">Positions (M22)</div></div>
+          <div id="positions-body" class="_body"></div>
+        </div>
       </div>
 
       <div class="muted" style="margin-top:14px" id="endpoints"></div>

@@ -5,7 +5,10 @@
     "drift_score": 0.0,
     "policy_confidence": 0.83,
     "order_fill_ratio": 0.0,
-    "venue_latency_ms": 31.0
+    "venue_latency_ms": 31.0,
+    "account_equity_usd": 0.0,
+    "cash_usd": 0.0,
+    "gross_exposure_usd": 0.0
   },
-  "ts": 1759776433.6733656
-}
+  "ts": 1759848920.746478
+}}

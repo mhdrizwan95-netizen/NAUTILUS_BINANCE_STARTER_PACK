@@ -77,10 +77,48 @@ function wsConnect(topic, listId){
   open();
 }
 
+function startGuardianWS(){
+  const url = OPS.replace(/^http/,"ws") + '/ws/incidents';
+  const pill = el(`<span class="pill">guardian ○</span>`);
+  document.getElementById("ws-indicators").appendChild(pill);
+  let retry=600;
+  const open = () => {
+    const ws = new WebSocket(url);
+    ws.onopen = () => { pill.textContent = 'guardian ●'; retry=600; };
+    ws.onclose= () => { pill.textContent = 'guardian ○'; setTimeout(open, Math.min(retry*=2, 4000)); };
+    ws.onmessage = e => {
+      try{
+        const it = JSON.parse(e.data);
+        const row = `<div class="row rowline"><div>${new Date(it.ts*1000).toLocaleTimeString()}</div><div>${it.level||'INFO'}</div><div>${it.msg||it.incident||'—'}</div></div>`;
+        const box = document.getElementById('guardian-body');
+        box.insertAdjacentHTML('afterbegin', row);
+        // Keep only last N entries
+        while(box.children.length>20) box.removeChild(box.lastChild);
+      }catch{}
+    };
+  };
+  open();
+}
+
 function setGallery(files){
   const root = document.getElementById("gallery"); root.innerHTML="";
   if(!files?.length){ root.appendChild(el(`<div class="muted">No calibration artifacts yet.</div>`)); return; }
   files.slice(-6).reverse().forEach(f => root.appendChild(el(`<div class="thumb">${f}</div>`)));
+}
+
+async function refreshPositions(){
+  const res = await fetch('/api/account_snapshot').then(r=>r.json()).catch(()=>null);
+  const el = document.getElementById('positions-body');
+  if(!res){ el.textContent='—'; return; }
+  const rows = (res.positions||[]).map(p=>`
+    <div class="row rowline">
+      <div>${p.symbol}</div><div>${p.qty}</div>
+      <div>$${p.avg_price.toFixed(2)}</div><div>$${p.last.toFixed(2)}</div>
+      <div>$${p.upl.toFixed(2)}</div><div>$${p.rpl.toFixed(2)}</div>
+    </div>`).join('');
+  el.innerHTML = `
+    <div class="row head"><div>Symbol</div><div>Qty</div><div>Avg</div><div>Last</div><div>UPL</div><div>RPL</div></div>
+    ${rows || '<div class="muted">No positions</div>'}`;
 }
 
 async function refreshOnce(){
@@ -88,6 +126,7 @@ async function refreshOnce(){
     const snap = await getJSON(`${DASH}/api/metrics_snapshot`);
     const m = snap?.metrics||{};
     setLiveStrip(m); setPnL(m); setPolicy(m);
+    await refreshPositions();
 
     // T4: Apply color rules and show source badge
     const msgEl = document.getElementById("msg");
@@ -123,6 +162,15 @@ async function refreshOnce(){
     const gal = await getJSON(`${DASH}/api/artifacts/m15`);
     setGallery((gal?.files||[]).map(p => p.split("/").pop()));
   }catch{}
+  // Fetch mode badge
+  try{
+    const meta = await getJSON(`${OPS}/meta`);
+    if (meta?.mode) {
+      const badgeEl = document.getElementById("mode-badge");
+      badgeEl.textContent = `mode: ${meta.mode}`;
+      badgeEl.className = `pill ${meta.mode === 'live' ? 'muted' : meta.mode === 'demo' ? 'ok' : 'muted'}`;
+    }
+  }catch(e){ /** silently fail */ }
 }
 
 async function ctrl(path, body){
@@ -142,8 +190,8 @@ refreshOnce();
 // Configurable polling interval (T1)
 const pollMs = (window.__DASH_CONFIG?.pollMs) || 5000;
 setInterval(refreshOnce, pollMs);
+startGuardianWS();
 wsConnect("scheduler","feed-scheduler");
-wsConnect("guardian","feed-guardian");
 wsConnect("lineage");  // heartbeat brings lineage/calibration
 wsConnect("calibration");
 window.ctrl = ctrl;
