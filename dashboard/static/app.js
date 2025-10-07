@@ -13,14 +13,20 @@ async function getJSON(u, to=2500){ const c=new AbortController(); const id=setT
 function setLiveStrip(m){
   const root = document.getElementById("live-strip"); root.innerHTML="";
   const items = [
+    ["Equity", fmtUSD(m.account_equity_usd)],
+    ["Cash", fmtUSD(m.cash_usd)],
+    ["Exposure", fmtUSD(m.gross_exposure_usd)],
     ["Realized PnL", fmtUSD(m.pnl_realized)],
     ["Unrealized", fmtUSD(m.pnl_unrealized)],
-    ["Drift", (m.drift_score??0).toFixed(2)],
-    ["Policy Conf", (m.policy_confidence??0).toFixed(2)],
-    ["Fill Ratio", (m.order_fill_ratio??0).toFixed(2)],
     ["Latency (ms)", Math.round(m.venue_latency_ms??0)]
   ];
-  items.forEach(([k,v])=>root.appendChild(el(`<div class="stat"><div class="label">${k}</div><div class="value">${v}</div></div>`)));
+  // Add optional warning style for over-leveraged positions (exposure > equity)
+  const eq = m.account_equity_usd||0, ex = m.gross_exposure_usd||0;
+  items.forEach(([k,v], i)=> {
+    const div = el(`<div class="stat"><div class="label">${k}</div><div class="value">${v}</div></div>`);
+    if (i === 2 && ex > eq && eq > 0) div.classList.add('warn'); // Exposure warning
+    root.appendChild(div);
+  });
 }
 
 function setPnL(m){
@@ -82,6 +88,31 @@ async function refreshOnce(){
     const snap = await getJSON(`${DASH}/api/metrics_snapshot`);
     const m = snap?.metrics||{};
     setLiveStrip(m); setPnL(m); setPolicy(m);
+
+    // T4: Apply color rules and show source badge
+    const msgEl = document.getElementById("msg");
+
+    // Apply color rules to the card
+    const card = document.querySelector("#live-strip").parentElement;
+    let cardClass = "";
+
+    const drift = m.drift_score ?? 0;
+    const conf = m.policy_confidence ?? 0;
+    const latency = m.venue_latency_ms ?? 0;
+
+    // Color rules: drift > 0.8 → red outline; confidence > 0.7 → green; latency > 200ms → amber
+    if (drift > 0.8) cardClass = "bad-outline";
+    else if (conf > 0.7) cardClass = "good-bg";
+    else if (latency > 200) cardClass = "warn-bg";
+
+    card.className = `card ${cardClass}`;
+
+    // Show source badge
+    if (snap?.source) {
+      msgEl.textContent = `source: ${snap.source}`;
+    } else {
+      msgEl.textContent = "";
+    }
   }catch(e){ document.getElementById("msg").textContent = "metrics unavailable"; }
   try{
     const lin = await getJSON(`${DASH}/api/lineage`);
@@ -97,13 +128,20 @@ async function refreshOnce(){
 async function ctrl(path, body){
   const msg = document.getElementById("msg");
   try{
-    const r = await fetch(`${OPS}/${path}`, {method:"POST", headers:{'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined});
+    const headers = {'Content-Type':'application/json'};
+    // T6: Add auth token for control actions
+    if (window.__DASH_CONFIG?.token) {
+      headers['X-OPS-TOKEN'] = window.__DASH_CONFIG.token;
+    }
+    const r = await fetch(`${OPS}/${path}`, {method:"POST", headers, body: body ? JSON.stringify(body) : undefined});
     msg.textContent = r.ok ? `${path} ok` : `${path} failed`;
   }catch(e){ msg.textContent = `${path} failed`; }
 }
 
 refreshOnce();
-setInterval(refreshOnce, 5000);
+// Configurable polling interval (T1)
+const pollMs = (window.__DASH_CONFIG?.pollMs) || 5000;
+setInterval(refreshOnce, pollMs);
 wsConnect("scheduler","feed-scheduler");
 wsConnect("guardian","feed-guardian");
 wsConnect("lineage");  // heartbeat brings lineage/calibration

@@ -1,0 +1,202 @@
+NAUTILUS_BINANCE_STARTER_PACK/ml_service/app.py:26:    return {"state": state, "probs": probs, "confidence": confidence, "action": action}
+.vscode/tasks.json:8:      "args": ["ops/calibrate_policy.py"],
+.vscode/tasks.json:15:      "command": "${workspaceFolder}/ops/calibrate_fast.sh",
+.vscode/tasks.json:22:      "command": "${workspaceFolder}/ops/calibrate_paper.sh",
+hmm_trader_grafana_dashboard.json:14:            "expr": "max(state_active)",
+hmm_trader_grafana_dashboard.json:45:            "expr": "pnl_realized",
+hmm_trader_grafana_dashboard.json:62:            "expr": "pnl_unrealized",
+hmm_trader_grafana_dashboard.json:79:            "expr": "drift_score",
+hmm_trader_grafana_dashboard.json:96:            "expr": "sum(rate(guardrail_trigger_total[5m])) by (reason)",
+hmm_trader_grafana_dashboard.json:114:            "expr": "state_active",
+dashboard/app.py:24:g_state = Gauge("state_active", "Active HMM state", ["id"], registry=_registry)
+dashboard/app.py:25:c_guard = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=_registry)
+dashboard/app.py:26:g_pnl_realized = Gauge("pnl_realized", "Realized PnL", registry=_registry)
+dashboard/app.py:27:g_pnl_unrealized = Gauge("pnl_unrealized", "Unrealized PnL", registry=_registry)
+dashboard/app.py:28:g_drift = Gauge("drift_score", "Feature drift (KLD)", registry=_registry)
+dashboard/app.py:31:g_corr_btc_eth = Gauge("corr_btc_eth", "BTC-ETH correlation coefficient", registry=_registry)
+dashboard/app.py:32:g_port_vol = Gauge("port_vol", "Portfolio volatility percentage", registry=_registry)
+dashboard/app.py:33:g_corr_regime = Gauge("corr_regime_state", "Correlation regime state", ["state"], registry=_registry)
+dashboard/app.py:61:    if not states.empty and "state" in states.columns:
+dashboard/app.py:62:        latest = int(states.iloc[-1]["state"])
+dashboard/app.py:64:        for sid in sorted(states["state"].unique()):
+dashboard/app.py:80:        g_pnl_realized.set(float(rollups["pnl"].iloc[-1]))
+dashboard/app.py:83:    drift_file = DATA_DIR / "drift_score.txt"
+dashboard/app.py:100:        if "state" in s.columns:
+dashboard/app.py:101:            hist = s["state"].value_counts().sort_index().to_dict()
+dashboard/app.py:109:                "state": int(last_row.get("state", 0)),
+dashboard/app.py:110:                "macro_state": int(last_row.get("macro_state", 1)),
+dashboard/app.py:178:                "state": int(states.iloc[-1]["state"]) if not states.empty and "state" in states.columns else None,
+hmm_operator_handbook.md:128:| `/status` | Current trading flag, ML health |
+hmm_operator_handbook.md:129:| `/kill` | Toggle trading_enabled flag |
+hmm_operator_handbook.md:130:| `/retrain` | Force model retraining |
+hmm_operator_handbook.md:232:| `pnl_realized` | Realized profit/loss (USD) |
+hmm_operator_handbook.md:233:| `pnl_unrealized` | Mark-to-market PnL |
+hmm_operator_handbook.md:234:| `drift_score` | KLD drift from training distribution |
+hmm_operator_handbook.md:235:| `guardrail_trigger_total` | Count per guardrail reason |
+hmm_operator_handbook.md:236:| `state_active{id}` | Active state indicator |
+hmm_operator_handbook.md:239:- `drift_score > 0.5` for 5m → Model drift warning
+hmm_operator_handbook.md:240:- `sum(rate(guardrail_trigger_total[5m])) > 30` → Execution instability
+hmm_operator_handbook.md:241:- `abs(pnl_realized) > 100` → Budget exhaustion
+hmm_operator_handbook.md:255:- `ops/calibrate_fast.sh` - BACKTEST mode
+hmm_operator_handbook.md:256:- `ops/calibrate_paper.sh 900` - PAPER mode (default 15m)
+hmm_operator_handbook.md:257:- `ops/calibrate_policy.py` - DIRECT mode (requires existing feedback_log.csv)
+hmm_operator_handbook.md:357:| 20:00 | Check Grafana metrics | `pnl_realized`, `guardrail_trigger_total` |
+ml_service/hierarchical_hmm.py:58:               Expected features: volatility, volume_spikes, drift_score, spread_bp, etc.
+ml_service/hierarchical_hmm.py:302:                "action": int(action),
+ml_service/hierarchical_hmm.py:303:                "confidence": confidence,
+ml_service/hierarchical_hmm.py:313:                "action": 0,  # HOLD
+ml_service/hierarchical_hmm.py:314:                "confidence": 0.0,
+architecture_whitepaper.md:96:- **Implementation:** `ops/calibrate_policy.py` with automation wrappers for fast and paper-based calibration.
+architecture_whitepaper.md:131:  - `data/memory_vault/lineage_index.json`
+architecture_whitepaper.md:138:  - REST API endpoints (`/status`, `/decisions`, `/alert`).
+architecture_whitepaper.md:186:  - `pnl_realized`, `winrate`, `drift_score`, `entropy`, `guardrail_trigger_total`.
+architecture_whitepaper.md:187:  - `m16_avg_reward`, `m18_port_var`, `m19_actions_total`, `m20_incidents_total`.
+strategies/hmm_policy/cluster_risk.py:14:                 target_port_vol: float = 0.02, max_cluster_imbalance: float = 0.5):
+strategies/hmm_policy/cluster_risk.py:21:            target_port_vol: Target portfolio volatility (fractional)
+strategies/hmm_policy/cluster_risk.py:27:        self.target_port_vol = target_port_vol
+strategies/hmm_policy/cluster_risk.py:42:            Tuple of (adjusted_qtys, port_vol, cluster_weights)
+strategies/hmm_policy/cluster_risk.py:44:                - port_vol: Resulting portfolio volatility
+strategies/hmm_policy/cluster_risk.py:74:        adjusted_qtys = self._scale_to_target_vol(adjusted_qtys, cov_matrix, self.target_port_vol)
+strategies/hmm_policy/cluster_risk.py:77:        port_vol = self._calculate_portfolio_volatility(adjusted_qtys, cov_matrix)
+strategies/hmm_policy/cluster_risk.py:79:        return adjusted_qtys, port_vol, cluster_weights
+strategies/hmm_policy/cluster_risk.py:204:        port_vol = self._calculate_portfolio_volatility(qtys, cov_matrix)
+strategies/hmm_policy/cluster_risk.py:205:        if port_vol == 0:
+strategies/hmm_policy/cluster_risk.py:209:        port_var = port_vol ** 2
+README_DEPLOYMENT.md:7:    ./ops/calibrate_fast.sh
+README_DEPLOYMENT.md:12:    ./ops/calibrate_paper.sh 900
+README_DEPLOYMENT.md:16:Run: `python ops/calibrate_policy.py`
+README_DEPLOYMENT.md:50:    python ops/m21_memory_manager.py
+README_DEPLOYMENT.md:53:    ./ops/m21_memory_daemon.sh 600
+README_DEPLOYMENT.md:56:    python ops/m21_memory_viz.py
+README_DEPLOYMENT.md:59:    data/memory_vault/lineage_index.json
+README_DEPLOYMENT.md:61:    data/memory_vault/lineage_graph.png
+README_DEPLOYMENT.md:70:    /status       → Current organism status and last decisions
+CLINE_TICKETS.md:29:- Add Prometheus /metrics, WebSocket live updates, Ops API kill/retrain/status; Grafana dashboard import ready.
+ops/calibrate_paper.sh:37:python ops/calibrate_policy.py
+ops/m20_detector.py:83:    guardrail_rate = metrics.get("guardrail_trigger_total_5m", 0)
+ops/m20_detector.py:87:        health["critical_issues"].append("guardrail_trigger_total_5m")
+ops/m20_detector.py:279:        "guardrail_trigger_total_5m": 25,  # Above threshold
+strategies/hmm_policy/feedback.py:85:                    "delta_pnl", "guardrail"
+strategies/hmm_policy/portfolio_risk.py:12:    corr_btc_eth: float
+strategies/hmm_policy/portfolio_risk.py:13:    port_vol: float
+strategies/hmm_policy/portfolio_risk.py:60:        corr_btc_eth = corr_matrix[0, 1] if corr_matrix.shape[0] > 1 else 0.0
+strategies/hmm_policy/portfolio_risk.py:62:        if abs(corr_btc_eth) > self.max_corr:
+strategies/hmm_policy/portfolio_risk.py:64:        elif abs(corr_btc_eth) < self.min_corr:
+strategies/hmm_policy/portfolio_risk.py:89:            Tuple of (adjusted_qtys, port_vol, exposure_scale, corr_regime)
+strategies/hmm_policy/portfolio_risk.py:99:        port_vol = self._calculate_portfolio_volatility(desired_qtys, cov_matrix)
+strategies/hmm_policy/portfolio_risk.py:110:        if port_vol > 0:
+strategies/hmm_policy/portfolio_risk.py:111:            vol_scale = min(regime_scale, self.target_vol / port_vol)
+strategies/hmm_policy/portfolio_risk.py:122:        final_port_vol = self._calculate_portfolio_volatility(adjusted_qtys, cov_matrix)
+strategies/hmm_policy/portfolio_risk.py:124:        return adjusted_qtys, final_port_vol, vol_scale, regime
+strategies/hmm_policy/portfolio_risk.py:161:        port_vol = self._calculate_portfolio_volatility(qtys, cov_matrix)
+strategies/hmm_policy/portfolio_risk.py:164:        corr_btc_eth = float(corr_matrix[0, 1]) if corr_matrix.shape[0] > 1 else 0.0
+strategies/hmm_policy/portfolio_risk.py:171:            corr_btc_eth=corr_btc_eth,
+strategies/hmm_policy/portfolio_risk.py:172:            port_vol=port_vol,
+tests/test_m14_covariance.py:97:    adjusted_qtys, port_vol, scale, regime = manager.adjust_positions(
+tests/test_m14_covariance.py:102:    assert port_vol >= 0
+tests/test_m14_covariance.py:148:    assert "corr_btc_eth" in metrics.__dict__
+tests/test_m14_covariance.py:149:    assert "port_vol" in metrics.__dict__
+backtests/run_backtest.py:150:                m_state, probs, conf = int(r["state"]), r["probs"], float(r["confidence"])
+backtests/run_backtest.py:154:        states_log.append({"ts_ns": ts_ns, "state": m_state, "macro_state": macro_state, "conf": conf})
+backtests/run_backtest.py:164:                "corr_btc_eth": float(corr) if corr else 0.0,
+backtests/run_backtest.py:165:                "port_vol": float(0.0),  # Placeholder - needs portfolio calculation
+ops/m22_notify.py:104:        "Guardrail Rate": f"{metrics.get('guardrail_trigger_total_5m', 'N/A')} per 5min",
+strategies/hmm_policy/analysis/transition_monitor.py:28:        self.current_drift_score = 0.0
+strategies/hmm_policy/analysis/transition_monitor.py:92:            self.current_drift_score = 0.0
+strategies/hmm_policy/analysis/transition_monitor.py:121:            self.current_drift_score = max(0, float(kl_div))
+strategies/hmm_policy/analysis/transition_monitor.py:123:            self.current_drift_score = 0.0
+strategies/hmm_policy/analysis/transition_monitor.py:130:            "transition_drift_score": self.current_drift_score,
+strategies/hmm_policy/analysis/transition_monitor.py:137:        return self.current_drift_score > threshold
+strategies/hmm_policy/telemetry.py:5:guardrail_counter = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=_registry)
+strategies/hmm_policy/telemetry.py:6:state_gauge = Gauge("state_active", "Active HMM state", ["id"], registry=_registry)
+strategies/hmm_policy/telemetry.py:7:pnl_realized = Gauge("pnl_realized", "Realized PnL", registry=_registry)
+strategies/hmm_policy/telemetry.py:8:pnl_unrealized = Gauge("pnl_unrealized", "Unrealized PnL", registry=_registry)
+strategies/hmm_policy/telemetry.py:9:drift_score = Gauge("drift_score", "Feature drift (KLD)", registry=_registry)
+strategies/hmm_policy/telemetry.py:19:    if realized is not None: pnl_realized.set(realized)
+strategies/hmm_policy/telemetry.py:20:    if unrealized is not None: pnl_unrealized.set(unrealized)
+strategies/hmm_policy/telemetry.py:23:    drift_score.set(value)
+ops/m20_guardian.sh:28:        'drift_score': 0.0,
+ops/m20_guardian.sh:31:        'guardrail_trigger_total_5m': 0,
+strategies/hmm_policy/strategy.py:81:                macro_state = 1; micro_state = result["state"]; conf = result["confidence"]
+strategies/hmm_policy/strategy.py:103:            "state": self.state,
+ops/calibrate_fast.sh:25:python ops/calibrate_policy.py
+ops/m19_scheduler.yaml:8:  drift_score_warn: 0.50
+ops/m19_scheduler.yaml:9:  drift_score_crit: 0.75
+ops/m19_scheduler.py:55:            "thresholds": {"drift_score_warn": 0.5, "drift_score_crit": 0.75,
+ops/m19_scheduler.py:79:        "drift_score": 0.0,
+ops/m19_scheduler.py:85:        "guardrail_trigger_total_5m": 0,
+ops/m19_scheduler.py:169:    drift = metrics.get("drift_score", 0.0)
+ops/m19_scheduler.py:170:    if drift >= th["drift_score_crit"]:
+ops/m19_scheduler.py:173:    elif drift >= th["drift_score_warn"]:
+ops/m19_scheduler.py:221:        "drift_score": drift,
+ops/m19_scheduler.py:248:        "action": None,
+ops/m19_scheduler.py:275:    if metrics.get("drift_score", 0.0) >= th["drift_score_crit"]:
+ops/m19_scheduler.py:292:    if metrics.get("drift_score", 0.0) >= th["drift_score_warn"]:
+ops/m19_scheduler.py:315:        "action": action,
+ops/m19_scheduler.py:331:            success = exec_shell("./ops/calibrate_fast.sh")
+ops/m19_scheduler.py:344:            success = exec_shell("./ops/calibrate_paper.sh 300")  # 5 minutes
+ops/calibrate_policy.py:10:  python ops/calibrate_policy.py
+tests/test_m141_clustering.py:130:    allocator = ClusterRiskAllocator(symbols, target_port_vol=0.02)
+tests/test_m141_clustering.py:146:    adjusted_qtys, port_vol, cluster_weights = allocator.allocate(
+tests/test_m141_clustering.py:151:    assert port_vol >= 0
+tests/test_m141_clustering.py:156:    assert port_vol < 0.05  # Should be close to target 2%
+tests/test_m141_clustering.py:236:    adjusted, port_vol, weights = allocator.allocate(desired, prices, cov, labels)
+tests/test_m141_clustering.py:239:    assert port_vol > 0
+ops/alerts.rules.yml:5:    expr: state_active == 0 and absent_over_time(state_active[2m]) == 0
+ops/alerts.rules.yml:10:    expr: drift_score > 0.5
+ops/alerts.rules.yml:15:    expr: sum(rate(guardrail_trigger_total[5m])) > 30
+ops/quickcheck.sh:26:curl -s "$OPS/status" && echo
+ops/m21_memory_manager.py:3:ops/m21_memory_manager.py — Distributed Memory & Model Lineage
+NAUTILUS_M9_ADDONS/ops/ops_api.py:19:@APP.get("/status")
+NAUTILUS_M9_ADDONS/ops/ops_api.py:35:@APP.post("/kill")
+NAUTILUS_M9_ADDONS/ops/ops_api.py:39:    return {"ok": True, "state": state}
+NAUTILUS_M9_ADDONS/ops/ops_api.py:41:@APP.post("/retrain")
+ops/provisioning/dashboards/hmm.json:14:            "expr": "max(state_active)",
+ops/provisioning/dashboards/hmm.json:45:            "expr": "pnl_realized",
+ops/provisioning/dashboards/hmm.json:62:            "expr": "pnl_unrealized",
+ops/provisioning/dashboards/hmm.json:79:            "expr": "drift_score",
+ops/provisioning/dashboards/hmm.json:96:            "expr": "sum(rate(guardrail_trigger_total[5m])) by (reason)",
+ops/provisioning/dashboards/hmm.json:114:            "expr": "state_active",
+ops/m24_peer_client.py:16:    keys=["m16_avg_reward","m16_winrate","m16_entropy","drift_score"]
+ops/m24_peer_client.py:30:        "drift_score": jitter(summary.get("drift_score",0)),
+ops/m22_comms_service.py:12:- Live status introspection (/status, /decisions, /incidents)
+ops/m22_comms_service.py:313:        "status": "/status",
+ops/m22_comms_service.py:317:@app.get("/status")
+ops/ops_api.py:18:@APP.get("/status")
+ops/ops_api.py:34:@APP.post("/kill")
+ops/ops_api.py:38:    return {"ok": True, "state": state}
+ops/ops_api.py:40:@APP.post("/retrain")
+NAUTILUS_M9_ADDONS/dashboard/app.py:23:g_state = Gauge("state_active", "Active HMM state", ["id"], registry=_registry)
+NAUTILUS_M9_ADDONS/dashboard/app.py:24:c_guard = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=_registry)
+NAUTILUS_M9_ADDONS/dashboard/app.py:25:g_pnl_realized = Gauge("pnl_realized", "Realized PnL", registry=_registry)
+NAUTILUS_M9_ADDONS/dashboard/app.py:26:g_pnl_unrealized = Gauge("pnl_unrealized", "Unrealized PnL", registry=_registry)
+NAUTILUS_M9_ADDONS/dashboard/app.py:27:g_drift = Gauge("drift_score", "Feature drift (KLD)", registry=_registry)
+NAUTILUS_M9_ADDONS/dashboard/app.py:55:    if not states.empty and "state" in states.columns:
+NAUTILUS_M9_ADDONS/dashboard/app.py:56:        latest = int(states.iloc[-1]["state"])
+NAUTILUS_M9_ADDONS/dashboard/app.py:58:        for sid in sorted(states["state"].unique()):
+NAUTILUS_M9_ADDONS/dashboard/app.py:75:        g_pnl_realized.set(float(rollups["pnl"].iloc[-1]))
+NAUTILUS_M9_ADDONS/dashboard/app.py:78:    drift_file = DATA_DIR / "drift_score.txt"
+NAUTILUS_M9_ADDONS/dashboard/app.py:119:                "state": int(states.iloc[-1]["state"]) if not states.empty and "state" in states.columns else None,
+ops/m20_playbook.py:65:        "action": action_name,
+ops/m24_collective_hub.py:14:@APP.post("/submit")
+ops/m24_collective_hub.py:21:@APP.get("/aggregate")
+ops/m24_collective_hub.py:29:    metrics=["avg_reward","winrate","entropy","drift_score"]
+ops/m24_collective_hub.py:36:@APP.get("/status")
+ops/m16_reinforce.py:37:    for col in ["state","action","confidence","pnl"]:
+ops/m16_reinforce.py:71:    states = sorted(df["state"].astype(int).unique().tolist())
+ops/m16_reinforce.py:74:    for i, s in enumerate(df["state"].astype(int).values):
+ops/m16_reinforce.py:163:    # Drift vs reward (if drift_score available elsewhere, we fallback to 0)
+ops/m16_reinforce.py:164:    drift = df.get("drift_score", pd.Series([0]*len(df)))
+ops/m16_reinforce.py:168:    plt.xlabel("drift_score"); plt.ylabel("robust_reward")
+ops/m21_memory_viz.py:3:ops/m21_memory_viz.py — Evolutionary Lineage Visualization
+NAUTILUS_M9_ADDONS/strategies/hmm_policy/telemetry.py:6:guardrail_counter = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=_registry)
+NAUTILUS_M9_ADDONS/strategies/hmm_policy/telemetry.py:7:state_gauge = Gauge("state_active", "Active HMM state", ["id"], registry=_registry)
+NAUTILUS_M9_ADDONS/strategies/hmm_policy/telemetry.py:8:pnl_realized = Gauge("pnl_realized", "Realized PnL", registry=_registry)
+NAUTILUS_M9_ADDONS/strategies/hmm_policy/telemetry.py:9:pnl_unrealized = Gauge("pnl_unrealized", "Unrealized PnL", registry=_registry)
+NAUTILUS_M9_ADDONS/strategies/hmm_policy/telemetry.py:10:drift_score = Gauge("drift_score", "Feature drift (KLD)", registry=_registry)
+NAUTILUS_M9_ADDONS/strategies/hmm_policy/telemetry.py:20:    if realized is not None: pnl_realized.set(realized)
+NAUTILUS_M9_ADDONS/strategies/hmm_policy/telemetry.py:21:    if unrealized is not None: pnl_unrealized.set(unrealized)
+NAUTILUS_M9_ADDONS/strategies/hmm_policy/telemetry.py:24:    drift_score.set(value)
+ops/m21_memory_daemon.sh:20:  python ops/m21_memory_manager.py 2>/dev/null || {
+ops/m21_memory_daemon.sh:28:    python ops/m21_memory_viz.py 2>/dev/null || {
+ops/m25_governor.py:34:    log_event({"violations":alerts,"action":"TRADING_DISABLED"})

@@ -347,17 +347,23 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
         # --- new: record telemetry + WS broadcast ---
         if success:
             telemetry.inc_scheduler_action(action)
+            reason = cause or "autonomous_decision"
             payload = {
-                "ts": now(),
                 "action": action,
-                "reason": cause,
-                "success": bool(success),
+                "reason": reason,
             }
             try:
-                import asyncio
-                asyncio.create_task(
-                    telemetry_ws_push("scheduler", payload)
-                )
+                import asyncio, aiohttp, os
+                DASH = os.environ.get("DASH_BASE", "http://127.0.0.1:8002")
+                async def push_to_dash():
+                    try:
+                        async with aiohttp.ClientSession() as sess:
+                            url = f"{DASH}/ws/scheduler"
+                            async with sess.ws_connect(url) as ws:
+                                await ws.send_json(payload)
+                    except Exception:
+                        pass
+                asyncio.create_task(push_to_dash())
             except Exception:
                 pass
 

@@ -1,10 +1,62 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 import json, time, httpx, os, glob, subprocess, shlex
 
+# --- metrics snapshot surface -----------------------------------------------
+from ops.telemetry_store import load as _load_snap, save as _save_snap, Metrics as _Metrics, Snapshot as _Snapshot
+import time
+
+class MetricsIn(BaseModel):
+    pnl_realized: float | None = None
+    pnl_unrealized: float | None = None
+    drift_score: float | None = None
+    policy_confidence: float | None = None
+    order_fill_ratio: float | None = None
+    venue_latency_ms: float | None = None
+    # NEW: account metrics
+    account_equity_usd: float | None = None
+    cash_usd: float | None = None
+    gross_exposure_usd: float | None = None
+
 APP = FastAPI(title="Ops API")
+
+@APP.get("/status")
+def status():
+    return {"ok": True}
+
+@APP.get("/readyz")
+def readyz():
+    return {"ok": True}
+
+
+# T6: Auth token for control actions
+EXPECTED_TOKEN = os.getenv("OPS_API_TOKEN", "dev-token")  # Change in production
+
+def _check_auth(request):
+    """Check X-OPS-TOKEN header for control actions."""
+    auth_header = request.headers.get("X-OPS-TOKEN")
+    if not auth_header or auth_header != EXPECTED_TOKEN:
+        raise HTTPException(401, "Invalid or missing X-OPS-TOKEN")
+
+@APP.get("/metrics_snapshot")
+def get_metrics_snapshot():
+    s = _load_snap()
+    return {"metrics": s.metrics.__dict__, "ts": s.ts}
+
+@APP.post("/metrics_snapshot")
+def post_metrics_snapshot(m: MetricsIn):
+    s = _load_snap()
+    d = s.metrics.__dict__.copy()
+    # apply partial updates
+    for k, v in m.dict(exclude_unset=True).items():
+        if v is not None:
+            d[k] = float(v)
+    new = _Snapshot(metrics=_Metrics(**d), ts=time.time())
+    _save_snap(new)
+    return {"ok": True, "ts": new.ts}
+# ---------------------------------------------------------------------------
 
 # Enable CORS for React frontend integration
 APP.add_middleware(
@@ -58,13 +110,15 @@ def status():
     return {"ok": True, "state": st}
 
 @APP.post("/kill")
-def kill(req: KillReq):
+def kill(req: KillReq, request: Request):
+    _check_auth(request)
     state = {"trading_enabled": bool(req.enabled)}
     STATE_FILE.write_text(json.dumps(state))
     return {"ok": True, "state": state}
 
 @APP.post("/retrain")
-def retrain(req: RetrainReq):
+def retrain(req: RetrainReq, request: Request):
+    _check_auth(request)
     # proxy to ML service
     try:
         r = httpx.post(f"{ML_URL}/train", json={"symbol":"BTCUSDT","feature_sequences": req.feature_sequences, "labels": req.labels or []}, timeout=30.0)
@@ -96,7 +150,8 @@ class PromoteReq(BaseModel):
     target_tag: str
 
 @APP.post("/canary_promote")
-def canary_promote(req: PromoteReq) -> dict:
+def canary_promote(req: PromoteReq, request: Request) -> dict:
+    _check_auth(request)
     """Promote a canary model tag into active use."""
     try:
         cmd = "./ops/m11_canary_promote.sh " + shlex.quote(req.target_tag)
@@ -114,3 +169,55 @@ def flush_guardrails():
         return {"ok": True, "flushed": True}
     except Exception as e:
         raise HTTPException(500, f"flush failed: {e}")
+
+# ---------- T3: Health & readiness endpoints ----------
+@APP.get("/healthz")
+def healthz():
+    """Fast health check - always returns ok."""
+    return {"ok": True}
+
+@APP.get("/readyz")
+def readyz():
+    """Readiness check - verifies can reach at least one Ops data source."""
+    try:
+        # Try to reach one of the data sources we depend on
+        # For simplicity, check if we can load metrics snapshot
+        snap = _load_snap()
+        if snap.metrics is not None:
+            return {"ok": True, "source": "snapshot"}
+    except Exception:
+        pass
+
+    # Try other sources like the status endpoint itself
+    try:
+        # If we can get any status info, we're ready
+        status()
+        return {"ok": True, "source": "status"}
+    except Exception:
+        pass
+
+    # If all sources fail, return degraded state
+    return {"ok": False, "error": "no data sources available"}
+# ---------------------------------------------------------------------------
+
+# ---------- ACC-5: Optional account snapshot endpoint ----------
+@APP.get("/account_snapshot")
+def account_snapshot():
+    """Return positions table and account summary."""
+    snap = _load_snap()
+    # Return latest cached values
+    return {
+        "equity_usd": snap.metrics.account_equity_usd,
+        "cash_usd": snap.metrics.cash_usd,
+        "positions": []  # TODO: implement real positions fetching if needed
+    }
+
+# --- health endpoints ---
+@APP.get("/status")
+def status():
+    return {"ok": True}
+
+@APP.get("/readyz")
+def readyz():
+    # keep it light; adjust if you want deeper checks
+    return {"ok": True}

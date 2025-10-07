@@ -6,11 +6,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from prometheus_client import CollectorRegistry, CONTENT_TYPE_LATEST, generate_latest, multiprocess, Counter, Gauge
 from prometheus_client import CollectorRegistry
 from fastapi import Response
+from .prom_setup import get_registry
 import pandas as pd
 from pathlib import Path
 import asyncio
-import time, json, os, requests
+import time, json, os, requests, re
 import httpx
+from typing import Dict, List, Any
 
 APP_ROOT = Path(__file__).resolve().parent
 DATA_DIR = APP_ROOT.parent / "data" / "processed"
@@ -32,17 +34,98 @@ APP.add_middleware(
     allow_headers=["*"],
 )
 
-# --- v2 compatibility shim ---------------------------------------------------
-from typing import Dict, List, Any
+# --- Real metrics shim (Option B) --------------------------------------------
+import re
 
-# basic http helper
+# basic http helper (for proxy routes below)
 async def _get_json(url: str) -> Any:
     async with httpx.AsyncClient(timeout=2.5) as client:
         r = await client.get(url)
         r.raise_for_status()
         return r.json()
 
-# 1) /api/metrics_snapshot → map legacy endpoints into a compact JSON
+# Config knobs from env (T1)
+POLL_MS = int(os.getenv("DASH_POLL_MS", "5000"))
+_prometric_keys = os.getenv("PROM_METRIC_KEYS", "pnl_realized,pnl_unrealized,drift_score,policy_confidence,order_fill_ratio,venue_latency_ms")
+PROM_METRIC_KEYS = [k.strip() for k in _prometric_keys.split(",") if k.strip()] if _prometric_keys else []
+
+PROM_MAP = {
+    "pnl_realized": ["pnl_realized", "pnl_realised", "pnl_realized_usd"],
+    "pnl_unrealized": ["pnl_unrealized", "pnl_unrealised", "pnl_unrealized_usd"],
+    "drift_score": ["drift_score", "policy_drift", "hmm_drift_score"],
+    "policy_confidence": ["policy_confidence", "action_confidence", "hmm_policy_confidence"],
+    "order_fill_ratio": ["order_fill_ratio", "fill_ratio", "execution_fill_ratio"],
+    "venue_latency_ms": ["venue_latency_ms", "venue_latency", "exchange_latency_ms"],
+}
+
+# Extend PROM_MAP with account metrics and env-provided keys
+PROM_MAP.update({
+    "account_equity_usd": ["account_equity_usd", "equity_usd", "nav_usd"],
+    "cash_usd": ["cash_usd", "balance_usd"],
+    "gross_exposure_usd": ["gross_exposure_usd", "exposure_usd", "gross_exposure"],
+})
+
+for key in PROM_METRIC_KEYS:
+    if key not in PROM_MAP:
+        PROM_MAP[key] = [key]  # Add default mapping for unknown keys
+
+async def _get_json_safe(url: str) -> Any | None:
+    try:
+        return await _get_json(url)
+    except Exception:
+        return None
+
+def _from_json(obj: dict | None, *keys: str, default: float = 0.0) -> float:
+    if not isinstance(obj, dict):
+        return default
+    for k in keys:
+        v = obj.get(k)
+        if v is not None:
+            try:
+                return float(v)
+            except Exception:
+                pass
+    return default
+
+def _parse_prometheus_text(text: str) -> dict[str, float]:
+    # T5: Export function for unit testing
+    """
+    Parse Prometheus exposition format: "name[ {labels} ] value"
+    Supports multiple metric shapes from the fallback chain.
+    """
+    out: dict[str, float] = {}
+    for line in text.splitlines():
+        if not line or line.startswith("#"):
+            continue
+        # match: metric_name{...} 123.45  OR  metric_name 123.45
+        m = re.match(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{.*?\})?\s+([-+]?\d*\.?\d+(?:[eE][-+]?\d+)?)$", line.strip())
+        if not m:
+            continue
+        name, val = m.group(1), m.group(2)
+        try:
+            out[name] = float(val)
+        except Exception:
+            continue
+    return out
+
+async def _get_prometheus_metrics(base: str) -> dict[str, float] | None:
+    try:
+        async with httpx.AsyncClient(timeout=2.5) as c:
+            r = await c.get(f"{base}/metrics")
+            r.raise_for_status()
+            raw = r.text
+        expo = _parse_prometheus_text(raw)
+        # resolve friendly names using PROM_MAP
+        resolved = {}
+        for friendly, candidates in PROM_MAP.items():
+            for name in candidates:
+                if name in expo:
+                    resolved[friendly] = float(expo[name])
+                    break
+        return resolved
+    except Exception:
+        return None
+
 @APP.get("/api/metrics_snapshot")
 async def api_metrics_snapshot():
     metrics = {
@@ -52,23 +135,70 @@ async def api_metrics_snapshot():
         "policy_confidence": 0.0,
         "order_fill_ratio": 0.0,
         "venue_latency_ms": 0.0,
+        "account_equity_usd": 0.0,
+        "cash_usd": 0.0,
+        "gross_exposure_usd": 0.0,
     }
-    try:
-        pnl = await _get_json("http://127.0.0.1:8002/api/pnl")
-        metrics["pnl_realized"] = float(pnl.get("realized", 0) or 0)
-        metrics["pnl_unrealized"] = float(pnl.get("unrealized", 0) or 0)
-    except Exception:
-        pass
-    try:
-        st = await _get_json("http://127.0.0.1:8002/api/states")
-        # tolerate different field names
-        metrics["drift_score"] = float(st.get("drift", st.get("drift_score", 0)) or 0)
-        metrics["policy_confidence"] = float(st.get("confidence", st.get("policy_confidence", 0)) or 0)
-        metrics["order_fill_ratio"] = float(st.get("fill_ratio", st.get("order_fill_ratio", 0)) or 0)
-        metrics["venue_latency_ms"] = float(st.get("latency_ms", st.get("venue_latency_ms", 0)) or 0)
-    except Exception:
-        pass
-    return {"metrics": metrics, "ts": time.time()}
+
+    source = "legacy"  # default if nothing works
+
+    # 1) Prefer Ops JSON snapshot if available
+    snap = await _get_json_safe(f"{OPS_BASE}/metrics_snapshot")
+    if isinstance(snap, dict):
+        source = "ops_snapshot"
+        m = snap.get("metrics") if "metrics" in snap else snap
+        metrics["pnl_realized"]       = _from_json(m, "pnl_realized")
+        metrics["pnl_unrealized"]     = _from_json(m, "pnl_unrealized")
+        metrics["drift_score"]        = _from_json(m, "drift_score")
+        metrics["policy_confidence"]  = _from_json(m, "policy_confidence")
+        metrics["order_fill_ratio"]   = _from_json(m, "order_fill_ratio")
+        metrics["venue_latency_ms"]   = _from_json(m, "venue_latency_ms")
+        metrics["account_equity_usd"] = _from_json(m, "account_equity_usd")
+        metrics["cash_usd"]           = _from_json(m, "cash_usd")
+        metrics["gross_exposure_usd"] = _from_json(m, "gross_exposure_usd")
+
+    else:
+        # 2) Try Ops generic /metrics JSON
+        m2 = await _get_json_safe(f"{OPS_BASE}/metrics")
+        if isinstance(m2, dict):
+            source = "ops_metrics"
+            # Try common shapes: {"pnl": {...}, "policy": {...}, "execution": {...}}
+            pnl = m2.get("pnl", m2)
+            pol = m2.get("policy", m2)
+            exe = m2.get("execution", m2)
+            metrics["pnl_realized"]      = _from_json(pnl, "realized", "pnl_realized", "realized_usd")
+            metrics["pnl_unrealized"]    = _from_json(pnl, "unrealized", "pnl_unrealized", "unrealized_usd")
+            metrics["drift_score"]       = _from_json(pol, "drift", "drift_score")
+            metrics["policy_confidence"] = _from_json(pol, "confidence", "policy_confidence")
+            metrics["order_fill_ratio"]  = _from_json(exe, "fill_ratio", "order_fill_ratio")
+            metrics["venue_latency_ms"]  = _from_json(exe, "venue_latency_ms", "latency_ms", "exchange_latency_ms")
+
+        else:
+            # 3) Try Ops split endpoints
+            pnl = await _get_json_safe(f"{OPS_BASE}/pnl")
+            st  = await _get_json_safe(f"{OPS_BASE}/state")
+            if not st:
+                st = await _get_json_safe(f"{OPS_BASE}/states")
+            if pnl or st:
+                source = "ops_split"
+            if pnl:
+                metrics["pnl_realized"]   = _from_json(pnl, "realized", "pnl_realized", "realized_usd")
+                metrics["pnl_unrealized"] = _from_json(pnl, "unrealized", "pnl_unrealized", "unrealized_usd")
+            if st:
+                metrics["drift_score"]       = _from_json(st, "drift", "drift_score")
+                metrics["policy_confidence"] = _from_json(st, "confidence", "policy_confidence")
+                metrics["order_fill_ratio"]  = _from_json(st, "fill_ratio", "order_fill_ratio")
+                metrics["venue_latency_ms"]  = _from_json(st, "latency_ms", "venue_latency_ms", "exchange_latency_ms")
+
+            # 4) Last resort: parse Prometheus exposition from Ops
+            if not pnl and not st:
+                expo = await _get_prometheus_metrics(OPS_BASE)
+                if expo:
+                    source = "ops_prom"
+                    for k in metrics.keys():
+                        metrics[k] = float(expo.get(k, metrics[k]))
+
+    return {"metrics": metrics, "ts": time.time(), "source": source}
 
 # 2) Proxy lineage & calibration to Ops API (M21 & M15)
 @APP.get("/api/lineage")
@@ -125,23 +255,23 @@ async def debug_publish(topic: str, payload: Dict[str, Any]):
     return {"ok": True}
 # ---------------------------------------------------------------------------
 
-# Prometheus registry (single-process simple mode)
-_registry = CollectorRegistry()
-g_state          = Gauge("state_active", "Active HMM state", ["id"], registry=_registry)
-c_guard          = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=_registry)
-g_pnl_realized   = Gauge("pnl_realized", "Realized PnL", registry=_registry)
-g_pnl_unrealized = Gauge("pnl_unrealized", "Unrealized PnL", registry=_registry)
-g_drift          = Gauge("drift_score", "Feature drift (KLD)", registry=_registry)
+# Prometheus registry (multiprocess-aware if env var set)
+REG = get_registry()
+g_state          = Gauge("state_active", "Active HMM state", ["id"], registry=REG)
+c_guard          = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=REG)
+g_pnl_realized   = Gauge("pnl_realized", "Realized PnL", registry=REG)
+g_pnl_unrealized = Gauge("pnl_unrealized", "Unrealized PnL", registry=REG)
+g_drift          = Gauge("drift_score", "Feature drift (KLD)", registry=REG)
 
 # M14: cross-symbol correlation risk metrics
-g_corr_btc_eth = Gauge("corr_btc_eth", "BTC-ETH correlation coefficient", registry=_registry)
-g_port_vol     = Gauge("port_vol", "Portfolio volatility percentage", registry=_registry)
-g_corr_regime  = Gauge("corr_regime_state", "Correlation regime state", ["state"], registry=_registry)
+g_corr_btc_eth = Gauge("corr_btc_eth", "BTC-ETH correlation coefficient", registry=REG)
+g_port_vol     = Gauge("port_vol", "Portfolio volatility percentage", registry=REG)
+g_corr_regime  = Gauge("corr_regime_state", "Correlation regime state", ["state"], registry=REG)
 
 # New: extra gauges (mirroring producers)
-g_policy_conf    = Gauge("policy_confidence", "Latest policy confidence", registry=_registry)
-g_fill_ratio     = Gauge("order_fill_ratio", "Recent fills/orders ratio", registry=_registry)
-g_latency_ms     = Gauge("venue_latency_ms", "Recent venue latency (ms)", registry=_registry)
+g_policy_conf    = Gauge("policy_confidence", "Latest policy confidence", registry=REG)
+g_fill_ratio     = Gauge("order_fill_ratio", "Recent fills/orders ratio", registry=REG)
+g_latency_ms     = Gauge("venue_latency_ms", "Recent venue latency (ms)", registry=REG)
 
 def read_csv_safe(path: Path, n_tail: int | None = None) -> pd.DataFrame:
     if not path.exists():
@@ -198,7 +328,7 @@ def metrics():
         except Exception:
             pass
 
-    return Response(generate_latest(_registry), media_type=CONTENT_TYPE_LATEST)
+    return Response(generate_latest(REG), media_type=CONTENT_TYPE_LATEST)
 
 @APP.get("/api/states")
 def get_states():
@@ -293,3 +423,56 @@ async def ws_endpoint(ws: WebSocket):
             await asyncio.sleep(1.0)
     except WebSocketDisconnect:
         ws_manager.disconnect(ws)
+
+# --- Health & metrics endpoints for dash ------------------------------------
+from fastapi import APIRouter
+import os, json, time
+import urllib.request
+
+OPS_BASE = os.getenv("OPS_BASE", "http://ops:8001")
+
+@APP.get("/status")
+def dash_status():
+    return {"ok": True}
+
+@APP.get("/readyz")
+def dash_ready():
+    # optional: sanity check Ops is reachable (non-fatal)
+    try:
+        urllib.request.urlopen(f"{OPS_BASE}/readyz", timeout=2)
+        return {"ok": True, "ops": "ok"}
+    except Exception:
+        return {"ok": True, "ops": "degraded"}
+
+def _fetch(url, timeout=2.5):
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+@APP.get("/api/metrics_snapshot")
+async def dash_metrics_snapshot():
+    """
+    Smart fallback: prefer ops /metrics_snapshot, degrade gracefully.
+    """
+    # 1) preferred
+    try:
+        data = _fetch(f"{OPS_BASE}/metrics_snapshot")
+        # annotate source so UI can show 'ops_snapshot'
+        data["source"] = data.get("source", "ops_snapshot")
+        return data
+    except Exception:
+        pass
+
+    # 2) try ops /metrics
+    try:
+        data = _fetch(f"{OPS_BASE}/metrics")
+        return {"metrics": data.get("metrics", {}), "ts": int(time.time()), "source": "ops_metrics"}
+    except Exception:
+        pass
+
+    # 3) last resort empty
+    return {"metrics": {
+        "pnl_realized": 0, "pnl_unrealized": 0,
+        "drift_score": 0, "policy_confidence": 0,
+        "order_fill_ratio": 0, "venue_latency_ms": 0,
+    }, "ts": int(time.time()), "source": "none"}
+# ---------------------------------------------------------------------------

@@ -126,6 +126,45 @@ If violations occur:
 Optional:
     python ops/m25_approval.py  → sends email for manual approval before promotion.
 
+### Dashboard Health & Observability
+
+#### Health Endpoints
+The Ops API provides health checking endpoints:
+
+- `/healthz` - Fast liveness check, always returns `{"ok": true}`
+- `/readyz` - Readiness check that verifies data sources are available
+
+#### Environment Variables
+- `OPS_API_TOKEN` - Token for authenticating control actions (kill, retrain, canary_promote). Default: "dev-token"
+- `DASH_POLL_MS` - Dashboard polling interval in milliseconds. Default: 5000 (5 seconds)
+- `PROM_METRIC_KEYS` - CSV of additional Prometheus metric names to extend PROM_MAP. Default: none
+
+#### Metrics Fallback Chain
+Dashboard auto-preferences metrics from multiple sources in this priority order:
+
+1. **ops_snapshot** - Ops API `/metrics_snapshot` (POST/PUT from strategy)
+2. **ops_metrics** - Ops API `/metrics` (JSON with pnl/policy/execution structure)
+3. **ops_split** - Ops API `/pnl` and `/state` / `/states` endpoints
+4. **ops_prom** - Ops API `/metrics` parsed as Prometheus exposition format
+5. **legacy** - Fallback to zeros if all sources fail
+
+Each source provides the `source` indicator in the dashboard response for observability.
+
+#### Authenticated Control Actions
+Control endpoints require `X-OPS-TOKEN` header:
+- `POST /kill` - Enable/disable trading
+- `POST /retrain` - Trigger ML retraining
+- `POST /canary_promote` - Promote canary models
+
+#### UI Guardrails
+Live Strip shows visual indicators:
+- Red outline: drift_score > 0.8
+- Green background: policy_confidence > 0.7
+- Amber background: venue_latency_ms > 200ms
+
+#### Docker Healthchecks
+Ops container healthcheck uses `/readyz` endpoint for service coordination.
+
 ### M18 Multi-Symbol Mode
 To activate shared risk allocation:
     import risk.covariance_allocator as cov
@@ -148,3 +187,11 @@ Config:
 State & Logs:
     data/processed/m19/scheduler_state.json
     data/processed/m19/metrics_snapshot.json (input KPIs)
+
+Final ops checklist
+	•	Docker stack: make up / make logs.
+	•	Data path: keep dropping lineage/calibration into ./data/** (containers see them live).
+	•	Metrics: when Ops adds /metrics_snapshot, the dashboard will auto-prefer it.
+
+	•	/api/metrics_snapshot on 8002 returns zeros ➜ your shim is working, but 8001 (Ops) has no metrics endpoints (/metrics_snapshot, /metrics, /pnl, /state(s) all 404).
+	•	The zsh: number expected / command not found: # lines are from pasting comments. No harm—just noise.

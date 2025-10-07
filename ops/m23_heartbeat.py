@@ -47,12 +47,12 @@ async def broadcast(topic: str, payload: dict):
 
 async def heartbeat_loop():
     while True:
-        ts = datetime.datetime.utcnow().isoformat()
         lineage = await get_lineage_summary()
         calibs = await get_calibration_gallery()
-        payload = {"ts": ts, "lineage": lineage, "calibration": calibs}
-        await broadcast("lineage", payload)
-        await broadcast("calibration", payload)
+        lineage_payload = {"lineage": lineage}
+        calib_payload = {"calibration": {"files": calibs.get("files", [])}}
+        await broadcast("lineage", lineage_payload)
+        await broadcast("calibration", calib_payload)
         await asyncio.sleep(10)  # every 10s
 
 

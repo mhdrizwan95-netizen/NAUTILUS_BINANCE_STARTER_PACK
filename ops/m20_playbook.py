@@ -309,13 +309,21 @@ def execute(incidents: List[str]) -> Dict[str, Any]:
                 if success:
                     telemetry.inc_guardian_incident(incident_type)
                     payload = {
-                        "ts": datetime.utcnow().isoformat(),
                         "incident": incident_type,
-                        "action": action_name,
+                        "reason": f"playbook_{action_name}",
                     }
                     try:
-                        import asyncio
-                        asyncio.create_task(telemetry_ws_push("guardian", payload))
+                        import asyncio, aiohttp, os
+                        DASH = os.environ.get("DASH_BASE", "http://127.0.0.1:8002")
+                        async def push_to_dash():
+                            try:
+                                async with aiohttp.ClientSession() as sess:
+                                    url = f"{DASH}/ws/guardian"
+                                    async with sess.ws_connect(url) as ws:
+                                        await ws.send_json(payload)
+                            except Exception:
+                                pass
+                        asyncio.create_task(push_to_dash())
                     except Exception:
                         pass
 

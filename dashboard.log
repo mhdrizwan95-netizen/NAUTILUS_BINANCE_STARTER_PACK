@@ -4,3 +4,7 @@ INFO:     Application startup complete.
 ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1INFO:     127.0.0.1:62302 - "GET /health HTTP/1.1" 404 Not Found
 INFO:     127.0.0.1:62303 - "GET /api/pnl HTTP/1.1" 200 OK
 INFO:     127.0.0.1:62304 - "GET /api/guardrails HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2471]
