@@ -15,3 +15,35 @@ groups:
     expr: sum(rate(guardrail_trigger_total[5m])) > 30
     for: 2m
     annotations: { description: "Guardrails triggering excessively." }
+
+  - alert: VenueSpecsStale
+    expr: time() - last_specs_refresh_epoch > 172800
+    for: 5m
+    labels: {severity: warn}
+    annotations:
+      summary: "Venue specs stale"
+      description: "Lot-size/filters not refreshed in over 48 hours."
+
+  - alert: IBKRPriceFeedStale
+    expr: time() - ibkr_last_price_update_epoch > 120
+    for: 2m
+    labels: {severity: warn}
+    annotations:
+      summary: "IBKR price feed stale"
+      description: "No price update from IBKR in >2 minutes."
+
+  - alert: ExposureCollectorStale
+    expr: time() - ops_exposure_last_refresh_epoch > 120
+    for: 2m
+    labels: {severity: warn}
+    annotations:
+      summary: "Exposure collector stale"
+      description: "OPS has not refreshed exposure metrics for >2 minutes."
+
+  - alert: SymbolExposureHigh
+    expr: exposure_usd > 10000
+    for: 1m
+    labels: {severity: warn}
+    annotations:
+      summary: "High exposure"
+      description: "{{ $labels.symbol }} exposure exceeds $10k"

@@ -1,7 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, asdict
 from pathlib import Path
-import json, time, os
+from json import JSONDecodeError
+import json, time, os, tempfile
 
 DATA_DIR = Path(os.getenv("OPS_DATA_DIR", "data"))
 RUNTIME_DIR = DATA_DIR / "runtime"
@@ -33,7 +34,24 @@ def load() -> Snapshot:
     if _STORE is not None:
         return _STORE
     if SNAP_PATH.exists():
-        j = json.loads(SNAP_PATH.read_text())
+        raw = SNAP_PATH.read_text().strip()
+        j = {}
+        if raw:
+            try:
+                j = json.loads(raw)
+            except JSONDecodeError:
+                # Support concatenated/NDJSON style writes by taking the last valid line
+                last = ""
+                for line in raw.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    last = line
+                if last:
+                    try:
+                        j = json.loads(last)
+                    except JSONDecodeError:
+                        j = {}
         _STORE = Snapshot(metrics=Metrics(**j.get("metrics", {})), ts=j.get("ts", time.time()))
         return _STORE
     _STORE = Snapshot(metrics=Metrics(), ts=time.time())
@@ -42,4 +60,12 @@ def load() -> Snapshot:
 def save(s: Snapshot) -> None:
     global _STORE
     _STORE = s
-    SNAP_PATH.write_text(json.dumps({"metrics": asdict(s.metrics), "ts": s.ts}, indent=2))
+    payload = json.dumps({"metrics": asdict(s.metrics), "ts": s.ts}, indent=2)
+    tmp_dir = SNAP_PATH.parent
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", dir=tmp_dir, delete=False) as tmp:
+        tmp.write(payload)
+        tmp.flush()
+        os.fsync(tmp.fileno())
+        tmp_path = tmp.name
+    os.replace(tmp_path, SNAP_PATH)

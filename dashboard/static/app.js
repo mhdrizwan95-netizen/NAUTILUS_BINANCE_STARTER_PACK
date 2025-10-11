@@ -112,9 +112,9 @@ async function refreshPositions(){
   if(!res){ el.textContent='—'; return; }
   const rows = (res.positions||[]).map(p=>`
     <div class="row rowline">
-      <div>${p.symbol}</div><div>${p.qty}</div>
-      <div>$${p.avg_price.toFixed(2)}</div><div>$${p.last.toFixed(2)}</div>
-      <div>$${p.upl.toFixed(2)}</div><div>$${p.rpl.toFixed(2)}</div>
+      <div>${p.symbol}</div><div>${p.qty_base.toFixed(8).replace(/\.?0+$/, '') || '0'}</div>
+      <div>$${p.avg_price_quote.toFixed(2)}</div><div>$${p.last_price_quote.toFixed(2)}</div>
+      <div>$${p.unrealized_usd.toFixed(2)}</div><div>$${p.realized_usd.toFixed(2)}</div>
     </div>`).join('');
   el.innerHTML = `
     <div class="row head"><div>Symbol</div><div>Qty</div><div>Avg</div><div>Last</div><div>UPL</div><div>RPL</div></div>

@@ -1,6 +1,26 @@
 global: { scrape_interval: 5s }
 rule_files: ["./alerts.rules.yml"]
 scrape_configs:
+  - job_name: 'hmm_engine_binance'
+    static_configs:
+      - targets: ['engine_binance:9103']
+
+  - job_name: 'hmm_engine_bybit'
+    static_configs:
+      - targets: ['engine_bybit:9104']
+
+  - job_name: 'hmm_ops'
+    static_configs:
+      - targets: ['ops:8001']
+
+  - job_name: 'hmm_dash'
+    static_configs:
+      - targets: ['dash:8002']
+
+  - job_name: 'hmm_ml'
+    static_configs:
+      - targets: ['ml_service:8010']
+
   - job_name: hmm-dashboard
     static_configs:
       - targets: ['host.docker.internal:8050']   # macOS: dashboard /metrics

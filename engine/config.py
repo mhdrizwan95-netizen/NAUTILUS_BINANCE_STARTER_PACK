@@ -1,0 +1,193 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from functools import lru_cache
+from typing import List
+
+
+class Settings:
+    """Runtime configuration for the engine service."""
+
+    def __init__(self) -> None:
+        mode = os.getenv("BINANCE_MODE", "demo").lower()
+        self.mode = mode
+
+        # prefer explicit demo/testnet credentials if provided
+        demo_key = os.getenv("DEMO_API_KEY") or os.getenv("DEMO_API_KEY_SPOT")
+        demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv("DEMO_API_SECRET_SPOT")
+
+        live_key = os.getenv("BINANCE_API_KEY", "")
+        live_secret = os.getenv("BINANCE_API_SECRET", "")
+
+        if mode == "demo":
+            self.api_key = demo_key or live_key
+            self.api_secret = demo_secret or live_secret
+            self.base_url = os.getenv("DEMO_SPOT_BASE", "https://testnet.binance.vision")
+        else:
+            self.api_key = live_key
+            self.api_secret = live_secret
+            self.base_url = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
+
+        if not self.api_key or not self.api_secret:
+            raise RuntimeError("Binance API credentials are not set for engine service.")
+
+        self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
+        self.timeout = float(os.getenv("BINANCE_API_TIMEOUT", "10"))
+        self.trading_enabled = os.getenv("TRADING_ENABLED", "true").lower() not in {"0", "false", "no"}
+        self.allowed_symbols = _split_symbols(os.getenv("TRADE_SYMBOLS", "BTCUSDT.BINANCE"))
+        self.min_notional = float(os.getenv("MIN_NOTIONAL_USDT", "10"))
+        self.max_notional = float(os.getenv("MAX_NOTIONAL_USDT", "10000"))
+
+
+def _split_symbols(value: str) -> list[str]:
+    parts = [p.strip() for p in value.split(",") if p.strip()]
+    return parts or ["BTCUSDT.BINANCE"]
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    return Settings()
+
+
+def _as_bool(v: str | None, default: bool) -> bool:
+    if v is None:
+        return default
+    return v.lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _as_float(v: str | None, default: float) -> float:
+    try:
+        return float(v) if v is not None else default
+    except ValueError:
+        return default
+
+
+def _as_int(v: str | None, default: int) -> int:
+    try:
+        return int(v) if v is not None else default
+    except ValueError:
+        return default
+
+
+def _as_list(v: str | None) -> List[str]:
+    if not v:
+        return []
+    return [s.strip() for s in v.split(",") if s.strip()]
+
+
+@dataclass(frozen=True)
+class RiskConfig:
+    trading_enabled: bool
+    min_notional_usdt: float
+    max_notional_usdt: float
+    max_orders_per_min: int
+    trade_symbols: List[str]
+    dust_threshold_usd: float
+    # breakers
+    exposure_cap_symbol_usd: float
+    exposure_cap_total_usd: float
+    venue_error_breaker_pct: float
+    venue_error_window_sec: int
+
+
+def load_risk_config() -> RiskConfig:
+    return RiskConfig(
+        trading_enabled=_as_bool(os.getenv("TRADING_ENABLED"), True),
+        min_notional_usdt=_as_float(os.getenv("MIN_NOTIONAL_USDT"), 5.0),
+        max_notional_usdt=_as_float(os.getenv("MAX_NOTIONAL_USDT"), 200.0),
+        max_orders_per_min=_as_int(os.getenv("MAX_ORDERS_PER_MIN"), 30),
+        trade_symbols=_as_list(os.getenv("TRADE_SYMBOLS")),
+        dust_threshold_usd=_as_float(os.getenv("DUST_THRESHOLD_USD"), 2.0),
+        exposure_cap_symbol_usd=_as_float(os.getenv("EXPOSURE_CAP_SYMBOL_USD"), 2_000.0),
+        exposure_cap_total_usd=_as_float(os.getenv("EXPOSURE_CAP_TOTAL_USD"), 10_000.0),
+        venue_error_breaker_pct=_as_float(os.getenv("VENUE_ERROR_BREAKER_PCT"), 50.0),
+        venue_error_window_sec=_as_int(os.getenv("VENUE_ERROR_WINDOW_SEC"), 60),
+    )
+
+# ---- Quote currency + universe helpers ----
+QUOTE_CCY = os.getenv("QUOTE_CCY", "USDT").upper()
+
+def norm_symbol(sym: str) -> str:
+    """Ensure symbols are in BASEQUOTE (e.g., BTCUSDT) without venue suffix."""
+    s = sym.split(".")[0].upper()
+    return s if s.endswith(QUOTE_CCY) else f"{s}{QUOTE_CCY}"
+
+@dataclass(frozen=True)
+class VenueFeeConfig:
+    taker_bps: float
+
+
+def load_fee_config(venue: str) -> VenueFeeConfig:
+    return VenueFeeConfig(taker_bps=_as_float(os.getenv(f"{venue}_TAKER_BPS"), 10.0))
+
+
+@dataclass(frozen=True)
+class IbkrFeeConfig:
+    mode: str           # "per_share" or "bps"
+    per_share_usd: float
+    min_trade_fee_usd: float
+    bps: float
+
+def load_ibkr_fee_config() -> IbkrFeeConfig:
+    mode = os.getenv("IBKR_FEE_MODE", "per_share").lower()
+    return IbkrFeeConfig(
+        mode=mode,
+        per_share_usd=_as_float(os.getenv("IBKR_FEE_PER_SHARE"), 0.005),
+        min_trade_fee_usd=_as_float(os.getenv("IBKR_MIN_TRADE_FEE_USD"), 1.0),
+        bps=_as_float(os.getenv("IBKR_FEE_BPS"), 1.0),  # only used if mode == "bps"
+    )
+
+def ibkr_min_notional_usd() -> float:
+    return _as_float(os.getenv("IBKR_MIN_NOTIONAL_USD"), 5.0)
+
+@dataclass(frozen=True)
+class StrategyConfig:
+    enabled: bool
+    dry_run: bool
+    symbols: List[str]
+    interval_sec: int
+    fast: int
+    slow: int
+    quote_usdt: float
+    # HMM policy knobs
+    hmm_enabled: bool
+    hmm_model_path: str
+    hmm_window: int
+    hmm_slippage_bps: float
+    cooldown_sec: int
+    tp_bps: float
+    sl_bps: float
+    # --- Ensemble ---
+    ensemble_enabled: bool
+    ensemble_min_conf: float
+    ensemble_weights: dict[str, float]
+
+def load_strategy_config() -> StrategyConfig:
+    # Defaults: safe and conservative
+    symbols = _as_list(os.getenv("STRATEGY_SYMBOLS")) or _as_list(os.getenv("TRADE_SYMBOLS"))
+    return StrategyConfig(
+        enabled=_as_bool(os.getenv("STRATEGY_ENABLED"), False),
+        dry_run=_as_bool(os.getenv("STRATEGY_DRY_RUN"), True),
+        symbols=symbols,
+        interval_sec=_as_int(os.getenv("STRATEGY_INTERVAL_SEC"), 60),
+        fast=_as_int(os.getenv("STRATEGY_FAST"), 9),
+        slow=_as_int(os.getenv("STRATEGY_SLOW"), 21),
+        quote_usdt=_as_float(os.getenv("STRATEGY_QUOTE_USDT"), 10.0),
+        hmm_enabled=_as_bool(os.getenv("HMM_ENABLED"), False),
+        hmm_model_path=os.getenv("HMM_MODEL_PATH", "engine/models/hmm_policy.pkl"),
+        hmm_window=_as_int(os.getenv("HMM_WINDOW"), 120),
+        hmm_slippage_bps=_as_float(os.getenv("HMM_SLIPPAGE_BPS"), 3.0),
+        cooldown_sec=_as_int(os.getenv("COOLDOWN_SEC"), 30),
+        tp_bps=_as_float(os.getenv("TP_BPS"), 20.0),
+        sl_bps=_as_float(os.getenv("SL_BPS"), 30.0),
+        # --- Ensemble ---
+        ensemble_enabled=_as_bool(os.getenv("ENSEMBLE_ENABLED"), False),
+        ensemble_min_conf=_as_float(os.getenv("ENSEMBLE_MIN_CONF"), 0.6),
+        ensemble_weights={
+            k: float(v)
+            for k, v in [
+                w.split(":") for w in os.getenv("ENSEMBLE_WEIGHTS", "hmm_v1:0.5,ma_v1:0.5").split(",")
+            ]
+        },
+    )

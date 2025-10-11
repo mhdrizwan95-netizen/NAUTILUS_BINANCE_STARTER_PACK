@@ -18,6 +18,35 @@ from strategies.hmm_policy.strategy import HMMPolicyStrategy
 
 async def main():
     load_dotenv()
+
+    # --- Binance testnet shim (Option A) ---
+    # If running in demo mode, ensure any code that reads the "live" env names
+    # transparently gets the DEMO_* values. This avoids zero balances from mismatched keys.
+    mode = os.getenv("BINANCE_MODE", "live").lower()
+    if mode == "demo":
+        # Map Spot testnet -> live var names expected elsewhere
+        mapping = {
+            "DEMO_API_KEY_SPOT": "BINANCE_API_KEY",
+            "DEMO_API_SECRET_SPOT": "BINANCE_API_SECRET",
+            "DEMO_SPOT_BASE": "BINANCE_SPOT_BASE",
+        }
+        # (optional) futures testnet mappings if your stack uses them
+        fut_map = {
+            "DEMO_API_KEY_USDM": "BINANCE_API_KEY_USDM",
+            "DEMO_API_SECRET_USDM": "BINANCE_API_SECRET_USDM",
+            "DEMO_USDM_BASE": "BINANCE_USDM_BASE",
+            "DEMO_COINM_BASE": "BINANCE_COINM_BASE",
+        }
+        mapping.update(fut_map)
+
+        for src, dst in mapping.items():
+            val = os.getenv(src)
+            if val:  # only override when provided
+                os.environ[dst] = val
+
+        # Make it obvious in logs
+        print("[run_paper] BINANCE_MODE=demo → using Binance TESTNET credentials/endpoints")
+
     symbol = os.getenv("SYMBOL", "BTCUSDT.BINANCE")
     print(f"[M1] Starting paper engine for {symbol} on Binance Spot Testnet")
 

@@ -1,0 +1,2144 @@
+{
+  "BINANCE": {
+    "BTCUSDT": {
+      "min_qty": 1e-05,
+      "step_size": 1e-05,
+      "min_notional": 0.0
+    },
+    "ETHUSDT": {
+      "min_qty": 0.0001,
+      "step_size": 0.0001,
+      "min_notional": 0.0
+    },
+    "BNBUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "NEOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "LTCUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "QTUMUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ADAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "XRPUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "TUSDUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "IOTAUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "XLMUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ONTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "TRXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ETCUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ICXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "VETUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "USDCUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "LINKUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ONGUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "HOTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ZILUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ZRXUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "FETUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BATUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ZECUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "IOSTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "CELRUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "DASHUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "THETAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ENJUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ATOMUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "TFUELUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ONEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ALGOUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DOGEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DUSKUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ANKRUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "WINUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "COSUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MTLUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "DENTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "WANUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "FUNUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "CVCUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "CHZUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BANDUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "XTZUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RVNUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "HBARUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "NKNUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "STXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "KAVAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ARPAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "IOTXUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "RLCUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BCHUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "FTTUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "EURUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "OGNUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "LSKUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BNTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MBLUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "COTIUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DATAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SOLUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "CTSIUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "HIVEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "CHRUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ARDRUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "MDTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "KNCUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "LRCUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "COMPUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "SCUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ZENUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "SNXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "VTHOUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DGBUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SXPUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "DCRUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "STORJUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "MANAUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "YFIUSDT": {
+      "min_qty": 1e-05,
+      "step_size": 1e-05,
+      "min_notional": 0.0
+    },
+    "JSTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "CRVUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SANDUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "NMRUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "DOTUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "LUNAUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "RSRUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PAXGUSDT": {
+      "min_qty": 0.0001,
+      "step_size": 0.0001,
+      "min_notional": 0.0
+    },
+    "TRBUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "SUSHIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "KSMUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "EGLDUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "DIAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RUNEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "FIOUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "UMAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BELUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "UNIUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "OXTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "SUNUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "AVAXUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "FLMUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "UTKUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "XVSUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "AAVEUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "NEARUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "FILUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "INJUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "AUDIOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "CTKUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "AXSUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "STRAXUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ROSEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "AVAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SKLUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "GRTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "JUVUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "PSGUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "1INCHUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "OGUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ATMUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ASRUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "CELOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RIFUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "TRUUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "CKBUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "TWTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "SFPUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DODOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "CAKEUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ACMUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "FISUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "OMUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PONDUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DEGOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ALICEUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "PERPUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "SUPERUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "CFXUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "TKOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PUNDIXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "TLMUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BARUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "FORTHUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "SLPUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "SHIBUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ICPUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ARUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "MASKUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "LPTUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "XVGUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ATAUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "GTCUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PHAUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "MLNUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "DEXEUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "C98USDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "QNTUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "FLOWUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "MINAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RAYUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "FARMUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "QUICKUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "MBOXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "REQUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "GHSTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "WAXPUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "GNOUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "XECUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DYDXUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "IDEXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "USDPUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "GALAUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ILVUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "YGGUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SYSUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DFUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "FIDAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "AGLDUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RADUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RAREUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "LAZIOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "CHESSUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ADXUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "AUCTIONUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "MOVRUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "CITYUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ENSUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "QIUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "PORTOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "POWRUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "JASMYUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "AMPUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "PYRUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "ALCXUSDT": {
+      "min_qty": 0.0001,
+      "step_size": 0.0001,
+      "min_notional": 0.0
+    },
+    "SANTOSUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "BICOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "FLUXUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "FXSUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "VOXELUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "HIGHUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "CVXUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "PEOPLEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SPELLUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "JOEUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ACHUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "IMXUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "GLMRUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SCRTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "API3USDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "BTTCUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ACAUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "XNOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "WOOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ALPINEUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "TUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ASTRUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "GMTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "KDAUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "APEUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "BIFIUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "STEEMUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "NEXOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "REIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "LDOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "OPUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "STGUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "LUNCUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "GMXUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "POLYXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "APTUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "OSMOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "HFTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PHBUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "HOOKUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MAGICUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RPLUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "GNSUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "SYNUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SSVUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "LQTYUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "USTCUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "GASUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "GLMUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PROMUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "QKCUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "IDUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ARBUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RDNTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "WBTCUSDT": {
+      "min_qty": 1e-05,
+      "step_size": 1e-05,
+      "min_notional": 0.0
+    },
+    "EDUUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "SUIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PEPEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "FLOKIUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "MAVUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "PENDLEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ARKMUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "WBETHUSDT": {
+      "min_qty": 0.0001,
+      "step_size": 0.0001,
+      "min_notional": 0.0
+    },
+    "WLDUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "FDUSDUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "SEIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "CYBERUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ARKUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "IQUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "NTRNUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "TIAUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "MEMEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ORDIUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "BEAMXUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "PIVXUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "VICUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "BLURUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "VANRYUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "AEURUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "JTOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "1000SATSUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BONKUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ACEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "NFPUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "AIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "XAIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MANTAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ALTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "JUPUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PYTHUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "RONINUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "DYMUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PIXELUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "STRKUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "PORTALUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "AXLUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "WIFUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "METISUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "AEVOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "BOMEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ETHFIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ENAUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "WUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "TNSRUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SAGAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "TAOUSDT": {
+      "min_qty": 0.0001,
+      "step_size": 0.0001,
+      "min_notional": 0.0
+    },
+    "REZUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BBUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "NOTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "IOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ZKUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "LISTAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ZROUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "GUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BANANAUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "RENDERUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "TONUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "DOGSUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "EURIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "POLUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "NEIROUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "TURBOUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "1MBABYDOGEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "CATIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "HMSTRUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "EIGENUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "SCRUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BNSOLUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "LUMIAUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "KAIAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "COWUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "CETUSUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PNUTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ACTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "USUALUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "THEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ACXUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ORCAUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "MOVEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MEUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "VELODROMEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "VANAUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "1000CATUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PENGUUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BIOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "DUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "AIXBTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "CGPTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "COOKIEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SOLVUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "TRUMPUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "ANIMEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BERAUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "1000CHEEMSUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "TSTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "LAYERUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "HEIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "KAITOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SHELLUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "REDUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "GPSUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "EPICUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BMTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "FORMUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "XUSDUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "NILUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PARTIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MUBARAKUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "TUTUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BROCCOLI714USDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BANANAS31USDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "GUNUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BABYUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "ONDOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BIGTIMEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "VIRTUALUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "KERNELUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "WCTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "HYPERUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "INITUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SIGNUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "STOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SYRUPUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "KMNOUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "SXTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "NXPCUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "AWEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "HAEDALUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "USD1USDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "HUMAUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "AUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SOPHUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "RESOLVUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "HOMEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "SPKUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "NEWTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SAHARAUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "LAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ERAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "CUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "TREEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "A2ZUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "TOWNSUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "PROVEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "BFUSDUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "PLUMEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "DOLOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MITOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "WLFIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SOMIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "OPENUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "USDEUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "LINEAUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "HOLOUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "PUMPUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "AVNTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ZKCUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "SKYUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "BARDUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "0GUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "HEMIUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "XPLUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MIRAUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "FFUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "EDENUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "NOMUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "2ZUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
+    },
+    "MORPHOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ASTERUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    }
+  }
+}

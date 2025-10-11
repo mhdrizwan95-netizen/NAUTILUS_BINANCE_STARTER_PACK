@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Model PnL Attribution Dashboard</title>
+<style>
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+    color: #e0e6ff;
+    margin: 0;
+    padding: 20px;
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.header {
+    text-align: center;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: rgba(0, 255, 157, 0.1);
+    border-radius: 12px;
+    border: 1px solid #00ff9d;
+}
+
+h1 {
+    font-size: 2.5em;
+    margin: 0;
+    background: linear-gradient(45deg, #00ff9d, #00b4d8, #0077b6);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.subtitle {
+    font-size: 1.1em;
+    color: #b0b7bf;
+    margin-top: 10px;
+}
+
+.portfolio-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.summary-card {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    padding: 20px;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px);
+}
+
+.summary-card h3 {
+    margin: 0 0 15px 0;
+    font-size: 1.1em;
+    color: #00ff9d;
+}
+
+.summary-card .value {
+    font-size: 2em;
+    font-weight: bold;
+    margin: 0;
+}
+
+.positive { color: #00ff9d; }
+.negative { color: #ff6b6b; }
+.neutral { color: #ffd93d; }
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    backdrop-filter: blur(10px);
+}
+
+thead {
+    background: linear-gradient(45deg, #1a1a2e, #16213e);
+}
+
+th, td {
+    padding: 15px 12px;
+    text-align: right;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+th {
+    font-weight: 600;
+    color: #00ff9d;
+    text-transform: uppercase;
+    font-size: 0.9em;
+    letter-spacing: 0.5px;
+}
+
+td {
+    font-family: 'Courier New', monospace;
+    font-weight: 500;
+}
+
+tr:nth-child(even) {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+tr:hover {
+    background: rgba(0, 255, 157, 0.1);
+    transition: background-color 0.3s ease;
+}
+
+.model-name {
+    font-weight: bold;
+    color: #ffffff;
+    text-align: left;
+}
+
+.venue-tag {
+    background: rgba(0, 183, 255, 0.2);
+    color: #00b7ff;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.8em;
+    font-weight: normal;
+}
+
+.pnl-value.positive::before { content: "📈 "; }
+.pnl-value.negative::before { content: "📉 "; }
+.pnl-value.neutral::before { content: "➡️ "; }
+
+.pnl-value.positive { color: #00ff9d; font-weight: bold; }
+.pnl-value.negative { color: #ff6b6b; font-weight: bold; }
+.pnl-value.neutral { color: #ffd93d; }
+
+.footer {
+    text-align: center;
+    margin-top: 30px;
+    color: #666;
+    font-size: 0.9em;
+}
+
+.status {
+    display: inline-block;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 0.8em;
+    font-weight: bold;
+}
+
+.status.live {
+    background: rgba(0, 255, 157, 0.2);
+    color: #00ff9d;
+}
+
+.status.error {
+    background: rgba(255, 107, 107, 0.2);
+    color: #ff6b6b;
+}
+
+.refresh-indicator {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    background: rgba(0, 0, 0, 0.8);
+    color: #00ff9d;
+    padding: 10px 15px;
+    border-radius: 20px;
+    font-size: 0.9em;
+    display: none;
+}
+
+.loading {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.loading::after {
+    content: " ⟳";
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 768px) {
+    body { padding: 10px; }
+    .portfolio-summary { grid-template-columns: 1fr; }
+    table { font-size: 0.9em; }
+    th, td { padding: 8px 6px; }
+}
+</style>
+</head>
+<body>
+<div id="refresh-indicator" class="refresh-indicator">Refreshing...</div>
+
+<div class="container">
+    <div class="header">
+        <h1>🤖 Model Attribution Dashboard</h1>
+        <div class="subtitle">Real-time P&L attribution across strategies and venues</div>
+    </div>
+
+    <div id="portfolio-summary" class="portfolio-summary">
+        <div class="summary-card">
+            <div id="status-indicator" class="status live">● LIVE</div>
+            <h3>Total Portfolio Value</h3>
+            <div id="total-equity" class="value neutral">$0.00</div>
+        </div>
+        <div class="summary-card">
+            <h3>Total Realized P&L</h3>
+            <div id="total-realized" class="value neutral">$0.00</div>
+        </div>
+        <div class="summary-card">
+            <h3>Total Unrealized P&L</h3>
+            <div id="total-unrealized" class="value neutral">$0.00</div>
+        </div>
+        <div class="summary-card">
+            <h3>Active Models</h3>
+            <div id="active-models" class="value neutral">0</div>
+        </div>
+    </div>
+
+    <table id="pnl-table">
+        <thead>
+            <tr>
+                <th style="text-align: left;">Model</th>
+                <th style="text-align: left;">Venue</th>
+                <th>Realized</th>
+                <th>Unrealized</th>
+                <th>Total P&L</th>
+                <th>Filled Orders</th>
+                <th>Win Rate</th>
+                <th>Sharpe</th>
+                <th>Drawdown</th>
+                <th>Return %</th>
+            </tr>
+        </thead>
+        <tbody id="table-body">
+            <tr id="loading-row">
+                <td colspan="10" style="text-align: center; padding: 40px; color: #666;">
+                    <div style="font-size: 1.2em;">Loading dashboard data...</div>
+                    <div style="margin-top: 10px;">Will refresh automatically every 5 seconds</div>
+                </td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="footer">
+        <p>Last updated: <span id="last-update">Never</span></p>
+        <p>Dashboard refreshes every 5 seconds | Data source: Prometheus metrics</p>
+    </div>
+</div>
+
+<script>
+// Global variables
+let lastUpdateTime = 0;
+let refreshTimeout = null;
+
+// Utility functions
+function formatCurrency(value) {
+    const num = parseFloat(value) || 0;
+    const absVal = Math.abs(num);
+    let formatted;
+
+    if (absVal >= 1000000) {
+        formatted = (num / 1000000).toFixed(2) + 'M';
+    } else if (absVal >= 1000) {
+        formatted = (num / 1000).toFixed(2) + 'K';
+    } else {
+        formatted = num.toFixed(2);
+    }
+
+    return num < 0 ? '-' + formatted : formatted;
+}
+
+function formatPercentage(value) {
+    const num = parseFloat(value) || 0;
+    return num.toFixed(2) + '%';
+}
+
+function getPnlClass(value) {
+    const num = parseFloat(value) || 0;
+    if (num > 0) return 'positive';
+    if (num < 0) return 'negative';
+    return 'neutral';
+}
+
+function createVenueTag(venue) {
+    return `<span class="venue-tag">${venue}</span>`;
+}
+
+// Main refresh function
+async function refreshDashboard() {
+    const refreshIndicator = document.getElementById('refresh-indicator');
+    const table = document.getElementById('pnl-table');
+    const statusIndicator = document.getElementById('status-indicator');
+
+    try {
+        // Show refreshing indicator
+        refreshIndicator.style.display = 'block';
+
+        // Fetch data from API
+        const response = await fetch('/dash/pnl');
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+
+        if (data.error) {
+            throw new Error(data.error);
+        }
+
+        // Update timestamp
+        const timestamp = new Date(data.timestamp * 1000);
+        document.getElementById('last-update').textContent = timestamp.toLocaleString();
+
+        // Update portfolio summary
+        const summary = data.portfolio_summary || {};
+        document.getElementById('total-equity').textContent =
+            formatCurrency(summary.total_realized_pnl + summary.total_unrealized_pnl) + ' USD';
+        document.getElementById('total-realized').textContent =
+            formatCurrency(summary.total_realized_pnl) + ' USD';
+        document.getElementById('total-unrealized').textContent =
+            formatCurrency(summary.total_unrealized_pnl) + ' USD';
+
+        // Update active models count
+        const models = data.models || [];
+        document.getElementById('active-models').textContent = models.length;
+
+        // Update table
+        const tableBody = document.getElementById('table-body');
+
+        // Clear loading row if it exists
+        const loadingRow = document.getElementById('loading-row');
+        if (loadingRow) {
+            loadingRow.remove();
+        }
+
+        // Clear existing rows
+        tableBody.innerHTML = '';
+
+        // Add data rows
+        models.forEach(model => {
+            const row = document.createElement('tr');
+
+            const totalPnl = (model.pnl_realized_total || 0) + (model.pnl_unrealized_total || 0);
+            const pnlClass = getPnlClass(totalPnl);
+
+            row.innerHTML = `
+                <td class="model-name">${model.model || 'Unknown'}</td>
+                <td>${createVenueTag(model.venue || 'GLOBAL')}</td>
+                <td class="pnl-value ${getPnlClass(model.pnl_realized_total)}">$${formatCurrency(model.pnl_realized_total)}</td>
+                <td class="pnl-value ${getPnlClass(model.pnl_unrealized_total)}">$${formatCurrency(model.pnl_unrealized_total)}</td>
+                <td class="pnl-value ${pnlClass}">$${formatCurrency(totalPnl)}</td>
+                <td>${Math.round(model.orders_filled_total || 0)}</td>
+                <td>${formatPercentage((model.win_rate || 0) * 100)}</td>
+                <td>${(model.sharpe || 0).toFixed(2)}</td>
+                <td class="${getPnlClass(-Math.abs(model.drawdown || 0))}">${formatPercentage(-(model.drawdown || 0))}</td>
+                <td class="${pnlClass}">${formatPercentage(model.return_pct)}</td>
+            `;
+
+            tableBody.appendChild(row);
+        });
+
+        // Update status
+        statusIndicator.textContent = '● LIVE';
+        statusIndicator.className = 'status live';
+
+        // Clear any previous errors
+        table.classList.remove('loading');
+
+    } catch (error) {
+        console.error('Dashboard refresh failed:', error);
+
+        // Show error state
+        statusIndicator.textContent = '● ERROR';
+        statusIndicator.className = 'status error';
+
+        // Show error message in table if no data loaded yet
+        const tableBody = document.getElementById('table-body');
+        if (tableBody.children.length === 0) {
+            tableBody.innerHTML = `
+                <tr>
+                    <td colspan="10" style="text-align: center; padding: 40px; color: #ff6b6b;">
+                        <div style="font-size: 1.2em;">⚠️ Failed to load dashboard data</div>
+                        <div style="margin-top: 10px; color: #999;">${error.message}</div>
+                        <div style="margin-top: 10px; font-size: 0.9em;">Will retry automatically...</div>
+                    </td>
+                </tr>
+            `;
+        }
+
+        table.classList.add('loading');
+    } finally {
+        // Hide refreshing indicator
+        refreshIndicator.style.display = 'none';
+    }
+}
+
+// Set up automatic refresh
+function startAutoRefresh() {
+    // Initial load
+    refreshDashboard();
+
+    // Set up interval
+    setInterval(refreshDashboard, 5000); // Refresh every 5 seconds
+
+    // Handle visibility changes (pause refresh when tab is hidden)
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            // Tab is hidden, stop refreshing
+            clearTimeout(refreshTimeout);
+        } else {
+            // Tab is visible again, refresh immediately and resume
+            refreshDashboard();
+        }
+    });
+}
+
+// Handle page load
+window.addEventListener('load', startAutoRefresh);
+
+// Handle manual refresh on click
+document.addEventListener('click', function(e) {
+    if (e.target.tagName === 'TH' || e.target.closest('th')) {
+        refreshDashboard();
+    }
+});
+
+// Add some keyboard shortcuts
+document.addEventListener('keydown', function(e) {
+    if (e.key === 'F5' || (e.ctrlKey && e.key === 'r')) {
+        e.preventDefault();
+        refreshDashboard();
+    }
+});
+</script>
+</body>
+</html>

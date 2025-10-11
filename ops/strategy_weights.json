@@ -1,0 +1,17 @@
+{
+  "current": "hmm_v3_ensemble",
+  "weights": {
+    "hmm_v3_ensemble": 0.95,
+    "hmm_v4_risk_adjusted": 0.05,
+    "ma_crossover_v2_backup": 0.0
+  },
+  "min_trades_for_eval": 50,
+  "min_live_hours": 6,
+  "promotion_threshold_pct": 5.0,
+  "rollback_threshold_pct": -20.0,
+  "max_canary_weight": 0.15,
+  "evaluation_interval_minutes": 60,
+  "auto_promotion_enabled": true,
+  "manual_override_allowed": true,
+  "last_updated": 1736440000
+}

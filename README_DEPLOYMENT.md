@@ -195,3 +195,17 @@ Final ops checklist
 
 	•	/api/metrics_snapshot on 8002 returns zeros ➜ your shim is working, but 8001 (Ops) has no metrics endpoints (/metrics_snapshot, /metrics, /pnl, /state(s) all 404).
 	•	The zsh: number expected / command not found: # lines are from pasting comments. No harm—just noise.
+
+### Engine-Driven Order Flow (New)
+- Service `engine` (port **8003**) owns Binance testnet order submission and maintains the canonical portfolio snapshot.
+- Ops API (`8001`) proxies `/orders/market` to the engine and mirrors its `/portfolio` in `/account_snapshot` and metrics snapshots.
+- Dashboard (`8002`) now reads `ops_snapshot` so Cash, Equity, Exposure and PnL tiles reflect the engine’s source of truth.
+
+Smoke test:
+```bash
+docker compose up -d --build
+curl -X POST http://localhost:8003/orders/market \
+  -H "content-type: application/json" \
+  -d '{"symbol":"BTCUSDT.BINANCE","side":"BUY","quote":50}'
+curl -s http://localhost:8001/account_snapshot | python -m json.tool
+```

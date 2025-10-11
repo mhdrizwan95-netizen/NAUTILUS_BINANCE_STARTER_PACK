@@ -2,7 +2,81 @@ x-env-common: &env_common
   PYTHONPATH: /app
   PROMETHEUS_MULTIPROC_DIR: /tmp/prom_multiproc
 
+x-engine-common: &engine_common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  command: >
+    /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port ${ENGINE_PORT} --workers 1
+  environment:
+    <<: *env_common
+    # Common trading parameters
+    TRADING_ENABLED: ${TRADING_ENABLED:-true}
+    MIN_NOTIONAL_USDT: ${MIN_NOTIONAL_USDT:-5}
+    MAX_NOTIONAL_USDT: ${MAX_NOTIONAL_USDT:-200}
+    MAX_ORDERS_PER_MIN: ${MAX_ORDERS_PER_MIN:-30}
+    TRADE_SYMBOLS: ${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
+    DUST_THRESHOLD_USD: ${DUST_THRESHOLD_USD:-2}
+    QUOTE_CCY: ${QUOTE_CCY:-USDT}
+    # Strategy
+    STRATEGY_ENABLED: ${STRATEGY_ENABLED:-false}
+    STRATEGY_DRY_RUN: ${STRATEGY_DRY_RUN:-true}
+    STRATEGY_SYMBOLS: ${STRATEGY_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
+    STRATEGY_INTERVAL_SEC: ${STRATEGY_INTERVAL_SEC:-60}
+    STRATEGY_FAST: ${STRATEGY_FAST:-9}
+    STRATEGY_SLOW: ${STRATEGY_SLOW:-21}
+    STRATEGY_QUOTE_USDT: ${STRATEGY_QUOTE_USDT:-10.0}
+    # Service dependencies
+    HMM_URL: http://ml_service:8010
+    ENGINE_POLL_SEC: ${ENGINE_POLL_SEC:-2}
+  healthcheck:
+    test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${ENGINE_PORT}/health | grep -q '\"engine\":\"ok\"' || exit 1"]
+    interval: 10s
+    timeout: 3s
+    retries: 10
+    start_period: 15s
+  depends_on:
+    - ml_service
+
 services:
+  engine_binance:
+    <<: *engine_common
+    container_name: hmm_engine_binance
+    env_file: ops/env.binance
+    ports:
+      - "8003:8003"
+      - "9103:9103"
+
+  engine_bybit:
+    <<: *engine_common
+    container_name: hmm_engine_bybit
+    env_file: ops/env.bybit
+    ports:
+      - "8004:8004"
+      - "9104:9104"
+
+# Legacy single-engine service for backward compatibility (commented out)
+# engine:
+#   <<: *engine_common
+#   container_name: hmm_engine
+#   command: >
+#     /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1
+#   environment:
+#     <<: *env_common
+#     BINANCE_MODE: ${BINANCE_MODE:-demo}
+#     BINANCE_API_KEY: ${DEMO_API_KEY_SPOT}
+#     BINANCE_API_SECRET: ${DEMO_API_SECRET_SPOT}
+#     DEMO_SPOT_BASE: ${DEMO_SPOT_BASE}
+#     DEMO_USDM_BASE: ${DEMO_USDM_BASE}
+#     DEMO_COINM_BASE: ${DEMO_COINM_BASE}
+#     BINANCE_SPOT_BASE: ${BINANCE_SPOT_BASE}
+#     BINANCE_RECV_WINDOW: ${BINANCE_RECV_WINDOW}
+#     BINANCE_API_TIMEOUT: ${BINANCE_API_TIMEOUT}
+#     ENGINE_PORT: 8003
+#   ports:
+#     - "8003:8003"
+#     - "9103:9103"
+
   ops:
     build:
       context: .
@@ -20,18 +94,16 @@ services:
       # LIVE-3: Environment variables for live metrics
       OPS_API_TOKEN: "dev-token"  # Set to actual token for production
 
+      ENGINE_BASE: "http://engine:8003"
+      ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS:-http://engine_binance:8003,http://engine_bybit:8004}"
+
       # --- Binance mode & creds ---
-      BINANCE_MODE: ${BINANCE_MODE}
-      BINANCE_API_KEY: ${BINANCE_API_KEY}
-      BINANCE_API_SECRET: ${BINANCE_API_SECRET}
-      # live bases
-      BINANCE_SPOT_BASE: ${BINANCE_SPOT_BASE}
-      BINANCE_USDM_BASE: ${BINANCE_USDM_BASE}
-      BINANCE_COINM_BASE: ${BINANCE_COINM_BASE}
-      # demo bases
-      DEMO_SPOT_BASE: ${DEMO_SPOT_BASE}
-      DEMO_USDM_BASE: ${DEMO_USDM_BASE}
-      DEMO_COINM_BASE: ${DEMO_COINM_BASE}
+      BINANCE_MODE: ${BINANCE_MODE:-demo}
+      BINANCE_API_KEY: ${DEMO_API_KEY_SPOT}
+      BINANCE_API_SECRET: ${DEMO_API_SECRET_SPOT}
+      BINANCE_SPOT_BASE: ${DEMO_SPOT_BASE}
+      BINANCE_USDM_BASE: ${DEMO_USDM_BASE}
+      BINANCE_COINM_BASE: ${DEMO_COINM_BASE}
       # http settings
       BINANCE_RECV_WINDOW: ${BINANCE_RECV_WINDOW}
       BINANCE_API_TIMEOUT: ${BINANCE_API_TIMEOUT}
@@ -40,11 +112,16 @@ services:
     ports:
       - "8001:8001"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/readyz | grep -q '\"ok\": true'"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/readyz | grep -q '\"ok\":true'"]
       interval: 10s
       timeout: 3s
       retries: 10
       start_period: 10s
+    depends_on:
+      engine_binance:
+        condition: service_healthy
+      engine_bybit:
+        condition: service_healthy
 
   dash:
     build:
@@ -58,6 +135,18 @@ services:
       <<: *env_common
       OPS_BASE: "http://ops:8001"
       DASH_BASE: "http://dash:8002"
+      # --- Binance mode & creds ---
+      BINANCE_MODE: ${BINANCE_MODE:-demo}
+      BINANCE_API_KEY: ${DEMO_API_KEY_SPOT}
+      BINANCE_API_SECRET: ${DEMO_API_SECRET_SPOT}
+      BINANCE_SPOT_BASE: ${DEMO_SPOT_BASE}
+      BINANCE_USDM_BASE: ${DEMO_USDM_BASE}
+      BINANCE_COINM_BASE: ${DEMO_COINM_BASE}
+      # http settings
+      BINANCE_RECV_WINDOW: ${BINANCE_RECV_WINDOW}
+      BINANCE_API_TIMEOUT: ${BINANCE_API_TIMEOUT}
+      DASH_SOURCE: ${DASH_SOURCE:-ops_snapshot}
+      DASH_OPS_URL: ${DASH_OPS_URL:-http://ops:8001/account_snapshot}
     volumes:
       - ./data:/app/data:ro
     ports:

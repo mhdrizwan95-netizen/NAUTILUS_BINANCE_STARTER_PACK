@@ -3,12 +3,32 @@ from pydantic import BaseModel
 from pathlib import Path
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import WebSocket, WebSocketDisconnect
-import json, time, httpx, os, glob, subprocess, shlex
+import json, time, httpx, os, glob, subprocess, shlex, logging
 import asyncio
 from pathlib import Path as Path2
+from typing import List, Dict, Any, Optional
+
+# Risk monitoring configuration
+RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
+ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL")
+EXPOSURE_CHECK_INTERVAL = int(os.getenv("EXPOSURE_CHECK_INTERVAL_SEC", "30"))
+
+# Parse engine endpoints from env, with safe defaults
+def _parse_endpoints(env_val: str | None):
+    if not env_val:
+        return []
+    return [e.strip() for e in env_val.split(",") if e.strip()]
+
+ENGINE_ENDPOINTS = _parse_endpoints(os.getenv("ENGINE_ENDPOINTS")) or [
+    "http://engine_binance:8003",
+    "http://engine_bybit:8004",
+]
 
 # --- metrics snapshot surface -----------------------------------------------
 from ops.telemetry_store import load as _load_snap, save as _save_snap, Metrics as _Metrics, Snapshot as _Snapshot
+from ops.routes.orders import router as orders_router
+from ops.strategy_router import router as strategy_router
+from ops.pnl_dashboard import router as pnl_router
 import time
 
 class MetricsIn(BaseModel):
@@ -23,15 +43,24 @@ class MetricsIn(BaseModel):
     cash_usd: float | None = None
     gross_exposure_usd: float | None = None
 
-APP = FastAPI(title="Ops API")
+from fastapi.staticfiles import StaticFiles
 
-@APP.get("/status")
-def status():
-    return {"ok": True}
+APP = FastAPI(title="Ops API")
+APP.include_router(orders_router)
+APP.include_router(strategy_router)
+APP.include_router(pnl_router)
+
+# Mount static files for dashboard
+APP.mount("/", StaticFiles(directory="ops/static", html=True), name="static")
 
 @APP.get("/readyz")
-def readyz():
-    return {"ok": True}
+async def readyz():
+    try:
+        eng = await engine_health()
+        engine_ok = eng.get("engine") == "ok"
+    except Exception:
+        engine_ok = False
+    return {"ok": engine_ok}
 
 
 # T6: Auth token for control actions
@@ -81,7 +110,7 @@ class RetrainReq(BaseModel):
     labels: list[int] | None = None
 
 @APP.get("/status")
-def status():
+async def status():
     st = {"ts": int(time.time()), "trading_enabled": True}
     if STATE_FILE.exists():
         try:
@@ -104,12 +133,27 @@ def status():
     except Exception as e:
         st["status_warning"] = f"{e}"
 
+    # include latest account snapshot
+    st["balances"] = ACCOUNT_CACHE.get("balances", {})
+    st["pnl"] = ACCOUNT_CACHE.get("pnl", {})
+    st["positions"] = ACCOUNT_CACHE.get("positions", [])
+    st["equity"] = ACCOUNT_CACHE.get("equity", 0.0)
+    st["cash"] = ACCOUNT_CACHE.get("cash", 0.0)
+    st["exposure"] = ACCOUNT_CACHE.get("exposure", 0.0)
+
     # lightweight health check to ML
     try:
         r = httpx.get(f"{ML_URL}/health", timeout=0.2).json()
         st["ml"] = r
     except Exception:
         st["ml"] = {"ok": False}
+
+    try:
+        engine = await engine_health()
+    except Exception as exc:  # noqa: BLE001
+        engine = {"ok": False, "error": str(exc)}
+    st["engine"] = engine
+
     return {"ok": True, "state": st}
 
 @APP.post("/kill")
@@ -195,164 +239,30 @@ def healthz():
     """Fast health check - always returns ok."""
     return {"ok": True}
 
-@APP.get("/readyz")
-def readyz():
-    """Readiness check - verifies can reach at least one Ops data source."""
-    result = {
-        "ok": True,
-        "source": None,
-        "snap_persist": None
-    }
 
-    try:
-        # Try to reach one of the data sources we depend on
-        # For simplicity, check if we can load metrics snapshot
-        snap = _load_snap()
-        if snap.metrics is not None:
-            result["source"] = "snapshot"
-    except Exception:
-        pass
 
-    # Check if snapshot persistence is working
-    try:
-        if SNAP_DIR.exists():
-            # Recent file should exist if writer is active
-            today_file = SNAP_DIR / (time.strftime("%Y-%m-%d") + ".jsonl")
-            if today_file.exists() or (time.time() - SNAP_DIR.stat().st_ctime) < 300:  # created within 5 mins
-                result["snap_persist"] = "ok"
-            else:
-                result["snap_persist"] = "stale"
-        else:
-            result["snap_persist"] = "no_dir"
-    except Exception as e:
-        result["snap_persist"] = f"error: {str(e)[:50]}"
 
-    return result
+@APP.get("/health")
+def health():
+    return {"ops": "ok"}
 # ---------------------------------------------------------------------------
 
 SNAP_DIR = Path2("data/ops_snapshots")
 SNAP_DIR.mkdir(parents=True, exist_ok=True)
 RET_DAYS = int(os.getenv("SNAP_RETENTION_DAYS", "14"))
-ALLOW_ACCOUNT_FALLBACK = os.getenv("ACCOUNT_DEMO_FALLBACK", "0").lower() in ("1", "true", "yes")
 
-from adapters.account_provider import BinanceAccountProvider
+from ops.engine_client import get_portfolio, health as engine_health
 
 # globals for account cache
 ACCOUNT_CACHE: dict = {
     "balances": {"equity": 0.0, "cash": 0.0, "exposure": 0.0},
+    "pnl": {"realized": 0.0, "unrealized": 0.0, "fees": 0.0},
     "positions": [],
     "ts": 0,
-    "source": "init",
+    "source": "engine",
 }
 
-def _load_demo_account() -> dict | None:
-    """Return the most recent demo snapshot if Binance returns nothing."""
-    try:
-        files = sorted(SNAP_DIR.glob("*.jsonl"))
-    except Exception:
-        return None
-    best: dict | None = None
-    for path in reversed(files):
-        try:
-            lines = path.read_text().splitlines()
-        except Exception:
-            continue
-        for line in reversed(lines):
-            try:
-                payload = json.loads(line)
-            except Exception:
-                continue
-            acct = payload.get("account") or {}
-            eq = float(acct.get("equity") or 0.0)
-            cash = float(acct.get("cash") or 0.0)
-            exposure = float(acct.get("exposure") or 0.0)
-            positions = acct.get("positions") or []
-            if eq or cash or exposure or positions:
-                candidate = {
-                    "equity": eq if eq else cash,
-                    "cash": cash if cash else (eq if eq else 0.0),
-                    "exposure": exposure,
-                    "positions": positions,
-                    "ts": payload.get("ts", time.time()),
-                    "source": "fallback",
-                }
-                if positions:
-                    return candidate
-                if best is None:
-                    best = candidate
-    return best
-
-def _derive_account_state(raw: dict, *, allow_fallback: bool = True) -> dict:
-    """Normalize raw provider payload into the dashboard-friendly schema."""
-    prev = ACCOUNT_CACHE
-    prev_source = prev.get("source")
-    can_use_prev = prev_source in {"binance", "cache"}
-    used_prev = False
-    fallback_used = False
-
-    eq = float(raw.get("equity") or raw.get("account_equity_usd") or 0.0)
-    cash = float(raw.get("cash") or raw.get("cash_usd") or 0.0)
-    exposure = float(raw.get("exposure") or raw.get("gross_exposure_usd") or 0.0)
-    positions = raw.get("positions") or []
-
-    spot = float(raw.get("spot_equity_usdt") or 0.0)
-    usdm = float(raw.get("usdm_equity_usdt") or 0.0)
-    coinm = float(raw.get("coinm_equity_est") or 0.0)
-    if eq == 0.0:
-        eq = spot + usdm + coinm
-    if cash == 0.0:
-        cash = float(raw.get("balances", {}).get("cash", 0.0)) or eq
-    if exposure == 0.0:
-        exposure = float(raw.get("balances", {}).get("exposure", 0.0)) or exposure
-
-    # Preserve previous readings if Binance temporarily returns zeros
-    if eq == 0.0 and prev.get("equity") and can_use_prev:
-        eq = float(prev.get("equity"))
-        used_prev = True
-    if cash == 0.0 and prev.get("cash"):
-        if can_use_prev:
-            cash = float(prev.get("cash"))
-            used_prev = True
-    if exposure == 0.0 and prev.get("exposure") and can_use_prev:
-        exposure = float(prev.get("exposure"))
-        used_prev = True
-    if not positions and prev.get("positions") and can_use_prev:
-        positions = prev.get("positions")
-        used_prev = True
-
-    if (
-        allow_fallback
-        and ALLOW_ACCOUNT_FALLBACK
-        and eq == 0.0
-        and cash == 0.0
-        and exposure == 0.0
-        and not positions
-    ):
-        demo = _load_demo_account()
-        if demo:
-            eq = demo.get("equity", eq)
-            cash = demo.get("cash", cash if cash else eq)
-            exposure = demo.get("exposure", exposure)
-            positions = demo.get("positions", positions)
-            fallback_used = True
-
-    ts = raw.get("ts") if isinstance(raw.get("ts"), (int, float)) else time.time()
-    source = "binance" if raw else "none"
-    if fallback_used:
-        source = "fallback"
-    elif used_prev:
-        source = "cache"
-
-    return {
-        "equity": float(eq),
-        "cash": float(cash),
-        "exposure": float(exposure),
-        "positions": positions,
-        "ts": ts,
-        "source": source,
-    }
-
-def _update_metrics_account_fields(equity: float, cash: float, exposure: float) -> None:
+def _update_metrics_account_fields(equity: float, cash: float, exposure: float, realized_pnl: float, unrealized_pnl: float) -> None:
     try:
         snap = _load_snap()
         metrics = snap.metrics.__dict__.copy()
@@ -361,6 +271,8 @@ def _update_metrics_account_fields(equity: float, cash: float, exposure: float) 
             "account_equity_usd": float(equity),
             "cash_usd": float(cash),
             "gross_exposure_usd": float(exposure),
+            "pnl_realized": float(realized_pnl),
+            "pnl_unrealized": float(unrealized_pnl),
         }.items():
             if abs(metrics.get(key, 0.0) - val) > 1e-6:
                 metrics[key] = val
@@ -371,9 +283,10 @@ def _update_metrics_account_fields(equity: float, cash: float, exposure: float) 
         print("account metrics update failed:", exc, flush=True)
 
 def _publish_account_snapshot(state: dict) -> None:
-    ACCOUNT_CACHE["equity"] = state.get("equity", 0.0)
-    ACCOUNT_CACHE["cash"] = state.get("cash", 0.0)
-    ACCOUNT_CACHE["exposure"] = state.get("exposure", 0.0)
+    ACCOUNT_CACHE["equity"] = float(state.get("equity", 0.0))
+    ACCOUNT_CACHE["cash"] = float(state.get("cash", 0.0))
+    ACCOUNT_CACHE["exposure"] = float(state.get("exposure", 0.0))
+    ACCOUNT_CACHE["pnl"] = state.get("pnl", {"realized": 0.0, "unrealized": 0.0, "fees": 0.0})
     ACCOUNT_CACHE["balances"] = {
         "equity": ACCOUNT_CACHE["equity"],
         "cash": ACCOUNT_CACHE["cash"],
@@ -381,38 +294,140 @@ def _publish_account_snapshot(state: dict) -> None:
     }
     ACCOUNT_CACHE["positions"] = state.get("positions", [])
     ACCOUNT_CACHE["ts"] = state.get("ts", time.time())
-    ACCOUNT_CACHE["source"] = state.get("source", "binance")
-    if ACCOUNT_CACHE["source"] != "fallback":
-        _update_metrics_account_fields(ACCOUNT_CACHE["equity"], ACCOUNT_CACHE["cash"], ACCOUNT_CACHE["exposure"])
+    ACCOUNT_CACHE["source"] = state.get("source", "engine")
+    _update_metrics_account_fields(
+        ACCOUNT_CACHE["equity"],
+        ACCOUNT_CACHE["cash"],
+        ACCOUNT_CACHE["exposure"],
+        ACCOUNT_CACHE["pnl"]["realized"],
+        ACCOUNT_CACHE["pnl"]["unrealized"]
+    )
 
 INC = []
 INC_MAX = 200
 
-# account polling for real API integration
-def _poll_account():
+# engine-driven polling loop
+async def _engine_poll_loop():
+    while True:
+        try:
+            portfolio = await get_portfolio()
+            portfolio["source"] = "engine"
+            _publish_account_snapshot(portfolio)
+            await _persist_snapshot(portfolio)
+        except Exception as exc:  # noqa: BLE001
+            print("engine poll error:", exc, flush=True)
+        await asyncio.sleep(float(os.getenv("ENGINE_POLL_SEC", "2")))
+
+
+async def _persist_snapshot(portfolio: dict) -> None:
     try:
-        prov = BinanceAccountProvider()
-        while True:
-            try:
-                snap = prov.snapshot()
-                state = _derive_account_state(snap)
-                _publish_account_snapshot(state)
-            except Exception as e:
-                # keep running; log minimal in container
-                print("account poll error:", repr(e))
-            POLL_SEC = float(os.getenv("DEMO_POLL_SEC","5"))
-            time.sleep(POLL_SEC)
-    except Exception:
-        # Graceful degradation - don't crash if DEMO_API_BASE not set
-        if ALLOW_ACCOUNT_FALLBACK:
-            fallback = _load_demo_account()
-            if fallback:
-                _publish_account_snapshot(fallback)
+        payload = {
+            "ts": time.time(),
+            "metrics": _load_snap().metrics.__dict__,
+            "account": {
+                "equity": portfolio.get("equity", 0.0),
+                "cash": portfolio.get("cash", 0.0),
+                "exposure": portfolio.get("exposure", 0.0),
+                "positions": portfolio.get("positions", []),
+                "pnl": portfolio.get("pnl", {}),
+                "ts": portfolio.get("ts", time.time()),
+            },
+        }
+        fn = SNAP_DIR / (time.strftime("%Y-%m-%d") + ".jsonl")
+        with fn.open("a") as f:
+            f.write(json.dumps(payload) + "\n")
+        _trim_snapshots()
+    except Exception as exc:  # noqa: BLE001
+        print("snapshot persist failed:", exc, flush=True)
+
+
+def _trim_snapshots() -> None:
+    cutoff = time.time() - RET_DAYS * 86400
+    for path in SNAP_DIR.glob("*.jsonl"):
+        if path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
+
+
+# ---------- Risk Intelligence Daemon ----------
+async def _risk_monitoring_loop():
+    """Background daemon that watches exposure and sends alerts."""
+    await asyncio.sleep(5)  # Delay startup to avoid race conditions
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
+                r = await client.get("http://localhost:8001/aggregate/exposure", timeout=5)
+                r.raise_for_status()
+                data = r.json()
+
+                alert_msg = None
+                for item in data.get("items", []):
+                    symbol = item.get("symbol", "UNKNOWN")
+                    value_usd = abs(item.get("value_usd", 0.0))
+                    if value_usd > RISK_LIMIT_USD:
+                        alert_msg = f"🚨 RISK LIMIT BREACH: {symbol} exposure ${value_usd:.2f} > ${RISK_LIMIT_USD}"
+                        break
+
+                if alert_msg:
+                    print(f"[RISK] {alert_msg}")
+                    if ALERT_WEBHOOK_URL:
+                        webhook_payload = {"text": alert_msg, "timestamp": time.time()}
+                        try:
+                            await client.post(ALERT_WEBHOOK_URL, json=webhook_payload, timeout=3)
+                        except Exception as webhook_exc:
+                            print(f"[RISK] Webhook failed: {webhook_exc}")
+
+        except Exception as e:
+            print(f"[RISK] Monitor error: {e}")
+
+        await asyncio.sleep(EXPOSURE_CHECK_INTERVAL)
+
+from ops.portfolio_collector import portfolio_collector_loop
+from ops.strategy_tracker import strategy_tracker_loop
+from ops.strategy_selector import promote_best
 
 @APP.on_event("startup")
-def _start_poll():
-    import threading
-    threading.Thread(target=_poll_account, daemon=True).start()
+async def _start_poll():
+    asyncio.create_task(_engine_poll_loop())
+    asyncio.create_task(_risk_monitoring_loop())
+    asyncio.create_task(exposure_collector_loop())
+    asyncio.create_task(pnl_collector_loop())
+    asyncio.create_task(portfolio_collector_loop())
+    asyncio.create_task(strategy_tracker_loop())
+
+@APP.on_event("startup")
+async def _start_canary_manager():
+    """Start the canary deployment evaluation daemon."""
+    try:
+        from ops.canary_manager import canary_evaluation_loop
+        asyncio.create_task(canary_evaluation_loop())
+        print("[CANARY] Canary manager started - continuous model evaluation active")
+    except Exception as e:
+        print(f"[WARN] Canary manager startup failed: {e}")
+
+@APP.on_event("startup")
+async def _start_capital_allocator():
+    """Start the dynamic capital allocation daemon."""
+    try:
+        from ops.capital_allocator import allocation_loop
+        asyncio.create_task(allocation_loop())
+        print("[ALLOC] Capital allocator started - dynamic capital optimization active")
+    except Exception as e:
+        print(f"[WARN] Capital allocator startup failed: {e}")
+
+@APP.on_event("startup")
+async def _start_strategy_governance():
+    # Strategy promotion loop - evaluates every 60 seconds
+    async def promotion_loop():
+        await asyncio.sleep(5)  # Let system warm up
+        while True:
+            try:
+                promote_best()
+                await asyncio.sleep(60)
+            except Exception as e:
+                logging.warning(f"[Governance] Promoter error: {e}")
+                await asyncio.sleep(30)  # Retry sooner on error
+
+    asyncio.create_task(promotion_loop())
 
 # expose account endpoints
 @APP.get("/account_snapshot")
@@ -423,8 +438,202 @@ def account_snapshot():
 def positions():
     return {"positions": ACCOUNT_CACHE.get("positions", [])}
 
-ACC = BinanceAccountProvider()  # fallback for compatibility
+ACC = None  # Remove legacy BinanceAccountProvider instantiation to prevent import-time crash
 
+# ---------- Multi-Venue Aggregation Endpoints ----------
+async def _fetch_json(client: httpx.AsyncClient, url: str) -> Dict[str, Any]:
+    try:
+        r = await client.get(url, timeout=3)
+        r.raise_for_status()
+        return await r.json()
+    except Exception:
+        return {}
+
+async def _fetch_many(paths: List[str]) -> List[Dict[str, Any]]:
+    async with httpx.AsyncClient() as client:
+        return await asyncio.gather(*[_fetch_json(client, p) for p in paths])
+
+@APP.get("/aggregate/health")
+async def aggregate_health():
+    results = await _fetch_many([f"{e}/health" for e in ENGINE_ENDPOINTS])
+    return {"venues": results}
+
+@APP.get("/aggregate/portfolio")
+async def aggregate_portfolio():
+    portfolios = await _fetch_many([f"{e}/portfolio" for e in ENGINE_ENDPOINTS])
+    total_equity = sum(float(p.get("equity_usd", 0) or 0) for p in portfolios if p)
+    return {
+        "total_equity_usd": total_equity,
+        "venues": portfolios,
+        "count": len([p for p in portfolios if p]),
+    }
+
+# Use the new comprehensive exposure aggregator
+from ops.aggregate_exposure import aggregate_exposure
+from ops.exposure_collector import exposure_collector_loop
+from ops.pnl_collector import pnl_collector_loop
+from ops.portfolio_collector import portfolio_collector_loop
+
+@APP.get("/aggregate/exposure")
+async def get_aggregate_exposure():
+    """
+    Unified exposure aggregator: merges positions from all engines (Binance + IBKR),
+    fills missing IBKR prices from live publisher, includes watchlist symbols.
+    """
+    agg = await aggregate_exposure(engine_endpoints_env=os.getenv("ENGINE_ENDPOINTS"))
+    return {
+        "totals": agg.totals,
+        "by_symbol": agg.by_symbol,
+    }
+
+@APP.get("/aggregate/metrics")
+async def aggregate_metrics():
+    metrics = await _fetch_many([f"{e}/metrics" for e in ENGINE_ENDPOINTS])
+    return {"venues": metrics}
+
+@APP.get("/aggregate/pnl")
+def get_pnl_snapshot():
+    """
+    Unified PnL snapshot: returns realized and unrealized PnL per venue.
+    Uses PROMETHEUS_METRICS direct from pnl_collector for accuracy.
+    """
+    from prometheus_client import REGISTRY
+
+    out = {"realized": {}, "unrealized": {}}
+    for metric in REGISTRY.collect():
+        if metric.name in ("pnl_realized_total", "pnl_unrealized_total"):
+            for sample in metric.samples:
+                venue = sample.labels["venue"]
+                value = float(sample.value)
+                if "realized" in metric.name:
+                    out["realized"][venue] = value
+                else:
+                    out["unrealized"][venue] = value
+    return out
+
+@APP.get("/aggregate/portfolio")
+def get_portfolio_snapshot():
+    """
+    Portfolio snapshot: total equity, cash, gain/loss, and return % since daily baseline.
+    Handy for your Dash to show equity card with current portfolio performance.
+    """
+    from prometheus_client import REGISTRY
+
+    out = {}
+    for metric in REGISTRY.collect():
+        if metric.name in ("portfolio_equity_usd", "portfolio_cash_usd", "portfolio_gain_usd",
+                          "portfolio_return_pct", "portfolio_equity_prev_close_usd", "ops_portfolio_last_refresh_epoch"):
+            for sample in metric.samples:
+                out[metric.name] = float(sample.value)
+    return {
+        "equity_usd": out.get("portfolio_equity_usd", 0.0),
+        "cash_usd": out.get("portfolio_cash_usd", 0.0),
+        "gain_usd": out.get("portfolio_gain_usd", 0.0),
+        "return_pct": out.get("portfolio_return_pct", 0.0),
+        "baseline_equity_usd": out.get("portfolio_equity_prev_close_usd", 0.0),
+        "last_refresh_epoch": out.get("ops_portfolio_last_refresh_epoch", None),
+    }
+
+# ---------- Strategy Governance Dashboard Endpoints ----------
+
+# Import strategy governance functions
+from ops.strategy_selector import get_leaderboard
+
+# Leaderboard endpoint - core governance API
+@APP.get("/strategy/leaderboard")
+def get_strategy_leaderboard():
+    """Return live strategy leaderboard with performance rankings."""
+    try:
+        leaderboard = get_leaderboard()
+        return {"ok": True, "leaderboard": leaderboard}
+    except Exception as e:
+        return {"error": str(e)}
+
+# Status endpoint with full registry
+@APP.get("/strategy/status")
+def get_strategy_status():
+    """Return current strategy registry and leaderboard."""
+    registry_path = Path("ops/strategy_registry.json")
+    if not registry_path.exists():
+        return {"error": "strategy registry not found"}
+    try:
+        registry = json.loads(registry_path.read_text())
+    except Exception:
+        return {"error": "invalid registry format"}
+
+    return {
+        "registry": registry,
+        "leaderboard": get_leaderboard(),
+        "ts": time.time()
+    }
+
+# Promotion history endpoint
+@APP.get("/strategy/history")
+def get_promotion_history():
+    """Return chronological log of all strategy promotions."""
+    registry_path = Path("ops/strategy_registry.json")
+    if not registry_path.exists():
+        return {"error": "strategy registry not found"}
+    try:
+        registry = json.loads(registry_path.read_text())
+        return {"ok": True, "promotion_log": registry.get("promotion_log", [])}
+    except Exception as e:
+        return {"error": str(e)}
+
+@APP.get("/strategy/ui")
+def get_strategy_ui():
+    """Return HTML dashboard for strategy governance visualization."""
+    from ops.strategy_ui import get_strategy_ui_html
+    try:
+        return get_strategy_ui_html()
+    except Exception as e:
+        return f"<html><body><h1>Error Loading Dashboard</h1><p>{str(e)[:200]}</p></body></html>"
+
+@APP.post("/strategy/promote")
+def manual_promote_strategy(req: dict, request: Request):
+    """Manually promote a specific strategy to production."""
+    _check_auth(request)
+
+    model_tag = req.get("model_tag")
+    if not model_tag:
+        return {"error": "model_tag required"}
+
+    from ops.strategy_selector import load_registry, save_registry
+    min_t = 3  # Require at least 3 trades for promotion
+
+    try:
+        registry = load_registry()
+        if model_tag not in registry:
+            # Add new model if it doesn't exist
+            registry[model_tag] = {"sharpe": 0.0, "drawdown": 0.0, "realized": 0.0, "trades": 0, "manual": True, "last_pnl": 0.0, "samples": []}
+
+        # Require minimum trading data before promotion (unless manual)
+        stats = registry.get(model_tag, {})
+        if stats.get("trades", 0) < min_t and not stats.get("manual"):
+            return {"error": f"model needs at least {min_t} trades to promote"}
+
+        # Set as current
+        registry["current_model"] = model_tag
+        save_registry(registry)
+
+        # Broadcast to engines
+        import asyncio
+        from ops.strategy_selector import push_model_update
+        asyncio.run(push_model_update(model_tag))
+
+        return {"ok": True, "promoted": model_tag, "trades_required": min_t}
+    except Exception as e:
+        return {"error": str(e)}
+
+async def _fetch_json(client: httpx.AsyncClient, url: str) -> Dict[str, Any]:
+    try:
+        r = await client.get(url, timeout=6.0)
+        r.raise_for_status()
+        return await r.json()
+    except Exception:
+        return {}
+
+# ---------- Legacy Incident Endpoints ----------
 @APP.post("/incidents")
 def create_incident(item: dict):
     item.setdefault("ts", time.time())
@@ -453,33 +662,3 @@ async def ws_incidents(websocket: WebSocket):
             await asyncio.sleep(3600)
     finally:
         WSS.discard(websocket)
-
-async def _snap_loop():
-    while True:
-        try:
-            raw_account = await ACC.fetch()
-            state = _derive_account_state(raw_account)
-            _publish_account_snapshot(state)
-            snap = _load_snap()
-            payload = {
-                "ts": time.time(),
-                "metrics": snap.metrics.__dict__.copy(),
-                "account": state,
-            }
-            fn = SNAP_DIR / (time.strftime("%Y-%m-%d") + ".jsonl")
-            with fn.open("a") as f:
-                f.write(json.dumps(payload) + "\n")
-            # retention
-            cutoff = time.time() - RET_DAYS * 86400
-            for p in SNAP_DIR.glob("*.jsonl"):
-                if p.stat().st_mtime < cutoff:
-                    p.unlink(missing_ok=True)
-        except Exception as e:
-            print("snap_loop err:", e, flush=True)
-            fallback = _derive_account_state({}, allow_fallback=True)
-            _publish_account_snapshot(fallback)
-        await asyncio.sleep(60)
-
-@APP.on_event("startup")
-async def _bg():
-    asyncio.create_task(_snap_loop())

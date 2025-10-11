@@ -14,17 +14,32 @@ class BinanceAccountProvider:
     """
     def __init__(self):
         mode = os.getenv("BINANCE_MODE", "live").lower()
-        self.api_key = os.getenv("BINANCE_API_KEY", "")
-        self.api_secret = os.getenv("BINANCE_API_SECRET", "")
 
         if mode == "demo":
             self.spot_base  = os.getenv("DEMO_SPOT_BASE",  "https://testnet.binance.vision")
             self.usdm_base  = os.getenv("DEMO_USDM_BASE",  "https://testnet.binancefuture.com")
             self.coinm_base = os.getenv("DEMO_COINM_BASE", "https://testnet.binancefuture.com")
+            key_candidates = [
+                os.getenv("DEMO_API_KEY_SPOT"),
+                os.getenv("DEMO_API_KEY_USDM"),
+                os.getenv("DEMO_API_KEY"),
+                os.getenv("BINANCE_API_KEY", ""),
+            ]
+            secret_candidates = [
+                os.getenv("DEMO_API_SECRET_SPOT"),
+                os.getenv("DEMO_API_SECRET_USDM"),
+                os.getenv("DEMO_API_SECRET"),
+                os.getenv("BINANCE_API_SECRET", ""),
+            ]
         else:
             self.spot_base  = os.getenv("BINANCE_SPOT_BASE",  "https://api.binance.com")
             self.usdm_base  = os.getenv("BINANCE_USDM_BASE",  "https://fapi.binance.com")
             self.coinm_base = os.getenv("BINANCE_COINM_BASE", "https://dapi.binance.com")
+            key_candidates = [os.getenv("BINANCE_API_KEY", "")]
+            secret_candidates = [os.getenv("BINANCE_API_SECRET", "")]
+
+        self.api_key = next((v for v in key_candidates if v), "")
+        self.api_secret = next((v for v in secret_candidates if v), "")
 
         self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
         self.timeout = int(os.getenv("BINANCE_API_TIMEOUT", "10"))

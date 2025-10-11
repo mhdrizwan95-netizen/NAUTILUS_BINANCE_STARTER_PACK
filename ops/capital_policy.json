@@ -1,0 +1,14 @@
+{
+  "refresh_sec": 30,
+  "base_equity_frac": 0.20,
+  "min_quota_usd": 250.0,
+  "max_quota_usd": 25000.0,
+  "step_up_pct": 0.15,
+  "step_down_pct": 0.20,
+  "sharpe_promote": 1.00,
+  "sharpe_demote": 0.30,
+  "cooldown_sec": 900,
+  "enabled": ["ma_crossover_v3", "hmm_v2_canary"],
+  "allocation_mode": "dynamic",
+  "fallback_mode": "equal_split"
+}
