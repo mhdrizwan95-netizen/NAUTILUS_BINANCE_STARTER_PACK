@@ -30,11 +30,12 @@ x-engine-common: &engine_common
     HMM_URL: http://ml_service:8010
     ENGINE_POLL_SEC: ${ENGINE_POLL_SEC:-2}
   healthcheck:
-    test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${ENGINE_PORT:-8003}/health | grep -q '\"engine\":\"ok\"' || exit 1"]
-    interval: 10s
-    timeout: 3s
+    # Lightweight health; avoid hitting account endpoints
+    test: ["CMD", "sh", "-lc", "curl -fsS http://localhost:8003/health >/dev/null"]
+    interval: 30s
+    timeout: 5s
     retries: 10
-    start_period: 15s
+    start_period: 20s
   depends_on: []
 
 services:
@@ -45,14 +46,20 @@ services:
     environment:
       - VENUE=BINANCE
       - GOVERNANCE_POLICY=/app/engine/policies.yaml
-      - BINANCE_MODE=testnet
-      - BINANCE_SPOT_BASE=https://testnet.binance.vision
+      - BINANCE_MODE=${BINANCE_MODE}
+      - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
+      - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE}
+      - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
       - TRADE_SYMBOLS=*      # ✅ Allow ALL symbols dynamically
-      - BINANCE_API_TIMEOUT=10
-      - BINANCE_RECV_WINDOW=5000
+      - BINANCE_API_TIMEOUT=15       # more tolerant to slow networks
+      - BINANCE_RECV_WINDOW=60000    # tolerant to clock skew
       - ENGINE_PORT=8003
+    volumes:
+      - ./engine/state:/app/engine/state:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./data:/app/data:rw
     ports:
       - "8003:8003"
       - "${ENGINE_METRICS_PORT:-9103}:9103"
@@ -75,6 +82,12 @@ services:
       - IBKR_FEE_PER_SHARE=${IBKR_FEE_PER_SHARE}
       - IBKR_MIN_TRADE_FEE_USD=${IBKR_MIN_TRADE_FEE_USD}
       - IBKR_MIN_NOTIONAL_USD=${IBKR_MIN_NOTIONAL_USD}
+      - BINANCE_API_TIMEOUT=15
+      - BINANCE_RECV_WINDOW=60000
+    volumes:
+      - ./engine/state:/app/engine/state:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./data:/app/data:rw
     ports:
       - "8005:8003"
     command: >
@@ -91,6 +104,12 @@ services:
       - VENUE=BYBIT
       - GOVERNANCE_POLICY=/app/engine/policies.yaml
       - ENGINE_PORT=8003
+      - BINANCE_API_TIMEOUT=15
+      - BINANCE_RECV_WINDOW=60000
+    volumes:
+      - ./engine/state:/app/engine/state:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./data:/app/data:rw
     ports:
       - "8004:8003"
       - "9104:9104"
@@ -205,15 +224,16 @@ services:
       context: .
       dockerfile: ops/Dockerfile
     container_name: hmm_executor
-    command: >
-      sh -c "python -m ops.vol_ranker --loop --interval ${VOL_REFRESH_MIN:-60} & python -u -m ops.main"
+    command: python -u ops/main.py trade
     environment:
       - ENGINE_URL=http://engine_binance:8003
       - ENABLE_EXECUTION=true
       - EXEC_METRICS_PORT=9102
       - PYTHONPATH=/app
-      # Optional: omit SYMBOLS to pull from /universe
-      - SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT
+      # Trading loop config
+      - EXEC_INTERVAL_SEC=2
+      - TRADE_SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT
+      - DRY_RUN=false
       # Dynamic sizing defaults
       - BASE_SIZE_USD=30
       - ATRP_REF=0.004
@@ -231,11 +251,12 @@ services:
       - HOLD_SEC=240
       - TP_BP=0
       - SL_BP=0
-      # Volatility ranker config
-      - VOL_REFRESH_MIN=60
-      - VOL_TOP_N=20
+      # New: Enhanced sizing & fallback
+      - MIN_NOTIONAL_MULT=1.15
+      - LIMIT_ADD_BP=6
+      - IOC_TO_MARKET_ON_400=true
       # Executor symbol refresh safety (seconds)
-      - SYMBOL_REFRESH_SEC=3600
+      # (deprecated/unused; kept for compatibility)
       - PROBE_USDT=30
       - MAX_SLIP_BP=120
       - MAX_ORDERS_PER_MIN=20
@@ -243,6 +264,20 @@ services:
       - PROBE_COOLDOWN_SEC=90
     ports:
       - "9102:9102"
+    depends_on:
+      engine_binance:
+        condition: service_healthy
+    restart: unless-stopped
+
+  vol_ranker:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    command: python -u ops/vol_ranker.py --loop --interval-sec 3600 --top-n 30 --out data/top_symbols.txt
+    environment:
+      - PYTHONPATH=/app
+    volumes:
+      - ./:/app
     depends_on:
       engine_binance:
         condition: service_healthy

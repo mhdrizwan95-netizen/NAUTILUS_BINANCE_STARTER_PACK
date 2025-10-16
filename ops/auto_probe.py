@@ -73,10 +73,42 @@ async def get_universe(engine_base: str) -> List[str]:
 
 
 async def symbol_info(engine_base: str, symbol: str) -> dict:
-    async with httpx.AsyncClient(timeout=6.0) as client:
-        r = await client.get(f"{engine_base}/symbol_info", params={"symbol": symbol})
-        r.raise_for_status()
-        return r.json()
+    """Fetch symbol filters from engine; fall back gracefully on error.
+
+    If /symbol_info returns 400/404 or is unavailable, attempt to read
+    /risk/config for a global min_notional_usdt and synthesize a minimal
+    filter so callers can proceed without crashing.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            r = await client.get(f"{engine_base}/symbol_info", params={"symbol": symbol})
+            if r.status_code == 200:
+                return r.json()
+    except Exception:
+        pass
+
+    # Fallback: query risk config for a global min_notional
+    min_notional = 5.0
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            rc = await client.get(f"{engine_base}/risk/config")
+            if rc.status_code == 200:
+                cfg = rc.json()
+                mn = cfg.get("min_notional_usdt")
+                if isinstance(mn, (int, float)):
+                    min_notional = float(mn)
+    except Exception:
+        pass
+
+    # Synthesize defaults; step sizes are conservative
+    return {
+        "symbol": symbol,
+        "step_size": 0.000001,
+        "min_qty": 0.0,
+        "min_notional": float(min_notional),
+        "max_notional": float("inf"),
+        "tick_size": 0.0,
+    }
 
 
 async def last_price(engine_base: str, symbol: str) -> Optional[float]:
@@ -209,4 +241,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-

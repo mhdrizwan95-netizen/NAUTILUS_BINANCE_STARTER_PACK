@@ -41,4 +41,5 @@ scrape_configs:
 
   - job_name: "executor"
     static_configs:
-      - targets: ["hmm_executor:9102"]
+      # Prefer service name over container_name for stable DNS within the compose network
+      - targets: ["executor:9102"]

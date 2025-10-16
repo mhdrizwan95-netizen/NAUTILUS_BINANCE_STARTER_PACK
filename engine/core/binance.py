@@ -33,6 +33,7 @@ class BinanceREST:
         self._symbol_filters: dict[str, SymbolFilter] = {}
         self._price_cache: dict[str, float] = {}
         self._lock = asyncio.Lock()
+        self._is_futures = getattr(settings, "is_futures", False)
 
     async def close(self) -> None:
         # Clients are created per-call; nothing persistent to close
@@ -40,17 +41,48 @@ class BinanceREST:
 
     async def ticker_price(self, symbol: str) -> float:
         payload = {"symbol": symbol}
-        async with httpx.AsyncClient(
-            base_url=self._base,
-            timeout=self._settings.timeout,
-            headers={"X-MBX-APIKEY": self._settings.api_key},
-        ) as client:
-            r = await client.get("/api/v3/ticker/price", params=payload)
-        r.raise_for_status()
-        data = r.json()
-        price = float(data["price"])
-        self._price_cache[symbol] = price
-        return price
+        # First attempt: standard public ticker endpoint
+        try:
+            path = "/fapi/v1/ticker/price" if self._is_futures else "/api/v3/ticker/price"
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._settings.timeout,
+                headers={"X-MBX-APIKEY": self._settings.api_key},
+            ) as client:
+                r = await client.get(path, params=payload)
+            r.raise_for_status()
+            data = r.json()
+            price = float(data["price"])
+            self._price_cache[symbol] = price
+            return price
+        except httpx.HTTPStatusError as e:
+            # Testnet sometimes returns 418/429 on public endpoints. Try bookTicker
+            if e.response is not None and e.response.status_code in (418, 429, 403):
+                try:
+                    fallback_path = "/fapi/v1/ticker/bookTicker" if self._is_futures else "/api/v3/ticker/bookTicker"
+                    async with httpx.AsyncClient(
+                        base_url=self._base,
+                        timeout=self._settings.timeout,
+                    ) as client:
+                        r2 = await client.get(fallback_path, params=payload)
+                    r2.raise_for_status()
+                    d2 = r2.json()
+                    # bookTicker gives best bid/ask; approximate mid
+                    bid = float(d2.get("bidPrice", 0) or 0)
+                    ask = float(d2.get("askPrice", 0) or 0)
+                    px = (bid + ask) / 2.0 if bid and ask else (bid or ask)
+                    if px:
+                        self._price_cache[symbol] = px
+                        return px
+                except Exception:
+                    # fallthrough to cache
+                    pass
+                # Last resort: cached price if available
+                cached = self._price_cache.get(symbol)
+                if cached:
+                    return cached
+            # Re-raise if not handled
+            raise
 
     async def exchange_filter(self, symbol: str) -> SymbolFilter:
         async with self._lock:
@@ -63,7 +95,8 @@ class BinanceREST:
                 timeout=self._settings.timeout,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
             ) as client:
-                r = await client.get("/api/v3/exchangeInfo", params=params)
+                path = "/fapi/v1/exchangeInfo" if self._is_futures else "/api/v3/exchangeInfo"
+                r = await client.get(path, params=params)
             r.raise_for_status()
             info = r.json()
             symbols = info.get("symbols", [])
@@ -91,19 +124,75 @@ class BinanceREST:
 
     async def account_snapshot(self) -> dict[str, Any]:
         settings = get_settings()
-        params = {
+        base_params = {
             "timestamp": _now_ms(),
             "recvWindow": settings.recv_window,
         }
-        params["signature"] = self._sign(params)
-        async with httpx.AsyncClient(
-            base_url=self._base,
-            timeout=self._settings.timeout,
-            headers={"X-MBX-APIKEY": self._settings.api_key},
-        ) as client:
-            r = await client.get("/api/v3/account", params=params)
-        r.raise_for_status()
-        return r.json()
+        # Retry a few times on throttling or ban codes which are common on demo/test clusters
+        for attempt in range(3):
+            params = dict(base_params)
+            params["timestamp"] = _now_ms()
+            params["signature"] = self._sign(params)
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._settings.timeout,
+                headers={"X-MBX-APIKEY": self._settings.api_key},
+            ) as client:
+                path = "/fapi/v2/account" if self._is_futures else "/api/v3/account"
+                r = await client.get(path, params=params)
+                if r.status_code in (418, 429):
+                    import logging, asyncio
+                    logging.getLogger(__name__).warning(
+                        "[BINANCE] /account returned %s (attempt %d) — backing off. body=%s",
+                        r.status_code, attempt + 1, r.text,
+                    )
+                    if attempt < 2:
+                        await asyncio.sleep(0.5 * (attempt + 1))
+                        continue
+                    return {"balances": [], "positions": []}
+            r.raise_for_status()
+            return r.json()
+        # Fallback (should never reach due to return above)
+        return {"balances": [], "positions": []}
+
+    async def my_trades_since(self, symbol: str, start_ms: int) -> list[dict[str, Any]]:
+        """
+        Fetch account trades for a symbol since a given timestamp (ms).
+        Wraps GET /api/v3/myTrades and retries common testnet throttling codes.
+        """
+        settings = get_settings()
+        base_params = {
+            "symbol": symbol,
+        }
+        # Binance allows startTime/endTime filtering; we provide startTime only
+        if start_ms and int(start_ms) > 0:
+            base_params["startTime"] = int(start_ms)
+        for attempt in range(3):
+            params = dict(base_params)
+            params["timestamp"] = _now_ms()
+            params["recvWindow"] = settings.recv_window
+            params["signature"] = self._sign(params)
+            try:
+                async with httpx.AsyncClient(
+                    base_url=self._base,
+                    timeout=self._settings.timeout,
+                    headers={"X-MBX-APIKEY": self._settings.api_key},
+                ) as client:
+                    path = "/fapi/v1/userTrades" if self._is_futures else "/api/v3/myTrades"
+                    r = await client.get(path, params=params)
+                r.raise_for_status()
+                data = r.json()
+                if isinstance(data, list):
+                    return data
+                # Defensive: sometimes returns object with 'rows'
+                rows = data.get("rows") if isinstance(data, dict) else None
+                return rows or []
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code if e.response is not None else 0
+                if code in (418, 429) and attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
 
     async def submit_market_order(
         self,
@@ -112,25 +201,35 @@ class BinanceREST:
         quantity: float,
     ) -> dict[str, Any]:
         settings = get_settings()
-        params = {
+        base_params = {
             "symbol": symbol,
             "side": side,
             "type": "MARKET",
             "quantity": f"{quantity:.8f}",
             "newOrderRespType": "FULL",
-            "timestamp": _now_ms(),
             "recvWindow": settings.recv_window,
         }
-        params["signature"] = self._sign(params)
-        async with httpx.AsyncClient(
-            base_url=self._base,
-            timeout=self._settings.timeout,
-            headers={"X-MBX-APIKEY": self._settings.api_key},
-        ) as client:
-            r = await client.post("/api/v3/order", data=params)
-        # For MARKET quote orders we must use POST /api/v3/order/test? but test? We'll rely on real /order.
-        r.raise_for_status()
-        return r.json()
+        # retry transient 418/429
+        for attempt in range(3):
+            params = dict(base_params)
+            params["timestamp"] = _now_ms()
+            params["signature"] = self._sign(params)
+            try:
+                async with httpx.AsyncClient(
+                    base_url=self._base,
+                    timeout=self._settings.timeout,
+                    headers={"X-MBX-APIKEY": self._settings.api_key},
+                ) as client:
+                    path = "/fapi/v1/order" if self._is_futures else "/api/v3/order"
+                    r = await client.post(path, data=params)
+                r.raise_for_status()
+                return r.json()
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code if e.response is not None else 0
+                if code in (418, 429) and attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
 
     async def submit_market_quote(
         self,
@@ -138,25 +237,47 @@ class BinanceREST:
         side: Literal["BUY", "SELL"],
         quote: float,
     ) -> dict[str, Any]:
+        # Futures API does not support quoteOrderQty for MARKET; emulate via qty
+        if self._is_futures:
+            px = await self.ticker_price(symbol)
+            qty = max(quote / px, 0.0)
+            # Round to step size if available
+            try:
+                filt = await self.exchange_filter(symbol)
+                step = getattr(filt, "step_size", 0.000001) or 0.000001
+                factor = 1.0 / float(step)
+                qty = int(qty * factor) / factor
+            except Exception:
+                pass
+            return await self.submit_market_order(symbol, side, qty)
         settings = get_settings()
-        params = {
+        base_params = {
             "symbol": symbol,
             "side": side,
             "type": "MARKET",
             "quoteOrderQty": f"{quote:.8f}",
             "newOrderRespType": "FULL",
-            "timestamp": _now_ms(),
             "recvWindow": settings.recv_window,
         }
-        params["signature"] = self._sign(params)
-        async with httpx.AsyncClient(
-            base_url=self._base,
-            timeout=self._settings.timeout,
-            headers={"X-MBX-APIKEY": self._settings.api_key},
-        ) as client:
-            r = await client.post("/api/v3/order", data=params)
-        r.raise_for_status()
-        return r.json()
+        for attempt in range(3):
+            params = dict(base_params)
+            params["timestamp"] = _now_ms()
+            params["signature"] = self._sign(params)
+            try:
+                async with httpx.AsyncClient(
+                    base_url=self._base,
+                    timeout=self._settings.timeout,
+                    headers={"X-MBX-APIKEY": self._settings.api_key},
+                ) as client:
+                    r = await client.post("/api/v3/order", data=params)
+                r.raise_for_status()
+                return r.json()
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code if e.response is not None else 0
+                if code in (418, 429) and attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
 
     async def submit_limit_order(
         self,
@@ -167,7 +288,7 @@ class BinanceREST:
         time_in_force: str = "IOC",
     ) -> dict[str, Any]:
         settings = get_settings()
-        params = {
+        base_params = {
             "symbol": symbol,
             "side": side,
             "type": "LIMIT",
@@ -175,18 +296,28 @@ class BinanceREST:
             "quantity": f"{quantity:.8f}",
             "price": f"{price:.8f}",
             "newOrderRespType": "FULL",
-            "timestamp": _now_ms(),
             "recvWindow": settings.recv_window,
         }
-        params["signature"] = self._sign(params)
-        async with httpx.AsyncClient(
-            base_url=self._base,
-            timeout=self._settings.timeout,
-            headers={"X-MBX-APIKEY": self._settings.api_key},
-        ) as client:
-            r = await client.post("/api/v3/order", data=params)
-        r.raise_for_status()
-        return r.json()
+        for attempt in range(3):
+            params = dict(base_params)
+            params["timestamp"] = _now_ms()
+            params["signature"] = self._sign(params)
+            try:
+                async with httpx.AsyncClient(
+                    base_url=self._base,
+                    timeout=self._settings.timeout,
+                    headers={"X-MBX-APIKEY": self._settings.api_key},
+                ) as client:
+                    path = "/fapi/v1/order" if self._is_futures else "/api/v3/order"
+                    r = await client.post(path, data=params)
+                r.raise_for_status()
+                return r.json()
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code if e.response is not None else 0
+                if code in (418, 429) and attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
 
     def _sign(self, params: dict[str, Any]) -> str:
         secret = self._settings.api_secret.encode()

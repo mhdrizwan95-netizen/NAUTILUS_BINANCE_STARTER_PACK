@@ -10,6 +10,14 @@ groups:
 
       # NOTE: Grafana variables are not valid in Prom rules; stick to fixed windows.
 
+      # Equity consistency: equity should equal cash + signed market value
+      - record: trading:equity_consistency_delta
+        expr: sum(equity_usd{job=~"engine_.*"}) - (sum(cash_usd{job=~"engine_.*"}) + sum(market_value_usd{job=~"engine_.*"}))
+
+      # Total unrealized by summing per-symbol (sanity)
+      - record: trading:unrealized_total_by_symbol
+        expr: sum(pnl_unrealized_symbol{job=~"engine_.*"})
+
   - name: trading_alerts
     interval: 30s
     rules:
@@ -23,7 +31,7 @@ groups:
           description: trading_enabled gauge indicates trading disabled for 5 minutes.
 
       - alert: TradingRejectRateHigh
-        expr: sum(rate(orders_rejected_total[5m])) / clamp_min(sum(rate(orders_submitted_total[5m])), 1e-9) > 0.02
+        expr: sum(rate(orders_rejected_total[5m])) / clamp_min(sum(rate(orders_rejected_total[5m]) + rate(orders_submitted_total[5m])), 1e-9) > 0.02
         for: 2m
         labels:
           severity: critical
@@ -32,7 +40,7 @@ groups:
           description: Reject rate >2% over 5m
 
       - alert: TradingRejectRateWarn
-        expr: sum(rate(orders_rejected_total[5m])) / clamp_min(sum(rate(orders_submitted_total[5m])), 1e-9) > 0.01
+        expr: sum(rate(orders_rejected_total[5m])) / clamp_min(sum(rate(orders_rejected_total[5m]) + rate(orders_submitted_total[5m])), 1e-9) > 0.01
         for: 5m
         labels:
           severity: warning
@@ -75,3 +83,23 @@ groups:
         annotations:
           summary: Observed slippage p50 high
           description: Median observed slippage > 20 bps over 15m.
+
+      # Equity consistency deviation > $1
+      - alert: EquityConsistencyDeltaHigh
+        expr: abs(trading:equity_consistency_delta) > 1
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Equity consistency delta exceeds $1
+          description: equity_usd != cash_usd + market_value_usd by more than $1
+
+      # Snapshot should be loaded within first minute after startup
+      - alert: SnapshotNotLoaded
+        expr: max_over_time(snapshot_loaded{job=~"engine_.*"}[60s]) < 0.5
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: Engine snapshot not loaded after 60s
+          description: snapshot_loaded gauge stayed 0 over the last minute.

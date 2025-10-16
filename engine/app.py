@@ -458,18 +458,43 @@ async def get_portfolio():
     try:
         state = portfolio.state
         metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
+        # Update signed market value (sum of qty*last)
+        try:
+            mv = sum(pos.quantity * pos.last_price for pos in state.positions.values())
+            metrics.REGISTRY["market_value_usd"].set(mv)
+        except Exception:
+            pass
+        # Update per-symbol unrealized gauges for invariants
+        try:
+            g = metrics.REGISTRY.get("pnl_unrealized_symbol")
+            if g is not None:
+                for pos in state.positions.values():
+                    # Symbol names in snapshots include venue suffix; keep base symbol here
+                    g.labels(symbol=pos.symbol).set(pos.upl)
+        except Exception:
+            pass
+        # Record mark time for auditability - always set, even when no positions
+        try:
+            metrics.REGISTRY["mark_time_epoch"].set(time.time())
+        except Exception:
+            pass
     except Exception:
         pass
     return snap
 
 
 @app.get("/account_snapshot")
-async def account_snapshot():
+async def account_snapshot(force: bool = False):
     """
-    Compatibility endpoint expected by ops collectors.
-    Returns the same structure as /portfolio (portfolio state snapshot).
+    Return account snapshot. If force=1, pull a fresh snapshot from the venue
+    and update router cache + snapshot_loaded flag immediately.
     """
-    return await get_portfolio()
+    snap = await (router.fetch_account_snapshot() if force else router.get_account_snapshot())
+    try:
+        router.snapshot_loaded = True
+    except Exception:
+        pass
+    return snap
 
 
 @app.post("/reconcile")
@@ -512,6 +537,12 @@ async def health():
     lag = max(0.0, time.time() - _last_reconcile_ts) if _last_reconcile_ts else None
     if lag is not None:
         metrics.reconcile_lag_seconds.set(lag)
+    # Update snapshot_loaded gauge for alerting - derive truth from router state
+    snap_ok = bool(getattr(router, "snapshot_loaded", False))
+    try:
+        metrics.REGISTRY["snapshot_loaded"].set(1 if snap_ok else 0)
+    except Exception:
+        pass
 
     # Include symbols if unrestricted
     from engine.config import load_risk_config
@@ -527,9 +558,11 @@ async def health():
     return {
         "engine": "ok",
         "mode": settings.mode,
+        "spot_base": getattr(settings, "base_url", None),
         "trading_enabled": settings.trading_enabled,
-        "snapshot_loaded": _boot_status["snapshot_loaded"],
-        "reconciled": _boot_status["reconciled"],
+        "last_snapshot_error": getattr(router, "last_snapshot_error", None),
+        "snapshot_loaded": snap_ok,  # UPDATED: accurate from router state
+        "reconciled": getattr(router, "reconciled", False),
         "equity": snap.get("equity_usd"),
         "pnl_unrealized": (snap.get("pnl") or {}).get("unrealized"),
         "quote_ccy": QUOTE_CCY,

@@ -53,20 +53,20 @@ def _daykey_now(t: float | None = None) -> str:
     return dt.strftime("%Y-%m-%d")
 
 async def _fetch_snapshot(client: httpx.AsyncClient, base_url: str) -> dict:
-    """Fetch account snapshot; fallback to /portfolio for older engines."""
+    """Prefer /portfolio (cached/local) to avoid hammering the venue; fallback to /account_snapshot."""
+    base = base_url.rstrip('/')
+    # 1) Try lightweight portfolio endpoint first (does not hit venue)
     try:
-        r = await client.get(f"{base_url.rstrip('/')}/account_snapshot", timeout=6.0)
+        r = await client.get(f"{base}/portfolio", timeout=6.0)
         r.raise_for_status()
         return r.json()
-    except httpx.HTTPStatusError as e:
-        if e.response is not None and e.response.status_code == 404:
-            try:
-                r2 = await client.get(f"{base_url.rstrip('/')}/portfolio", timeout=6.0)
-                r2.raise_for_status()
-                return r2.json()
-            except Exception:
-                return {}
-        return {}
+    except Exception:
+        pass
+    # 2) Fallback to account_snapshot if portfolio fails
+    try:
+        r = await client.get(f"{base}/account_snapshot", timeout=6.0)
+        r.raise_for_status()
+        return r.json()
     except Exception:
         return {}
 

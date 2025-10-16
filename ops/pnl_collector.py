@@ -29,20 +29,18 @@ PNL_LAST_REFRESH = Gauge(
 )
 
 async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
-    """Fetch account snapshot; fallback to /portfolio for older engines."""
+    """Prefer /portfolio to avoid venue calls; fallback to /account_snapshot."""
+    base = base_url.rstrip('/')
     try:
-        r = await client.get(f"{base_url.rstrip('/')}/account_snapshot", timeout=5.0)
+        r = await client.get(f"{base}/portfolio", timeout=5.0)
         r.raise_for_status()
         return r.json()
-    except httpx.HTTPStatusError as e:
-        if e.response is not None and e.response.status_code == 404:
-            try:
-                r2 = await client.get(f"{base_url.rstrip('/')}/portfolio", timeout=5.0)
-                r2.raise_for_status()
-                return r2.json()
-            except Exception:
-                return {}
-        return {}
+    except Exception:
+        pass
+    try:
+        r = await client.get(f"{base}/account_snapshot", timeout=5.0)
+        r.raise_for_status()
+        return r.json()
     except Exception:
         return {}
 

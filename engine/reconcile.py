@@ -1,6 +1,10 @@
 from __future__ import annotations
 from typing import List, Dict, Any, Optional
 from .state import SnapshotStore
+try:
+    from engine.metrics import REGISTRY as _METRICS
+except Exception:
+    _METRICS = {}
 
 class ExchangeClientProto:
     """Tiny protocol the real client should satisfy."""
@@ -35,14 +39,32 @@ def reconcile_since_snapshot(*, portfolio: PortfolioProto, client: ExchangeClien
 
     # Apply fills
     for t in trades:
-        portfolio.apply_fill(
-            symbol=t["symbol"],
-            side=t.get("isBuyer", True) and "BUY" or "SELL",
-            qty=float(t["qty"] if "qty" in t else t.get("quantity", 0.0)),
-            price=float(t["price"]),
-            fee_quote=float(t.get("quoteFee", 0.0) or t.get("commission_quote", 0.0) or 0.0),
-            ts_ms=int(t.get("time", 0))
-        )
+        # Normalize Binance myTrades-style payloads
+        sym = t.get("symbol") or t.get("S", "")
+        side = "BUY" if bool(t.get("isBuyer", True)) else "SELL"
+        qty = float(t.get("qty") if "qty" in t else t.get("quantity", 0.0) or 0.0)
+        px = float(t.get("price") or 0.0)
+        # Commission may be in non-quote asset; if unknown, treat as 0 for robustness
+        fee = 0.0
+        try:
+            fee = float(
+                t.get("quoteFee", 0.0)
+                or t.get("commission_quote", 0.0)
+                or (t.get("commission", 0.0) if t.get("commissionAsset") in {"USDT", "USD"} else 0.0)
+                or 0.0
+            )
+        except Exception:
+            fee = 0.0
+        if sym and qty and px:
+            # Portfolio.apply_fill expects keyword names: quantity, fee_usd
+            portfolio.apply_fill(symbol=sym, side=side, quantity=float(qty), price=float(px), fee_usd=float(fee))
+            # Increment venue trades counter for observability
+            try:
+                ctr = _METRICS.get("venue_trades_total")
+                if ctr is not None:
+                    ctr.inc()
+            except Exception:
+                pass
 
     # Persist new snapshot
     new_snap = portfolio.snapshot()

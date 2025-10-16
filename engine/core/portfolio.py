@@ -62,6 +62,10 @@ class Portfolio:
     def state(self) -> PortfolioState:
         return self._state
 
+    # Provide snapshot method for reconciliation/persistence shims
+    def snapshot(self) -> dict:
+        return self._state.snapshot()
+
     def update_price(self, symbol: str, price: float) -> None:
         pos = self._state.positions.get(symbol)
         if not pos:

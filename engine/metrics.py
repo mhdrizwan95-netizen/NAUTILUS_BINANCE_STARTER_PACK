@@ -6,6 +6,7 @@ router = APIRouter()
 orders_submitted = Counter("orders_submitted_total", "Orders accepted by engine")
 orders_rejected = Counter("orders_rejected_total", "Orders rejected by validation")
 orders_filled = Counter("orders_filled_total", "Orders that reached FILLED state")
+venue_trades = Counter("venue_trades_total", "Trades fetched from venue (applied via reconciliation)")
 orders_canceled = Counter("orders_canceled_total", "Orders canceled by venue or user")
 orders_expired = Counter("orders_expired_total", "Orders that expired at venue")
 breaker_rejections = Counter("breaker_rejections_total", "Orders rejected by breakers")
@@ -20,8 +21,14 @@ pnl_unrealized = Gauge("pnl_unrealized_total", "Unrealized profit/loss in USDT")
 equity_usd = Gauge("equity_usd", "Total account equity")
 cash_usd = Gauge("cash_usd", "Free cash in USD")
 exposure_usd = Gauge("exposure_usd", "Open exposure in USD")
+market_value_usd = Gauge("market_value_usd", "Signed market value of open positions in USD")
 max_notional_usdt = Gauge("max_notional_usdt", "Current MAX_NOTIONAL_USDT limit")
 trading_enabled_gauge = Gauge("trading_enabled", "1 if trading enabled, else 0")
+snapshot_loaded_gauge = Gauge("snapshot_loaded", "1 if a portfolio snapshot is loaded, else 0")
+mark_time_epoch = Gauge("mark_time_epoch", "Unix time when positions were last marked to market")
+
+# Per-symbol unrealized PnL (for invariants)
+pnl_unrealized_symbol = Gauge("pnl_unrealized_symbol", "Unrealized PnL by symbol (USD)", ["symbol"])
 
 # Production polish metrics
 reconcile_lag_seconds = Gauge("reconcile_lag_seconds", "Seconds since last portfolio reconcile")
@@ -38,6 +45,7 @@ REGISTRY = {
     "orders_submitted_total": orders_submitted,
     "orders_rejected_total": orders_rejected,
     "orders_filled_total": orders_filled,
+    "venue_trades_total": venue_trades,
     "orders_canceled_total": orders_canceled,
     "orders_expired_total": orders_expired,
     "breaker_rejections_total": breaker_rejections,
@@ -55,8 +63,12 @@ REGISTRY = {
     "equity_usd": equity_usd,
     "cash_usd": cash_usd,
     "exposure_usd": exposure_usd,
+    "market_value_usd": market_value_usd,
     "max_notional_usdt": max_notional_usdt,
     "trading_enabled": trading_enabled_gauge,
+    "snapshot_loaded": snapshot_loaded_gauge,
+    "mark_time_epoch": mark_time_epoch,
+    "pnl_unrealized_symbol": pnl_unrealized_symbol,
 }
 
 

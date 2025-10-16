@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import List
+import asyncio
+import httpx
 
 
 class Settings:
@@ -12,22 +14,35 @@ class Settings:
     def __init__(self) -> None:
         mode = os.getenv("BINANCE_MODE", "demo").lower()
         self.mode = mode
+        self.is_futures = mode.startswith("futures")
 
-        # prefer explicit demo/testnet credentials if provided
+        # Prefer explicit demo/testnet credentials if provided
         demo_key = os.getenv("DEMO_API_KEY") or os.getenv("DEMO_API_KEY_SPOT")
         demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv("DEMO_API_SECRET_SPOT")
 
         live_key = os.getenv("BINANCE_API_KEY", "")
         live_secret = os.getenv("BINANCE_API_SECRET", "")
 
-        if mode == "demo":
-            self.api_key = demo_key or live_key
-            self.api_secret = demo_secret or live_secret
-            self.base_url = os.getenv("DEMO_SPOT_BASE", "https://testnet.binance.vision")
+        # Treat 'testnet' and 'paper' as demo aliases
+        if self.is_futures:
+            # Futures bases
+            if mode in {"futures_testnet", "futures_paper", "futures-demo"}:
+                self.api_key = demo_key or live_key
+                self.api_secret = demo_secret or live_secret
+                self.base_url = os.getenv("BINANCE_FUTURES_BASE", os.getenv("DEMO_USDM_BASE", "https://testnet.binancefuture.com"))
+            else:
+                self.api_key = live_key
+                self.api_secret = live_secret
+                self.base_url = os.getenv("BINANCE_FUTURES_BASE", "https://fapi.binance.com")
         else:
-            self.api_key = live_key
-            self.api_secret = live_secret
-            self.base_url = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
+            if mode in {"demo", "testnet", "paper"}:
+                self.api_key = demo_key or live_key
+                self.api_secret = demo_secret or live_secret
+                self.base_url = os.getenv("DEMO_SPOT_BASE", os.getenv("BINANCE_SPOT_BASE", "https://testnet.binance.vision"))
+            else:
+                self.api_key = live_key
+                self.api_secret = live_secret
+                self.base_url = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
 
         if not self.api_key or not self.api_secret:
             raise RuntimeError("Binance API credentials are not set for engine service.")
@@ -93,11 +108,11 @@ class RiskConfig:
 
 def load_risk_config() -> RiskConfig:
     TRADE_SYMBOLS_ENV = os.getenv("TRADE_SYMBOLS", "").strip()
-    if TRADE_SYMBOLS_ENV in ("", "*"):
-        # ✅ Auto-allow all symbols dynamically
+    if TRADE_SYMBOLS_ENV.strip() == "*" or TRADE_SYMBOLS_ENV.lower().strip() == "all":
+        # Set to None for dynamic loading in the app startup
         trade_symbols = None
     else:
-        trade_symbols = [s.strip() for s in TRADE_SYMBOLS_ENV.split(",") if s.strip()]
+        trade_symbols = [s.strip() for s in TRADE_SYMBOLS_ENV.split(",") if s.strip()] or None
 
     return RiskConfig(
         trading_enabled=_as_bool(os.getenv("TRADING_ENABLED"), True),
@@ -119,6 +134,26 @@ def norm_symbol(sym: str) -> str:
     """Ensure symbols are in BASEQUOTE (e.g., BTCUSDT) without venue suffix."""
     s = sym.split(".")[0].upper()
     return s if s.endswith(QUOTE_CCY) else f"{s}{QUOTE_CCY}"
+
+async def list_all_testnet_pairs() -> List[str]:
+    """Fetch all tradeable spot pairs from Binance testnet."""
+    base_url = "https://testnet.binance.vision"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        try:
+            r = await client.get(f"{base_url}/api/v3/exchangeInfo")
+            r.raise_for_status()
+            data = r.json()
+            symbols = []
+            for symbol_info in data.get("symbols", []):
+                status = symbol_info.get("status", "")
+                if status == "TRADING":
+                    symbol = symbol_info.get("symbol", "")
+                    if symbol and symbol.endswith("USDT"):
+                        symbols.append(symbol)
+            return sorted(symbols)
+        except Exception:
+            # Fallback to a few hardcoded pairs
+            return ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
 
 @dataclass(frozen=True)
 class VenueFeeConfig:

@@ -107,19 +107,21 @@ def run_once() -> int:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="Run refresh loop")
-    parser.add_argument(
-        "--interval",
-        type=int,
-        default=int(os.getenv("VOL_REFRESH_MIN", 60)),
-        help="Refresh interval in minutes (default from VOL_REFRESH_MIN)",
-    )
+    parser.add_argument("--interval-sec", type=int, default=3600, help="Refresh interval in seconds")
+    parser.add_argument("--top-n", type=int, default=TOP_N, help="Number of top symbols to select")
+    parser.add_argument("--out", default=OUTPUT_FILE, help="Output file path")
     args = parser.parse_args()
+
+    # Override globals for daemon mode
+    global TOP_N, OUTPUT_FILE
+    TOP_N = args.top_n
+    OUTPUT_FILE = args.out
 
     if not args.loop:
         run_once()
         return
 
-    refresh_sec = max(60, int(args.interval) * 60)
+    refresh_sec = max(60, args.interval_sec)
     print(f"[vol_ranker] starting loop, interval={refresh_sec}s -> {OUTPUT_FILE}")
     while True:
         try:

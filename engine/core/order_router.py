@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from typing import Any, Literal
+import httpx
 
 from engine.config import get_settings, load_fee_config, load_ibkr_fee_config, ibkr_min_notional_usd
 from engine.core.binance import BinanceREST
@@ -30,23 +31,126 @@ class OrderRouter:
         self._settings = get_settings()
         # Set the default client for backwards compatibility
         _CLIENTS["BINANCE"] = default_client
+        self.snapshot_loaded = False  # NEW
+        self._last_snapshot: dict | None = None
 
     async def initialize_balances(self) -> None:
         # Only initialize Binance balances for backwards compatibility
         # IBKR would need separate balance initialization
-        if "BINANCE" in _CLIENTS:
-            account = await _CLIENTS["BINANCE"].account_snapshot()
-            balances = account.get("balances", [])
-            for bal in balances:
-                asset = bal.get("asset")
-                free = float(bal.get("free", 0.0))
-                locked = float(bal.get("locked", 0.0))
-                total = free + locked
-                if asset == "USDT":
-                    self._portfolio.state.cash = total
-                    self._portfolio.state.equity = total
+        try:
+            if "BINANCE" in _CLIENTS:
+                account = await _CLIENTS["BINANCE"].account_snapshot()
+                # Spot balances
+                balances = account.get("balances", [])
+                if balances:
+                    for bal in balances:
+                        asset = bal.get("asset")
+                        free = float(bal.get("free", 0.0))
+                        locked = float(bal.get("locked", 0.0))
+                        total = free + locked
+                        if asset == "USDT":
+                            self._portfolio.state.cash = total
+                            self._portfolio.state.equity = total
+                    self._balances = balances
+                else:
+                    # Futures: totalWalletBalance in USDT (USD-M)
+                    try:
+                        usdt = float(account.get("totalWalletBalance", 0.0))
+                        if usdt:
+                            self._portfolio.state.cash = usdt
+                            self._portfolio.state.equity = usdt
+                    except Exception:
+                        pass
+                    self._positions = account.get("positions", [])
+                self._last_snapshot = account
+                self.snapshot_loaded = True
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("[INIT] initialize_balances failed: %s; starting with empty balances", e)
+            # Leave portfolio empty; snapshot_loaded will be false
 
     async def market_quote(self, symbol: str, side: Side, quote: float) -> dict[str, Any]:
+        """Submit a market order using quote notional when venue supports it.
+
+        For BINANCE we can submit `quoteOrderQty` directly which avoids requiring
+        a prior price lookup (useful when public ticker endpoints are flaky).
+        For other venues (e.g., IBKR) fall back to converting quote→quantity.
+        """
+        # Decide venue
+        venue = symbol.split(".")[1] if "." in symbol else None
+        base = symbol.split(".")[0].upper()
+
+        if venue is None:
+            default_venue = "BINANCE" if base.endswith("USDT") else "IBKR"
+            symbol = f"{base}.{default_venue}"
+            venue = default_venue
+
+        # BINANCE fast-path: submit quote order without price lookup
+        if venue == "BINANCE":
+            client = _CLIENTS.get("BINANCE")
+            if client is None:
+                raise ValueError("VENUE_CLIENT_MISSING: No client for venue BINANCE")
+
+            # Specs lookup or sane defaults
+            spec: SymbolSpec | None = (SPECS.get("BINANCE") or {}).get(base)
+            if spec is None:
+                spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
+
+            # Notional guard (we already pass risk rails earlier but keep a venue check)
+            if float(quote) < float(spec.min_notional):
+                orders_rejected.inc()
+                raise ValueError(f"MIN_NOTIONAL: Quote {quote:.2f} below {spec.min_notional:.2f}")
+
+            submit = getattr(client, "submit_market_quote", None)
+            if submit is None:
+                # Fallback to qty path if client lacks quote submit
+                qty = await self._quote_to_quantity(symbol, side, quote)
+                return await self.market_quantity(symbol, side, qty)
+
+            t0 = time.time()
+            try:
+                res = await submit(symbol=base, side=side, quote=float(quote))
+            except httpx.HTTPStatusError as e:
+                code = e.response.status_code if e.response is not None else 0
+                # Some testnet symbols reject quoteOrderQty for MARKET orders
+                # Gracefully fallback to quantity path on 400-series client errors
+                if code in (400, 415, 422):
+                    qty = await self._quote_to_quantity(symbol, side, quote)
+                    return await self.market_quantity(symbol, side, qty)
+                raise
+            t1 = time.time()
+
+            try:
+                REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
+            except Exception:
+                pass
+
+            # Post-process fills & fees similar to quantity path
+            fee_bps = load_fee_config("BINANCE").taker_bps
+            filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or 0.0)
+            # Prefer avg_fill_price if present; else fall back to first fill price
+            avg_price = float(res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", 0.0) or 0.0)
+            fill_notional = abs(filled_qty) * avg_price if (filled_qty and avg_price) else float(quote)
+            fee = (fee_bps / 10_000.0) * fill_notional
+            res.setdefault("filled_qty_base", filled_qty)
+            if avg_price:
+                res.setdefault("avg_fill_price", avg_price)
+            res["taker_bps"] = fee_bps
+
+            # Apply fill to local portfolio (best-effort)
+            try:
+                if filled_qty > 0 and (avg_price or fill_notional > 0):
+                    px = avg_price if avg_price else (fill_notional / max(filled_qty, 1e-12))
+                    self._portfolio.apply_fill(base, side, abs(filled_qty), px, float(fee))
+                    st = self._portfolio.state
+                    update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
+            except Exception:
+                pass
+
+            return res
+
+        # Other venues: fall back to quote→quantity conversion
         qty = await self._quote_to_quantity(symbol, side, quote)
         return await self.market_quantity(symbol, side, qty)
 
@@ -304,6 +408,56 @@ def _round_tick(value: float, tick: float) -> float:
 
 
 class OrderRouterExt(OrderRouter):
+    async def fetch_account_snapshot(self) -> dict:
+        """
+        Fetch a fresh snapshot from the venue and update local cache.
+        Used by /account_snapshot?force=1 and any ad-hoc refreshers.
+        """
+        account = await _CLIENTS["BINANCE"].account_snapshot()
+
+        balances = account.get("balances", []) if isinstance(account, dict) else []
+        positions = account.get("positions", []) if isinstance(account, dict) else []
+
+        # Only overwrite cache if we actually received balances
+        if balances:
+            self._balances = balances
+            self._positions = positions
+            self._last_snapshot = account
+            self.snapshot_loaded = True
+
+            # Update portfolio cash/equity from USDT balance if present
+            try:
+                usdt = 0.0
+                for bal in balances:
+                    if bal.get("asset") == "USDT":
+                        usdt = float(bal.get("free", 0.0)) + float(bal.get("locked", 0.0))
+                        break
+                if usdt > 0:
+                    self._portfolio.state.cash = usdt
+                    self._portfolio.state.equity = usdt
+                    # Push to gauges immediately for dashboards
+                    from engine.metrics import update_portfolio_gauges
+                    s = self._portfolio.state
+                    update_portfolio_gauges(s.cash, s.realized, s.unrealized, s.exposure)
+            except Exception:
+                pass
+        else:
+            try:
+                # Record reason for observability in /health
+                self.last_snapshot_error = {
+                    "reason": "empty_or_throttled",
+                    "got_keys": list(account.keys()) if isinstance(account, dict) else None,
+                }
+            except Exception:
+                pass
+        return self._last_snapshot or {"balances": [], "positions": []}
+
+    async def get_account_snapshot(self) -> dict:
+        """Shim for current snapshot (latest stored or last fetch)."""
+        if self._last_snapshot is None:
+            return await self.fetch_account_snapshot()
+        return self._last_snapshot
+
     async def limit_quote(self, symbol: str, side: Side, quote: float, price: float, time_in_force: str = "IOC") -> dict[str, Any]:
         qty = await self._quote_to_quantity(symbol, side, quote)
         return await self.limit_quantity(symbol, side, qty, price, time_in_force)
