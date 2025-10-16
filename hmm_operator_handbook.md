@@ -63,8 +63,8 @@ export PYTHONPATH=$(pwd)
 
 ### Optional Docker Compose for Observability
 ```bash
-cd ops
-docker compose -f compose.observability.yml up -d
+cd ops/observability
+docker compose -f docker-compose.observability.yml up -d
 ```
 
 ### .env Example

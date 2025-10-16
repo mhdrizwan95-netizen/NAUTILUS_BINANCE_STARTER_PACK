@@ -1,0 +1,2 @@
+CRON_TZ=Asia/Riyadh
+*/10 * * * * /usr/local/bin/python /app/ops/train_backfill_one.py >> /app/logs/cron/backfill.log 2>&1

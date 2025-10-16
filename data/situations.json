@@ -1,0 +1,56 @@
+{
+  "situations": [
+    {
+      "name": "vwap_reclaim_accel",
+      "version": 1,
+      "window": {
+        "bars": 20,
+        "interval": "1m"
+      },
+      "universe": {
+        "venue": "BINANCE",
+        "quote": "USDT"
+      },
+      "predicates": [
+        {
+          "feat": "vwap_dev",
+          "op": "crosses_up",
+          "value": 0.0,
+          "low": null,
+          "high": null
+        },
+        {
+          "feat": "vol_accel_5m_over_30m",
+          "op": ">",
+          "value": 4.0,
+          "low": null,
+          "high": null
+        },
+        {
+          "feat": "rsi_14",
+          "op": "between",
+          "value": null,
+          "low": 45.0,
+          "high": 65.0
+        },
+        {
+          "feat": "spread_over_atr",
+          "op": "<",
+          "value": 0.6,
+          "low": null,
+          "high": null
+        }
+      ],
+      "labels": [
+        "momentum",
+        "reclaim",
+        "liquidity_ok"
+      ],
+      "risk_template": "candidate",
+      "cooldown_sec": 900,
+      "min_depth_usdt": 10000.0,
+      "priority": 0.6,
+      "enabled": true
+    }
+  ]
+}

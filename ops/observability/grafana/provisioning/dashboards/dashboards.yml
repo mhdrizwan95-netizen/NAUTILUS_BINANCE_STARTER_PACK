@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: HMM Dashboards
+    orgId: 1
+    folder: "HMM"
+    type: file
+    disableDeletion: false
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

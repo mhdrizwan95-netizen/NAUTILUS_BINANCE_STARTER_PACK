@@ -1,0 +1,41 @@
+groups:
+- name: trading_cockpit
+  interval: 30s
+  rules:
+  # PnL aggregates
+  - record: pnl_total_usd
+    expr: sum without (pid, instance, job) (pnl_realized_total) + sum without (pid, instance, job) (pnl_unrealized_total)
+
+  # Order flow (15m window)
+  - record: orders_submitted_15m
+    expr: sum without (pid, instance, job) (increase(orders_submitted_total[15m]))
+  - record: orders_filled_15m
+    expr: sum without (pid, instance, job) (increase(orders_filled_total[15m]))
+  - record: fills_success_rate_15m
+    expr: clamp_min(orders_filled_15m / clamp_min(orders_submitted_15m, 1e-9), 0)
+
+  # Guardian / incidents (5m)
+  - record: incidents_5m
+    expr: sum(increase(m20_incidents_total[5m]))
+
+  # Engine health
+  - record: ws_disconnects_15m
+    expr: sum(increase(ws_disconnects_total[15m]))
+
+  # Exposure by symbol (USD)
+  - record: exposure_by_symbol
+    expr: sum by (symbol) (exposure_usd)
+
+  # Equity (across engines)
+  - record: portfolio_equity_usd_total
+    expr: sum without (pid, instance, job) (equity_usd)
+
+  # Latency helper (reuse if needed)
+  - record: trading:submit_to_ack_ms:rate5m_by_le
+    expr: sum(rate(submit_to_ack_ms_bucket[5m])) by (le)
+
+  # Optional model placeholders (comment out if unused)
+  - record: model_drift_score
+    expr: avg(model_drift_score)
+  - record: model_entropy
+    expr: avg(model_entropy)

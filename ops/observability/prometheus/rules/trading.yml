@@ -1,0 +1,77 @@
+groups:
+  - name: trading_rec
+    interval: 30s
+    rules:
+      - record: trading:breaker_rejections_24h
+        expr: sum without (pid, instance) (increase(breaker_rejections_total{job=~"engine_.*"}[24h]))
+
+      - record: trading:submit_to_ack_ms:rate5m_by_le
+        expr: sum(rate(submit_to_ack_ms_bucket[5m])) by (le)
+
+      # NOTE: Grafana variables are not valid in Prom rules; stick to fixed windows.
+
+  - name: trading_alerts
+    interval: 30s
+    rules:
+      - alert: TradingDisabledTooLong
+        expr: max(trading_enabled{job=~"engine_.*"}) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Trading disabled for >5m
+          description: trading_enabled gauge indicates trading disabled for 5 minutes.
+
+      - alert: TradingRejectRateHigh
+        expr: sum(rate(orders_rejected_total[5m])) / clamp_min(sum(rate(orders_submitted_total[5m])), 1e-9) > 0.02
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: High reject rate
+          description: Reject rate >2% over 5m
+
+      - alert: TradingRejectRateWarn
+        expr: sum(rate(orders_rejected_total[5m])) / clamp_min(sum(rate(orders_submitted_total[5m])), 1e-9) > 0.01
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Elevated reject rate
+          description: Reject rate >1% over 5m
+
+      - alert: SubmitAckLatencyHigh
+        expr: histogram_quantile(0.99, trading:submit_to_ack_ms:rate5m_by_le) > 200
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: High p99 submit→ack latency
+          description: p99 > 200 ms for 2m
+
+      - alert: ExposureRefreshStale
+        expr: time() - max(ops_exposure_last_refresh_epoch) > 60
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Exposure refresh stale
+          description: No fresh exposure for >60s
+
+      - alert: NoFills30m
+        expr: sum(increase(orders_filled_total{job=~"engine_.*"}[30m])) == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: No fills for 30 minutes
+          description: Order fills have been zero over the last 30m across engines.
+
+      - alert: ObservedSlipHigh
+        expr: histogram_quantile(0.5, sum(rate(slip_observed_bp_bucket{job="executor"}[15m])) by (le)) > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Observed slippage p50 high
+          description: Median observed slippage > 20 bps over 15m.

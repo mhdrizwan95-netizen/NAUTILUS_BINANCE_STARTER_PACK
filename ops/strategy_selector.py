@@ -20,6 +20,29 @@ def save_registry(d: dict):
     tmp.write_text(json.dumps(d, indent=2))
     tmp.replace(REGISTRY_PATH)
 
+def _as_float(x, default: float = 0.0) -> float:
+    try:
+        if isinstance(x, list):
+            # common pattern: store history list; use last value
+            return float(x[-1]) if x else float(default)
+        if isinstance(x, (int, float)):
+            return float(x)
+        return float(x)
+    except Exception:
+        return float(default)
+
+
+def _as_count(x, default: int = 0) -> int:
+    try:
+        if isinstance(x, list):
+            return int(len(x))
+        if isinstance(x, (int, float)):
+            return int(x)
+        return int(x)
+    except Exception:
+        return int(default)
+
+
 def rank_strategies(registry: dict) -> list:
     """
     Rank strategies by composite score: Sharpe ratio primary, drawdown penalty
@@ -33,12 +56,12 @@ def rank_strategies(registry: dict) -> list:
     ranked = []
     for name, stats in models:
         # Require minimum data quality
-        if stats.get("samples", 0) < 10:
+        if _as_count(stats.get("samples", 0)) < 10:
             continue
 
-        sharpe = stats.get("sharpe", 0.0)
-        drawdown = stats.get("drawdown", 0.0)
-        realized = stats.get("realized", 0.0)
+        sharpe = _as_float(stats.get("sharpe", 0.0))
+        drawdown = _as_float(stats.get("drawdown", 0.0))
+        realized = _as_float(stats.get("realized", 0.0))
 
         # Composite score: boost Sharpe, penalize drawdown
         score = sharpe - (drawdown * 0.1) + (realized * 0.001)
@@ -82,7 +105,10 @@ def promote_best():
             "time": utc_now(),
             "from": current,
             "to": best_model,
-            "reason": f"Sharpe improved {best_stats['sharpe']:.2f} > {registry.get(current,{}).get('sharpe',0):.2f}"
+            "reason": (
+                f"Sharpe improved {_as_float(best_stats.get('sharpe', 0.0)):.2f} > "
+                f"{_as_float(registry.get(current, {}).get('sharpe', 0.0)):.2f}"
+            )
         })
 
         # Keep only last 50 promotions for log size management
@@ -125,11 +151,11 @@ def get_leaderboard() -> list:
             "name": name,
             "rank": i + 1,
             "score": round(score, 3),
-            "sharpe": round(stats.get("sharpe", 0.0), 3),
-            "drawdown": round(stats.get("drawdown", 0.0), 3),
-            "realized": round(stats.get("realized", 0.0), 2),
-            "trades": stats.get("trades", 0),
-            "samples": stats.get("samples", 0),
+            "sharpe": round(_as_float(stats.get("sharpe", 0.0)), 3),
+            "drawdown": round(_as_float(stats.get("drawdown", 0.0)), 3),
+            "realized": round(_as_float(stats.get("realized", 0.0)), 2),
+            "trades": _as_count(stats.get("trades", 0)),
+            "samples": _as_count(stats.get("samples", 0)),
             "is_current": (name == current)
         })
 

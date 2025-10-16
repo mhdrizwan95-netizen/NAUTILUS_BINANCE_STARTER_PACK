@@ -9,9 +9,29 @@ logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(m
 
 # Prometheus metrics for strategy performance monitoring
 from prometheus_client import Gauge
-SHARPE_GAUGE = Gauge("strategy_sharpe", "Live Sharpe ratio per strategy", ["model"])
-DD_GAUGE = Gauge("strategy_drawdown", "Live drawdown per strategy", ["model"])
-REALIZED_GAUGE = Gauge("strategy_realized_pnl", "Realized PnL per strategy", ["model"])
+from ops.prometheus import REGISTRY
+
+SHARPE_GAUGE = Gauge(
+    "strategy_sharpe",
+    "Live Sharpe ratio per strategy",
+    ["model"],
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+DD_GAUGE = Gauge(
+    "strategy_drawdown",
+    "Live drawdown per strategy",
+    ["model"],
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+REALIZED_GAUGE = Gauge(
+    "strategy_realized_pnl",
+    "Realized PnL per strategy",
+    ["model"],
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
 
 def load_registry() -> dict:
     if REGISTRY_PATH.exists():
@@ -26,7 +46,7 @@ def save_registry(d: dict):
     tmp.write_text(json.dumps(d, indent=2))
     tmp.replace(REGISTRY_PATH)
 
-async def fetch_strategy_metrics(base_url: str) -> dict:
+async def fetch_strategy_metrics(base_url: str, current_model: str | None = None) -> dict:
     """
     Scrape strategy-tagged PnL metrics from engine /metrics endpoint.
     Expects Prometheus format like: pnl_realized_total{venue="BINANCE",model="hmm_v1"} 120.0
@@ -54,6 +74,28 @@ async def fetch_strategy_metrics(base_url: str) -> dict:
             val = float(line.split()[-1])
             if model in data:
                 data[model]["unrealized"] = val
+    # Fallback: if no model-labelled metrics were found, attribute aggregate engine PnL to current model
+    if not data and current_model:
+        realized = None
+        unrealized = None
+        for line in txt.splitlines():
+            if line.startswith("pnl_realized_total ") and ' {' not in line:
+                try:
+                    realized = float(line.split()[-1])
+                except Exception:
+                    pass
+            if line.startswith("pnl_unrealized_total ") and ' {' not in line:
+                try:
+                    unrealized = float(line.split()[-1])
+                except Exception:
+                    pass
+        if realized is not None or unrealized is not None:
+            data[current_model] = {}
+            if realized is not None:
+                data[current_model]["realized"] = realized
+            if unrealized is not None:
+                data[current_model]["unrealized"] = unrealized
+
     return data
 
 async def strategy_tracker_loop():
@@ -69,8 +111,9 @@ async def strategy_tracker_loop():
     while True:
         try:
             all_data = {}
+            current_model = registry.get("current_model")
             for e in engines:
-                data = await fetch_strategy_metrics(e)
+                data = await fetch_strategy_metrics(e, current_model=current_model)
                 for m, vals in data.items():
                     all_data.setdefault(m, {}).update(vals)
 

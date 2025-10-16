@@ -1,0 +1,55 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "HMM • Governance Overview",
+    "tags": ["hmm", "governance", "prometheus"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "schemaVersion": 39,
+    "version": 1,
+    "panels": [
+      {
+        "id": 1,
+        "type": "stat",
+        "title": "Active Governance Rules",
+        "targets": [
+          { "refId": "A", "expr": "max(governance_rules_active)" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+        "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+      },
+      {
+        "id": 2,
+        "type": "timeseries",
+        "title": "Rule Executions (rate 5m)",
+        "targets": [
+          { "refId": "A", "expr": "sum by (name) (rate(governance_rule_tripped_total[5m]))", "legendFormat": "{{name}}" }
+        ],
+        "fieldConfig": { "defaults": { "unit": "short", "decimals": 2, "custom": { "fillOpacity": 15 } }, "overrides": [] },
+        "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+        "gridPos": { "h": 10, "w": 18, "x": 6, "y": 0 }
+      },
+      {
+        "id": 3,
+        "type": "stat",
+        "title": "Trading Enabled",
+        "targets": [ { "refId": "A", "expr": "max(trading_enabled)" } ],
+        "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+        "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 4 }
+      },
+      {
+        "id": 4,
+        "type": "stat",
+        "title": "Max Notional (current)",
+        "targets": [ { "refId": "A", "expr": "max(max_notional_usdt)" } ],
+        "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
+        "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 4 }
+      }
+    ],
+    "time": { "from": "now-6h", "to": "now" },
+    "templating": { "list": [] }
+  }
+}

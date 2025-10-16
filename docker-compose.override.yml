@@ -2,14 +2,6 @@ services:
   ops:
     healthcheck:
       # Use python in the container to ping /readyz
-      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8001/readyz', timeout=3); sys.exit(0)"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
-
-  dash:
-    healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8002/readyz', timeout=3); sys.exit(0)"]
       interval: 10s
       timeout: 3s

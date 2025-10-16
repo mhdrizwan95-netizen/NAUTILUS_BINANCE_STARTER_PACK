@@ -1,0 +1,41 @@
+[
+  {
+    "name": "vwap_reclaim_accel",
+    "version": 1,
+    "window": {"bars": 60, "interval": "1m"},
+    "predicates": [
+      {"feat": "vwap_dev", "op": "crosses_up", "value": 0.0},
+      {"feat": "vol_accel_5m_over_30m", "op": ">", "value": 1.2},
+      {"feat": "rsi_14", "op": "between", "low": 33, "high": 75},
+      {"feat": "spread_over_atr", "op": "<", "value": 2.0}
+    ],
+    "cooldown_sec": 120,
+    "min_depth_usdt": 2000,
+    "priority": 0.95
+  },
+  {
+    "name": "parabolic_blowoff",
+    "version": 1,
+    "window": {"bars": 60, "interval": "1m"},
+    "predicates": [
+      {"feat": "r15", "op": ">", "value": 0.03},
+      {"feat": "vwap_dev", "op": ">", "value": 0.006},
+      {"feat": "vol_accel_1m_over_30m", "op": ">", "value": 3.0}
+    ],
+    "cooldown_sec": 600,
+    "min_depth_usdt": 5000,
+    "priority": 0.7
+  },
+  {
+    "name": "momentum_probe",
+    "version": 1,
+    "window": {"bars": 30, "interval": "1m"},
+    "predicates": [
+      {"feat": "r15", "op": ">", "value": 0.01},
+      {"feat": "spread_over_atr", "op": "<", "value": 2.0}
+    ],
+    "cooldown_sec": 90,
+    "min_depth_usdt": 1500,
+    "priority": 0.9
+  }
+]

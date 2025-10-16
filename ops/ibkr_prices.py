@@ -9,6 +9,7 @@ IBKR Price Publisher for OPS
 import os, time, asyncio, logging
 from ib_insync import IB, Stock, util
 from prometheus_client import Gauge
+from ops.prometheus import REGISTRY
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -19,8 +20,21 @@ WATCHLIST = os.getenv("OPS_IBKR_TICKERS", "AAPL,MSFT,NVDA,TSLA,GOOGL").split(","
 PRICES: dict[str, float] = {}
 
 # Prometheus metrics
-PRICE_METRICS = {sym: Gauge(f"ibkr_price_{sym.lower()}_usd", f"Last traded price for {sym} (USD)") for sym in WATCHLIST}
-LAST_UPDATE = Gauge("ibkr_last_price_update_epoch", "Unix time of last IBKR price update")
+PRICE_METRICS = {
+    sym: Gauge(
+        f"ibkr_price_{sym.lower()}_usd",
+        f"Last traded price for {sym} (USD)",
+        registry=REGISTRY,
+        multiprocess_mode="max",
+    )
+    for sym in WATCHLIST
+}
+LAST_UPDATE = Gauge(
+    "ibkr_last_price_update_epoch",
+    "Unix time of last IBKR price update",
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
 
 class IbkrPriceFeed:
     def __init__(self):

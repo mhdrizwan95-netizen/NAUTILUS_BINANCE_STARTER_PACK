@@ -42,7 +42,7 @@
         "type": "graph",
         "targets": [
           {
-            "expr": "pnl_realized",
+            "expr": "sum without (pid) (pnl_realized_total{job=~\"engine_.*\"})",
             "refId": "A"
           }
         ],
@@ -59,7 +59,7 @@
         "type": "graph",
         "targets": [
           {
-            "expr": "pnl_unrealized",
+            "expr": "sum without (pid) (pnl_unrealized_total{job=~\"engine_.*\"})",
             "refId": "A"
           }
         ],
@@ -120,6 +120,86 @@
           "w": 24,
           "x": 0,
           "y": 24
+        }
+      },
+      {
+        "id": 7,
+        "title": "Cash Baseline Check",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "sum without (pid) (equity_usd{job=~\"engine_.*\"}) - (sum without (pid) (pnl_realized_total{job=~\"engine_.*\"}) + sum without (pid) (pnl_unrealized_total{job=~\"engine_.*\"}))",
+            "refId": "A"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                { "color": "green", "value": null }
+              ]
+            }
+          }
+      },
+      {
+        "id": 8,
+        "title": "Orders Rejected Rate (5m)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum without (pid) (rate(orders_rejected_total{job=~\"engine_.*\"}[5m]))",
+            "refId": "A",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 42 }
+      },
+      {
+        "id": 9,
+        "title": "Breaker Rejections (24h)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "sum without (pid) (increase(breaker_rejections_total{job=~\"engine_.*\"}[24h]))",
+            "refId": "A",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 42 }
+      },
+      {
+        "id": 10,
+        "title": "Breaker State (1=open)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "max by (instance) (breaker_state{job=~\"engine_.*\"})",
+            "refId": "A",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "gridPos": { "h": 6, "w": 12, "x": 0, "y": 50 }
+      },
+      {
+        "id": 11,
+        "title": "Venue Error Rate (%)",
+        "type": "timeseries",
+        "targets": [
+          {
+            "expr": "max by (instance) (venue_error_rate_pct{job=~\"engine_.*\"})",
+            "refId": "A",
+            "legendFormat": "{{instance}}"
+          }
+        ],
+        "gridPos": { "h": 6, "w": 12, "x": 12, "y": 50 }
+      }
+        "gridPos": {
+          "h": 6,
+          "w": 24,
+          "x": 0,
+          "y": 36
         }
       }
     ],

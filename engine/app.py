@@ -10,10 +10,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 import json
+import httpx as _httpx
 
 from engine.config import get_settings, load_risk_config, QUOTE_CCY
 from engine.core.binance import BinanceREST
 from engine.core.order_router import OrderRouter, set_exchange_client
+from engine.core.order_router import OrderRouterExt
 from engine.core.portfolio import Portfolio
 from engine.core.event_bus import BUS, initialize_event_bus, publish_order_event, publish_risk_event
 from engine.core import alert_daemon
@@ -32,11 +34,17 @@ risk_cfg = load_risk_config()
 RAILS = RiskRails(risk_cfg)
 rest_client = BinanceREST()
 portfolio = Portfolio()
-router = OrderRouter(rest_client, portfolio)
+router = OrderRouterExt(rest_client, portfolio)
 startup_lock = asyncio.Lock()
 
 # Attach metrics router
 app.include_router(metrics.router)
+metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
+try:
+    metrics.set_max_notional(RAILS.cfg.max_notional_usdt)
+except Exception:
+    pass
+metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
 
 
 # Attach strategy router
@@ -90,10 +98,40 @@ class MarketOrderRequest(BaseModel):
         return self
 
 
+class LimitOrderRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbol: str = Field(..., description="e.g., BTCUSDT.BINANCE")
+    side: Literal["BUY", "SELL"]
+    price: float = Field(..., gt=0, description="Limit price")
+    timeInForce: Literal["IOC", "FOK", "GTC"] = Field("IOC")
+    quote: Optional[float] = Field(None, gt=0, description="Quote currency amount (USDT).")
+    quantity: Optional[float] = Field(None, gt=0, description="Base asset quantity.")
+
+    @model_validator(mode="after")
+    def validate_exclusive(self):
+        if (self.quantity is None) == (self.quote is None):
+            raise ValueError("Set exactly one of quote or quantity.")
+        return self
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     async with startup_lock:
         await router.initialize_balances()
+        # Optional: seed starting cash for demo/test if no balances detected
+        try:
+            import os
+            state = portfolio.state
+            if (state.cash is None or state.cash <= 0):
+                seed = os.getenv("STARTING_CASH_USD") or os.getenv("ENGINE_STARTING_CASH_USD")
+                if seed is not None:
+                    val = float(seed)
+                    if val > 0:
+                        state.cash = val
+                        state.equity = val
+        except Exception:
+            pass
         # Initialize portfolio metrics
         state = portfolio.state
         metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
@@ -231,6 +269,27 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
             result = await router.market_quantity(req.symbol, req.side, req.quantity or 0.0)
         metrics.orders_submitted.inc()
 
+        # Terminal status counters now increment in Portfolio.apply_fill();
+        # additional venue statuses (canceled/expired) can be recorded by
+        # reconciliation or explicit cancel flows.
+
+        # Apply immediate fill to internal portfolio state (best-effort)
+        try:
+            sym = (result.get("symbol") or req.symbol).split(".")[0]
+            qty_base = float(result.get("filled_qty_base") or 0.0)
+            px = float(result.get("avg_fill_price") or 0.0)
+            fee_usd = float(result.get("fee_usd") or 0.0)
+            if qty_base > 0 and px > 0:
+                portfolio.apply_fill(symbol=sym, side=req.side, quantity=qty_base, price=px, fee_usd=fee_usd)
+                # Update gauges after applying the fill
+                state = portfolio.state
+                metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
+                # Persist snapshot
+                _store.save(state.snapshot())
+        except Exception:
+            # Non-fatal; reconcile daemon or manual /reconcile can catch up
+            pass
+
         resp = {
             "status": "submitted",
             "order": result,
@@ -240,16 +299,110 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
         append_jsonl("orders.jsonl", resp)
         if idem_key:
             CACHE.set(idem_key, resp)
-        # Persist a fresh portfolio snapshot after submission path returns success from router
-        try:
-            snap = portfolio.state.snapshot()
-            _store.save(snap)
-        except Exception:
-            pass
         return resp
     except Exception as exc:  # pylint: disable=broad-except
         metrics.orders_rejected.inc()
+        # Surface Binance error payloads for easier debugging
+        try:
+            if isinstance(exc, _httpx.HTTPStatusError) and exc.response is not None:
+                status = exc.response.status_code
+                body = exc.response.text
+                raise HTTPException(status_code=status, detail=f"Binance error: {body}") from exc
+        except Exception:
+            pass
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/orders/limit")
+async def submit_limit_order(req: LimitOrderRequest, request: Request):
+    # Idempotency check
+    idem_key = request.headers.get("X-Idempotency-Key")
+    if idem_key:
+        cached = CACHE.get(idem_key)
+        if cached:
+            return JSONResponse(content=cached, status_code=200)
+
+    ok, err = RAILS.check_order(
+        symbol=req.symbol,
+        side=req.side,  # type: ignore
+        quote=req.quote,
+        quantity=req.quantity,
+    )
+    if not ok:
+        metrics.orders_rejected.inc()
+        status = 403 if err.get("error") in {"TRADING_DISABLED", "SYMBOL_NOT_ALLOWED"} else 400
+        await publish_risk_event("rejected", {
+            "symbol": req.symbol,
+            "side": req.side,
+            "quote": req.quote,
+            "quantity": req.quantity,
+            "reason": err.get("error", "UNKNOWN_RISK_VIOLATION"),
+            "timestamp": time.time()
+        })
+        return JSONResponse(content={"status": "rejected", **err}, status_code=status)
+
+    try:
+        if req.quote is not None:
+            result = await router.limit_quote(req.symbol, req.side, req.quote, req.price, req.timeInForce)
+        else:
+            result = await router.limit_quantity(req.symbol, req.side, req.quantity or 0.0, req.price, req.timeInForce)
+        metrics.orders_submitted.inc()
+
+        # Apply immediate fill (best-effort)
+        try:
+            sym = (result.get("symbol") or req.symbol).split(".")[0]
+            qty_base = float(result.get("filled_qty_base") or 0.0)
+            px = float(result.get("avg_fill_price") or 0.0)
+            fee_usd = float(result.get("fee_usd") or 0.0)
+            if qty_base > 0 and px > 0:
+                portfolio.apply_fill(symbol=sym, side=req.side, quantity=qty_base, price=px, fee_usd=fee_usd)
+                st = portfolio.state
+                metrics.update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
+                _store.save(st.snapshot())
+        except Exception:
+            pass
+
+        resp = {
+            "status": "submitted",
+            "order": result,
+            "idempotency_key": idem_key,
+            "timestamp": time.time(),
+        }
+        append_jsonl("orders.jsonl", resp)
+        if idem_key:
+            CACHE.set(idem_key, resp)
+        return resp
+    except Exception as exc:
+        metrics.orders_rejected.inc()
+        try:
+            if isinstance(exc, _httpx.HTTPStatusError) and exc.response is not None:
+                status = exc.response.status_code
+                body = exc.response.text
+                raise HTTPException(status_code=status, detail=f"Binance error: {body}") from exc
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/symbol_info")
+async def symbol_info(symbol: str):
+    """Return live venue filters for a symbol (min_notional, step size, etc.).
+
+    Accepts symbols with or without venue suffix (e.g., BTCUSDT or BTCUSDT.BINANCE).
+    """
+    try:
+        clean = symbol.split(".")[0].upper()
+        filt = await rest_client.exchange_filter(clean)
+        return {
+            "symbol": clean,
+            "step_size": filt.step_size,
+            "min_qty": filt.min_qty,
+            "min_notional": filt.min_notional,
+            "max_notional": filt.max_notional,
+            "tick_size": getattr(filt, "tick_size", 0.0),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"symbol_info failed: {exc}")
 
 
 @app.get("/orders/{order_id}")
@@ -291,11 +444,32 @@ async def get_portfolio():
             p["unrealized_usd"] = float(p.get("unrealized_usd", 0.0))  # keep if already computed
             p["value_usd"] = (qty * float(last)) if (last is not None) else 0.0
             p["is_dust"] = abs(p["value_usd"]) < dust
+            # Also update internal portfolio marks so unrealized PnL tracks market
+            try:
+                if last is not None:
+                    portfolio.update_price(base, float(last))
+            except Exception:
+                pass
         snap["quote_ccy"] = QUOTE_CCY
         snap["positions"] = positions
     except Exception:
         pass
+    # Refresh engine metrics from latest snapshot so external scrapers see updated values
+    try:
+        state = portfolio.state
+        metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
+    except Exception:
+        pass
     return snap
+
+
+@app.get("/account_snapshot")
+async def account_snapshot():
+    """
+    Compatibility endpoint expected by ops collectors.
+    Returns the same structure as /portfolio (portfolio state snapshot).
+    """
+    return await get_portfolio()
 
 
 @app.post("/reconcile")
@@ -338,6 +512,18 @@ async def health():
     lag = max(0.0, time.time() - _last_reconcile_ts) if _last_reconcile_ts else None
     if lag is not None:
         metrics.reconcile_lag_seconds.set(lag)
+
+    # Include symbols if unrestricted
+    from engine.config import load_risk_config
+    risk_cfg = load_risk_config()
+    symbols = None
+    if risk_cfg.trade_symbols is None:
+        try:
+            from engine.universe import configured_universe
+            symbols = configured_universe()
+        except Exception:
+            pass
+
     return {
         "engine": "ok",
         "mode": settings.mode,
@@ -348,6 +534,7 @@ async def health():
         "pnl_unrealized": (snap.get("pnl") or {}).get("unrealized"),
         "quote_ccy": QUOTE_CCY,
         "reconcile_lag_seconds": lag,
+        "symbols": symbols,
     }
 
 
@@ -449,6 +636,28 @@ async def _start_governance():
         print(f"[WARN] Governance startup failed: {e}")
 
 
+@app.on_event("startup")
+async def _subscribe_governance_hooks():
+    """React to governance actions by hot-reloading risk rails."""
+    async def _on_governance_action(_data: dict) -> None:
+        # Governance mutated runtime env vars; reflect into risk rails config
+        from engine.config import load_risk_config
+    try:
+        RAILS.cfg = load_risk_config()
+        metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
+        try:
+            metrics.set_max_notional(RAILS.cfg.max_notional_usdt)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    try:
+        BUS.subscribe("governance.action", _on_governance_action)
+    except Exception:
+        pass
+
+
 @app.get("/events/stats")
 def get_event_stats():
     """Get event bus statistics."""
@@ -459,6 +668,42 @@ def get_event_stats():
 def get_alert_stats():
     """Get alerting system statistics."""
     return {"alerting": alert_daemon._alert_daemon.get_stats() if alert_daemon._alert_daemon else {}}
+
+
+@app.get("/risk/config")
+def get_risk_config():
+    """Return current risk rails configuration (live values)."""
+    cfg = RAILS.cfg
+    return {
+        "trading_enabled": cfg.trading_enabled,
+        "min_notional_usdt": cfg.min_notional_usdt,
+        "max_notional_usdt": cfg.max_notional_usdt,
+        "max_orders_per_min": cfg.max_orders_per_min,
+        "exposure_cap_symbol_usd": cfg.exposure_cap_symbol_usd,
+        "exposure_cap_total_usd": cfg.exposure_cap_total_usd,
+        "venue_error_breaker_pct": cfg.venue_error_breaker_pct,
+        "venue_error_window_sec": cfg.venue_error_window_sec,
+    }
+
+
+@app.post("/risk/reload")
+def reload_risk_config():
+    """Hot-reload risk configuration from environment variables."""
+    from engine.config import load_risk_config
+    RAILS.cfg = load_risk_config()
+    metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
+    try:
+        metrics.set_max_notional(RAILS.cfg.max_notional_usdt)
+    except Exception:
+        pass
+    cfg = RAILS.cfg
+    return {
+        "status": "ok",
+        "trading_enabled": cfg.trading_enabled,
+        "min_notional_usdt": cfg.min_notional_usdt,
+        "max_notional_usdt": cfg.max_notional_usdt,
+        "max_orders_per_min": cfg.max_orders_per_min,
+    }
 
 
 @app.get("/governance/status")
@@ -480,6 +725,17 @@ def reload_governance_policies():
         return {"status": "success" if success else "failed"}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.get("/governance/actions")
+def list_governance_actions(limit: int = 20):
+    """Return the most recent governance actions (audit log)."""
+    try:
+        from ops import governance_daemon
+        actions = governance_daemon.get_recent_governance_actions(limit)
+        return {"actions": actions, "limit": limit}
+    except Exception as e:
+        return {"actions": [], "error": str(e)}
 
 
 @app.post("/governance/simulate/{event_type}")

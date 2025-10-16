@@ -3,15 +3,46 @@ from __future__ import annotations
 import os, asyncio, time, math, logging, httpx
 from datetime import datetime, timezone
 from prometheus_client import Gauge
+from ops.prometheus import REGISTRY
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
-PORTFOLIO_EQUITY = Gauge("portfolio_equity_usd", "Total portfolio equity (USD)")
-PORTFOLIO_CASH   = Gauge("portfolio_cash_usd", "Total portfolio cash (USD)")
-PORTFOLIO_GAIN   = Gauge("portfolio_gain_usd", "Gain/Loss since prior close or start-of-day (USD)")
-PORTFOLIO_RET    = Gauge("portfolio_return_pct", "Return % since prior close or start-of-day")
-PORTFOLIO_PREV   = Gauge("portfolio_equity_prev_close_usd", "Baseline equity used for gain/return calc")
-PORTFOLIO_LAST   = Gauge("ops_portfolio_last_refresh_epoch", "Unix time of last portfolio refresh")
+PORTFOLIO_EQUITY = Gauge(
+    "portfolio_equity_usd",
+    "Total portfolio equity (USD)",
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+PORTFOLIO_CASH = Gauge(
+    "portfolio_cash_usd",
+    "Total portfolio cash (USD)",
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+PORTFOLIO_GAIN = Gauge(
+    "portfolio_gain_usd",
+    "Gain/Loss since prior close or start-of-day (USD)",
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+PORTFOLIO_RET = Gauge(
+    "portfolio_return_pct",
+    "Return % since prior close or start-of-day",
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+PORTFOLIO_PREV = Gauge(
+    "portfolio_equity_prev_close_usd",
+    "Baseline equity used for gain/return calc",
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+PORTFOLIO_LAST = Gauge(
+    "ops_portfolio_last_refresh_epoch",
+    "Unix time of last portfolio refresh",
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
 
 # persistence (in-memory) for daily baseline
 _BASELINE_EQUITY: float | None = None
@@ -22,10 +53,20 @@ def _daykey_now(t: float | None = None) -> str:
     return dt.strftime("%Y-%m-%d")
 
 async def _fetch_snapshot(client: httpx.AsyncClient, base_url: str) -> dict:
+    """Fetch account snapshot; fallback to /portfolio for older engines."""
     try:
         r = await client.get(f"{base_url.rstrip('/')}/account_snapshot", timeout=6.0)
         r.raise_for_status()
         return r.json()
+    except httpx.HTTPStatusError as e:
+        if e.response is not None and e.response.status_code == 404:
+            try:
+                r2 = await client.get(f"{base_url.rstrip('/')}/portfolio", timeout=6.0)
+                r2.raise_for_status()
+                return r2.json()
+            except Exception:
+                return {}
+        return {}
     except Exception:
         return {}
 
@@ -94,7 +135,12 @@ async def portfolio_collector_loop(interval_sec: int = 10):
             PORTFOLIO_RET.set(ret)
 
             PORTFOLIO_LAST.set(now)
-            logging.info(".2f")
+            try:
+                logging.info(
+                    f"Portfolio totals updated: equity={total_equity:.2f} cash={total_cash:.2f}"
+                )
+            except Exception:
+                pass
         except Exception as e:
             logging.warning(f"Portfolio collector error: {e}")
 

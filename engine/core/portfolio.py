@@ -108,6 +108,15 @@ class Portfolio:
         self._cleanup_positions()
         self._recalculate()
 
+        # Increment filled counter for observability
+        try:
+            from engine.metrics import REGISTRY as _MET
+            ctr = _MET.get("orders_filled_total")
+            if ctr is not None:
+                ctr.inc()
+        except Exception:
+            pass
+
     def _cleanup_positions(self) -> None:
         to_delete: List[str] = []
         for sym, pos in self._state.positions.items():

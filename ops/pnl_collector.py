@@ -2,19 +2,47 @@
 from __future__ import annotations
 import os, asyncio, time, logging, httpx
 from prometheus_client import Gauge
+from ops.prometheus import REGISTRY
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 # Prometheus Gauges per venue
-PNL_REALIZED = Gauge("pnl_realized_total", "Realized PnL per venue (USD)", ["venue"])
-PNL_UNREALIZED = Gauge("pnl_unrealized_total", "Unrealized PnL per venue (USD)", ["venue"])
-PNL_LAST_REFRESH = Gauge("ops_pnl_last_refresh_epoch", "Unix time of last PnL refresh")
+PNL_REALIZED = Gauge(
+    "pnl_realized_total",
+    "Realized PnL per venue (USD)",
+    ["venue"],
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+PNL_UNREALIZED = Gauge(
+    "pnl_unrealized_total",
+    "Unrealized PnL per venue (USD)",
+    ["venue"],
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+PNL_LAST_REFRESH = Gauge(
+    "ops_pnl_last_refresh_epoch",
+    "Unix time of last PnL refresh",
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
 
 async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
+    """Fetch account snapshot; fallback to /portfolio for older engines."""
     try:
         r = await client.get(f"{base_url.rstrip('/')}/account_snapshot", timeout=5.0)
         r.raise_for_status()
         return r.json()
+    except httpx.HTTPStatusError as e:
+        if e.response is not None and e.response.status_code == 404:
+            try:
+                r2 = await client.get(f"{base_url.rstrip('/')}/portfolio", timeout=5.0)
+                r2.raise_for_status()
+                return r2.json()
+            except Exception:
+                return {}
+        return {}
     except Exception:
         return {}
 

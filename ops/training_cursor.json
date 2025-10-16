@@ -1,0 +1,7 @@
+{
+  "lower_bound": "2025-07-01",
+  "next_date": "2025-10-11",
+  "symbols": ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
+  "wrap_mode": false
+}
+

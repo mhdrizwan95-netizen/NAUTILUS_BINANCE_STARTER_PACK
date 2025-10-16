@@ -1,1 +1,4 @@
 .env
+
+# Environment configuration files (contain API keys)
+ops/env.*

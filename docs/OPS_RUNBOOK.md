@@ -4,18 +4,21 @@
 
 | Task | Command | Notes |
 |------|----------|-------|
-| View live PnL dashboard | `open http://localhost:8002/pnl_dashboard.html` | Auto-refresh every 5 s |
-| Inspect governance policies | `cat ops/policies.yaml` | Edit & reload automatically |
-| Adjust model weights | `curl -X POST /strategy/weights …` | Canary rollout control |
-| Check allocations | `cat ops/capital_allocations.json` | Updated every N seconds |
-| Pause trading | `export TRADING_ENABLED=false` | Also via governance action |
-| Export daily PnL CSV | `python ops/export_pnl.py` | Stored in `ops/exports/` |
+| View live PnL dashboard | `open http://localhost:8002/pnl_dashboard.html` | Served by Ops API |
+| Inspect governance policies | `cat ops/policies.yaml` | YAML reloaded on change |
+| Adjust model weights | `curl -X POST http://localhost:8002/strategy/weights …` | Requires `X-OPS-TOKEN` |
+| Check allocations | `cat ops/capital_allocations.json` | Updated continuously by allocator |
+| Pause trading | `curl -X POST http://localhost:8002/kill …` | Mirrors `TRADING_ENABLED` flag |
+| Export daily PnL CSV | `python ops/export_pnl.py` | Outputs to `ops/exports/` |
+| Open Grafana overview | `open http://localhost:3000` | After observability stack is up |
+| Inspect Prometheus targets | `open http://localhost:9090/targets` | Confirms scrape status |
 
 ## Recovery
 
 1. Stop containers: `docker compose down`
 2. Ensure latest snapshot: `engine/state/portfolio.json`
 3. Restart: `docker compose up -d`
+4. If observability is enabled: `cd ops/observability && docker compose -f docker-compose.observability.yml up -d`
    The reconciliation daemon auto-restores open orders.
 
 ## Troubleshooting
@@ -23,11 +26,11 @@
 | Symptom | Check | Remedy |
 |----------|-------|--------|
 | Orders rejected | `engine/logs/orders.jsonl` | Confirm risk rails thresholds |
-| Missing metrics | `/metrics` endpoints | Restart Prometheus scraper |
-| No SSE updates | `/stream` connection | Check event bus loop in logs |
-| Telegram silent | `TELEGRAM_TOKEN`, `CHAT_ID` env vars | Verify API key |
-| High latency | `curl -w "@curl-format.txt" /strategy/signal` | Check network/database bottlenecks |
-| Memory usage | `docker stats ops` | Restart container if > 2GB |
+| Missing metrics | `curl http://localhost:8002/metrics` → 500? | Restart `hmm_ops`; verify `/tmp/prom_multiproc` permissions |
+| Prometheus scrape failing | Grafana > Connections > Data sources | Ensure `hmm_ops:8002` reachable inside network |
+| Telegram silent | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` env vars | Verify API key |
+| High latency | `histogram_quantile` panel in Grafana | Investigate venue network or throttling |
+| Memory usage | `docker stats hmm_ops` | Restart container if > 2GB |
 
 ## Governance Testing
 
@@ -46,14 +49,11 @@ Watch for [GOV] 📉 Exposure reduced in logs.
 
 ### Production Metrics Check
 ```bash
-# Overall health
-curl http://localhost:8002/status | jq '.engine,.ml'
+# Aggregated venue metrics
+curl http://localhost:8002/aggregate/metrics | jq '.venues.engine_binance'
 
-# Order flow
-curl http://localhost:8002/aggregate/metrics | jq '.[] | .orders_submitted_total'
-
-# Capital utilization
-curl http://localhost:8002/dash/pnl | jq '.portfolio_summary.total_allocated_percentage'
+# Portfolio snapshot (equity, cash, gain)
+curl http://localhost:8002/aggregate/portfolio | jq
 
 # Canary promotion status
 curl http://localhost:8002/strategy/status | jq '.leaderboard[0]'
@@ -89,10 +89,16 @@ tail -f ops/capital_allocations.json | jq '.capital_quota_usd'
 3. **Gradual Resume:**
    ```bash
    # Reduce model weights to 10% of normal
-   curl -X POST /strategy/weights -d '{"weights": {"model1": 0.01}}'
+   curl -X POST http://localhost:8002/strategy/weights \
+     -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" \
+     -H "Content-Type: application/json" \
+     -d '{"weights": {"model1": 0.01}}'
 
    # Slowly scale back up over hours
-   curl -X POST /strategy/weights -d '{"weights": {"model1": 0.1}}'
+   curl -X POST http://localhost:8002/strategy/weights \
+     -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" \
+     -H "Content-Type: application/json" \
+     -d '{"weights": {"model1": 0.1}}'
    ```
 
 ### Data Corruption Recovery

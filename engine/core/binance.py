@@ -20,6 +20,7 @@ class SymbolFilter:
     min_qty: float
     min_notional: float
     max_notional: float
+    tick_size: float = 0.0
 
 
 class BinanceREST:
@@ -29,21 +30,22 @@ class BinanceREST:
         settings = get_settings()
         self._settings = settings
         self._base = settings.base_url.rstrip("/")
-        self._client = httpx.AsyncClient(
-            base_url=self._base,
-            timeout=settings.timeout,
-            headers={"X-MBX-APIKEY": settings.api_key},
-        )
         self._symbol_filters: dict[str, SymbolFilter] = {}
         self._price_cache: dict[str, float] = {}
         self._lock = asyncio.Lock()
 
     async def close(self) -> None:
-        await self._client.aclose()
+        # Clients are created per-call; nothing persistent to close
+        return None
 
     async def ticker_price(self, symbol: str) -> float:
         payload = {"symbol": symbol}
-        r = await self._client.get("/api/v3/ticker/price", params=payload)
+        async with httpx.AsyncClient(
+            base_url=self._base,
+            timeout=self._settings.timeout,
+            headers={"X-MBX-APIKEY": self._settings.api_key},
+        ) as client:
+            r = await client.get("/api/v3/ticker/price", params=payload)
         r.raise_for_status()
         data = r.json()
         price = float(data["price"])
@@ -56,7 +58,12 @@ class BinanceREST:
             if cached:
                 return cached
             params = {"symbol": symbol}
-            r = await self._client.get("/api/v3/exchangeInfo", params=params)
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._settings.timeout,
+                headers={"X-MBX-APIKEY": self._settings.api_key},
+            ) as client:
+                r = await client.get("/api/v3/exchangeInfo", params=params)
             r.raise_for_status()
             info = r.json()
             symbols = info.get("symbols", [])
@@ -67,6 +74,7 @@ class BinanceREST:
             min_qty = 0.0
             min_notional = 0.0
             max_notional = float("inf")
+            tick_size = 0.0
             for f in filters:
                 ftype = f.get("filterType")
                 if ftype == "LOT_SIZE":
@@ -75,7 +83,9 @@ class BinanceREST:
                 elif ftype == "NOTIONAL":
                     min_notional = float(f.get("minNotional", 0.0))
                     max_notional = float(f.get("maxNotional", float("inf")))
-            filt = SymbolFilter(symbol, step_size, min_qty, min_notional, max_notional)
+                elif ftype == "PRICE_FILTER":
+                    tick_size = float(f.get("tickSize", 0.0))
+            filt = SymbolFilter(symbol, step_size, min_qty, min_notional, max_notional, tick_size)
             self._symbol_filters[symbol] = filt
             return filt
 
@@ -86,7 +96,12 @@ class BinanceREST:
             "recvWindow": settings.recv_window,
         }
         params["signature"] = self._sign(params)
-        r = await self._client.get("/api/v3/account", params=params)
+        async with httpx.AsyncClient(
+            base_url=self._base,
+            timeout=self._settings.timeout,
+            headers={"X-MBX-APIKEY": self._settings.api_key},
+        ) as client:
+            r = await client.get("/api/v3/account", params=params)
         r.raise_for_status()
         return r.json()
 
@@ -102,11 +117,17 @@ class BinanceREST:
             "side": side,
             "type": "MARKET",
             "quantity": f"{quantity:.8f}",
+            "newOrderRespType": "FULL",
             "timestamp": _now_ms(),
             "recvWindow": settings.recv_window,
         }
         params["signature"] = self._sign(params)
-        r = await self._client.post("/api/v3/order", data=params)
+        async with httpx.AsyncClient(
+            base_url=self._base,
+            timeout=self._settings.timeout,
+            headers={"X-MBX-APIKEY": self._settings.api_key},
+        ) as client:
+            r = await client.post("/api/v3/order", data=params)
         # For MARKET quote orders we must use POST /api/v3/order/test? but test? We'll rely on real /order.
         r.raise_for_status()
         return r.json()
@@ -123,11 +144,47 @@ class BinanceREST:
             "side": side,
             "type": "MARKET",
             "quoteOrderQty": f"{quote:.8f}",
+            "newOrderRespType": "FULL",
             "timestamp": _now_ms(),
             "recvWindow": settings.recv_window,
         }
         params["signature"] = self._sign(params)
-        r = await self._client.post("/api/v3/order", data=params)
+        async with httpx.AsyncClient(
+            base_url=self._base,
+            timeout=self._settings.timeout,
+            headers={"X-MBX-APIKEY": self._settings.api_key},
+        ) as client:
+            r = await client.post("/api/v3/order", data=params)
+        r.raise_for_status()
+        return r.json()
+
+    async def submit_limit_order(
+        self,
+        symbol: str,
+        side: Literal["BUY", "SELL"],
+        quantity: float,
+        price: float,
+        time_in_force: str = "IOC",
+    ) -> dict[str, Any]:
+        settings = get_settings()
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "type": "LIMIT",
+            "timeInForce": time_in_force,
+            "quantity": f"{quantity:.8f}",
+            "price": f"{price:.8f}",
+            "newOrderRespType": "FULL",
+            "timestamp": _now_ms(),
+            "recvWindow": settings.recv_window,
+        }
+        params["signature"] = self._sign(params)
+        async with httpx.AsyncClient(
+            base_url=self._base,
+            timeout=self._settings.timeout,
+            headers={"X-MBX-APIKEY": self._settings.api_key},
+        ) as client:
+            r = await client.post("/api/v3/order", data=params)
         r.raise_for_status()
         return r.json()
 

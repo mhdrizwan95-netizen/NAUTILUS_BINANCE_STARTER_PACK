@@ -1,0 +1,18 @@
+universe_builder:
+  venue: BINANCE
+  quote: USDT
+  scan_interval_sec: 60
+thresholds:
+  min_notional_per_min: 5000
+  max_spread_atr: 1.2
+  min_depth_usdt: 5000
+  ignition:
+    turnover_mult: 8.0
+    tradecount_mult: 5.0
+    atrp_min: 0.015
+  quarantine:
+    min_age_minutes: 360
+    safe_scans: 3
+  demotion:
+    notional_drop_mult: 0.33
+    cb_hits: 2

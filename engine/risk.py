@@ -69,12 +69,15 @@ class RiskRails:
             }
 
         # Symbol allowlist (USDT universe)
-        if self.cfg.trade_symbols and symbol.split(".")[0] not in (s + "USDT" if s.endswith("USDT") else s for s in self.cfg.trade_symbols):
-            return False, {
-                "error": "SYMBOL_NOT_ALLOWED",
-                "message": f"{symbol} is not enabled.",
-                "allowed": [f"{s}.BINANCE" if ".BINANCE" not in s else s for s in self.cfg.trade_symbols],
-            }
+        if self.cfg.trade_symbols is not None:
+            symbol_base = symbol.split(".")[0].upper()
+            allowed_bases = {s.split(".")[0].upper() for s in self.cfg.trade_symbols}
+            if symbol_base not in allowed_bases:
+                return False, {
+                    "error": "SYMBOL_NOT_ALLOWED",
+                    "message": f"{symbol} is not enabled.",
+                    "allowed": [f"{s}.BINANCE" for s in sorted(self.cfg.trade_symbols)],
+                }
 
         # Exactly one of quote or quantity
         if (quote is None and quantity is None) or (quote is not None and quantity is not None):

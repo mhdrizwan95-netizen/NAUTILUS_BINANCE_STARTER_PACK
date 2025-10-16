@@ -7,7 +7,7 @@ x-engine-common: &engine_common
     context: .
     dockerfile: Dockerfile
   command: >
-    /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port ${ENGINE_PORT} --workers 1
+    /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port ${ENGINE_PORT:-8003} --workers 1
   environment:
     <<: *env_common
     # Common trading parameters
@@ -30,29 +30,69 @@ x-engine-common: &engine_common
     HMM_URL: http://ml_service:8010
     ENGINE_POLL_SEC: ${ENGINE_POLL_SEC:-2}
   healthcheck:
-    test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${ENGINE_PORT}/health | grep -q '\"engine\":\"ok\"' || exit 1"]
+    test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:${ENGINE_PORT:-8003}/health | grep -q '\"engine\":\"ok\"' || exit 1"]
     interval: 10s
     timeout: 3s
     retries: 10
     start_period: 15s
-  depends_on:
-    - ml_service
+  depends_on: []
 
 services:
   engine_binance:
     <<: *engine_common
     container_name: hmm_engine_binance
-    env_file: ops/env.binance
+    env_file: .env
+    environment:
+      - VENUE=BINANCE
+      - GOVERNANCE_POLICY=/app/engine/policies.yaml
+      - BINANCE_MODE=testnet
+      - BINANCE_SPOT_BASE=https://testnet.binance.vision
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - TRADE_SYMBOLS=*      # ✅ Allow ALL symbols dynamically
+      - BINANCE_API_TIMEOUT=10
+      - BINANCE_RECV_WINDOW=5000
+      - ENGINE_PORT=8003
     ports:
       - "8003:8003"
-      - "9103:9103"
+      - "${ENGINE_METRICS_PORT:-9103}:9103"
+    command: >
+      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1
+
+  engine_ibkr:
+    <<: *engine_common
+    container_name: hmm_engine_ibkr
+    env_file: .env
+    environment:
+      - VENUE=IBKR
+      - GOVERNANCE_POLICY=/app/engine/policies.yaml
+      - ENGINE_PORT=8003
+      - TRADING_ENABLED=${TRADING_ENABLED}
+      - IBKR_HOST=${IBKR_HOST}
+      - IBKR_PORT=${IBKR_PORT}
+      - IBKR_CLIENT_ID=${IBKR_CLIENT_ID}
+      - IBKR_FEE_MODE=${IBKR_FEE_MODE}
+      - IBKR_FEE_PER_SHARE=${IBKR_FEE_PER_SHARE}
+      - IBKR_MIN_TRADE_FEE_USD=${IBKR_MIN_TRADE_FEE_USD}
+      - IBKR_MIN_NOTIONAL_USD=${IBKR_MIN_NOTIONAL_USD}
+    ports:
+      - "8005:8003"
+    command: >
+      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1
+
 
   engine_bybit:
     <<: *engine_common
     container_name: hmm_engine_bybit
-    env_file: ops/env.bybit
+    env_file:
+      - .env
+      - ops/env.bybit
+    environment:
+      - VENUE=BYBIT
+      - GOVERNANCE_POLICY=/app/engine/policies.yaml
+      - ENGINE_PORT=8003
     ports:
-      - "8004:8004"
+      - "8004:8003"
       - "9104:9104"
 
 # Legacy single-engine service for backward compatibility (commented out)
@@ -84,24 +124,26 @@ services:
     container_name: hmm_ops
     command: >
       /usr/bin/tini -- uvicorn ops.ops_api:APP
-      --host 0.0.0.0 --port 8001 --workers 2
+      --host 0.0.0.0 --port 8002 --workers ${OPS_WORKERS:-2}
     environment:
       <<: *env_common
-      OPS_BASE: "http://ops:8001"
-      DASH_BASE: "http://dash:8002"
+      OPS_BASE: "http://ops:8002"
+      DASH_BASE: "http://ops:8002"
       # Optional: point API to on-disk data (mounted below)
       OPS_DATA_DIR: /app/data
       # LIVE-3: Environment variables for live metrics
       OPS_API_TOKEN: "dev-token"  # Set to actual token for production
 
-      ENGINE_BASE: "http://engine:8003"
-      ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS:-http://engine_binance:8003,http://engine_bybit:8004}"
+      ENGINE_BASE: "http://engine_binance:8003"
+      ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS}"
+
+      OPS_METRICS_PORT: "${OPS_METRICS_PORT:-9102}"
 
       # --- Binance mode & creds ---
-      BINANCE_MODE: ${BINANCE_MODE:-demo}
-      BINANCE_API_KEY: ${DEMO_API_KEY_SPOT}
-      BINANCE_API_SECRET: ${DEMO_API_SECRET_SPOT}
-      BINANCE_SPOT_BASE: ${DEMO_SPOT_BASE}
+      BINANCE_MODE: ${BINANCE_MODE}
+      BINANCE_API_KEY: ${BINANCE_API_KEY}
+      BINANCE_API_SECRET: ${BINANCE_API_SECRET}
+      BINANCE_SPOT_BASE: ${BINANCE_SPOT_BASE}
       BINANCE_USDM_BASE: ${DEMO_USDM_BASE}
       BINANCE_COINM_BASE: ${DEMO_COINM_BASE}
       # http settings
@@ -110,9 +152,9 @@ services:
     volumes:
       - ./data:/app/data:rw
     ports:
-      - "8001:8001"
+      - "${OPS_PORT:-8002}:8002"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8001/readyz | grep -q '\"ok\":true'"]
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/readyz | grep -q '\"ok\":true'"]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -120,43 +162,114 @@ services:
     depends_on:
       engine_binance:
         condition: service_healthy
+      engine_ibkr:
+        condition: service_healthy
       engine_bybit:
         condition: service_healthy
 
-  dash:
+  universe:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: hmm_dash
+    container_name: hmm_universe
     command: >
-      bash -c "python ops/prestart_prom.py &&
-                uvicorn dashboard.app:APP --host 0.0.0.0 --port 8002 --workers 2"
-    environment:
-      <<: *env_common
-      OPS_BASE: "http://ops:8001"
-      DASH_BASE: "http://dash:8002"
-      # --- Binance mode & creds ---
-      BINANCE_MODE: ${BINANCE_MODE:-demo}
-      BINANCE_API_KEY: ${DEMO_API_KEY_SPOT}
-      BINANCE_API_SECRET: ${DEMO_API_SECRET_SPOT}
-      BINANCE_SPOT_BASE: ${DEMO_SPOT_BASE}
-      BINANCE_USDM_BASE: ${DEMO_USDM_BASE}
-      BINANCE_COINM_BASE: ${DEMO_COINM_BASE}
-      # http settings
-      BINANCE_RECV_WINDOW: ${BINANCE_RECV_WINDOW}
-      BINANCE_API_TIMEOUT: ${BINANCE_API_TIMEOUT}
-      DASH_SOURCE: ${DASH_SOURCE:-ops_snapshot}
-      DASH_OPS_URL: ${DASH_OPS_URL:-http://ops:8001/account_snapshot}
-    volumes:
-      - ./data:/app/data:ro
+      /usr/bin/tini -- uvicorn universe.service:APP --host 0.0.0.0 --port 8009
     ports:
-      - "8002:8002"
+      - "8009:8009"
+
+  situations:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hmm_situations
+    command: >
+      /usr/bin/tini -- uvicorn situations.service:APP --host 0.0.0.0 --port 8011
+    ports:
+      - "8011:8011"
+
+  screener:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hmm_screener
+    command: >
+      /usr/bin/tini -- uvicorn screener.service:APP --host 0.0.0.0 --port 8010
+    ports:
+      - "8010:8010"
     depends_on:
-      ops:
+      - universe
+      - situations
+
+  executor:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    container_name: hmm_executor
+    command: >
+      sh -c "python -m ops.vol_ranker --loop --interval ${VOL_REFRESH_MIN:-60} & python -u -m ops.main"
+    environment:
+      - ENGINE_URL=http://engine_binance:8003
+      - ENABLE_EXECUTION=true
+      - EXEC_METRICS_PORT=9102
+      - PYTHONPATH=/app
+      # Optional: omit SYMBOLS to pull from /universe
+      - SYMBOLS=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT
+      # Dynamic sizing defaults
+      - BASE_SIZE_USD=30
+      - ATRP_REF=0.004
+      - BETA_CONF=1.0
+      - VOL_LOOKBACK_MIN=30
+      - EXPOSURE_CAP_SYMBOL_USD=300
+      - EXPOSURE_CAP_TOTAL_USD=1500
+      # Slippage model thresholds
+      - SLIP_LIMIT_THRESH_BP=12
+      - SLIP_MARKET_THRESH_BP=40
+      - LIMIT_ADD_BP=4
+      - MAX_SLIP_BP_HARD=120
+      - IOC_MARKET_BACKOFF_SEC=300
+      - ENABLE_SELLS=true
+      - HOLD_SEC=240
+      - TP_BP=0
+      - SL_BP=0
+      # Volatility ranker config
+      - VOL_REFRESH_MIN=60
+      - VOL_TOP_N=20
+      # Executor symbol refresh safety (seconds)
+      - SYMBOL_REFRESH_SEC=3600
+      - PROBE_USDT=30
+      - MAX_SLIP_BP=120
+      - MAX_ORDERS_PER_MIN=20
+      - MAX_PARALLEL_ORDERS=3
+      - PROBE_COOLDOWN_SEC=90
+    ports:
+      - "9102:9102"
+    depends_on:
+      engine_binance:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/readyz | grep -q '\"ok\": true'"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
+    restart: unless-stopped
+
+  backfill:
+    build:
+      context: .
+      dockerfile: ops/scheduler.Dockerfile
+    container_name: hmm_backfill
+    depends_on:
+      situations:
+        condition: service_started
+    volumes:
+      - ./:/app
+    working_dir: /app
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Riyadh
+
+  slip_trainer:
+    build:
+      context: .
+      dockerfile: ops/Dockerfile
+    container_name: hmm_slip_trainer
+    command: >
+      sh -c "python - <<'PY'\nfrom ops.slip_model import train_from_parquet; train_from_parquet()\nPY"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

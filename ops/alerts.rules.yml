@@ -47,3 +47,11 @@ groups:
     annotations:
       summary: "High exposure"
       description: "{{ $labels.symbol }} exposure exceeds $10k"
+
+  - alert: TradingDisabledTooLong
+    expr: max(trading_enabled) == 0
+    for: 5m
+    labels: {severity: warn}
+    annotations:
+      summary: "Trading disabled > 5m"
+      description: "trading_enabled gauge is 0 for 5 minutes."

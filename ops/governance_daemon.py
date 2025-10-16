@@ -22,7 +22,18 @@ from pathlib import Path
 
 from engine.core.event_bus import BUS
 from ops.strategy_selector import promote_best
-from engine.metrics import REGISTRY
+from prometheus_client import Gauge, Counter
+
+# Prometheus metrics for governance visibility
+_GOVERNANCE_RULES_ACTIVE = Gauge(
+    "governance_rules_active",
+    "Number of enabled governance rules loaded",
+)
+_GOVERNANCE_RULE_TRIPPED = Counter(
+    "governance_rule_tripped_total",
+    "Total governance rule executions",
+    ["name"],
+)
 
 
 @dataclass
@@ -35,6 +46,8 @@ class GovernanceRule:
     cooldown_seconds: int = 0
     description: str = ""
     enabled: bool = True
+    name: str = ""
+    params: Dict[str, Any] = None
 
     def evaluate(self, data: Dict[str, Any]) -> bool:
         """Evaluate condition against event data."""
@@ -100,11 +113,20 @@ class GovernanceDaemon:
                     priority=policy.get("priority", "medium"),
                     cooldown_seconds=policy.get("cooldown_seconds", 0),
                     description=policy.get("description", ""),
-                    enabled=policy.get("enabled", True)
+                    enabled=policy.get("enabled", True),
+                    name=policy.get("name", ""),
+                    params=policy.get("params", {}),
                 )
+                if not rule.name:
+                    desc = (rule.description or rule.action).strip().replace(" ", "_")[:40]
+                    rule.name = f"{rule.trigger}:{desc}" if desc else f"{rule.trigger}:{rule.action}"
                 self.rules.append(rule)
 
             logging.info(f"[GOV] Loaded {len([r for r in self.rules if r.enabled])} enabled governance rules")
+            try:
+                _GOVERNANCE_RULES_ACTIVE.set(len([r for r in self.rules if r.enabled]))
+            except Exception:
+                pass
 
         except Exception as e:
             logging.error(f"[GOV] Failed to load governance policies: {e}")
@@ -192,6 +214,16 @@ class GovernanceDaemon:
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 logging.info(f"[GOV] 📈 EXPOSURE INCREASED: ${current_max} → ${new_max}")
 
+            elif action == "set_max_notional":
+                # Explicitly set MAX_NOTIONAL_USDT from rule params
+                try:
+                    target = float((rule.params or {}).get("value"))
+                except Exception:
+                    target = float(os.getenv("MAX_NOTIONAL_BASELINE", os.getenv("MAX_NOTIONAL_USDT", "200")))
+                old = float(os.getenv("MAX_NOTIONAL_USDT", "200"))
+                os.environ["MAX_NOTIONAL_USDT"] = str(target)
+                logging.info(f"[GOV] 🎚️ MAX_NOTIONAL set: ${old} → ${target}")
+
             elif action == "gradual_resume":
                 # Gradual resumption - enable trading with reduced limits first
                 os.environ["TRADING_ENABLED"] = "true"
@@ -262,6 +294,17 @@ class GovernanceDaemon:
 
         except Exception as e:
             logging.error(f"[GOV] Action '{action}' failed: {e}")
+            return
+
+        # Notify subscribers (e.g., engine to hot-reload risk rails)
+        try:
+            await BUS.publish("governance.action", {
+                "action": action,
+                "timestamp": time.time(),
+                "description": rule.description,
+            })
+        except Exception as e:
+            logging.debug(f"[GOV] notify publish failed: {e}")
 
     def _is_on_cooldown(self, action: str, cooldown_seconds: int) -> bool:
         """Check if action is still on cooldown."""
@@ -291,6 +334,10 @@ class GovernanceDaemon:
 
         # Immediate log for transparency
         logging.info(f"[GOV] AUDIT: {rule.action} executed due to {rule.trigger}")
+        try:
+            _GOVERNANCE_RULE_TRIPPED.labels(name=rule.name or f"{rule.trigger}:{rule.action}").inc()
+        except Exception:
+            pass
 
     def get_status(self) -> Dict[str, Any]:
         """Get current governance system status."""
@@ -314,6 +361,10 @@ class GovernanceDaemon:
             self._load_policies()
             self._setup_event_subscriptions()
             logging.info("[GOV] ✅ Policies reloaded successfully")
+            try:
+                _GOVERNANCE_RULES_ACTIVE.set(len([r for r in self.rules if r.enabled]))
+            except Exception:
+                pass
             return True
         except Exception as e:
             logging.error(f"[GOV] ❌ Policy reload failed: {e}")
@@ -364,3 +415,9 @@ def force_governance_action(action: str, reason: str = "manual") -> bool:
     if _governance_daemon:
         return _governance_daemon.force_action(action, reason)
     return False
+
+def get_recent_governance_actions(limit: int = 20) -> List[Dict[str, Any]]:
+    """Return the most recent governance audit events (up to `limit`)."""
+    if _governance_daemon and _governance_daemon.audit_events:
+        return _governance_daemon.audit_events[-max(0, int(limit)) :]
+    return []

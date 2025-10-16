@@ -1,0 +1,7 @@
+scan:
+  bar_interval: "1m"
+  topk: { long: 5, short: 5 }
+risk:
+  daily_settled_cash_frac: 0.30
+  per_trade_equity_frac: 0.0025
+  atr_multiplier: 1.5

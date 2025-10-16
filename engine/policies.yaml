@@ -1,0 +1,40 @@
+# Minimal governance policies to ensure the daemon has sane defaults.
+
+rules:
+  # Test-friendly: Trigger via /governance/simulate/poor_performance
+  - trigger: metrics.update
+    name: test_small_drawdown_reduce
+    condition: "data.get('pnl_unrealized', 0) < -10"
+    action: reduce_exposure
+    priority: high
+    cooldown_seconds: 0
+    description: "Test rule: small drawdown → reduce exposure"
+
+  # Test-friendly: Trigger via /governance/simulate/market_stress
+  - trigger: price.anomaly
+    name: test_vol_spike_pause
+    condition: "data.get('volatility_spike', False) == True"
+    action: pause_trading
+    priority: high
+    cooldown_seconds: 0
+    description: "Market stress: volatility spike → pause trading"
+
+  # Recovery: allow quick resume via /governance/simulate/great_performance
+  - trigger: metrics.update
+    name: test_recovery_resume
+    condition: "data.get('sharpe', 0) > 1.5"
+    action: immediate_resume
+    priority: medium
+    cooldown_seconds: 0
+    description: "Recovery condition met → immediate resume"
+
+  # Restore exposure cap when performance recovers
+  - trigger: metrics.update
+    name: performance.recovery_restore_exposure
+    condition: "data.get('sharpe', 0) > 1.5"
+    action: set_max_notional
+    params:
+      value: 1000
+    priority: medium
+    cooldown_seconds: 300
+    description: "Recovery detected → restore max notional cap"

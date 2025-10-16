@@ -82,7 +82,7 @@ class RiskConfig:
     min_notional_usdt: float
     max_notional_usdt: float
     max_orders_per_min: int
-    trade_symbols: List[str]
+    trade_symbols: List[str] | None
     dust_threshold_usd: float
     # breakers
     exposure_cap_symbol_usd: float
@@ -92,12 +92,19 @@ class RiskConfig:
 
 
 def load_risk_config() -> RiskConfig:
+    TRADE_SYMBOLS_ENV = os.getenv("TRADE_SYMBOLS", "").strip()
+    if TRADE_SYMBOLS_ENV in ("", "*"):
+        # ✅ Auto-allow all symbols dynamically
+        trade_symbols = None
+    else:
+        trade_symbols = [s.strip() for s in TRADE_SYMBOLS_ENV.split(",") if s.strip()]
+
     return RiskConfig(
         trading_enabled=_as_bool(os.getenv("TRADING_ENABLED"), True),
         min_notional_usdt=_as_float(os.getenv("MIN_NOTIONAL_USDT"), 5.0),
         max_notional_usdt=_as_float(os.getenv("MAX_NOTIONAL_USDT"), 200.0),
         max_orders_per_min=_as_int(os.getenv("MAX_ORDERS_PER_MIN"), 30),
-        trade_symbols=_as_list(os.getenv("TRADE_SYMBOLS")),
+        trade_symbols=trade_symbols,
         dust_threshold_usd=_as_float(os.getenv("DUST_THRESHOLD_USD"), 2.0),
         exposure_cap_symbol_usd=_as_float(os.getenv("EXPOSURE_CAP_SYMBOL_USD"), 2_000.0),
         exposure_cap_total_usd=_as_float(os.getenv("EXPOSURE_CAP_TOTAL_USD"), 10_000.0),

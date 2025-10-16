@@ -1,0 +1,156 @@
+# Autonomous Governance Policies - M15 Brainstem Layer
+# The final intelligence layer enabling true autonomous operation
+# When conditions are met, the system takes automated governance actions
+
+rules:
+  # Emergency Risk Controls - Highest Priority, Immediate Action
+  - trigger: risk.rejected
+    condition: "data.get('reason') == 'TRADING_DISABLED'"
+    action: pause_trading
+    priority: critical
+    description: "Complete emergency stop - all trading immediately disabled"
+
+  - trigger: risk.rejected
+    condition: "data.get('reason') == 'MAX_ORDERS_PER_MIN'"
+    action: pause_trading
+    priority: high
+    cooldown_seconds: 300  # 5 minute cooldown to prevent thrashing
+    description: "Rate limit exceeded - temporary trading halt"
+
+  - trigger: risk.rejected
+    condition: "data.get('reason') == 'EXPOSURE_LIMIT'"
+    action: reduce_exposure
+    priority: high
+    cooldown_seconds: 600  # 10 minute cooldown
+    description: "Position size limit breached - reduce exposure immediately"
+
+  # Performance-Based Governance - Capital Protection
+  - trigger: metrics.update
+    condition: "data.get('pnl_unrealized', 0) < -200"
+    action: emergency_reductions
+    priority: critical
+    cooldown_seconds: 300
+    description: "Severe drawdown detected - emergency risk reduction protocol"
+
+  - trigger: metrics.update
+    condition: "data.get('pnl_unrealized', 0) < -100 and data.get('pnl_unrealized', 0) >= -200"
+    action: reduce_exposure
+    priority: high
+    cooldown_seconds: 1800  # 30 minutes
+    description: "Significant unrealized losses - reduce exposure by 30%"
+
+  - trigger: metrics.update
+    condition: "data.get('pnl_unrealized', 0) < -50 and data.get('pnl_unrealized', 0) >= -100"
+    action: moderate_reductions
+    priority: medium
+    cooldown_seconds: 3600  # 1 hour
+    description: "Noticeable losses - reduce position sizes moderately"
+
+  # Strategy Performance Governance - Self-Optimization
+  - trigger: metrics.update
+    condition: "data.get('sharpe', 1.0) < 0.1"
+    action: promote_model
+    priority: high
+    cooldown_seconds: 7200  # 2 hours
+    description: "Poor strategy performance - promote better performing model"
+
+  - trigger: metrics.update
+    condition: "data.get('sharpe', 1.0) > 2.0 and data.get('equity_usd', 10000) > 10100"
+    action: increase_exposure
+    priority: low
+    cooldown_seconds: 3600
+    description: "Excellent performance - gradually increase exposure"
+
+  - trigger: metrics.update
+    condition: "data.get('max_drawdown', 0) > 0.15"
+    action: conservative_shift
+    priority: medium
+    cooldown_seconds: 3600
+    description: "Historical drawdown rising - switch to more conservative parameters"
+
+  # Operational Governance - System Health Maintenance
+  - trigger: error.occurred
+    condition: "data.get('severity') in ['CRITICAL', 'ERROR'] and data.get('count', 1) >= 5"
+    action: pause_trading
+    priority: critical
+    cooldown_seconds: 900  # 15 minutes
+    description: "Critical system errors - temporary trading suspension"
+
+  - trigger: reconnect.attempted
+    condition: "data.get('failures', 0) >= 3"
+    action: notify_ops
+    priority: high
+    cooldown_seconds: 1800
+    description: "Multiple connection failures - require operator attention"
+
+  - trigger: reconcile.completed
+    condition: "data.get('imported', 0) > 10"
+    action: investigate_desync
+    priority: medium
+    cooldown_seconds: 3600
+    description: "Significant state discrepancies found - may need investigation"
+
+  # Market Condition Governance - Adaptive Behavior
+  - trigger: orderbook.update
+    condition: "data.get('spread_pct', 0) > 0.02"
+    action: reduce_max_order_size
+    priority: medium
+    cooldown_seconds: 1800
+    description: "High spreads indicate low liquidity - reduce order sizes"
+
+  - trigger: price.anomaly
+    condition: "data.get('volatility_spike', False) == True"
+    action: reduce_exposure
+    priority: high
+    cooldown_seconds: 600
+    description: "Extreme market volatility - reduce positions immediately"
+
+  # Recovery Protocols - Autonomous Restoration
+  - trigger: risk.normalized
+    condition: "data.get('all_limits_ok', False) == True"
+    action: gradual_resume
+    priority: medium
+    cooldown_seconds: 1800
+    description: "Risk conditions normalized - begin gradual trading resumption"
+
+  - trigger: performance.recovered
+    condition: "data.get('pnl_unrealized', 0) > 10 and data.get('recent_win_rate', 0) > 0.6"
+    action: gradual_risk_increase
+    priority: low
+    cooldown_seconds: 3600
+    description: "Performance recovered with good win rate - gradually increase risk"
+
+  # Administrative Governance - Intelligence Layer Management
+  - trigger: alert.throttled
+    condition: "data.get('throttle_count', 0) > 50"
+    action: review_alert_config
+    priority: low
+    cooldown_seconds: 86400  # Daily
+    description: "Excessive alert throttling - review alert configuration"
+
+  - trigger: strategy.promoted
+    condition: "True"
+    action: log_performance_audit
+    priority: low
+    cooldown_seconds: 86400
+    description: "Strategy promotion event - log for performance auditing"
+
+  # Safety Override - Human-in-the-Loop Boundaries
+  - trigger: manual.override
+    condition: "data.get('administrator_override', False) == True"
+    action: immediate_resume
+    priority: critical
+    description: "Administrator has taken manual control - honor override"
+
+  # Default Actions - Informational Only
+  - trigger: order.submitted
+    condition: "data.get('symbol', '').endswith('BTCUSDT.BINANCE')"
+    action: log_btc_activity
+    priority: low
+    description: "BTC trading activity - informational logging only"
+
+  - trigger: order.filled
+    condition: "data.get('avg_fill_price', 0) > 0"
+    action: update_performance_stats
+    priority: low
+    description: "Update trade statistics for performance tracking"

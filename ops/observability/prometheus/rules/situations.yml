@@ -1,0 +1,18 @@
+groups:
+  - name: situations_recording
+    interval: 15s
+    rules:
+      - record: situation_hits_rate_per_min
+        expr: sum by (name) (rate(situation_hits_total[1m])) * 60
+      - record: situation_ev_mean
+        expr: situation_ev_mean
+      - record: situation_ev_ci_low
+        expr: situation_ev_ci_low
+      - record: situation_ev_ci_high
+        expr: situation_ev_ci_high
+      - record: situation_novelty_rate
+        expr: situation_novelty_rate
+      - record: situation_explore_share
+        expr: sum by (name) (rate(situation_decisions_total{decision="explore"}[5m]))
+              /
+              clamp_min(sum by (name) (rate(situation_decisions_total[5m])), 1)

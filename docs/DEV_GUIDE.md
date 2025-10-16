@@ -123,6 +123,8 @@ LOGS_DIR = Path("logs") / datetime.now().strftime("%Y-%m-%d")
 LOGS_DIR.mkdir(parents=True, exist_ok=True)
 ```
 
+Ops workers default to two Uvicorn processes (`OPS_WORKERS` in `.env`). When adding file writes make sure the non-root user can modify the destination and prefer atomic `Path.replace()` calls as shown above.
+
 ## Architecture Guidelines
 
 ### Component Isolation
@@ -149,23 +151,44 @@ LOGS_DIR.mkdir(parents=True, exist_ok=True)
 ### Prometheus Metrics
 ```python
 from prometheus_client import Counter, Gauge, Histogram
+from ops.prometheus import REGISTRY
 
-# Counters for events
-SIGNALS_ROUTED = Counter('signals_routed_total', 'Total signals processed', ['model'])
-ORDERS_SUBMITTED = Counter('orders_submitted_total', 'Orders sent to engine', ['venue'])
+# Multi-worker safe metrics – always register against REGISTRY.
+SIGNALS_ROUTED = Counter(
+    "signals_routed_total",
+    "Total signals processed",
+    ["model"],
+    registry=REGISTRY,
+)
 
-# Gauges for states
-ALLOCATED_CAPITAL = Gauge('allocated_capital_usd', 'Total capital allocated', ['model'])
-ACTIVE_MODELS = Gauge('active_models', 'Currently enabled models')
+ORDERS_SUBMITTED = Counter(
+    "orders_submitted_total",
+    "Orders sent to engine",
+    ["venue"],
+    registry=REGISTRY,
+)
 
-# Histograms for distributions
-SIGNAL_LATENCY = Histogram('signal_latency_seconds', 'End-to-end signal processing time')
-ORDER_FILL_TIME = Histogram('order_fill_seconds', 'Time to fill orders')
+ALLOCATED_CAPITAL = Gauge(
+    "allocated_capital_usd",
+    "Total capital allocated",
+    ["model"],
+    registry=REGISTRY,
+    multiprocess_mode="max",
+)
+
+SIGNAL_LATENCY = Histogram(
+    "signal_latency_seconds",
+    "End-to-end signal processing time",
+    registry=REGISTRY,
+    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0],
+)
 
 # Usage
 SIGNALS_ROUTED.labels(model="canary_v2").inc()
 ALLOCATED_CAPITAL.labels(model="canary_v2").set(15432.50)
 ```
+
+The helper in `ops/prometheus.py` creates a per-process `CollectorRegistry`, attaches `multiprocess.MultiProcessCollector`, and provides `render_latest()` for the `/metrics` endpoint. Always import `REGISTRY` from there instead of relying on the global default registry.
 
 ### Health Checks
 ```python

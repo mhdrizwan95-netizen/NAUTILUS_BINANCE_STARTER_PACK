@@ -2,87 +2,88 @@
 # Each rule subscribes to an event bus topic and evaluates conditions
 # When conditions are met, formatted messages are sent via configured channels
 
-# Operational Alerts - Core Trading Events
-- topic: order.submitted
-  condition: "data.get('symbol', '').endswith('BTCUSDT.BINANCE')"
-  message: "🛒 BTC trade submitted: {side} {quote:.2f} USDT @ {symbol}"
-  channels: ["log", "telegram"]
+rules:
+  # Operational Alerts - Core Trading Events
+  - topic: order.submitted
+    condition: "data.get('symbol', '').endswith('BTCUSDT.BINANCE')"
+    message: "🛒 BTC trade submitted: {side} {quote:.2f} USDT @ {symbol}"
+    channels: ["log", "telegram"]
 
-- topic: order.closed
-  condition: "data.get('status') == 'FILLED'"
-  message: "✅ {symbol} {side} filled @ {avg_fill_price:.2f} (qty: {filled_qty:.6f})"
-  channels: ["log", "telegram"]
+  - topic: order.closed
+    condition: "data.get('status') == 'FILLED'"
+    message: "✅ {symbol} {side} filled @ {avg_fill_price:.2f} (qty: {filled_qty:.6f})"
+    channels: ["log", "telegram"]
 
-- topic: order.closed
-  condition: "data.get('status') == 'CANCELED'"
-  message: "⛔ {symbol} canceled - {venue_order_id}"
-  channels: ["log"]
+  - topic: order.closed
+    condition: "data.get('status') == 'CANCELED'"
+    message: "⛔ {symbol} canceled - {venue_order_id}"
+    channels: ["log"]
 
-# Risk & Safety Alerts - Critical Threshold Breaches
-- topic: risk.rejected
-  condition: "data.get('reason') == 'MIN_NOTIONAL'"
-  message: "❗ RISK: Order below min notional ({quote:.2f} USDT) - {symbol}"
-  channels: ["log", "telegram"]
-  priority: "high"
+  # Risk & Safety Alerts - Critical Threshold Breaches
+  - topic: risk.rejected
+    condition: "data.get('reason') == 'MIN_NOTIONAL'"
+    message: "❗ RISK: Order below min notional ({quote:.2f} USDT) - {symbol}"
+    channels: ["log", "telegram"]
+    priority: "high"
 
-- topic: risk.rejected
-  condition: "data.get('reason') == 'EXPOSURE_LIMIT'"
-  message: "⚠️ RISK: Exposure limit exceeded - {symbol} {quote:.2f} USDT"
-  channels: ["log", "telegram"]
-  priority: "high"
+  - topic: risk.rejected
+    condition: "data.get('reason') == 'EXPOSURE_LIMIT'"
+    message: "⚠️ RISK: Exposure limit exceeded - {symbol} {quote:.2f} USDT"
+    channels: ["log", "telegram"]
+    priority: "high"
 
-- topic: risk.rejected
-  condition: "data.get('reason') == 'TRADING_DISABLED'"
-  message: "🚫 CRITICAL: Trading disabled - system in emergency stop"
-  channels: ["log", "telegram", "webhook"]
-  priority: "critical"
+  - topic: risk.rejected
+    condition: "data.get('reason') == 'TRADING_DISABLED'"
+    message: "🚫 CRITICAL: Trading disabled - system in emergency stop"
+    channels: ["log", "telegram", "webhook"]
+    priority: "critical"
 
-# Performance Alerts - PnL Monitoring
-- topic: metrics.update
-  condition: "data.get('pnl_unrealized', 0) < -100"
-  message: "📉 HIGH LOSS: Unrealized PnL ${:.2f} - risk threshold breached"
-  channels: ["log", "telegram"]
-  priority: "high"
+  # Performance Alerts - PnL Monitoring
+  - topic: metrics.update
+    condition: "data.get('pnl_unrealized', 0) < -100"
+    message: "📉 HIGH LOSS: Unrealized PnL ${:.2f} - risk threshold breached"
+    channels: ["log", "telegram"]
+    priority: "high"
 
-- topic: metrics.update
-  condition: "abs(data.get('pnl_unrealized', 0)) > 1000"
-  message: "💰 LARGE POSITION: PnL ${:.2f} - significant exposure"
-  channels: ["log"]
-  priority: "medium"
+  - topic: metrics.update
+    condition: "abs(data.get('pnl_unrealized', 0)) > 1000"
+    message: "💰 LARGE POSITION: PnL ${:.2f} - significant exposure"
+    channels: ["log"]
+    priority: "medium"
 
-# System Health Alerts - Infrastructure Monitoring
-- topic: reconnect.completed
-  condition: "True"
-  message: "🔄 RECONNECT: Venue connection restored - {venue}"
-  channels: ["log", "telegram"]
-  priority: "medium"
+  # System Health Alerts - Infrastructure Monitoring
+  - topic: reconnect.completed
+    condition: "True"
+    message: "🔄 RECONNECT: Venue connection restored - {venue}"
+    channels: ["log", "telegram"]
+    priority: "medium"
 
-- topic: reconcile.completed
-  condition: "data.get('imported', 0) > 0"
-  message: "🔍 SYNC: Imported {imported} missed orders, closed {closed}"
-  channels: ["log", "telegram"]
-  priority: "medium"
+  - topic: reconcile.completed
+    condition: "data.get('imported', 0) > 0"
+    message: "🔍 SYNC: Imported {imported} missed orders, closed {closed}"
+    channels: ["log", "telegram"]
+    priority: "medium"
 
-# Order Book & Strategy Alerts - Market Intelligence
-- topic: orderbook.update
-  condition: "data.get('spread_pct', 0) > 0.01"
-  message: "📊 HIGH SPREAD: {symbol} spread > 1% - potential slippage risk"
-  channels: ["log"]
-  priority: "low"
+  # Order Book & Strategy Alerts - Market Intelligence
+  - topic: orderbook.update
+    condition: "data.get('spread_pct', 0) > 0.01"
+    message: "📊 HIGH SPREAD: {symbol} spread > 1% - potential slippage risk"
+    channels: ["log"]
+    priority: "low"
 
-# Governance Alerts - Strategy & Model Changes
-- topic: strategy.promoted
-  condition: "True"
-  message: "🚀 MODEL PROMOTION: {model_tag} activated - performance threshold met"
-  channels: ["log", "telegram"]
-  priority: "medium"
+  # Governance Alerts - Strategy & Model Changes
+  - topic: strategy.promoted
+    condition: "True"
+    message: "🚀 MODEL PROMOTION: {model_tag} activated - performance threshold met"
+    channels: ["log", "telegram"]
+    priority: "medium"
 
-# Debug & Development Alerts
-- topic: error.occurred
-  condition: "data.get('severity') in ['ERROR', 'CRITICAL']"
-  message: "💥 ERROR: {component} - {message}"
-  channels: ["log"]
-  priority: "critical"
+  # Debug & Development Alerts
+  - topic: error.occurred
+    condition: "data.get('severity') in ['ERROR', 'CRITICAL']"
+    message: "💥 ERROR: {component} - {message}"
+    channels: ["log"]
+    priority: "critical"
 
 # Throttling Configuration
 throttling:

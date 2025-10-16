@@ -1,0 +1,294 @@
+{
+  "id": null,
+  "uid": "hmm-trading-overview",
+  "title": "HMM • Trading Overview",
+  "tags": ["hmm", "trading"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "10s",
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Equity",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(equity_usd{job=~\"engine_.*\"})" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 0 } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "background",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "PnL Realized (range)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(pnl_realized_total{job=~\"engine_.*\"}[$__range]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Unrealized PnL",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(pnl_unrealized_total{job=~\"engine_.*\"})" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Reject Rate",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(orders_rejected_total[$__rate_interval])) / clamp_min(sum(rate(orders_submitted_total[$__rate_interval])), 1e-9)" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "yellow", "value": 0.01 }, { "color": "red", "value": 0.02 } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "horizontal",
+        "textMode": "value",
+        "wideLayout": true,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "showPercentChange": false
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "PnL (Δ/min & Unrealized)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(pnl_realized_total{job=~\"engine_.*\"}[$__rate_interval])) * 60", "legendFormat": "Realized Δ/min", "interval": "10s" },
+        { "refId": "B", "expr": "sum(pnl_unrealized_total{job=~\"engine_.*\"})", "legendFormat": "Unrealized" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "currencyUSD", "decimals": 2, "custom": { "fillOpacity": 15 } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "Unrealized" }, "properties": [ { "id": "custom.axisPlacement", "value": "right" } ] }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Orders / min",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(orders_submitted_total{job=~\"engine_.*\"}[$__rate_interval])) * 60", "legendFormat": "Submitted", "interval": "10s" },
+        { "refId": "B", "expr": "sum(rate(orders_filled_total{job=~\"engine_.*\"}[$__rate_interval])) * 60", "legendFormat": "Filled", "interval": "10s" },
+        { "refId": "C", "expr": "sum(rate(orders_rejected_total{job=~\"engine_.*\"}[$__rate_interval])) * 60", "legendFormat": "Rejected", "interval": "10s" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 1, "custom": { "fillOpacity": 15, "axisLabel": "orders/min" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Submit → Ack Latency (ms)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "histogram_quantile(0.5, trading:submit_to_ack_ms:rate_by_le or trading:submit_to_ack_ms:rate5m_by_le or sum(rate(submit_to_ack_ms_bucket[$__rate_interval])) by (le))", "legendFormat": "p50", "interval": "10s" },
+        { "refId": "B", "expr": "histogram_quantile(0.95, trading:submit_to_ack_ms:rate_by_le or trading:submit_to_ack_ms:rate5m_by_le or sum(rate(submit_to_ack_ms_bucket[$__rate_interval])) by (le))", "legendFormat": "p95", "interval": "10s" },
+        { "refId": "C", "expr": "histogram_quantile(0.99, trading:submit_to_ack_ms:rate_by_le or trading:submit_to_ack_ms:rate5m_by_le or sum(rate(submit_to_ack_ms_bucket[$__rate_interval])) by (le))", "legendFormat": "p99", "interval": "10s" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms", "decimals": 1, "custom": { "fillOpacity": 15 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 12 }
+    },
+    {
+      "id": 8,
+      "type": "stat",
+      "title": "Breaker Rejections (range)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(increase(breaker_rejections_total{job=~\"engine_.*\"}[$__range]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none", "decimals": 0 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 6, "w": 12, "x": 12, "y": 12 }
+    },
+    {
+      "id": 9,
+      "type": "stat",
+      "title": "Exposure Lag (s)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "time() - max(ops_exposure_last_refresh_epoch)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "yellow", "value": 30 }, { "color": "red", "value": 60 } ] } }, "overrides": [] },
+      "options": { "colorMode": "background", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 4, "w": 12, "x": 12, "y": 18 }
+    }
+    ,
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Avg Dynamic Size (5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "avg(avg_over_time(dynamic_size_usd{job=\"executor\"}[5m]))" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 22 }
+    },
+    {
+      "id": 11,
+      "type": "bargauge",
+      "title": "ATR% Top-10 (now)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "topk(10, atr_percent{job=\"executor\"})" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2 }, "overrides": [] },
+      "options": { "displayMode": "gradient", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 22 }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Confidence by Symbol",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "confidence{job=\"executor\"}", "legendFormat": "{{symbol}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2, "custom": { "fillOpacity": 10 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "gridPos": { "h": 8, "w": 12, "x": 18, "y": 22 }
+    }
+    ,
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Predicted vs Observed Slip (5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "avg(avg_over_time(predicted_slippage_bp{job=\"executor\"}[5m]))", "legendFormat": "Predicted (avg)" },
+        { "refId": "B", "expr": "histogram_quantile(0.5, sum(rate(slip_observed_bp_bucket{job=\"executor\"}[5m])) by (le))", "legendFormat": "Observed p50" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 1, "custom": { "fillOpacity": 20 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 30 }
+    },
+    {
+      "id": 14,
+      "type": "bargauge",
+      "title": "Tactic Mix (rate 5m)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum(rate(execution_tactic_total{job=\"executor\"}[5m])) by (tactic)", "legendFormat": "{{tactic}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 2 }, "overrides": [] },
+      "options": { "displayMode": "gradient", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 30 }
+    }
+    ,
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Active Governance Rules",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "max(governance_rules_active)" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 38 }
+    }
+    ,
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Governance Rule Executions (range)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        { "refId": "A", "expr": "sum by (name) (increase(governance_rule_tripped_total[$__range]))", "legendFormat": "{{name}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0, "custom": { "fillOpacity": 15 } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "single" } },
+      "gridPos": { "h": 8, "w": 18, "x": 6, "y": 38 }
+    }
+    ,
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Trading Enabled",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(trading_enabled)" } ],
+      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 46 }
+    }
+    ,
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Max Notional (current)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [ { "refId": "A", "expr": "max(max_notional_usdt)" } ],
+      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "justifyMode": "auto", "orientation": "horizontal", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 46 }
+    }
+  ],
+  "templating": { "list": [] },
+  "annotations": {
+    "list": [
+      { "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" }, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard" }
+    ]
+  },
+  "time": { "from": "now-6h", "to": "now" },
+  "timepicker": { "refresh_intervals": ["10s", "30s", "1m", "5m", "15m", "1h"] }
+}

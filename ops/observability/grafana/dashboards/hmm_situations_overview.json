@@ -1,0 +1,37 @@
+{
+  "title": "HMM • Situations Overview",
+  "tags": ["hmm","situations"],
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Hits per minute",
+      "targets": [{"expr":"situation_hits_rate_per_min", "legendFormat":"{{name}}"}],
+      "gridPos": {"x":0, "y":0, "w":12, "h":8}
+    },
+    {
+      "type": "timeseries",
+      "title": "EV with 95% CI",
+      "targets": [
+        {"expr":"situation_ev_mean", "legendFormat":"mean {{name}}"},
+        {"expr":"situation_ev_ci_low", "legendFormat":"ci_low {{name}}"},
+        {"expr":"situation_ev_ci_high", "legendFormat":"ci_high {{name}}"}
+      ],
+      "gridPos": {"x":12, "y":0, "w":12, "h":8}
+    },
+    {
+      "type": "timeseries",
+      "title": "Novelty rate",
+      "targets": [{"expr":"situation_novelty_rate", "legendFormat":"{{name}}"}],
+      "gridPos": {"x":0, "y":8, "w":12, "h":6}
+    },
+    {
+      "type": "timeseries",
+      "title": "Explore share (5m)",
+      "targets": [{"expr":"situation_explore_share", "legendFormat":"{{name}}"}],
+      "gridPos": {"x":12, "y":8, "w":12, "h":6}
+    }
+  ]
+}
+

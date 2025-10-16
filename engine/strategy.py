@@ -110,13 +110,19 @@ def post_strategy_signal(sig: StrategySignal, request: Request):
     return resp
 
 def _latest_price(symbol: str) -> Optional[float]:
+    """Synchronous price lookup for scheduler thread without touching event loop.
+
+    Uses a one-off blocking HTTP call to the Binance public ticker endpoint
+    to avoid sharing the async client across threads/loops.
+    """
     try:
-        # Prefer router/exchange client helper; fallback to direct call
-        from .app import router as order_router_instance
-        client = order_router_instance.exchange_client()
-        # Use asyncio.run to call the async method in sync context
-        import asyncio
-        return asyncio.run(client.ticker_price(symbol))
+        import httpx
+        from .config import get_settings
+        clean = symbol.split(".")[0]
+        base = get_settings().base_url.rstrip("/")
+        r = httpx.get(f"{base}/api/v3/ticker/price", params={"symbol": clean}, timeout=5.0)
+        r.raise_for_status()
+        return float(r.json().get("price"))
     except Exception:
         return None
 

@@ -129,41 +129,52 @@ Optional:
 ### Dashboard Health & Observability
 
 #### Health Endpoints
-The Ops API provides health checking endpoints:
+The Ops API exposes:
 
-- `/healthz` - Fast liveness check, always returns `{"ok": true}`
-- `/readyz` - Readiness check that verifies data sources are available
+- `GET /readyz` — readiness signal used by container healthchecks.
+- `GET /healthz` — lightweight liveness endpoint.
+- `GET /aggregate/health` — summarized health of engines and collectors.
 
-#### Environment Variables
-- `OPS_API_TOKEN` - Token for authenticating control actions (kill, retrain, canary_promote). Default: "dev-token"
-- `DASH_POLL_MS` - Dashboard polling interval in milliseconds. Default: 5000 (5 seconds)
-- `PROM_METRIC_KEYS` - CSV of additional Prometheus metric names to extend PROM_MAP. Default: none
+Engines provide `GET /health` and `/metrics`.
 
-#### Metrics Fallback Chain
-Dashboard auto-preferences metrics from multiple sources in this priority order:
+#### Control & Auth
+The following Ops endpoints require `X-OPS-TOKEN` with the value of `OPS_API_TOKEN` (default: `dev-token`):
 
-1. **ops_snapshot** - Ops API `/metrics_snapshot` (POST/PUT from strategy)
-2. **ops_metrics** - Ops API `/metrics` (JSON with pnl/policy/execution structure)
-3. **ops_split** - Ops API `/pnl` and `/state` / `/states` endpoints
-4. **ops_prom** - Ops API `/metrics` parsed as Prometheus exposition format
-5. **legacy** - Fallback to zeros if all sources fail
+- `POST /kill` — pause/resume trading globally.
+- `POST /strategy/weights` — adjust rollout weights.
+- `POST /retrain`, `POST /canary_promote` — model lifecycle hooks.
 
-Each source provides the `source` indicator in the dashboard response for observability.
+#### Metrics Plumbing
 
-#### Authenticated Control Actions
-Control endpoints require `X-OPS-TOKEN` header:
-- `POST /kill` - Enable/disable trading
-- `POST /retrain` - Trigger ML retraining
-- `POST /canary_promote` - Promote canary models
+* OPS runs multiple Uvicorn workers (`OPS_WORKERS`, default `2`). Every collector registers against the shared registry in `ops/prometheus.py` to remain multiprocess-safe.
+* Metrics live under `/metrics` on each service (`http://localhost:8002/metrics`, `http://localhost:8003/metrics`, etc.).
+* Histogram families use standard `_bucket`, `_count`, `_sum` names (`submit_to_ack_ms_bucket` for order latency).
 
-#### UI Guardrails
-Live Strip shows visual indicators:
-- Red outline: drift_score > 0.8
-- Green background: policy_confidence > 0.7
-- Amber background: venue_latency_ms > 200ms
+Key environment variables:
 
-#### Docker Healthchecks
-Ops container healthcheck uses `/readyz` endpoint for service coordination.
+- `PROMETHEUS_MULTIPROC_DIR` — shared directory for multiprocess shards (defaults to `/tmp/prom_multiproc` in the container; created and chowned in the Dockerfile).
+- `OPS_WORKERS` — number of Uvicorn workers for the Ops API.
+- `OPS_METRICS_PORT` — exported host port for scraping (default `9102`, but Prometheus scrapes the HTTP endpoint on `8002`).
+
+#### Observability Bundle
+
+Located in `ops/observability/`:
+
+1. Start the trading stack: `docker compose up -d`.
+2. Launch the observability pack:
+   ```bash
+   cd ops/observability
+   docker compose -f docker-compose.observability.yml up -d
+   ```
+3. Prometheus (http://localhost:9090) scrapes:
+   - `hmm_ops:8002`
+   - `engine_binance:8003`
+   - `engine_bybit:8003`
+   - `engine_ibkr:8003`
+   - `ml_service:8010` (optional)
+4. Grafana (http://localhost:3000, admin/admin) auto-loads the “HMM • Trading Overview” dashboard from `grafana/dashboards/hmm_trading_overview.json`.
+
+If you run the observability stack on a remote host, ensure the project network name in `docker-compose.observability.yml` matches the main compose project (`docker network ls`).
 
 ### M18 Multi-Symbol Mode
 To activate shared risk allocation:
@@ -189,17 +200,15 @@ State & Logs:
     data/processed/m19/metrics_snapshot.json (input KPIs)
 
 Final ops checklist
-	•	Docker stack: make up / make logs.
-	•	Data path: keep dropping lineage/calibration into ./data/** (containers see them live).
-	•	Metrics: when Ops adds /metrics_snapshot, the dashboard will auto-prefer it.
+	•	`docker compose ps` — confirm `hmm_engine_*` and `hmm_ops` are healthy.  
+	•	Ensure `./data` remains mounted for snapshots, lineage, and calibration artifacts.  
+	•	`curl http://localhost:8002/metrics` — verify Prometheus exposition for collectors.  
+	•	If observability is enabled, check Grafana’s “HMM • Trading Overview” dashboard loads without scrape errors.
 
-	•	/api/metrics_snapshot on 8002 returns zeros ➜ your shim is working, but 8001 (Ops) has no metrics endpoints (/metrics_snapshot, /metrics, /pnl, /state(s) all 404).
-	•	The zsh: number expected / command not found: # lines are from pasting comments. No harm—just noise.
-
-### Engine-Driven Order Flow (New)
-- Service `engine` (port **8003**) owns Binance testnet order submission and maintains the canonical portfolio snapshot.
-- Ops API (`8001`) proxies `/orders/market` to the engine and mirrors its `/portfolio` in `/account_snapshot` and metrics snapshots.
-- Dashboard (`8002`) now reads `ops_snapshot` so Cash, Equity, Exposure and PnL tiles reflect the engine’s source of truth.
+### Engine-Driven Order Flow (Current)
+- Use venue-specific engines for low-level order placement (e.g. `http://localhost:8003/orders/market` for Binance testnet).
+- Ops API (`http://localhost:8002`) exposes aggregated snapshots (`/account_snapshot`, `/aggregate/portfolio`) and governance controls (`/strategy/weights`, `/kill`).
+- Front-end dashboards (served from Ops) read the Ops metrics registry so Equity, Exposure, and PnL tiles reflect the engines’ source of truth.
 
 Smoke test:
 ```bash
@@ -207,5 +216,5 @@ docker compose up -d --build
 curl -X POST http://localhost:8003/orders/market \
   -H "content-type: application/json" \
   -d '{"symbol":"BTCUSDT.BINANCE","side":"BUY","quote":50}'
-curl -s http://localhost:8001/account_snapshot | python -m json.tool
+curl -s http://localhost:8002/account_snapshot | python -m json.tool
 ```

@@ -1,12 +1,17 @@
 from fastapi import FastAPI, HTTPException, Request
-from pydantic import BaseModel
-from pathlib import Path
+from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
+from pathlib import Path
+from pathlib import Path as Path2
 import json, time, httpx, os, glob, subprocess, shlex, logging
 import asyncio
-from pathlib import Path as Path2
 from typing import List, Dict, Any, Optional
+
+from ops.prometheus import REGISTRY, render_latest
+from prometheus_client import Counter
 
 # Risk monitoring configuration
 RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
@@ -29,6 +34,7 @@ from ops.telemetry_store import load as _load_snap, save as _save_snap, Metrics 
 from ops.routes.orders import router as orders_router
 from ops.strategy_router import router as strategy_router
 from ops.pnl_dashboard import router as pnl_router
+from ops.situations.router import router as situations_router
 import time
 
 class MetricsIn(BaseModel):
@@ -43,15 +49,16 @@ class MetricsIn(BaseModel):
     cash_usd: float | None = None
     gross_exposure_usd: float | None = None
 
-from fastapi.staticfiles import StaticFiles
-
 APP = FastAPI(title="Ops API")
 APP.include_router(orders_router)
 APP.include_router(strategy_router)
 APP.include_router(pnl_router)
+APP.include_router(situations_router)
 
-# Mount static files for dashboard
-APP.mount("/", StaticFiles(directory="ops/static", html=True), name="static")
+@APP.get("/metrics")
+def metrics_endpoint():
+    payload, content_type = render_latest()
+    return Response(payload, media_type=content_type)
 
 @APP.get("/readyz")
 async def readyz():
@@ -385,6 +392,35 @@ from ops.portfolio_collector import portfolio_collector_loop
 from ops.strategy_tracker import strategy_tracker_loop
 from ops.strategy_selector import promote_best
 
+import os as _os
+import fcntl as _fcntl
+
+_TRACKER_LOCK_FD = None  # keep process-global lock handle alive
+
+
+def _acquire_singleton_lock(name: str) -> bool:
+    """Try to acquire a process-wide file lock so only one worker runs a task.
+
+    Returns True if this process acquired the lock, False if another worker holds it.
+    """
+    global _TRACKER_LOCK_FD
+    try:
+        path = f"/tmp/{name}.lock"
+        fd = _os.open(path, _os.O_CREAT | _os.O_RDWR)
+        _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        _TRACKER_LOCK_FD = fd  # keep open to hold the lock
+        return True
+    except BlockingIOError:
+        try:
+            if 'fd' in locals():
+                _os.close(fd)
+        except Exception:
+            pass
+        return False
+    except Exception:
+        return False
+
+
 @APP.on_event("startup")
 async def _start_poll():
     asyncio.create_task(_engine_poll_loop())
@@ -392,7 +428,15 @@ async def _start_poll():
     asyncio.create_task(exposure_collector_loop())
     asyncio.create_task(pnl_collector_loop())
     asyncio.create_task(portfolio_collector_loop())
-    asyncio.create_task(strategy_tracker_loop())
+
+    # Start strategy tracker in a single worker only (Option B)
+    # Gate via env flag and file lock to ensure one-of-N under multiprocess uvicorn
+    tracker_env_ok = _os.getenv("OPS_TRACKER_LEADER", "1").lower() in {"1", "true", "yes"}
+    if tracker_env_ok and _acquire_singleton_lock("hmm_strategy_tracker"):
+        asyncio.create_task(strategy_tracker_loop())
+        print(f"[StrategyTracker] started in PID {_os.getpid()} (leader)")
+    else:
+        print(f"[StrategyTracker] skipped in PID {_os.getpid()} (follower)")
 
 @APP.on_event("startup")
 async def _start_canary_manager():
@@ -419,9 +463,12 @@ async def _start_strategy_governance():
     # Strategy promotion loop - evaluates every 60 seconds
     async def promotion_loop():
         await asyncio.sleep(5)  # Let system warm up
+        import os
+        enabled = os.getenv("GOVERNANCE_PROMOTE_ENABLED", "true").lower() not in {"0", "false", "no"}
         while True:
             try:
-                promote_best()
+                if enabled:
+                    promote_best()
                 await asyncio.sleep(60)
             except Exception as e:
                 logging.warning(f"[Governance] Promoter error: {e}")
@@ -497,8 +544,6 @@ def get_pnl_snapshot():
     Unified PnL snapshot: returns realized and unrealized PnL per venue.
     Uses PROMETHEUS_METRICS direct from pnl_collector for accuracy.
     """
-    from prometheus_client import REGISTRY
-
     out = {"realized": {}, "unrealized": {}}
     for metric in REGISTRY.collect():
         if metric.name in ("pnl_realized_total", "pnl_unrealized_total"):
@@ -517,8 +562,6 @@ def get_portfolio_snapshot():
     Portfolio snapshot: total equity, cash, gain/loss, and return % since daily baseline.
     Handy for your Dash to show equity card with current portfolio performance.
     """
-    from prometheus_client import REGISTRY
-
     out = {}
     for metric in REGISTRY.collect():
         if metric.name in ("portfolio_equity_usd", "portfolio_cash_usd", "portfolio_gain_usd",
@@ -662,3 +705,38 @@ async def ws_incidents(websocket: WebSocket):
             await asyncio.sleep(3600)
     finally:
         WSS.discard(websocket)
+
+# Mount static files for dashboard
+APP.mount("/", StaticFiles(directory="ops/static", html=True), name="static")
+
+# ---- Situations SSE consumer (shadow mode) ----
+SSE_COUNTER = Counter(
+    "situation_events_consumed_total",
+    "Number of situation events consumed by Ops",
+    ["name"],
+    registry=REGISTRY,
+)
+
+
+@APP.on_event("startup")
+async def _start_situations_consumer():
+    async def _run():
+        import httpx
+        url = os.getenv("SITUATIONS_SSE_URL", "http://hmm_situations:8011/events/stream")
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                async with client.stream("GET", url) as r:
+                    async for line in r.aiter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        payload = line[6:]
+                        try:
+                            evt = json.loads(payload)
+                            name = evt.get("situation") or "unknown"
+                            SSE_COUNTER.labels(name=name).inc()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+    asyncio.create_task(_run())

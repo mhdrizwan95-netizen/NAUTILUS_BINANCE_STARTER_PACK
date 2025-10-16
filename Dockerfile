@@ -21,7 +21,10 @@ RUN python -m pip install --upgrade pip && pip install -r requirements.txt
 COPY . .
 
 # Non-root user
-RUN useradd -m appuser
+RUN useradd -m appuser \
+ && mkdir -p /tmp/prom_multiproc \
+ && chown appuser:appuser /tmp/prom_multiproc \
+ && chown -R appuser:appuser /app
 USER appuser
 
 # Default envs; override in compose
