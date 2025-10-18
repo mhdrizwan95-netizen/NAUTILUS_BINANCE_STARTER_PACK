@@ -6,63 +6,22 @@ rule_files:
   - /etc/prometheus/rules/*.yml
 
 scrape_configs:
-  - job_name: "ops"
+  - job_name: 'engine_binance_exporter'
     static_configs:
-      - targets: ["hmm_ops:8002"]
-
-  - job_name: "engine_binance"
-    scrape_interval: 10s
-    scrape_timeout: 8s
-    static_configs:
-      - targets: ["engine_binance_exporter:8003"]
+      - targets: ['engine_binance_exporter:8003']
         labels:
-          role: exporter
-    metric_relabel_configs:
-      - source_labels: [role]
-        regex: ^trader$
-        action: drop
-      - source_labels: [__name__]
-        regex: ^(equity_usd|cash_usd|market_value_usd|mark_time_epoch|entry_price|position_amt|unrealized_profit|mark_price|snapshot_id|metrics_heartbeat)$
-        action: keep
+          role: 'exporter'
 
-  - job_name: "engine_binance_trader"
-    scrape_interval: 10s
-    scrape_timeout: 8s
+  - job_name: 'engine_binance_trader'
     static_configs:
-      - targets: ["hmm_engine_binance:8003"]
+      - targets: ['engine_binance:8003']
         labels:
-          role: trader
-    metric_relabel_configs:
-      - source_labels: [role]
-        regex: ^exporter$
-        action: drop
+          role: 'trader'
 
-  - job_name: "engine_bybit"
+  - job_name: 'ops'
     static_configs:
-      - targets: ["engine_bybit:8003"]
+      - targets: ['ops:8002']
 
-  - job_name: "engine_ibkr"
+  - job_name: 'screener'
     static_configs:
-      - targets: ["engine_ibkr:8003"]
-
-  # ml_service is optional; comment out to avoid DOWN target unless you run it
-  # - job_name: "ml_service"
-  #   static_configs:
-  #     - targets: ["ml_service:8010"]
-
-  - job_name: "situations"
-    static_configs:
-      - targets: ["hmm_situations:8011"]
-
-  - job_name: "universe"
-    static_configs:
-      - targets: ["hmm_universe:8009"]
-
-  - job_name: "screener"
-    static_configs:
-      - targets: ["hmm_screener:8010"]
-
-  - job_name: "executor"
-    static_configs:
-      # Prefer service name over container_name for stable DNS within the compose network
-      - targets: ["executor:9102"]
+      - targets: ['screener:8010']
