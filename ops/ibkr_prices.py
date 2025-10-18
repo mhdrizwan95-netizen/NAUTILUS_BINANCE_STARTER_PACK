@@ -13,22 +13,65 @@ from ops.prometheus import REGISTRY
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
-# Default tickers — override via OPS_IBKR_TICKERS env
-WATCHLIST = os.getenv("OPS_IBKR_TICKERS", "AAPL,MSFT,NVDA,TSLA,GOOGL").split(",")
-
 # Programmatic price cache (updated alongside Prometheus metrics)
 PRICES: dict[str, float] = {}
 
-# Prometheus metrics
-PRICE_METRICS = {
-    sym: Gauge(
-        f"ibkr_price_{sym.lower()}_usd",
-        f"Last traded price for {sym} (USD)",
-        registry=REGISTRY,
-        multiprocess_mode="max",
-    )
-    for sym in WATCHLIST
-}
+PRICE_METRICS: dict[str, Gauge] = {}
+
+
+def _parse_watchlist(raw: str) -> list[str]:
+    symbols: list[str] = []
+    for sym in raw.split(","):
+        cleaned = sym.strip().upper()
+        if cleaned and cleaned not in symbols:
+            symbols.append(cleaned)
+    return symbols or ["AAPL", "MSFT", "NVDA", "TSLA", "GOOGL"]
+
+
+def _rebuild_metrics(symbols: list[str]) -> None:
+    global PRICE_METRICS
+    for sym in symbols:
+        if sym not in PRICE_METRICS:
+            PRICE_METRICS[sym] = Gauge(
+                f"ibkr_price_{sym.lower()}_usd",
+                f"Last traded price for {sym} (USD)",
+                registry=REGISTRY,
+                multiprocess_mode="max",
+            )
+
+
+class _Watchlist(list):
+    def __init__(self):
+        self._raw = None
+        self.refresh()
+
+    def refresh(self):
+        raw = os.getenv("OPS_IBKR_TICKERS", "AAPL,MSFT,NVDA,TSLA,GOOGL")
+        if raw == self._raw:
+            return
+        symbols = _parse_watchlist(raw)
+        self[:] = symbols
+        self._raw = raw
+        _rebuild_metrics(symbols)
+
+    def __iter__(self):
+        self.refresh()
+        return super().__iter__()
+
+    def __len__(self):
+        self.refresh()
+        return super().__len__()
+
+    def __contains__(self, item):
+        self.refresh()
+        return super().__contains__(item.upper() if isinstance(item, str) else item)
+
+    def __repr__(self):
+        self.refresh()
+        return super().__repr__()
+
+
+WATCHLIST = _Watchlist()
 LAST_UPDATE = Gauge(
     "ibkr_last_price_update_epoch",
     "Unix time of last IBKR price update",

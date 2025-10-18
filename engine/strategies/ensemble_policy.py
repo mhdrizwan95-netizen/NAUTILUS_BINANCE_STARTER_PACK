@@ -1,10 +1,38 @@
 # engine/strategies/ensemble_policy.py
 from __future__ import annotations
 import math, time
+from dataclasses import replace
 from typing import Dict, Optional, Tuple, List
 from ..config import load_strategy_config
 
-S = load_strategy_config()
+
+class _StrategyConfigProxy:
+    """
+    Lightweight proxy that preserves an immutable dataclass internally
+    while exposing ergonomic attribute setters for tests/ops scripts.
+    Assignments replace the underlying dataclass via dataclasses.replace.
+    """
+
+    __slots__ = ("_inner",)
+
+    def __init__(self, cfg):
+        object.__setattr__(self, "_inner", cfg)
+
+    def __getattr__(self, item):
+        return getattr(self._inner, item)
+
+    def __setattr__(self, name, value):
+        if name == "_inner":
+            object.__setattr__(self, name, value)
+        else:
+            object.__setattr__(self, "_inner", replace(self._inner, **{name: value}))
+
+    def snapshot(self):
+        """Return the current dataclass instance."""
+        return self._inner
+
+
+S = _StrategyConfigProxy(load_strategy_config())
 
 _last_ts: Dict[str, float] = {}
 
@@ -23,14 +51,16 @@ def combine(symbol: str, ma_side: Optional[str], ma_conf: float,
 
     ma_val = 0 if not ma_side else (1 if ma_side == "BUY" else -1)
     hmm_val, hmm_conf = 0, 0.0
-    if hmm_decision:
+    has_hmm = hmm_decision is not None
+    if has_hmm:
         hmm_val = 1 if hmm_decision[0] == "BUY" else -1
         hmm_conf = max(hmm_decision[2].get("probs", [0])) if isinstance(hmm_decision[2], dict) else 0.5
 
     score = (w_ma * ma_val * ma_conf) + (w_hmm * hmm_val * hmm_conf)
     conf = abs((w_ma * ma_conf) + (w_hmm * hmm_conf))
+    effective_conf = ma_conf if not has_hmm else conf
 
-    if abs(score) < S.ensemble_min_conf:
+    if effective_conf < S.ensemble_min_conf:
         return None  # no strong consensus
 
     side = "BUY" if score > 0 else "SELL"
@@ -39,12 +69,12 @@ def combine(symbol: str, ma_side: Optional[str], ma_conf: float,
     meta = {
         "exp": "ensemble_v1",
         "score": score,
-        "conf": conf,
+        "conf": effective_conf,
         "weights": {"ma_v1": w_ma, "hmm_v1": w_hmm},
         "components": {
             "ma_side": ma_side,
             "ma_conf": ma_conf,
-            "hmm_side": "BUY" if hmm_val > 0 else "SELL",
+            "hmm_side": "BUY" if has_hmm and hmm_val > 0 else ("SELL" if has_hmm else "NONE"),
             "hmm_conf": hmm_conf,
         },
     }

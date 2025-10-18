@@ -11,8 +11,31 @@ scrape_configs:
       - targets: ["hmm_ops:8002"]
 
   - job_name: "engine_binance"
+    scrape_interval: 10s
+    scrape_timeout: 8s
     static_configs:
-      - targets: ["engine_binance:8003"]
+      - targets: ["engine_binance_exporter:8003"]
+        labels:
+          role: exporter
+    metric_relabel_configs:
+      - source_labels: [role]
+        regex: ^trader$
+        action: drop
+      - source_labels: [__name__]
+        regex: ^(equity_usd|cash_usd|market_value_usd|mark_time_epoch|entry_price|position_amt|unrealized_profit|mark_price|snapshot_id|metrics_heartbeat)$
+        action: keep
+
+  - job_name: "engine_binance_trader"
+    scrape_interval: 10s
+    scrape_timeout: 8s
+    static_configs:
+      - targets: ["hmm_engine_binance:8003"]
+        labels:
+          role: trader
+    metric_relabel_configs:
+      - source_labels: [role]
+        regex: ^exporter$
+        action: drop
 
   - job_name: "engine_bybit"
     static_configs:

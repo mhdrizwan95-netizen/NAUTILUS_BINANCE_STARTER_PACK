@@ -23,7 +23,7 @@ def main():
         base = os.environ.get("BINANCE_FUTURES_BASE") or "https://testnet.binancefuture.com"
         endpoint = "/fapi/v1/userTrades"
     else:
-        base = os.environ.get("DEMO_SPOT_BASE") or os.environ.get("BINANCE_SPOT_BASE") or "https://api-demo.binance.com"
+        base = os.environ.get("DEMO_SPOT_BASE") or os.environ.get("BINANCE_SPOT_BASE") or "https://testnet.binance.vision"
         endpoint = "/api/v3/myTrades"
     key  = os.environ.get("BINANCE_API_KEY")
     sec  = os.environ.get("BINANCE_API_SECRET")

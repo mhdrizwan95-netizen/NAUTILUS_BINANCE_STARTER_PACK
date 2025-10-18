@@ -7,7 +7,7 @@ x-engine-common: &engine_common
     context: .
     dockerfile: Dockerfile
   command: >
-    /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port ${ENGINE_PORT:-8003} --workers 1
+    /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port ${ENGINE_PORT:-8003} --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
   environment:
     <<: *env_common
     # Common trading parameters
@@ -39,16 +39,45 @@ x-engine-common: &engine_common
   depends_on: []
 
 services:
+  engine_binance_exporter:
+    <<: *engine_common
+    container_name: hmm_engine_binance_exporter
+    env_file: .env
+    environment:
+      - ROLE=exporter
+      - VENUE=BINANCE
+      - TRADING_ENABLED=false
+      - GOVERNANCE_POLICY=/app/engine/policies.yaml
+      - BINANCE_MODE=${BINANCE_MODE}
+      - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
+      - BINANCE_FUTURES_BASE=https://testnet.binancefuture.com
+      - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - TRADE_SYMBOLS=*
+      - BINANCE_API_TIMEOUT=15
+      - BINANCE_RECV_WINDOW=60000
+      - ENGINE_PORT=8003
+    volumes:
+      - ./engine/state:/app/engine/state:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./data:/app/data:rw
+    ports:
+      - "9103:8003"
+    command: >
+      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
+
   engine_binance:
     <<: *engine_common
     container_name: hmm_engine_binance
     env_file: .env
     environment:
+      - ROLE=trader
       - VENUE=BINANCE
       - GOVERNANCE_POLICY=/app/engine/policies.yaml
       - BINANCE_MODE=${BINANCE_MODE}
       - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
-      - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE}
+      - BINANCE_FUTURES_BASE=https://testnet.binancefuture.com  # Explicitly set for futures
       - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
@@ -62,9 +91,8 @@ services:
       - ./data:/app/data:rw
     ports:
       - "8003:8003"
-      - "${ENGINE_METRICS_PORT:-9103}:9103"
     command: >
-      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1
+      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 1024
 
   engine_ibkr:
     <<: *engine_common
@@ -91,7 +119,7 @@ services:
     ports:
       - "8005:8003"
     command: >
-      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1
+      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
 
 
   engine_bybit:

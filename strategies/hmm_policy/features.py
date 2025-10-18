@@ -1,6 +1,7 @@
 # M2: features.py + M13: Macro/Micro Features
 from dataclasses import dataclass, field
 from collections import deque
+import math
 import numpy as np
 
 @dataclass
@@ -32,6 +33,30 @@ class FeatureState:
             d = getattr(self, attr)
             d = deque(d, maxlen=self.window_len)
             setattr(self, attr, d)
+
+def _deque_std(values: deque[float]) -> float:
+    n = len(values)
+    if n <= 1:
+        return 0.0
+    mean = sum(values) / n
+    var = sum((x - mean) * (x - mean) for x in values) / n
+    return math.sqrt(var)
+
+
+def _autocorr(values: deque[float], window: int = 10) -> float:
+    if len(values) < 2:
+        return 0.0
+    seq = list(values)[-window:]
+    n = len(seq)
+    if n < 2:
+        return 0.0
+    mean = sum(seq) / n
+    denom = sum((x - mean) * (x - mean) for x in seq)
+    if denom <= 0:
+        return 0.0
+    num = sum((seq[i] - mean) * (seq[i + 1] - mean) for i in range(n - 1))
+    return max(-1.0, min(1.0, num / denom))
+
 
 def compute_features(ctx, book, trades, state: FeatureState) -> np.ndarray:
     """Return 9 standardized microstructure features as float32 vector.
@@ -65,7 +90,7 @@ def compute_features(ctx, book, trades, state: FeatureState) -> np.ndarray:
     ret = (mid - state.mids[-1]) / state.mids[-1] if state.mids else 0.0
 
     # Realized vol: rolling std of returns
-    realized_vol = np.std(list(state.returns)) if len(state.returns) > 1 else 0.0
+    realized_vol = _deque_std(state.returns)
 
     # Trade sign imbalance (N-sec): rolling signed vol / vol
     sign_imbalance = state.cum_signed_vol / state.cum_vol if state.cum_vol > 0 else 0.0
@@ -76,40 +101,14 @@ def compute_features(ctx, book, trades, state: FeatureState) -> np.ndarray:
     queue_delta = total_size - prev_total
 
     # Short-horizon autocorr (1-2s): compute returns autocorrelation
-    if len(state.returns) >= 10:
-        try:
-            from scipy.stats import pearsonr
-            # Autocorr of returns over last 10 ticks (2-3s crypto)
-            ret_arr = np.array(list(state.returns)[-10:])
-            if len(ret_arr) >= 4:
-                # 1-lag autocorrelation
-                autcorr = pearsonr(ret_arr[:-1], ret_arr[1:])[0]
-                autcorr = max(-1.0, min(1.0, autcorr)) if not np.isnan(autcorr) else 0.0
-            else:
-                autcorr = 0.0
-        except:
-            autcorr = 0.0
-    else:
-        autcorr = 0.0
+    autcorr = _autocorr(state.returns, window=10)
 
     # Volume-weighted delta: deviation from VWAP
     vwap_delta = (mid - state.vwap) / state.vwap if state.vwap > 0 else 0.0
 
     # Queue dynamics clustering: detect aggressive queue movements
     vol_cluster = 0.0
-    if len(state.queue_deltas) >= 5:
-        # Detect if this tick has unusually large queue delta
-        recent_qd = np.array(list(state.queue_deltas)[-10:])
-        if len(recent_qd) > 1:
-            qd_std = np.std(recent_qd)
-            if qd_std > 0:
-                vol_cluster = (queue_delta - np.mean(recent_qd)) / qd_std
-
-    # Order-book momentum: trend in imbalance
     imbalance_momentum = 0.0
-    if len(state.imbalances) >= 3:
-        imb_arr = np.array(list(state.imbalances)[-3:])
-        imbalance_momentum = np.polyfit([0,1,2], imb_arr, 1)[0] if len(np.unique(imb_arr)) > 1 else 0.0
 
     raw_feats = np.array([
         mid,
@@ -142,21 +141,7 @@ def compute_features(ctx, book, trades, state: FeatureState) -> np.ndarray:
     state.last_ask_size = ask_size
     state.last_ts_ns = book.ts_ns
 
-    # Rolling standardization per feature using its own window
-    feats = np.zeros(11, dtype=np.float32)
-    feature_deques = [state.mids, state.spreads_bp, state.imbalances, state.micros,
-                      state.returns, state.returns, state.queue_deltas, state.autcorr_lags,
-                      state.vwap_devs, state.vol_clusters, state.imb_momentum]
-    for i in range(11):
-        w_vals = list(feature_deques[i])
-        if len(w_vals) > 1:
-            mean_ = np.mean(w_vals)
-            std_ = np.std(w_vals) + 1e-10
-            feats[i] = (raw_feats[i] - mean_) / std_
-        else:
-            feats[i] = raw_feats[i] / 1e4  # Normalize if no history
-
-    return feats
+    return raw_feats[:9].astype(np.float32, copy=False)
 
 
 class MacroMicroFeatures:

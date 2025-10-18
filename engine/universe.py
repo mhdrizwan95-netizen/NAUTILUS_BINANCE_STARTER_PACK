@@ -37,10 +37,16 @@ def configured_universe() -> List[str]:
 
 async def last_prices() -> Dict[str, float]:
     """Fetch last prices for all configured symbols (router's exchange client)."""
-    from .app import router as order_router  # import here to avoid circular import
+    from .app import _price_map  # Global mark price map for bulk fetch
     out: Dict[str, float] = {}
     for s in configured_universe():
+        symbol = s.replace("USDT", "")
+        if symbol in _price_map:
+            out[s] = _price_map[symbol]
+            continue
+        # Fallback to per-symbol fetch
         try:
+            from .app import router as order_router
             out[s] = await order_router.get_last_price(f"{s}.BINANCE")
         except Exception:
             # best-effort; leave missing if not available

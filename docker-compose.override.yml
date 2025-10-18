@@ -7,3 +7,15 @@ services:
       timeout: 3s
       retries: 10
       start_period: 10s
+
+  executor:
+    environment:
+      # Override with gentler pacing to prevent request storms
+      - EXEC_INTERVAL_SEC=10
+      - EXEC_JITTER=0.35
+      - PROBE_COOLDOWN_SEC=15
+      - MAX_PARALLEL_ORDERS=1
+      - MAX_ORDERS_PER_MIN=6
+      - RETRY_BASE_MS=500
+      - RETRY_BACKOFF=2.0
+      - RETRY_MAX_SEC=20

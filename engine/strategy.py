@@ -119,8 +119,10 @@ def _latest_price(symbol: str) -> Optional[float]:
         import httpx
         from .config import get_settings
         clean = symbol.split(".")[0]
-        base = get_settings().base_url.rstrip("/")
-        r = httpx.get(f"{base}/api/v3/ticker/price", params={"symbol": clean}, timeout=5.0)
+        s = get_settings()
+        base = s.base_url.rstrip("/")
+        path = "/fapi/v1/ticker/price" if getattr(s, "is_futures", False) else "/api/v3/ticker/price"
+        r = httpx.get(f"{base}{path}", params={"symbol": clean}, timeout=5.0)
         r.raise_for_status()
         return float(r.json().get("price"))
     except Exception:

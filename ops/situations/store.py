@@ -22,7 +22,8 @@ SITUATION_PRIORITY = Gauge(
 
 class SituationStore:
     def __init__(self, path: Optional[Path] = None) -> None:
-        data_dir = Path(os.getenv("OPS_DATA_DIR", "/app/data"))
+        env_dir = os.getenv("OPS_DATA_DIR")
+        data_dir = Path(env_dir).expanduser() if env_dir else Path.cwd() / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         self._path = path or (data_dir / "situations.json")
         self._items: Dict[str, Situation] = {}
@@ -83,4 +84,3 @@ class SituationStore:
             SITUATION_PRIORITY.labels(name=name).set(float(s2.priority))
         await self.save()
         return s2
-

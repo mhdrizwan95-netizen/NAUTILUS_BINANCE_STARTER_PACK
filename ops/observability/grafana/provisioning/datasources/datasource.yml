@@ -1,7 +1,7 @@
 apiVersion: 1
 datasources:
   - name: Prometheus (stack)
-    uid: prom_stack
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://hmm_prometheus:9090

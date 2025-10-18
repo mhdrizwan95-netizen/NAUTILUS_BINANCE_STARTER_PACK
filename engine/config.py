@@ -12,40 +12,74 @@ class Settings:
     """Runtime configuration for the engine service."""
 
     def __init__(self) -> None:
-        mode = os.getenv("BINANCE_MODE", "demo").lower()
-        self.mode = mode
-        self.is_futures = mode.startswith("futures")
+        venue = os.getenv("VENUE", "BINANCE").upper()
+        self.venue = venue
 
-        # Prefer explicit demo/testnet credentials if provided
-        demo_key = os.getenv("DEMO_API_KEY") or os.getenv("DEMO_API_KEY_SPOT")
-        demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv("DEMO_API_SECRET_SPOT")
+        # Initialize defaults for attributes that are populated conditionally.
+        self.spot_base = ""
+        self.futures_base = ""
+        self.api_key = ""
+        self.api_secret = ""
+        self.base_url = ""
+        self.mode = ""
+        self.is_futures = False
 
-        live_key = os.getenv("BINANCE_API_KEY", "")
-        live_secret = os.getenv("BINANCE_API_SECRET", "")
-
-        # Treat 'testnet' and 'paper' as demo aliases
-        if self.is_futures:
-            # Futures bases
-            if mode in {"futures_testnet", "futures_paper", "futures-demo"}:
-                self.api_key = demo_key or live_key
-                self.api_secret = demo_secret or live_secret
-                self.base_url = os.getenv("BINANCE_FUTURES_BASE", os.getenv("DEMO_USDM_BASE", "https://testnet.binancefuture.com"))
-            else:
-                self.api_key = live_key
-                self.api_secret = live_secret
-                self.base_url = os.getenv("BINANCE_FUTURES_BASE", "https://fapi.binance.com")
+        if venue == "IBKR":
+            # IBKR-specific configuration
+            self.mode = "ibkr"
+            self.is_futures = False  # IBKR doesn't use futures concept like Binance
+            self.api_key = os.getenv("IBKR_USERNAME", "")
+            self.api_secret = os.getenv("IBKR_PASSWORD", "")
+            host = os.getenv("IBKR_HOST", "127.0.0.1")
+            port = os.getenv("IBKR_PORT", "7497")
+            self.base_url = f"{host}:{port}"
         else:
-            if mode in {"demo", "testnet", "paper"}:
-                self.api_key = demo_key or live_key
-                self.api_secret = demo_secret or live_secret
-                self.base_url = os.getenv("DEMO_SPOT_BASE", os.getenv("BINANCE_SPOT_BASE", "https://testnet.binance.vision"))
-            else:
-                self.api_key = live_key
-                self.api_secret = live_secret
-                self.base_url = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
+            # Binance-specific configuration
+            mode = os.getenv("BINANCE_MODE", "demo").lower()
+            self.mode = mode
+            self.is_futures = mode.startswith("futures")
 
-        if not self.api_key or not self.api_secret:
-            raise RuntimeError("Binance API credentials are not set for engine service.")
+            # Set both base URLs explicitly
+            self.spot_base = os.getenv("BINANCE_SPOT_BASE", os.getenv("DEMO_SPOT_BASE", "https://testnet.binance.vision"))
+            self.futures_base = os.getenv("BINANCE_FUTURES_BASE", os.getenv("DEMO_USDM_BASE", "https://testnet.binancefuture.com"))
+
+            # Prefer explicit demo/testnet credentials if provided
+            demo_key = os.getenv("DEMO_API_KEY") or os.getenv("DEMO_API_KEY_SPOT")
+            demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv("DEMO_API_SECRET_SPOT")
+
+            live_key = os.getenv("BINANCE_API_KEY", "")
+            live_secret = os.getenv("BINANCE_API_SECRET", "")
+
+            # Set credentials based on mode, keeping existing logic but with separate base URL selection
+            if self.is_futures:
+                if mode in {"futures_testnet", "futures_paper", "futures-demo"}:
+                    self.api_key = demo_key or live_key
+                    self.api_secret = demo_secret or live_secret
+                    self.base_url = self.futures_base
+                else:
+                    self.api_key = live_key
+                    self.api_secret = live_secret
+                    self.base_url = os.getenv("BINANCE_FUTURES_BASE", "https://fapi.binance.com")
+            else:
+                if mode in {"demo", "testnet", "paper"}:
+                    self.api_key = demo_key or live_key
+                    self.api_secret = demo_secret or live_secret
+                    self.base_url = self.spot_base
+                else:
+                    self.api_key = live_key
+                    self.api_secret = live_secret
+                    self.base_url = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
+
+            # Only require credentials for Binance venue
+            if not self.api_key or not self.api_secret:
+                # Allow missing credentials in test/demo environments; callers should
+                # ensure TRADING_ENABLED is false when running without real keys.
+                self.api_key = self.api_key or ""
+                self.api_secret = self.api_secret or ""
+
+            # Validate futures base URL if in futures mode
+            if self.is_futures and not self.futures_base:
+                raise RuntimeError(f"BINANCE_FUTURES_BASE must be set for futures mode, got: {self.futures_base}")
 
         self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
         self.timeout = float(os.getenv("BINANCE_API_TIMEOUT", "10"))
@@ -53,6 +87,11 @@ class Settings:
         self.allowed_symbols = _split_symbols(os.getenv("TRADE_SYMBOLS", "BTCUSDT.BINANCE"))
         self.min_notional = float(os.getenv("MIN_NOTIONAL_USDT", "10"))
         self.max_notional = float(os.getenv("MAX_NOTIONAL_USDT", "10000"))
+
+    @property
+    def api_base(self):
+        """Dynamically select appropriate base URL based on mode."""
+        return self.base_url
 
 
 def _split_symbols(value: str) -> list[str]:
@@ -107,16 +146,19 @@ class RiskConfig:
 
 
 def load_risk_config() -> RiskConfig:
+    settings = get_settings()
     TRADE_SYMBOLS_ENV = os.getenv("TRADE_SYMBOLS", "").strip()
     if TRADE_SYMBOLS_ENV.strip() == "*" or TRADE_SYMBOLS_ENV.lower().strip() == "all":
         # Set to None for dynamic loading in the app startup
         trade_symbols = None
     else:
         trade_symbols = [s.strip() for s in TRADE_SYMBOLS_ENV.split(",") if s.strip()] or None
-
+    # Futures venues typically have higher min notional (e.g., 100 USDT on testnet).
+    # If MIN_NOTIONAL_USDT not explicitly set, choose a sensible per-mode default.
+    default_min_notional = 100.0 if getattr(settings, "is_futures", False) else 5.0
     return RiskConfig(
         trading_enabled=_as_bool(os.getenv("TRADING_ENABLED"), True),
-        min_notional_usdt=_as_float(os.getenv("MIN_NOTIONAL_USDT"), 5.0),
+        min_notional_usdt=_as_float(os.getenv("MIN_NOTIONAL_USDT"), default_min_notional),
         max_notional_usdt=_as_float(os.getenv("MAX_NOTIONAL_USDT"), 200.0),
         max_orders_per_min=_as_int(os.getenv("MAX_ORDERS_PER_MIN"), 30),
         trade_symbols=trade_symbols,

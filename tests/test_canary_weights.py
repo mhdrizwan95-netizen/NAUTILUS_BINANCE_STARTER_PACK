@@ -26,7 +26,7 @@ def sample_weights(tmp_path):
         },
         "min_trades_for_eval": 50,
         "min_live_hours": 6,
-        "max_canary_weight": 0.15
+        "max_canary_weight": 0.20
     }
 
     # Write to our actual weights file for testing

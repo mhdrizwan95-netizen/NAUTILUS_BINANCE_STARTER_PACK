@@ -1,5 +1,11 @@
 # strategies/hmm_policy/telemetry.py — M9 telemetry helpers (Prometheus-friendly)
+import time
+from collections import deque
+from typing import Callable, Deque, Iterable, Optional, TypeVar, overload
+
 from prometheus_client import CollectorRegistry, Counter, Gauge
+
+T = TypeVar("T")
 
 _registry = CollectorRegistry()
 guardrail_counter = Counter("guardrail_trigger_total", "Guardrail triggers", ["reason"], registry=_registry)
@@ -57,3 +63,56 @@ def inc_guardian_incident(incident_type: str):
     """Increment guardian incident counter."""
     try: m20_incidents_total.labels(type=str(incident_type)).inc()
     except Exception: pass
+
+
+class Telemetry:
+    """
+    Lightweight latency profiler used in tests to ensure feature extraction
+    remains performant. Keeps a rolling buffer of timings (in microseconds).
+    """
+
+    def __init__(self, *, window: int | None = 512) -> None:
+        self._window: Optional[int] = window
+        self._samples: Deque[float] = deque(maxlen=window or 0)
+
+    def record_us(self, duration_us: float) -> None:
+        """Record a measurement in microseconds."""
+        if duration_us >= 0:
+            self._samples.append(duration_us)
+
+    def time_call(self, fn: Callable[..., T], *args, **kwargs) -> T:
+        """Execute `fn` and record its execution time in microseconds."""
+        start = time.perf_counter()
+        result = fn(*args, **kwargs)
+        elapsed = (time.perf_counter() - start) * 1e6
+        self.record_us(elapsed)
+        return result
+
+    def samples(self) -> Iterable[float]:
+        """Return the collected samples."""
+        return tuple(self._samples)
+
+    def avg_timing_us(self) -> float:
+        """Average execution time in microseconds (0.0 when no samples)."""
+        if not self._samples:
+            return 0.0
+        return sum(self._samples) / len(self._samples)
+
+    def reset(self) -> None:
+        """Clear collected timings."""
+        self._samples.clear()
+
+
+__all__ = [
+    "Telemetry",
+    "emit_guardrail",
+    "set_state",
+    "set_pnl",
+    "set_drift",
+    "set_policy_confidence",
+    "set_order_fill_ratio",
+    "observe_venue_latency_ms",
+    "inc_scheduler_action",
+    "inc_guardian_incident",
+    "registry",
+]

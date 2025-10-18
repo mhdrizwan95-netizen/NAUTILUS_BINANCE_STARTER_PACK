@@ -25,6 +25,7 @@ POL_PATH = MODEL_DIR / "policy_v1.joblib"
 # M11: versioning + blue/green serving
 MODELS: Dict[str, dict] = {}  # tag -> {"hmm":..., "scaler":..., "policy":...}
 ACTIVE_TAG_PATH = MODEL_DIR / "active_tag.txt"
+ACTIVE_H2_TAG_PATH = MODEL_DIR / "active_h2_tag.txt"
 
 # M13: H2 hierarchical models
 H2_MODELS: Dict[str, dict] = {}  # tag -> {"macro": hmm, "micro": {macro_state:int -> hmm}, "scaler_macro":..., "scaler_micro":..., "policy":...}
@@ -66,6 +67,14 @@ def _set_active_tag(tag: str):
     if tag not in MODELS:
         _load_tag(tag)
     ACTIVE_TAG_PATH.write_text(tag)
+
+
+def _active_h2_tag() -> Optional[str]:
+    return ACTIVE_H2_TAG_PATH.read_text().strip() if ACTIVE_H2_TAG_PATH.exists() else None
+
+
+def _set_active_h2_tag(tag: str):
+    ACTIVE_H2_TAG_PATH.write_text(tag)
 
 app = FastAPI()
 hmm: Optional[GaussianHMM] = None
@@ -190,6 +199,25 @@ def _h2_tag_paths(tag: str):
         "scalermicro": base.with_suffix(".scalermicro.joblib"),
         "policy": base.with_suffix(".policy.joblib"),
     }
+
+
+def _stabilize_transitions(hmm: GaussianHMM) -> None:
+    """Ensure transition/start probabilities form valid distributions."""
+    tm = hmm.transmat_.copy()
+    n = hmm.n_components
+    for i in range(n):
+        total = float(tm[i].sum())
+        if total <= 0:
+            tm[i] = np.full(n, 1.0 / n, dtype=tm.dtype)
+        else:
+            tm[i] = tm[i] / total
+    hmm.transmat_ = tm
+    start = hmm.startprob_
+    total = start.sum()
+    if total <= 0:
+        hmm.startprob_ = np.full_like(start, 1.0 / hmm.n_components)
+    else:
+        hmm.startprob_ = start / total
 
 # ---------- Lifecyle ----------
 
@@ -331,7 +359,7 @@ def partial_fit(req: PartialFitRequest):
 
 @app.post("/infer", response_model=InferResponse)
 def infer(req: InferRequest):
-    tag = req.tag or _active_tag()
+    tag = req.tag or _active_h2_tag()
     if tag is None or tag not in MODELS:
         # fallback to legacy singletons if present
         use = {"hmm": hmm, "scaler": scaler, "policy": policy}
@@ -364,6 +392,7 @@ def train_h2(req: H2TrainRequest):
     scaler_macro = StandardScaler().fit(X_macro)
     X_macro_s = scaler_macro.transform(X_macro)
     macro_hmm = GaussianHMM(n_components=req.n_macro, covariance_type="diag", n_iter=200).fit(X_macro_s)
+    _stabilize_transitions(macro_hmm)
 
     # Micro HMMs per macro
     scaler_micro = StandardScaler()
@@ -377,7 +406,9 @@ def train_h2(req: H2TrainRequest):
     micro_by_macro = {}
     for m_state, seq in req.micro_sequences_by_macro.items():
         X_m = scaler_micro.transform(np.asarray(seq, dtype=np.float32))
-        micro_by_macro[m_state] = GaussianHMM(n_components=req.n_micro, covariance_type="diag", n_iter=200).fit(X_m)
+        hmm_m = GaussianHMM(n_components=req.n_micro, covariance_type="diag", n_iter=200).fit(X_m)
+        _stabilize_transitions(hmm_m)
+        micro_by_macro[m_state] = hmm_m
 
     # Optional policy head on (macro_state, micro_state, micro_feats)
     policy = None
@@ -400,9 +431,8 @@ def train_h2(req: H2TrainRequest):
     dump(scaler_macro, base.with_suffix(".scalermacro.joblib"))
     dump(scaler_micro, base.with_suffix(".scalermicro.joblib"))
     if policy: dump(policy, base.with_suffix(".policy.joblib"))
-    # set active if none
-    if _active_tag() is None:
-        _set_active_tag(tag)
+    if _active_h2_tag() is None:
+        _set_active_h2_tag(tag)
     return {"ok": True, "tag": tag, "n_macro": req.n_macro, "n_micro": req.n_micro}
 
 def _try_load_h2(tag: str):

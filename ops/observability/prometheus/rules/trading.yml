@@ -18,6 +18,42 @@ groups:
       - record: trading:unrealized_total_by_symbol
         expr: sum(pnl_unrealized_symbol{job=~"engine_.*"})
 
+  - name: trading-guardrails
+    interval: 15s
+    rules:
+      - record: trading:req_5xx_rate
+        expr: sum by (job)(increase(http_requests_total{code=~"5.."}[2m]))
+
+      - record: trading:executor_error_rate
+        expr: increase(executor_ping_errors_total[2m])
+
+      - alert: EngineFiveXXBurst
+        expr: trading:req_5xx_rate > 5
+        for: 2m
+        labels: {severity: page}
+        annotations:
+          summary: "Engine 5xx burst"
+          description: "Engine returned >5 5xx in last 2m (job={{ $labels.job }})"
+
+      - alert: ExecutorStormRisk
+        expr: trading:executor_error_rate > 10
+        for: 2m
+        labels: {severity: warn}
+        annotations:
+          summary: "Executor storm risk"
+          description: "Executor ping errors >10 in 2m; consider backing off loop."
+
+      - alert: SnapshotStale
+        expr: (time() - max(mark_time_epoch{job=~"engine_.*"})) > 90
+        for: 2m
+        labels: {severity: warn}
+        annotations:
+          summary: "Mark-to-market stale"
+          description: "No fresh mark for >90s."
+
+      - record: trading:ghost_fills_delta
+        expr: increase(orders_filled_total[5m]) - increase(venue_trades_total[5m])
+
   - name: trading_alerts
     interval: 30s
     rules:
@@ -83,6 +119,33 @@ groups:
         annotations:
           summary: Observed slippage p50 high
           description: Median observed slippage > 20 bps over 15m.
+
+      - alert: ExporterHeartbeatStale
+        expr: time() - metrics_heartbeat{role="exporter"} > 30
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Exporter heartbeat stale
+          description: Exporter has not updated metrics_heartbeat for >30s
+
+      - alert: TraderSilent
+        expr: rate(orders_submitted_total{role="trader"}[10m]) == 0
+        for: 20m
+        labels:
+          severity: warning
+        annotations:
+          summary: No orders submitted in 20m
+          description: Trader has not submitted any orders in the last 20 minutes
+
+      - alert: EquityResidualNonZero
+        expr: abs(equity_usd{role="exporter"}-(cash_usd{role="exporter"}+market_value_usd{role="exporter"})) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Equity accounting residual non-zero
+          description: equity_usd != cash_usd + market_value_usd by more than $1 for >5m
 
       # Equity consistency deviation > $1
       - alert: EquityConsistencyDeltaHigh

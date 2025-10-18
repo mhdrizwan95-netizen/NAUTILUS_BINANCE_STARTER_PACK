@@ -73,6 +73,15 @@ async def _fetch_snapshot(client: httpx.AsyncClient, base_url: str) -> dict:
 def _sumf(values):
     return float(sum(float(v or 0.0) for v in values))
 
+
+async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
+    """
+    Backwards-compatible helper that mirrors the PnL collector's signature.
+    Delegates to `_fetch_snapshot` so existing code/tests can reuse
+    the same import without duplicating logic.
+    """
+    return await _fetch_snapshot(client, base_url)
+
 async def portfolio_collector_loop(interval_sec: int = 10):
     """
     Aggregates equity/cash across all engines and computes:

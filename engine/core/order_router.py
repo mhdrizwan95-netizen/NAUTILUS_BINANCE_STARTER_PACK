@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 import httpx
 
 from engine.config import get_settings, load_fee_config, load_ibkr_fee_config, ibkr_min_notional_usd
@@ -23,6 +23,22 @@ def exchange_client(venue: str = "BINANCE"):
     return _CLIENTS.get(venue)
 
 
+def place_market_order(*, symbol: str, side: str, quote: float | None, quantity: float | None) -> dict[str, Any]:
+    """Legacy module-level helper retained for tests/CLI scripts."""
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        return loop.run_until_complete(place_market_order_async(symbol=symbol, side=side, quote=quote, quantity=quantity))
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+async def place_market_order_async(*, symbol: str, side: str, quote: float | None, quantity: float | None) -> dict[str, Any]:
+    return await _place_market_order_async_core(symbol, side, quote, quantity, None)
+
+
 class OrderRouter:
     """Handles order validation and routing across multiple venues."""
 
@@ -42,7 +58,10 @@ class OrderRouter:
                 account = await _CLIENTS["BINANCE"].account_snapshot()
                 # Spot balances
                 balances = account.get("balances", [])
+                futures_positions = account.get("positions", [])
+
                 if balances:
+                    # Spot path: set cash/equity from USDT balance
                     for bal in balances:
                         asset = bal.get("asset")
                         free = float(bal.get("free", 0.0))
@@ -53,7 +72,7 @@ class OrderRouter:
                             self._portfolio.state.equity = total
                     self._balances = balances
                 else:
-                    # Futures: totalWalletBalance in USDT (USD-M)
+                    # Futures path: use totalWalletBalance and import open positions
                     try:
                         usdt = float(account.get("totalWalletBalance", 0.0))
                         if usdt:
@@ -61,7 +80,13 @@ class OrderRouter:
                             self._portfolio.state.equity = usdt
                     except Exception:
                         pass
-                    self._positions = account.get("positions", [])
+                    self._positions = futures_positions
+                    # Import non-zero positions into internal portfolio for mark-to-market
+                    try:
+                        self._import_futures_positions(futures_positions)
+                    except Exception:
+                        pass
+
                 self._last_snapshot = account
                 self.snapshot_loaded = True
         except Exception as e:
@@ -168,6 +193,7 @@ class OrderRouter:
             loop.close()
 
     async def _place_market_order_async(self, *, symbol: str, side: str, quote: float | None, quantity: float | None) -> dict[str, Any]:
+        return await _place_market_order_async_core(symbol, side, quote, quantity, self._portfolio)
         # Decide venue
         venue = symbol.split(".")[1] if "." in symbol else None
         base = symbol.split(".")[0].upper()
@@ -227,74 +253,6 @@ class OrderRouter:
             raise ValueError(f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}")
 
         # Submit
-        if venue == "IBKR":
-            # IBKR requires quantity; ignore quote
-            t0 = time.time()
-            res = client.place_market_order(symbol=symbol, side=side, quantity=int(quantity))
-            t1 = time.time()
-            try:
-                REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-            except Exception:
-                pass
-            fill_notional = abs(res.get("filled_qty_base", quantity)) * float(res.get("avg_fill_price", px))
-            fee_cfg = load_ibkr_fee_config()
-            if fee_cfg.mode == "per_share":
-                fee = max(fee_cfg.min_trade_fee_usd, abs(int(quantity)) * fee_cfg.per_share_usd)
-            else:
-                fee = (fee_cfg.bps / 10_000.0) * fill_notional
-        else:
-            # Binance path (direct async client)
-            clean_symbol = base
-            if quote is not None and (quantity is None or quantity == 0):
-                submit = getattr(client, "submit_market_quote", None)
-                if submit is None:
-                    raise ValueError("CLIENT_MISSING_METHOD: submit_market_quote")
-                t0 = time.time()
-                res = await submit(symbol=clean_symbol, side=side, quote=quote)
-                t1 = time.time()
-            else:
-                submit = getattr(client, "submit_market_order", None)
-                if submit is None:
-                    raise ValueError("CLIENT_MISSING_METHOD: submit_market_order")
-                t0 = time.time()
-                res = await submit(symbol=clean_symbol, side=side, quantity=float(quantity))
-                t1 = time.time()
-
-            try:
-                REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-            except Exception:
-                pass
-
-            fee_bps = load_fee_config(venue).taker_bps
-            filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or quantity)
-            avg_price = float(res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", px))
-            fill_notional = abs(filled_qty) * avg_price
-            fee = (fee_bps / 10_000.0) * fill_notional
-            res.setdefault("filled_qty_base", filled_qty)
-            res.setdefault("avg_fill_price", avg_price)
-            res["taker_bps"] = fee_bps
-
-        # Apply fill to local portfolio immediately for responsive dashboards
-        try:
-            # Determine fill details across venues
-            if venue == "IBKR":
-                filled_qty_ibkr = float(res.get("filled_qty_base") or quantity or 0.0)
-                avg_px_ibkr = float(res.get("avg_fill_price") or px)
-                self._portfolio.apply_fill(base, side, abs(filled_qty_ibkr), avg_px_ibkr, float(fee))
-            else:
-                self._portfolio.apply_fill(base, side, abs(float(res.get("filled_qty_base") or filled_qty)), float(res.get("avg_fill_price") or avg_price), float(fee))
-            st = self._portfolio.state
-            update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-        except Exception:
-            # Non-fatal; reconciliation will catch up later
-            pass
-
-        REGISTRY["fees_paid_total"].inc(fee)
-        res["fee_usd"] = float(fee)
-        res["rounded_qty"] = float(quantity)
-        res["venue"] = venue
-        return res
-
     async def market_quantity(self, symbol: str, side: Side, quantity: float) -> dict[str, Any]:
         """Backwards compatibility for existing code"""
         # For now, assume Binance if not specified
@@ -374,10 +332,136 @@ def _normalize_symbol(symbol: str) -> str:
     return symbol.replace(".BINANCE", "").upper()
 
 
+async def _place_market_order_async_core(symbol: str, side: str, quote: float | None, quantity: float | None, portfolio: Optional[Portfolio]) -> dict[str, Any]:
+    # Decide venue
+    venue = symbol.split(".")[1] if "." in symbol else None
+    base = symbol.split(".")[0].upper()
+
+    if venue is None:
+        default_venue = "BINANCE" if base.endswith("USDT") else "IBKR"
+        symbol = f"{base}.{default_venue}"
+        venue = default_venue
+
+    client = _CLIENTS.get(venue)
+    if client is None:
+        raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
+
+    px = await _resolve_last_price(client, venue, base, symbol)
+    if px is None or px <= 0:
+        raise ValueError(f"NO_PRICE: No last price for {symbol}")
+
+    spec: SymbolSpec | None = (SPECS.get(venue) or {}).get(base)
+    if venue == "IBKR" and spec is None:
+        spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
+    elif venue == "BINANCE" and spec is None:
+        spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
+
+    if spec is None:
+        raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
+
+    # Quote→qty or direct qty; IBKR requires integer shares
+    did_round = False
+    if quote is not None and (quantity is None or quantity == 0):
+        raw_qty = float(quote) / float(px)
+        quantity = _round_step(raw_qty, spec.step_size)
+        did_round = (quantity != raw_qty)
+    elif quantity is not None:
+        quantity = _round_step(float(quantity), spec.step_size)
+        did_round = True
+
+    if did_round:
+        REGISTRY["orders_rounded_total"].inc()
+
+    if quantity is None or abs(quantity) < spec.min_qty:
+        orders_rejected.inc()
+        raise ValueError(f"QTY_TOO_SMALL: Rounded qty {quantity} < min_qty {spec.min_qty}")
+
+    quantity_val = float(quantity)
+    notional = abs(quantity_val) * float(px)
+    min_notional = spec.min_notional
+    if venue == "IBKR":
+        min_notional = max(min_notional, ibkr_min_notional_usd())
+
+    if notional < min_notional:
+        orders_rejected.inc()
+        raise ValueError(f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}")
+
+    if venue == "IBKR":
+        t0 = time.time()
+        res = client.place_market_order(symbol=symbol, side=side, quantity=int(quantity))
+        t1 = time.time()
+        try:
+            REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
+        except Exception:
+            pass
+        fill_notional = abs(res.get("filled_qty_base", quantity)) * float(res.get("avg_fill_price", px))
+        fee_cfg = load_ibkr_fee_config()
+        if fee_cfg.mode == "per_share":
+            fee = max(fee_cfg.min_trade_fee_usd, abs(int(quantity)) * fee_cfg.per_share_usd)
+        else:
+            fee = (fee_cfg.bps / 10_000.0) * fill_notional
+    else:
+        clean_symbol = base
+        if quote is not None and (quantity is None or quantity == 0):
+            submit = getattr(client, "submit_market_quote", None)
+            if submit is None:
+                raise ValueError("CLIENT_MISSING_METHOD: submit_market_quote")
+            t0 = time.time()
+            res = await submit(symbol=clean_symbol, side=side, quote=quote)
+            t1 = time.time()
+        else:
+            submit = getattr(client, "submit_market_order", None)
+            if submit is None:
+                submit = getattr(client, "place_market_order", None)
+            if submit is None:
+                raise ValueError("CLIENT_MISSING_METHOD: submit_market_order")
+            t0 = time.time()
+            res = submit(symbol=clean_symbol, side=side, quantity=float(quantity))
+            if hasattr(res, "__await__"):
+                res = await res
+            t1 = time.time()
+
+        try:
+            REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
+        except Exception:
+            pass
+
+        fee_bps = load_fee_config(venue).taker_bps
+        filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or quantity)
+        avg_price = float(res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", px))
+        fill_notional = abs(filled_qty) * avg_price
+        fee = (fee_bps / 10_000.0) * fill_notional
+        res.setdefault("filled_qty_base", filled_qty)
+        res.setdefault("avg_fill_price", avg_price)
+        res["taker_bps"] = fee_bps
+
+    if portfolio is not None:
+        try:
+            if venue == "IBKR":
+                filled_qty_ibkr = float(res.get("filled_qty_base") or quantity or 0.0)
+                avg_px_ibkr = float(res.get("avg_fill_price") or px)
+                portfolio.apply_fill(base, side, abs(filled_qty_ibkr), avg_px_ibkr, float(fee))
+            else:
+                filled_qty_bin = float(res.get("filled_qty_base") or quantity or 0.0)
+                avg_px_bin = float(res.get("avg_fill_price") or px)
+                portfolio.apply_fill(base, side, abs(filled_qty_bin), avg_px_bin, float(fee))
+            st = portfolio.state
+            update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
+        except Exception:
+            pass
+
+    REGISTRY["fees_paid_total"].inc(fee)
+    res["fee_usd"] = float(fee)
+    res["rounded_qty"] = round(float(quantity), 8)
+    res["venue"] = venue
+    return res
+
+
 def _round_step(value: float, step: float) -> float:
-    precision = int(abs(math.log10(step))) if step < 1 else 0
+    if step <= 0:
+        return value
     factor = 1 / step
-    return math.floor(value * factor) / factor if factor != 0 else round(value, precision)
+    return round(value * factor) / factor
 
 
 async def _resolve_last_price(client, venue: str, base: str, symbol: str) -> float | None:
@@ -408,6 +492,42 @@ def _round_tick(value: float, tick: float) -> float:
 
 
 class OrderRouterExt(OrderRouter):
+    def _import_futures_positions(self, positions: list[dict] | None) -> None:
+        """Populate internal portfolio from Binance futures positions.
+
+        Expects entries with keys: symbol, positionAmt, entryPrice.
+        """
+        if not positions:
+            return
+        # Clear existing positions before import
+        try:
+            self._portfolio.state.positions.clear()
+        except Exception:
+            pass
+        for p in positions:
+            try:
+                amt = float(p.get("positionAmt", 0.0) or 0.0)
+                if abs(amt) <= 0.0:
+                    continue
+                sym = str(p.get("symbol", "")).upper()
+                entry = float(p.get("entryPrice", 0.0) or 0.0)
+                pos = self._portfolio.state.positions.setdefault(sym, self._portfolio.state.positions.get(sym))
+                if pos is None:
+                    from engine.core.portfolio import Position as _Position
+                    pos = _Position(symbol=sym)
+                    self._portfolio.state.positions[sym] = pos
+                pos.quantity = amt  # signed
+                pos.avg_price = entry
+                # last_price updated via /portfolio marks; upl recomputed there
+            except Exception:
+                continue
+        # After import, recalc exposure/equity; last prices will be updated on /portfolio
+        try:
+            from engine.core.portfolio import Portfolio as _Port
+            # trigger recalc with current last prices (may be zero)
+            self._portfolio._recalculate()  # type: ignore[attr-defined]
+        except Exception:
+            pass
     async def fetch_account_snapshot(self) -> dict:
         """
         Fetch a fresh snapshot from the venue and update local cache.
@@ -418,14 +538,13 @@ class OrderRouterExt(OrderRouter):
         balances = account.get("balances", []) if isinstance(account, dict) else []
         positions = account.get("positions", []) if isinstance(account, dict) else []
 
-        # Only overwrite cache if we actually received balances
+        # Spot path: if balances present, update cash/equity from USDT
         if balances:
             self._balances = balances
             self._positions = positions
             self._last_snapshot = account
             self.snapshot_loaded = True
 
-            # Update portfolio cash/equity from USDT balance if present
             try:
                 usdt = 0.0
                 for bal in balances:
@@ -435,19 +554,25 @@ class OrderRouterExt(OrderRouter):
                 if usdt > 0:
                     self._portfolio.state.cash = usdt
                     self._portfolio.state.equity = usdt
-                    # Push to gauges immediately for dashboards
                     from engine.metrics import update_portfolio_gauges
                     s = self._portfolio.state
                     update_portfolio_gauges(s.cash, s.realized, s.unrealized, s.exposure)
             except Exception:
                 pass
         else:
+            # Futures path: use totalWalletBalance and import open positions
+            self._positions = positions
+            self._last_snapshot = account
+            self.snapshot_loaded = True
             try:
-                # Record reason for observability in /health
-                self.last_snapshot_error = {
-                    "reason": "empty_or_throttled",
-                    "got_keys": list(account.keys()) if isinstance(account, dict) else None,
-                }
+                usdt = float(account.get("totalWalletBalance", 0.0))
+                if usdt > 0:
+                    self._portfolio.state.cash = usdt
+                    self._portfolio.state.equity = usdt
+            except Exception:
+                pass
+            try:
+                self._import_futures_positions(positions)
             except Exception:
                 pass
         return self._last_snapshot or {"balances": [], "positions": []}

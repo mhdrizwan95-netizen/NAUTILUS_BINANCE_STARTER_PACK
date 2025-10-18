@@ -91,6 +91,29 @@ def health():
     return {"ok": True}
 
 
+@APP.get("/candidates")
+def candidates(limit: int = 20):
+    """
+    Return candidate symbols for trading. Currently uses universe or fallbacks.
+    Future: integrate scoring to return top candidates based on alpha signals.
+    """
+    # Try to get universe
+    uni = get_universe()
+    symbols = list(uni.keys()) if uni else []
+
+    # Fallback to basic universe if universe service is down
+    if not symbols:
+        symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT",
+                  "LINKUSDT", "XRPUSDT", "LTCUSDT", "BCHUSDT", "ETCUSDT"]
+
+    # Limit to requested amount
+    symbols = symbols[:limit] if limit > 0 else symbols
+
+    # For now, return simple list of symbols
+    # TODO: In future, rank by alpha scores from scan results
+    return symbols
+
+
 @APP.get("/metrics")
 def metrics():
     payload = generate_latest(REG)
