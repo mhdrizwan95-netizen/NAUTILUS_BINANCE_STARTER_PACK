@@ -14,14 +14,36 @@ env/
 venv/
 
 # Node, misc
+frontend/
 node_modules/
+
+# Large datasets & archives
+backtests/
+docs/
+notebooks/
+reports/
+NAUTILUS_BINANCE_STARTER_PACK/
+
+# Model artifacts
+ml_service/model_store/
+**/*.joblib
+**/*.pt
+**/*.onnx
+**/*.h5
 
 # Local artifacts & caches
 **/.pytest_cache/
 **/.mypy_cache/
 **/.ruff_cache/
 .DS_Store
+*.log
+.ipynb_checkpoints/
 
 # Data generated at runtime stays on a volume
 data/
 backup_legacy/
+ml_service/model_store/
+**/*.joblib
+**/*.pt
+**/*.onnx
+**/*.h5

@@ -2,3 +2,15 @@
 
 # Environment configuration files (contain API keys)
 ops/env.*
+
+# Model artifacts (large, generated)
+ml_service/model_store/
+**/*.joblib
+**/*.pt
+**/*.onnx
+**/*.h5
+ml_service/model_store/
+**/*.joblib
+**/*.pt
+**/*.onnx
+**/*.h5
