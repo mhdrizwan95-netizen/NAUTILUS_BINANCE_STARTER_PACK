@@ -5,14 +5,6 @@ from typing import Dict, List, Tuple
 import httpx
 from dataclasses import dataclass, asdict
 
-# Optional bridge into ibkr_prices module (if running inside same process)
-try:
-    from ops import ibkr_prices  # exposes PRICE cache if present
-    _IBKR_PRICE_MAP = True
-except Exception:
-    ibkr_prices = None
-    _IBKR_PRICE_MAP = False
-
 @dataclass
 class Position:
     symbol: str          # "BTCUSDT.BINANCE" | "AAPL.IBKR"
@@ -60,12 +52,18 @@ def _price_from_port_pos(p: dict) -> float | None:
     return None
 
 def _maybe_fill_price_from_ibkr(symbol: str) -> float | None:
-    if not _IBKR_PRICE_MAP or not ibkr_prices:
-        return None
-    # ibkr_prices exports Prometheus Gauges, but we also keep a small cache map if desired
-    # We'll read direct from the Gauges via ._value.get()
+    import sys
+    module = sys.modules.get("ops.ibkr_prices")
+    if module is None:
+        try:
+            from importlib import import_module
+            module = import_module("ops.ibkr_prices")
+        except Exception:
+            return None
+
+    metrics = getattr(module, "PRICE_METRICS", {})
     base = symbol.split(".")[0].upper()
-    g = ibkr_prices.PRICE_METRICS.get(base)
+    g = metrics.get(base)
     if g is None:
         return None
     try:

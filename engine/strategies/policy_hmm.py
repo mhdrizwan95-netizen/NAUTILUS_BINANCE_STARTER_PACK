@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Dict, Deque, Optional, Tuple, List
 from ..config import load_strategy_config
 from ..core import order_router
+from .calibration import adjust_quote, adjust_confidence, cooldown_scale
 
 S = load_strategy_config()
 
@@ -37,7 +38,7 @@ def _vola(returns: List[float]) -> float:
 
 def _features(sym: str) -> Optional[List[float]]:
     P, V = _prices[sym], _vols[sym]
-    if len(P) < 10:  # need minimum data
+    if len(P) < 3:  # need minimum data
         return None
     rets = [0.0] + [ (P[i]-P[i-1])/P[i-1] for i in range(1, len(P)) ]
     vwap = _vwap(list(P), list(V) if len(V)==len(P) else [1.0]*len(P))
@@ -75,7 +76,8 @@ def decide(sym: str) -> Optional[Tuple[str, float, Dict]]:
     """Return (side, quote_usdt, meta) or None if no action."""
     # cooldown
     now = time.time()
-    if now - _last_signal_ts[sym] < S.cooldown_sec:
+    dynamic_cooldown = max(1.0, S.cooldown_sec * cooldown_scale(sym))
+    if now - _last_signal_ts[sym] < dynamic_cooldown:
         return None
 
     feats = _features(sym)
@@ -83,15 +85,18 @@ def decide(sym: str) -> Optional[Tuple[str, float, Dict]]:
         return None
 
     probs = model().predict_proba([feats])[0]  # e.g., [p_bull, p_bear, p_chop]
+    base_conf = float(max(probs))
+    adj_conf = adjust_confidence(sym, base_conf)
     # Map regimes → action
-    p_bull, p_bear, p_chop = probs[0], probs[1], probs[2] if len(probs)>=3 else (probs[0], probs[1], 0.0)
-    if max(probs) < 0.5:
+    p_bull, p_bear = probs[0], probs[1]
+    p_chop = probs[2] if len(probs) >= 3 else 0.0
+    if adj_conf < 0.5:
         return None  # low confidence
 
     # Get current market price for reference (used in meta, not required for decision)
     px = 0.0
 
-    quote = S.quote_usdt
+    quote = adjust_quote(sym, S.quote_usdt)
     # vol-scaled sizing (example): smaller size when vola high
     # Here kept simple; robust sizing can use realized vola bins
     if p_bull > p_bear and p_bull > p_chop:
@@ -102,5 +107,5 @@ def decide(sym: str) -> Optional[Tuple[str, float, Dict]]:
         return None
 
     _last_signal_ts[sym] = now
-    meta = {"exp":"hmm_v1","probs":probs,"mark":px}
+    meta = {"exp": "hmm_v1", "probs": probs, "mark": px, "conf": adj_conf, "cooldown": dynamic_cooldown}
     return side, float(quote), meta

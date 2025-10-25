@@ -52,4 +52,3 @@ class UniverseStore:
 
     def snapshot(self) -> Dict[str, dict]:
         return self.state
-

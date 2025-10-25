@@ -224,4 +224,3 @@ Guardrails & Risk Checks → Execution → Feedback Logging → Reinforcement
 The Autonomous Trading Framework represents a complete, modular, and ethically governed architecture for continuous, real-time algorithmic trading. It integrates cognition, coordination, communication, and compliance within a unified, self-sustaining system.
 
 By combining adaptive learning (M16), contextual regime detection (M17), coordinated risk control (M18), meta-scheduling (M19), resilience (M20), memory (M21), communication (M22), imagination (M23), collaboration (M24), and ethical governance (M25), the framework achieves a stable balance between autonomy and accountability.
-

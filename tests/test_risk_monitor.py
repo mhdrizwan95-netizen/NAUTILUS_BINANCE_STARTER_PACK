@@ -51,7 +51,7 @@ def test_risk_alerts_on_high_exposure():
     # Simulate the risk monitoring loop (one iteration)
     import asyncio
     async def test_monitor():
-        await ops_api._risk_monitoring_loop()
+        await ops_api._risk_monitoring_loop(run_once=True)
 
     asyncio.run(test_monitor())
 
@@ -93,7 +93,7 @@ def test_no_alert_on_safe_exposure():
     # Simulate the risk monitoring loop
     import asyncio
     async def test_monitor():
-        await ops_api._risk_monitoring_loop()
+        await ops_api._risk_monitoring_loop(run_once=True)
 
     asyncio.run(test_monitor())
 
@@ -116,7 +116,7 @@ def test_risk_monitor_handles_monitor_errors():
     # Simulate the risk monitoring loop - should not raise exception
     import asyncio
     async def test_monitor():
-        await ops_api._risk_monitoring_loop()
+        await ops_api._risk_monitoring_loop(run_once=True)
 
     # Should complete without errors (logged internally)
     asyncio.run(test_monitor())

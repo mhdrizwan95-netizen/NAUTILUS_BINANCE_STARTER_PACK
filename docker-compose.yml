@@ -50,7 +50,7 @@ services:
       - GOVERNANCE_POLICY=/app/engine/policies.yaml
       - BINANCE_MODE=${BINANCE_MODE}
       - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
-      - BINANCE_FUTURES_BASE=https://testnet.binancefuture.com
+      - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com}
       - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
@@ -64,6 +64,8 @@ services:
       - ./data:/app/data:rw
     ports:
       - "9103:8003"
+    networks:
+      - trading_net
     command: >
       /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
 
@@ -77,7 +79,7 @@ services:
       - GOVERNANCE_POLICY=/app/engine/policies.yaml
       - BINANCE_MODE=${BINANCE_MODE}
       - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
-      - BINANCE_FUTURES_BASE=https://testnet.binancefuture.com  # Explicitly set for futures
+      - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com}  # Explicitly set for futures
       - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
@@ -91,12 +93,79 @@ services:
       - ./data:/app/data:rw
     ports:
       - "8003:8003"
+    networks:
+      - trading_net
     command: >
       /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 1024
     healthcheck:
       # More lenient healthcheck to debug the timeout issue
       test: ["CMD", "sh", "-lc", "curl -fsS --max-time 10 http://localhost:8003/health >/dev/null"]
       interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  engine_kraken_exporter:
+    <<: *engine_common
+    container_name: hmm_engine_kraken_exporter
+    env_file: .env
+    environment:
+      - ROLE=exporter
+      - VENUE=KRAKEN
+      - TRADING_ENABLED=false
+      - GOVERNANCE_POLICY=/app/engine/policies.yaml
+      - KRAKEN_MODE=${KRAKEN_MODE:-testnet}
+      - KRAKEN_BASE_URL=${KRAKEN_BASE_URL:-https://demo-futures.kraken.com}
+      - KRAKEN_API_KEY=${KRAKEN_API_KEY}
+      - KRAKEN_API_SECRET=${KRAKEN_API_SECRET}
+      - KRAKEN_WS_URL=${KRAKEN_WS_URL:-wss://demo-futures.kraken.com/ws/v1}
+      - KRAKEN_API_TIMEOUT=${KRAKEN_API_TIMEOUT:-10}
+      - TRADE_SYMBOLS=${KRAKEN_TRADED_SYMBOLS:-PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN}
+      - QUOTE_CCY=USD
+      - ENGINE_PORT=8003
+    volumes:
+      - ./engine/state:/app/engine/state:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./data:/app/data:rw
+    ports:
+      - "9105:8003"
+    depends_on:
+      - engine_kraken
+    networks:
+      - trading_net
+    command: >
+      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
+
+  engine_kraken:
+    <<: *engine_common
+    container_name: hmm_engine_kraken
+    env_file: .env
+    environment:
+      - ROLE=trader
+      - VENUE=KRAKEN
+      - GOVERNANCE_POLICY=/app/engine/policies.yaml
+      - KRAKEN_MODE=${KRAKEN_MODE:-testnet}
+      - KRAKEN_BASE_URL=${KRAKEN_BASE_URL:-https://demo-futures.kraken.com}
+      - KRAKEN_API_KEY=${KRAKEN_API_KEY}
+      - KRAKEN_API_SECRET=${KRAKEN_API_SECRET}
+      - KRAKEN_WS_URL=${KRAKEN_WS_URL:-wss://demo-futures.kraken.com/ws/v1}
+      - KRAKEN_API_TIMEOUT=${KRAKEN_API_TIMEOUT:-10}
+      - TRADE_SYMBOLS=${KRAKEN_TRADED_SYMBOLS:-PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN}
+      - QUOTE_CCY=USD
+      - ENGINE_PORT=8003
+    volumes:
+      - ./engine/state:/app/engine/state:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./data:/app/data:rw
+    ports:
+      - "8006:8003"
+    networks:
+      - trading_net
+    command: >
+      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 512
+    healthcheck:
+      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 10 http://localhost:8003/health >/dev/null"]
+      interval: 15s
       timeout: 10s
       retries: 10
       start_period: 30s
@@ -125,6 +194,8 @@ services:
       - ./data:/app/data:rw
     ports:
       - "8005:8003"
+    networks:
+      - trading_net
     command: >
       /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
 
@@ -343,3 +414,8 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+
+networks:
+  trading_net:
+    external: true
+    name: nautilus_trading_network

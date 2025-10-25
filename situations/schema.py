@@ -20,4 +20,3 @@ class Situation(BaseModel):
     cooldown_sec: int = 600
     min_depth_usdt: float = 0.0
     priority: float = 0.5
-

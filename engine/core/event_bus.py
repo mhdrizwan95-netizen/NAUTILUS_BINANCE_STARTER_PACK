@@ -150,6 +150,30 @@ class EventBus:
             "running": self._running
         }
 
+    def fire(self, topic: str, data: Dict[str, Any]) -> None:
+        """Fire-and-forget publish for non-async contexts.
+
+        Schedules an async publish on the running loop. If no loop is
+        running (rare in tests), it falls back to a best-effort direct
+        call that will no-op when the bus isn't started.
+        """
+        async def _runner():
+            try:
+                await self.publish(topic, data)
+            except Exception as e:
+                logging.getLogger(__name__).warning("[BUS] fire error on %s: %s", topic, e)
+
+        try:
+            loop = asyncio.get_running_loop()
+            loop.create_task(_runner())
+        except RuntimeError:
+            # No running loop; invoke synchronously best-effort
+            try:
+                asyncio.run(_runner())
+            except RuntimeError:
+                # Nested loop not allowed; drop silently
+                pass
+
 
 # Global event bus instance - the central nervous system
 BUS = EventBus()

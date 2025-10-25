@@ -107,7 +107,8 @@ class CovarianceTracker:
 
     def is_ready(self) -> bool:
         """Check if tracker has sufficient data for reliable covariance estimates."""
-        return all(len(self.price_hist[s]) >= self.window // 3 for s in self.symbols)
+        minimum = max(3, min(5, self.window))
+        return all(len(self.price_hist[s]) >= minimum for s in self.symbols)
 
     def get_pairwise_correlation(self, symbol1: str, symbol2: str) -> float:
         """Get correlation coefficient between two specific symbols."""

@@ -200,9 +200,9 @@ State & Logs:
     data/processed/m19/metrics_snapshot.json (input KPIs)
 
 Final ops checklist
-	•	`docker compose ps` — confirm `hmm_engine_*` and `hmm_ops` are healthy.  
-	•	Ensure `./data` remains mounted for snapshots, lineage, and calibration artifacts.  
-	•	`curl http://localhost:8002/metrics` — verify Prometheus exposition for collectors.  
+	•	`docker compose ps` — confirm `hmm_engine_*` and `hmm_ops` are healthy.
+	•	Ensure `./data` remains mounted for snapshots, lineage, and calibration artifacts.
+	•	`curl http://localhost:8002/metrics` — verify Prometheus exposition for collectors.
 	•	If observability is enabled, check Grafana’s “HMM • Trading Overview” dashboard loads without scrape errors.
 
 ### Engine-Driven Order Flow (Current)

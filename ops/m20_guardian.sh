@@ -13,7 +13,7 @@ while true; do
   echo "$(date '+%Y-%m-%d %H:%M:%S') [M20] Health check starting..."
   python -c "
 import sys
-sys.path.insert(0, '.')  
+sys.path.insert(0, '.')
 import ops.m20_detector as detector
 import ops.m20_playbook as playbook
 

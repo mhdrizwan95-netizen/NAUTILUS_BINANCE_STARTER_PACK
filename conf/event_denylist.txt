@@ -1,0 +1,3 @@
+# Event Breakout denylist
+# One symbol per line (e.g., PEPEUSDT)
+# Lines starting with # are comments.

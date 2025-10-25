@@ -44,4 +44,3 @@ Common gotchas
 - Counter resets after restarts can cause negative deltas; all panels use `clamp_min` to avoid this, but very short windows can still look noisy.
 - If a metric isn’t exported by a venue (e.g., `ibkr_commission_usd_total`), the corresponding panel will be empty.
 - Ensure each engine exports with the correct `job` label: `engine_binance`, `engine_ibkr`.
-

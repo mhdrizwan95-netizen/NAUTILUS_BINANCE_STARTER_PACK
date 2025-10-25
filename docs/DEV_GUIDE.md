@@ -1,414 +1,141 @@
 # Developer Guide
 
+This guide explains how to bootstrap a development environment, run services locally, execute the test suite, and extend the Nautilus HMM stack safely.
+
 ## Environment
 
-- Python ≥ 3.10
-- FastAPI + HTTPX + Prometheus Client
-- Docker / Docker Compose
-- pytest + pytest-asyncio for tests
+| Requirement | Notes |
+|-------------|-------|
+| Python 3.10+ | The repo targets Python 3.10; create a virtualenv for tooling and unit tests. |
+| Docker & Docker Compose | Required for the full stack (`docker compose` v2 syntax). |
+| make | `Makefile` wraps common workflows; install GNU Make on macOS via Homebrew if needed. |
+| Optional: `ib_insync` | Needed only when developing the IBKR connector (`pip install ib-insync`). |
 
-Install:
+Install Python dependencies inside a virtualenv:
+
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip
 pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 
-## Branching Convention
+## Bootstrapping the stack
 
-Type	Prefix	Example
-Feature	feat/	feat/capital-allocator
-Fix	fix/	fix/risk-rails-validation
-Docs	docs/	docs/system-overview
-Refactor	ref/	ref/unify-logging
-Test	test/	test/add-canary-validation
+1. Copy the environment template and tweak credentials/risk knobs.
+   ```bash
+   cp env.example .env
+   ```
+2. Ensure the shared Docker network exists (compose expects it).
+   ```bash
+   docker network create nautilus_trading_network || true
+   ```
+3. Build and launch services with the Makefile helpers.
+   ```bash
+   make build          # build images
+   make up-core        # start engines, ops, universe, situations, screener
+   make up-obs         # optional: Prometheus + Grafana bundle
+   ```
+4. Verify metrics and health.
+   ```bash
+   make smoke-exporter
+   curl http://localhost:8003/readyz | jq
+   curl http://localhost:8002/status | jq
+   ```
+5. Stop services when done.
+   ```bash
+   make down           # core stack
+   make down-all       # core + observability bundle
+   ```
 
-## Development Workflow
+### Running components directly
 
-1. **Code:** Implement feature/fix
-2. **Test:** Add tests, run suite
-3. **Integrate:** Build docker-compose
-4. **Validate:** Test end-to-end
-5. **Document:** Update docs/ if needed
-6. **Review:** Create PR with description
+- Engine API (hot reload):
+  ```bash
+  uvicorn engine.app:app --reload --port 8003
+  ```
+- Ops API:
+  ```bash
+  uvicorn ops.ops_api:APP --reload --port 8002
+  ```
+- ML service (not part of docker-compose by default):
+  ```bash
+  uvicorn ml_service.app:app --host 0.0.0.0 --port 8010 --reload
+  ```
 
-### Local Development
+Set `PYTHONPATH=.` when running modules directly so relative imports resolve.
+
+## Repository layout hints
+
+| Path | Highlights |
+|------|------------|
+| `engine/` | FastAPI app, order router, risk rails, metrics, storage, state management. |
+| `engine/core/` | Venue adapters, portfolio accounting, reconciliation daemon, event bus, strategy scheduler. |
+| `strategies/` | HMM policy code, ensemble fusion, replay tools, venue-specific strategies. |
+| `ml_service/` | Model training/inference API, hierarchical HMM implementation, model store. |
+| `ops/` | Ops API, capital allocator, governance daemons, executor, observability plumbing. |
+| `ops/observability/` | Prometheus/Grafana configs, alerting rules, validation scripts. |
+| `universe/`, `situations/`, `screener/` | Supporting FastAPI microservices for symbol selection and pattern detection. |
+| `engine/storage/` | SQLite facade and schema for orders, fills, positions, and equity snapshots. |
+| `engine/logs/`, `engine/state/`, `data/runtime/` | JSONL logs, portfolio snapshots, SQLite database. |
+| `scripts/`, `pipeline/`, `notebooks/` | Research pipelines, backtests, model registry helpers, exploratory notebooks. |
+| `tests/` | Pytest suite covering engine, strategy, ops, and ML behaviour. |
+
+## Tests
+
+Run the full suite:
+
 ```bash
-# Start just OPS for development
-docker compose up ops --build
-
-# Run tests in watch mode
-pytest-watch tests/
-
-# Debug specific component
-python -m ops.capital_allocator  # Run standalone
+pytest
 ```
 
-### Testing Strategy
-
-#### Unit Tests
-- Cover all major functions (allocators, routers, evaluators)
-- Mock external dependencies (HTTPX, file I/O)
-- Test edge cases and error conditions
-
-#### Integration Tests
-- OPS ⇄ Engine API communication
-- Prometheus metric collection/scraping
-- Database persistence and recovery
-- Docker container networking
-
-#### End-to-End Tests
-- Complete signal → execution → measurement flow
-- Multi-container docker-compose scenarios
-- Performance/load testing
-
-### Key Test Coverage Areas
+Common subsets:
 
 ```bash
-pytest tests/test_capital_allocation.py -v  # Allocation logic
-pytest tests/test_canary_weights.py -v      # Routing weights
-pytest tests/test_strategy.py -v            # Model behavior
-pytest tests/test_risk_rails.py -v          # Risk enforcement
+pytest tests/test_strategy.py -k buy
+pytest tests/test_ops_aggregate.py -vv
+pytest tests -k "kraken or binance"
 ```
 
-## Code Style
-
-### Python Standards
-```python
-# Use async for all I/O
-async def fetch_metrics():
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url)
-
-# Structured error responses
-return {
-    "error": "validation_failed",
-    "code": "INVALID_QUOTE",
-    "message": "Quote exceeds allocation",
-    "details": {"requested": 1000, "available": 500}
-}
-
-# Atomic file operations
-temp_path = target.with_suffix('.tmp')
-try:
-    temp_path.write_text(json.dumps(data, indent=2))
-    temp_path.replace(target)  # Atomic move
-except Exception:
-    temp_path.unlink(missing_ok=True)  # Clean up on error
-```
-
-### Logging Patterns
-```python
-import logging
-logger = logging.getLogger(__name__)
-
-# Info for normal operations
-logger.info(f"[COMPONENT] Model {model_id} promoted to {weight:.1%}")
-
-# Warning for recoverable issues
-logger.warning(f"[COMPONENT] Metrics fetch failed, using cache")
-
-# Error for serious problems
-logger.error(f"[COMPONENT] Critical allocation failure: {e}")
-```
-
-### Environment Configuration
-```python
-# Always use environment variables for secrets/config
-METRICS_URL = os.getenv("OPS_METRICS_URL", "http://localhost:8002/metrics")
-API_TIMEOUT = float(os.getenv("API_TIMEOUT_SEC", "5.0"))
-
-# Never hardcode paths - use pathlib for cross-platform
-CONFIG_PATH = Path("ops") / "config.json"
-LOGS_DIR = Path("logs") / datetime.now().strftime("%Y-%m-%d")
-LOGS_DIR.mkdir(parents=True, exist_ok=True)
-```
-
-Ops workers default to two Uvicorn processes (`OPS_WORKERS` in `.env`). When adding file writes make sure the non-root user can modify the destination and prefer atomic `Path.replace()` calls as shown above.
-
-## Architecture Guidelines
-
-### Component Isolation
-- **Controls:** Never import from ops/ into engine/ (directional dependency)
-- **Events:** Use event bus for cross-component communication
-- **Config:** Environment variables with JSON configs for complex structures
-- **Data:** Append-only JSONL logs, never mutate existing records
-
-### Error Handling
-- **Validate inputs** at all API boundaries
-- **Graceful degradation** when dependencies fail
-- **Circuit breakers** for external service failures
-- **Recovery procedures** for state corruption
-
-### Performance Considerations
-- **Async everywhere** - never block on I/O
-- **Batching** - group similar operations when possible
-- **Caching** - short-lived caches for frequent data
-- **Pagination** - for large result sets
-- **Memory limits** - implement bounds on in-memory collections
-
-## Instrumentation
-
-### Prometheus Metrics
-```python
-from prometheus_client import Counter, Gauge, Histogram
-from ops.prometheus import REGISTRY
-
-# Multi-worker safe metrics – always register against REGISTRY.
-SIGNALS_ROUTED = Counter(
-    "signals_routed_total",
-    "Total signals processed",
-    ["model"],
-    registry=REGISTRY,
-)
-
-ORDERS_SUBMITTED = Counter(
-    "orders_submitted_total",
-    "Orders sent to engine",
-    ["venue"],
-    registry=REGISTRY,
-)
-
-ALLOCATED_CAPITAL = Gauge(
-    "allocated_capital_usd",
-    "Total capital allocated",
-    ["model"],
-    registry=REGISTRY,
-    multiprocess_mode="max",
-)
-
-SIGNAL_LATENCY = Histogram(
-    "signal_latency_seconds",
-    "End-to-end signal processing time",
-    registry=REGISTRY,
-    buckets=[0.01, 0.05, 0.1, 0.25, 0.5, 1.0],
-)
-
-# Usage
-SIGNALS_ROUTED.labels(model="canary_v2").inc()
-ALLOCATED_CAPITAL.labels(model="canary_v2").set(15432.50)
-```
-
-The helper in `ops/prometheus.py` creates a per-process `CollectorRegistry`, attaches `multiprocess.MultiProcessCollector`, and provides `render_latest()` for the `/metrics` endpoint. Always import `REGISTRY` from there instead of relying on the global default registry.
-
-### Health Checks
-```python
-@app.get("/health")
-def health():
-    # System health
-    services_ok = check_databases() and check_exchanges()
-
-    # Data freshness
-    metrics_fresh = (time.time() - last_metrics_update) < 300
-
-    return {
-        "status": "healthy" if services_ok else "degraded",
-        "checks": {
-            "services": services_ok,
-            "metrics_fresh": metrics_fresh,
-            "last_update": last_metrics_update
-        }
-    }
-```
-
-## Security Practices
-
-### API Access Control
-```python
-def verify_token(token: str) -> bool:
-    # Never log raw tokens in production
-    expected = os.getenv("OPS_API_TOKEN")
-    return token and token == expected
-
-@app.post("/admin/restart")
-def admin_action(request: Request):
-    if not verify_token(request.headers.get("X-OPS-TOKEN")):
-        raise HTTPException(401, "Invalid token")
-    # Proceed with privileged operation
-```
-
-### Data Validation
-```python
-from pydantic import BaseModel, validator
-
-class StrategyWeights(BaseModel):
-    weights: Dict[str, float]
-
-    @validator('weights')
-    def validate_weights(cls, v):
-        if abs(sum(v.values()) - 1.0) > 0.001:
-            raise ValueError("Weights must sum to 1.0")
-        return v
-```
-
-## CI/CD Pipeline
-
-### Pre-commit Checks
-```yaml
-# .pre-commit-config.yaml
-repos:
-- repo: https://github.com/psf/black
-  rev: stable
-  hooks:
-  - id: black
-- repo: https://github.com/pycqa/flake8
-  rev: latest
-  hooks:
-  - id: flake8
-- repo: https://github.com/pre-commit/mirrors-mypy
-  rev: latest
-  hooks:
-  - id: mypy
-```
-
-### CI Stages
-1. **Lint:** `flake8` and `mypy` must pass
-2. **Unit:** `pytest -xvs --cov=nautilus --cov-report=html`
-3. **Integration:** Docker-compose test scenario
-4. **Security:** Static analysis for vulnerabilities
-5. **Build:** Docker image built and tagged
-
-### Deployment Safety
-- **Feature Flags:** New features can be disabled instantly
-- **Canary Releases:** All model updates go through canary process
-- **Rollback Scripts:** Automated rollback procedures
-- **Database Migrations:** Versioned schema changes
-
-## Debugging Techniques
-
-### Local Debugging
-```bash
-# Enable debug logging
-export LOG_LEVEL=DEBUG
-
-# Debug specific component
-PYTHONPATH=. python -c "
-import ops.capital_allocator as ca
-print(ca.get_model_quota('test_model'))
-"
-
-# Interactive debugging
-docker compose exec ops python
->>> import ops.strategy_router
->>> # Debug commands here
-```
-
-### Remote Debugging
-```bash
-# Enable profiler
-PYTHONDONTWRITEBYTECODE=1 python -m cProfile -o profile.prof ops/ops_api.py
-
-# Analyze bottlenecks
-import pstats
-p = pstats.Stats('profile.prof')
-p.print_stats()
-```
-
-## Extension Points
-
-### Adding New Strategies
-1. Implement strategy in `strategies/new_strategy/`
-2. Add to strategy registry: `ops/strategy_registry.json`
-3. Update capital policy enabled list
-4. Add backtesting in `backtests/`
-5. Test canary promotion process
-
-### Adding New Venues
-1. Create venue adapter: `engine/adapters/new_venue.py`
-2. Add configuration to `ops/env.example`
-3. Update docker-compose.yml
-4. Add health checks and monitoring
-5. Test venue-specific risk rails
-
-### Adding New Metrics
-1. Define metric in Prometheus config
-2. Add instrumentation in relevant components
-3. Update dashboard if needed
-4. Add alerting rules if required
-
-## Performance Profiling
-
-```python
-import cProfile
-import asyncio
-
-async def profile_allocation():
-    pr = cProfile.Profile()
-    pr.enable()
-    await simulate_allocation_cycle()
-    pr.disable()
-    pr.print_stats(sort='cumulative')
-```
-
-## Documentation Standards
-
-### Code Documentation
-```python
-def complex_function(param1: ComplexType, param2: int) -> ComplexReturn:
-    """
-    Perform complex allocation calculation.
-
-    This function implements Sharpe-based capital reallocation across
-    multiple models while respecting cooldown periods and bounds.
-
-    Args:
-        param1: Description of complex parameter
-        param2: Simple integer parameter
-
-    Returns:
-        ComplexReturn: Detailed description of return structure
-
-    Raises:
-        ValueError: When allocation violates constraints
-        RuntimeError: When external dependencies unavailable
-
-    Example:
-        >>> result = complex_function(ComplexType(), 42)
-        >>> assert result.total_allocated > 0
-    """
-```
-
-### API Documentation
-```python
-@router.post("/strategy/allocate")
-async def allocate_capital(allocation: AllocationRequest):
-    """
-    Manually trigger capital reallocation.
-
-    This endpoint forces an immediate capital redistribution cycle
-    regardless of cooldown timers, useful for emergency adjustments.
-
-    Args:
-        allocation: Parameters for allocation override
-
-    Returns:
-        dict: Allocation results with new quota assignments
-
-    Raises:
-        HTTPException: 403 if manual allocation disabled
-                       500 if allocation calculation fails
-    """
-```
-
-## Troubleshooting Development
-
-### Common Issues
-
-**Import Errors:**
-- Ensure `PYTHONPATH=.` for local development
-- Check that all dependencies are installed
-- Verify Docker container rebuilt after code changes
-
-**Permission Errors:**
-- Use `sudo` for system-level operations only
-- Ensure Docker daemon allows container access to files
-- Check that logs directories are writable
-
-**Async Errors:**
-- Never call async functions from sync context without `asyncio.run()`
-- Use `asyncio.gather()` for concurrent operations
-- Ensure event loops aren't nested
-
-**Metric Discrepancies:**
-- Compare raw Prometheus metrics with dashboard aggregations
-- Use `curl http://localhost:9090/api/v1/query?query=metric_name` for direct inspection
-- Verify metric labels are correctly set
+Tips:
+
+- Tests mock HTTP calls with `respx`. When adding client code, expose request factories so they can be patched.
+- Use `pytest.mark.asyncio` for coroutine tests.
+- Keep fixtures deterministic—seed RNGs and avoid wall-clock dependence.
+- SQLite-backed tests run against in-memory DBs; keep schema changes backward compatible.
+- If you add a new venue adapter, extend `tests/test_order_router.py` and build fixture payloads that match the venue API.
+
+## Coding conventions
+
+- Prefer async I/O (`httpx.AsyncClient`, `asyncio`) inside request handlers; the only blocking threads should be strategy background loops.
+- Always surface configuration via environment variables or dataclasses—never hard-code credentials or sensitive paths.
+- For file writes, use atomic patterns (`Path.write_text` to temp file + `Path.replace`) as seen in `engine/state.py`.
+- Instrument new behaviours with Prometheus metrics or logs; register metrics in `engine/metrics.py` or `ops/prometheus.py`.
+- Route errors through FastAPI HTTP exceptions with informative `detail` payloads; log context but avoid leaking secrets.
+- When touching `engine/strategy.py`, ensure `RiskRails.check_order` remains in the path and `Cache` idempotency semantics are preserved.
+- Follow existing logging style: structured messages with component prefixes (`logger.info("[COMPONENT] ...")`).
+- Keep docstrings and comments concise; add explanatory comments only when intent is non-obvious.
+
+## Observability during development
+
+- `make smoke-exporter` validates accounting invariants (`equity_usd = cash_usd + market_value_usd`).
+- `make smoke-prom` lists active Prometheus targets; useful when wiring new exporters.
+- `ops/observability/validate_obs.sh` runs saved PromQL checks to confirm dashboards stay green after changes.
+- New metrics should include labels compatible with existing dashboards (`venue`, `symbol`, `model`, `role`).
+
+## State & data considerations
+
+- Portfolio state persists under `engine/state/portfolio.json`; respect atomic writes when modifying schema.
+- Orders/fills go to both JSONL logs and `data/runtime/trades.db`; if you change schemas, update `engine/storage/schema.sql` and migration code.
+- Idempotency cache lives at `engine/state/idempotency_cache.json`; flush it via `engine/idempotency.py` when changing key formats.
+- When developing universe/screener logic, watch rate-limit gauges (`RATE_LIMIT_429`) and respect Binance testnet quotas.
+
+## Submitting changes
+
+- Run `pytest` before opening a PR; add tests for new behaviour or regressions.
+- Update documentation (`README.md`, `docs/*`) when you add a venue, change APIs, or modify operational procedures.
+- Mention relevant Makefile targets or configuration knobs in commit messages to help operators.
+- Provide roll-back instructions or release notes if changes require coordinated deploys.
+
+Happy hacking! Keep the docs current—the quickest way to land smoother changes is to ensure future you (or the next teammate) can find the context right here.

@@ -1,0 +1,293 @@
+from __future__ import annotations
+
+"""
+Risk Guardian: cross-margin and equity monitors + auto de-risk actions.
+
+Implements the "automate, not negotiate" guardrails from the playbook:
+ - Daily stop (e.g., -$100) -> pause trading until UTC reset
+ - Cross-margin health floor (e.g., 1.35) -> cancel entries, tighten stops
+ - Hard de-risk if health < critical (e.g., 1.30) -> reduce largest VAR
+
+Defaults are disabled; enable with env vars to avoid impacting tests.
+"""
+
+import asyncio
+import math
+import os
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+import zoneinfo
+from typing import Optional, Tuple
+
+from .metrics import REGISTRY as MET
+
+
+def _as_float(v: Optional[str], default: float) -> float:
+    try:
+        return float(v) if v is not None else default
+    except Exception:
+        return default
+
+
+def _as_bool(v: Optional[str], default: bool) -> bool:
+    if v is None:
+        return default
+    return str(v).lower() not in {"0", "false", "no"}
+
+
+@dataclass
+class GuardianConfig:
+    enabled: bool = False
+    poll_sec: float = 5.0
+    cross_health_floor: float = 1.35           # Cross margin: want >= floor
+    futures_mmr_floor: float = 0.80            # Futures MMR: want <= floor
+    critical_ratio: float = 1.07               # worst-score threshold vs floor for hard action
+    max_daily_loss_usd: float = 100.0
+    max_open_positions: int = 5
+    daily_reset_tz: str = "UTC"
+    daily_reset_hour: int = 0
+    # VAR controls
+    var_use_stop_first: bool = True
+    var_atr_tf: str = "5m"
+    var_atr_n: int = 14
+    var_trim_pct: float = 0.30
+
+
+def load_guardian_config() -> GuardianConfig:
+    return GuardianConfig(
+        enabled=_as_bool(os.getenv("GUARDIAN_ENABLED"), False),
+        poll_sec=_as_float(os.getenv("GUARDIAN_POLL_SEC"), 5.0),
+        cross_health_floor=_as_float(os.getenv("CROSS_HEALTH_FLOOR"), 1.35),
+        futures_mmr_floor=_as_float(os.getenv("FUTURES_MMR_FLOOR"), 0.80),
+        critical_ratio=_as_float(os.getenv("HEALTH_CRITICAL_RATIO"), 1.07),
+        max_daily_loss_usd=_as_float(os.getenv("MAX_DAILY_LOSS_USD"), 100.0),
+        max_open_positions=int(_as_float(os.getenv("MAX_OPEN_POSITIONS"), 5)),
+        daily_reset_tz=os.getenv("DAILY_RESET_TZ", "UTC"),
+        daily_reset_hour=int(_as_float(os.getenv("DAILY_RESET_HOUR"), 0)),
+        var_use_stop_first=_as_bool(os.getenv("VAR_USE_STOP_FIRST"), True),
+        var_atr_tf=os.getenv("VAR_ATR_TF", "5m"),
+        var_atr_n=int(_as_float(os.getenv("VAR_ATR_N"), 14)),
+        var_trim_pct=float(_as_float(os.getenv("VAR_TRIM_PCT"), 0.30)),
+    )
+
+
+class RiskGuardian:
+    def __init__(self, cfg: GuardianConfig | None = None) -> None:
+        self.cfg = cfg or load_guardian_config()
+        self._running = False
+        self._task: Optional[asyncio.Task] = None
+        self._day_anchor: Optional[Tuple[int, float]] = None  # (YYYYMMDD, realized_at_anchor)
+        self._paused_until_utc_reset = False
+        self._tz = None
+        try:
+            self._tz = zoneinfo.ZoneInfo(self.cfg.daily_reset_tz)
+        except Exception:
+            self._tz = zoneinfo.ZoneInfo("UTC")
+
+    async def start(self) -> None:
+        if not self.cfg.enabled or self._running:
+            return
+        self._running = True
+        self._task = asyncio.create_task(self._loop(), name="risk-guardian")
+
+    async def stop(self) -> None:
+        self._running = False
+        if self._task:
+            try:
+                await asyncio.wait_for(self._task, timeout=1.0)
+            except Exception:
+                self._task.cancel()
+
+    async def _loop(self) -> None:
+        from .app import router as order_router
+        from .risk import RiskRails
+        from .config import load_risk_config
+        rails = RiskRails(load_risk_config())
+        while self._running:
+            t0 = time.time()
+            try:
+                snap = await order_router.get_account_snapshot()
+                await self._enforce_daily_stop(order_router)
+                await self._enforce_cross_health(order_router, snap)
+                # Keep portfolio gauges fresh via rails snapshot ingestion
+                try:
+                    rails.refresh_snapshot_metrics(snap)
+                except Exception:
+                    pass
+            except Exception as e:
+                # Soft-fail to avoid killing the loop
+            try:
+                MET.get("engine_venue_errors_total").labels(venue="guard", error="LOOP_ERROR").inc()
+            except Exception:
+                pass
+            dt = max(0.0, self.cfg.poll_sec - (time.time() - t0))
+            await asyncio.sleep(dt)
+
+    async def _enforce_daily_stop(self, order_router) -> None:
+        from .risk import RiskRails
+        from .config import load_risk_config
+        state = order_router.portfolio_service().state
+        realized = float(state.realized or 0.0)
+        # Anchor at first run of day based on configured timezone/hour
+        now_dt = datetime.now(self._tz)
+        # daily boundary hour
+        boundary = now_dt.replace(hour=self.cfg.daily_reset_hour, minute=0, second=0, microsecond=0)
+        if now_dt < boundary:
+            # before today's boundary, use yesterday's
+            boundary = boundary - timedelta(days=1)
+        day = boundary.year * 10000 + boundary.month * 100 + boundary.day
+        if self._day_anchor is None or self._day_anchor[0] != day:
+            self._day_anchor = (day, realized)
+            self._paused_until_utc_reset = False
+            # Auto re-arm at boundary
+            _write_trading_flag(True)
+            # Emit health OK
+            try:
+                from engine.core.event_bus import BUS as _BUS
+                _BUS.fire("health.state", {"state": 0, "reason": "daily_reset"})
+            except Exception:
+                pass
+            return
+        pnl_day = realized - (self._day_anchor[1] or 0.0)
+        try:
+            MET.get("pnl_realized_total").set(realized)
+        except Exception:
+            pass
+        if pnl_day <= -abs(self.cfg.max_daily_loss_usd) and not self._paused_until_utc_reset:
+            # Pause trading via RiskRails config gate
+            # Write a single-source-of-truth flag file; RiskRails will consult it on each order
+            _write_trading_flag(False)
+            try:
+                MET.get("trading_enabled").set(0)
+            except Exception:
+                pass
+            self._paused_until_utc_reset = True
+            try:
+                from .core.event_bus import publish_risk_event
+                await publish_risk_event("daily_stop", {"pnl_day": pnl_day, "limit": self.cfg.max_daily_loss_usd})
+            except Exception:
+                pass
+
+    async def _enforce_cross_health(self, order_router, snap: dict | None) -> None:
+        """Evaluate cross-margin level and futures MMR; act on worst breach.
+
+        Normalization:
+          - Cross margin: want marginLevel >= floor -> score = floor / level
+          - Futures MMR: want mmr <= floor -> score = mmr / floor
+          Worst score >= 1.0 indicates breach; >= critical_ratio triggers hard de-risk.
+        """
+        # Extract common fields
+        cross_level = _safe_float(_dig(snap, ["marginLevel"]))
+        # Pull futures fields if available
+        fut_mmr = None
+        try:
+            maint_total = _safe_float(_dig(snap, ["totalMaintMargin"]))
+            wallet = _safe_float(_dig(snap, ["totalWalletBalance"]))
+            upl = _safe_float(_dig(snap, ["totalUnrealizedProfit"]))
+            if maint_total is not None and wallet is not None and upl is not None:
+                denom = wallet + upl
+                if denom > 0:
+                    fut_mmr = float(maint_total) / float(denom)
+        except Exception:
+            fut_mmr = None
+
+        # Normalized worst-score
+        worst = 0.0
+        if cross_level is not None and cross_level > 0:
+            worst = max(worst, self.cfg.cross_health_floor / max(cross_level, 1e-9))
+        if fut_mmr is not None and fut_mmr > 0:
+            worst = max(worst, fut_mmr / max(self.cfg.futures_mmr_floor, 1e-9))
+
+        # Publish soft metrics if gauges exist
+        try:
+            g1 = MET.get("kraken_equity_usd")  # reuse registry handle access
+            # Only set if present; we avoid adding new gauges here
+        except Exception:
+            pass
+
+        if worst >= 1.0:
+            await self._derisk_soft(order_router, worst)
+        if worst >= self.cfg.critical_ratio:
+            await self._derisk_hard(order_router, worst)
+
+    async def _derisk_soft(self, order_router, score: float) -> None:
+        # Cancel resting entries & tighten stops — publish events for now
+        try:
+            from .core.event_bus import publish_risk_event
+            await publish_risk_event("cross_health_soft", {"worst_score": score, "floors": {"cross": self.cfg.cross_health_floor, "futures_mmr": self.cfg.futures_mmr_floor}})
+        except Exception:
+            pass
+
+    async def _derisk_hard(self, order_router, score: float) -> None:
+        # Reduce largest-VAR position by 30% until health recovers (best-effort)
+        try:
+            from .core.event_bus import publish_risk_event
+        except Exception:
+            publish_risk_event = None
+        positions = list(order_router.portfolio_service().state.positions.values())
+        if not positions:
+            return
+        # Compute VAR ranking (stop-aware, ATR fallback)
+        try:
+            from engine.risk_var import sort_positions_by_var_desc
+        except Exception:
+            sort_positions_by_var_desc = None  # type: ignore
+        if sort_positions_by_var_desc is not None:
+            ranked = sort_positions_by_var_desc(
+                positions,
+                md=None,
+                tf=self.cfg.var_atr_tf,
+                n=self.cfg.var_atr_n,
+                use_stop_first=self.cfg.var_use_stop_first,
+            )
+            target = ranked[0] if ranked else None
+        else:
+            target = max(positions, key=lambda p: abs(getattr(p, "quantity", 0.0) * getattr(p, "last_price", 0.0)))
+        if target is None:
+            return
+        qty = float(getattr(target, "quantity", 0.0))
+        last = float(getattr(target, "last_price", 0.0))
+        if qty == 0.0 or last == 0.0:
+            return
+        symbol = getattr(target, "symbol", "") or ""
+        base = symbol.split(".")[0].upper()
+        venue = symbol.split(".")[1].upper() if "." in symbol else "BINANCE"
+        side = "SELL" if qty > 0 else "BUY"
+        reduce_qty = abs(qty) * float(self.cfg.var_trim_pct)
+        try:
+            await order_router.market_quantity(f"{base}.{venue}", side, reduce_qty)
+            if publish_risk_event:
+                await publish_risk_event("cross_health_hard", {"worst_score": score, "symbol": base, "reduced_qty": reduce_qty, "side": side})
+        except Exception:
+            # best-effort only
+            pass
+
+
+def _safe_float(v) -> Optional[float]:
+    try:
+        if v is None:
+            return None
+        f = float(v)
+        return f if math.isfinite(f) else None
+    except Exception:
+        return None
+
+
+def _dig(d: Optional[dict], path: list[str]):
+    cur = d or {}
+    for k in path:
+        if not isinstance(cur, dict):
+            return None
+        cur = cur.get(k)
+    return cur
+
+
+def _write_trading_flag(enabled: bool) -> None:
+    try:
+        import json, os
+        os.makedirs("state", exist_ok=True)
+        with open("state/trading_enabled.flag", "w", encoding="utf-8") as fh:
+            fh.write("true" if enabled else "false")
+    except Exception:
+        pass

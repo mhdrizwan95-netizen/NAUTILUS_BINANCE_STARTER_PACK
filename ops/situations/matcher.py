@@ -45,4 +45,3 @@ class Matcher:
                     except Exception:
                         pass
         return hits
-

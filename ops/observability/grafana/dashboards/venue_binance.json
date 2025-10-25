@@ -15,9 +15,9 @@
   },
   "templating": {
     "list": [
-      { "name": "role", "type": "custom", "label": "Metrics Source", "query": "Exporter,Trader", "current": { "selected": true, "text": "Exporter", "value": "Exporter" } },
+      { "name": "role", "type": "custom", "label": "Metrics Source", "query": "exporter,trader", "current": { "selected": true, "text": "Exporter", "value": "exporter" } },
       { "name": "venue", "type": "constant", "label": "Venue", "query": "engine_binance", "current": { "selected": true, "value": "engine_binance", "text": "engine_binance" } },
-      { "name": "symbol", "type": "query", "datasource": { "type": "prometheus", "uid": "prometheus" }, "refresh": 2, "query": "label_values({__name__=~\"position_amt|entry_price\",role=\"exporter\"}, symbol)", "includeAll": true, "multi": true, "current": { "selected": true, "text": "All", "value": ["$__all"] } },
+      { "name": "symbol", "type": "query", "datasource": { "type": "prometheus", "uid": "prometheus" }, "refresh": 2, "query": "label_values({__name__=~\"position_amt|entry_price\",role=\"$role\",venue=\"$venue\"}, symbol)", "includeAll": true, "multi": true, "current": { "selected": true, "text": "All", "value": ["$__all"] } },
       { "name": "range_s", "type": "constant", "label": "range_s", "query": "${__range_s}" },
       { "name": "rate_interval", "type": "constant", "label": "rate_interval", "query": "${__rate_interval}" }
     ]

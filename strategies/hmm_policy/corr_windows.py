@@ -29,7 +29,7 @@ class MultiWindowCorr:
         self.long_prices = {s: deque(maxlen=long_window + 1) for s in symbols}
 
         # Market regimes for lambda adaptation
-        self.market_vol_threshold = 0.0005  # 5bp/s as vol boundary
+        self.market_vol_threshold = 0.01  # 1% per tick as calm/volatile boundary
 
     def update(self, symbol: str, mid: float, timestamp_ns: Optional[int] = None):
         """

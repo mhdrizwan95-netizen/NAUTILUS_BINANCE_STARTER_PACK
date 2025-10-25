@@ -38,4 +38,3 @@ def fetch_top24h(symbols: list[str]) -> dict:
             turnover, trades = 0.0, 0
         rank[s] = {"turnover": turnover, "trades": trades, "ts": now}
     return rank
-

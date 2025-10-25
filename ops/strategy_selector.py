@@ -55,8 +55,9 @@ def rank_strategies(registry: dict) -> list:
 
     ranked = []
     for name, stats in models:
-        # Require minimum data quality
-        if _as_count(stats.get("samples", 0)) < 10:
+        sample_count = _as_count(stats.get("samples", 0))
+        trade_count = _as_count(stats.get("trades", 0))
+        if sample_count < 3 and trade_count < 50:
             continue
 
         sharpe = _as_float(stats.get("sharpe", 0.0))
@@ -86,8 +87,8 @@ def promote_best():
     if len(ranked) >= 2:
         second_best_model, second_score, _ = ranked[1]
         improvement = best_score - second_score
-        # Only promote if clear edge (prevent thrashing on noise)
-        should_promote = best_model != current and (improvement > 0.1 or current not in [r[0] for r in ranked])
+        threshold = 0.05
+        should_promote = best_model != current and (improvement > threshold or current not in [r[0] for r in ranked])
     else:
         should_promote = best_model != current
 

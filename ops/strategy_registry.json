@@ -1,38 +1,9 @@
 {
+  "current_model": "hmm_v1",
   "hmm_v1": {
-    "sharpe": 0.91,
-    "drawdown": 4.1,
-    "realized": 134.2,
-    "trades": 284,
-    "last_promotion": "2025-10-09T16:11:00Z",
-    "version": 3,
-    "last_pnl": 0.0,
-    "samples": []
-  },
-  "ma_crossover_v3": {
-    "sharpe": 1.17,
-    "drawdown": 3.3,
-    "realized": 185.7,
-    "trades": 310,
-    "last_promotion": "2025-10-09T17:30:00Z",
-    "version": 5,
-    "last_pnl": 0.0,
-    "samples": []
+    "manual": false
   },
   "ensemble_v2": {
-    "sharpe": 1.04,
-    "drawdown": 2.7,
-    "realized": 162.0,
-    "trades": 298,
-    "last_promotion": "2025-10-09T17:45:00Z",
-    "version": 2,
-    "last_pnl": 0.0,
-    "samples": []
-  },
-  "current_model": "ma_crossover_v3",
-  "promotion_log": [
-    {"time": "2025-10-09T17:30:00Z", "from": "hmm_v1", "to": "ma_crossover_v3", "reason": "Sharpe improved 1.17 > 0.91"},
-    {"time": "2025-10-09T17:45:00Z", "from": "ma_crossover_v3", "to": "ensemble_v2", "reason": "Manual override: ensemble_v2"},
-    {"time": "2025-10-09T18:00:00Z", "from": "ensemble_v2", "to": "ma_crossover_v3", "reason": "Sharpe degradation 0.89 < 1.04"}
-  ]
+    "manual": false
+  }
 }

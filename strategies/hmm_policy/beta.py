@@ -121,7 +121,7 @@ def detect_hedging_opportunity(beta: float, correlation_regime: str) -> bool:
         return False
 
     # Otherwise, consider if beta is significantly different from 1
-    return abs(beta - 1.0) > 0.3  # Only hedge if substantially different
+    return abs(beta - 1.0) > 0.4  # Only hedge if substantially different
 
 def cluster_beta_risk(beta_vector: np.ndarray, cluster_assignments: np.ndarray) -> dict:
     """

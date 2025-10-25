@@ -10,8 +10,16 @@ import json, time, httpx, os, glob, subprocess, shlex, logging
 import asyncio
 from typing import List, Dict, Any, Optional
 
-from ops.prometheus import REGISTRY, render_latest
-from prometheus_client import Counter
+from ops.prometheus import REGISTRY, render_latest, get_or_create_counter
+from ops.pnl_collector import PNL_REALIZED, PNL_UNREALIZED
+from ops.portfolio_collector import (
+    PORTFOLIO_EQUITY,
+    PORTFOLIO_CASH,
+    PORTFOLIO_GAIN,
+    PORTFOLIO_RET,
+    PORTFOLIO_PREV,
+    PORTFOLIO_LAST,
+)
 
 # Risk monitoring configuration
 RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
@@ -356,36 +364,43 @@ def _trim_snapshots() -> None:
 
 
 # ---------- Risk Intelligence Daemon ----------
-async def _risk_monitoring_loop():
+async def _risk_monitor_iteration() -> None:
+    """Execute a single risk monitoring pass."""
+    try:
+        async with httpx.AsyncClient() as client:
+            r = await client.get("http://localhost:8001/aggregate/exposure", timeout=5)
+            r.raise_for_status()
+            data = r.json()
+
+            alert_msg = None
+            for item in data.get("items", []):
+                symbol = item.get("symbol", "UNKNOWN")
+                value_usd = abs(item.get("value_usd", 0.0))
+                if value_usd > RISK_LIMIT_USD:
+                    alert_msg = f"🚨 RISK LIMIT BREACH: {symbol} exposure ${value_usd:.2f} > ${RISK_LIMIT_USD}"
+                    break
+
+            if alert_msg:
+                print(f"[RISK] {alert_msg}")
+                if ALERT_WEBHOOK_URL:
+                    webhook_payload = {"text": alert_msg, "timestamp": time.time()}
+                    try:
+                        await client.post(ALERT_WEBHOOK_URL, json=webhook_payload, timeout=3)
+                    except Exception as webhook_exc:
+                        print(f"[RISK] Webhook failed: {webhook_exc}")
+
+    except Exception as e:  # noqa: BLE001
+        print(f"[RISK] Monitor error: {e}")
+
+
+async def _risk_monitoring_loop(run_once: bool = False):
     """Background daemon that watches exposure and sends alerts."""
+    if run_once:
+        await _risk_monitor_iteration()
+        return
     await asyncio.sleep(5)  # Delay startup to avoid race conditions
     while True:
-        try:
-            async with httpx.AsyncClient() as client:
-                r = await client.get("http://localhost:8001/aggregate/exposure", timeout=5)
-                r.raise_for_status()
-                data = r.json()
-
-                alert_msg = None
-                for item in data.get("items", []):
-                    symbol = item.get("symbol", "UNKNOWN")
-                    value_usd = abs(item.get("value_usd", 0.0))
-                    if value_usd > RISK_LIMIT_USD:
-                        alert_msg = f"🚨 RISK LIMIT BREACH: {symbol} exposure ${value_usd:.2f} > ${RISK_LIMIT_USD}"
-                        break
-
-                if alert_msg:
-                    print(f"[RISK] {alert_msg}")
-                    if ALERT_WEBHOOK_URL:
-                        webhook_payload = {"text": alert_msg, "timestamp": time.time()}
-                        try:
-                            await client.post(ALERT_WEBHOOK_URL, json=webhook_payload, timeout=3)
-                        except Exception as webhook_exc:
-                            print(f"[RISK] Webhook failed: {webhook_exc}")
-
-        except Exception as e:
-            print(f"[RISK] Monitor error: {e}")
-
+        await _risk_monitor_iteration()
         await asyncio.sleep(EXPOSURE_CHECK_INTERVAL)
 
 from ops.portfolio_collector import portfolio_collector_loop
@@ -492,8 +507,11 @@ async def _fetch_json(client: httpx.AsyncClient, url: str) -> Dict[str, Any]:
     try:
         r = await client.get(url, timeout=3)
         r.raise_for_status()
-        return await r.json()
-    except Exception:
+        data = r.json()
+        logging.debug("aggregate fetch success for %s: %s", url, data)
+        return data
+    except Exception as exc:
+        logging.debug("aggregate fetch failed for %s: %s", url, exc)
         return {}
 
 async def _fetch_many(paths: List[str]) -> List[Dict[str, Any]]:
@@ -509,10 +527,12 @@ async def aggregate_health():
 async def aggregate_portfolio():
     portfolios = await _fetch_many([f"{e}/portfolio" for e in ENGINE_ENDPOINTS])
     total_equity = sum(float(p.get("equity_usd", 0) or 0) for p in portfolios if p)
+    metrics_view = get_portfolio_snapshot()
     return {
         "total_equity_usd": total_equity,
         "venues": portfolios,
         "count": len([p for p in portfolios if p]),
+        **metrics_view,
     }
 
 # Use the new comprehensive exposure aggregator
@@ -545,15 +565,12 @@ def get_pnl_snapshot():
     Uses PROMETHEUS_METRICS direct from pnl_collector for accuracy.
     """
     out = {"realized": {}, "unrealized": {}}
-    for metric in REGISTRY.collect():
-        if metric.name in ("pnl_realized_total", "pnl_unrealized_total"):
-            for sample in metric.samples:
-                venue = sample.labels["venue"]
-                value = float(sample.value)
-                if "realized" in metric.name:
-                    out["realized"][venue] = value
-                else:
-                    out["unrealized"][venue] = value
+    for metric in PNL_REALIZED.collect():
+        for sample in metric.samples:
+            out["realized"][sample.labels["venue"]] = float(sample.value)
+    for metric in PNL_UNREALIZED.collect():
+        for sample in metric.samples:
+            out["unrealized"][sample.labels["venue"]] = float(sample.value)
     return out
 
 @APP.get("/aggregate/portfolio")
@@ -562,19 +579,13 @@ def get_portfolio_snapshot():
     Portfolio snapshot: total equity, cash, gain/loss, and return % since daily baseline.
     Handy for your Dash to show equity card with current portfolio performance.
     """
-    out = {}
-    for metric in REGISTRY.collect():
-        if metric.name in ("portfolio_equity_usd", "portfolio_cash_usd", "portfolio_gain_usd",
-                          "portfolio_return_pct", "portfolio_equity_prev_close_usd", "ops_portfolio_last_refresh_epoch"):
-            for sample in metric.samples:
-                out[metric.name] = float(sample.value)
     return {
-        "equity_usd": out.get("portfolio_equity_usd", 0.0),
-        "cash_usd": out.get("portfolio_cash_usd", 0.0),
-        "gain_usd": out.get("portfolio_gain_usd", 0.0),
-        "return_pct": out.get("portfolio_return_pct", 0.0),
-        "baseline_equity_usd": out.get("portfolio_equity_prev_close_usd", 0.0),
-        "last_refresh_epoch": out.get("ops_portfolio_last_refresh_epoch", None),
+        "equity_usd": float(PORTFOLIO_EQUITY._value.get()),
+        "cash_usd": float(PORTFOLIO_CASH._value.get()),
+        "gain_usd": float(PORTFOLIO_GAIN._value.get()),
+        "return_pct": float(PORTFOLIO_RET._value.get()),
+        "baseline_equity_usd": float(PORTFOLIO_PREV._value.get()),
+        "last_refresh_epoch": float(PORTFOLIO_LAST._value.get()) if PORTFOLIO_LAST._value.get() else None,
     }
 
 # ---------- Strategy Governance Dashboard Endpoints ----------
@@ -642,16 +653,18 @@ def manual_promote_strategy(req: dict, request: Request):
         return {"error": "model_tag required"}
 
     from ops.strategy_selector import load_registry, save_registry
-    min_t = 3  # Require at least 3 trades for promotion
+    min_t = 3  # Require at least 3 trades for promotion when not manual
 
     try:
         registry = load_registry()
-        if model_tag not in registry:
-            # Add new model if it doesn't exist
-            registry[model_tag] = {"sharpe": 0.0, "drawdown": 0.0, "realized": 0.0, "trades": 0, "manual": True, "last_pnl": 0.0, "samples": []}
+        stats = registry.get(model_tag)
+        if stats is None:
+            stats = {"sharpe": 0.0, "drawdown": 0.0, "realized": 0.0, "trades": 0, "manual": True, "last_pnl": 0.0, "samples": []}
+            registry[model_tag] = stats
 
-        # Require minimum trading data before promotion (unless manual)
-        stats = registry.get(model_tag, {})
+        # Manual override defaults to True for this endpoint
+        stats["manual"] = True
+
         if stats.get("trades", 0) < min_t and not stats.get("manual"):
             return {"error": f"model needs at least {min_t} trades to promote"}
 
@@ -667,14 +680,6 @@ def manual_promote_strategy(req: dict, request: Request):
         return {"ok": True, "promoted": model_tag, "trades_required": min_t}
     except Exception as e:
         return {"error": str(e)}
-
-async def _fetch_json(client: httpx.AsyncClient, url: str) -> Dict[str, Any]:
-    try:
-        r = await client.get(url, timeout=6.0)
-        r.raise_for_status()
-        return await r.json()
-    except Exception:
-        return {}
 
 # ---------- Legacy Incident Endpoints ----------
 @APP.post("/incidents")
@@ -710,11 +715,10 @@ async def ws_incidents(websocket: WebSocket):
 APP.mount("/", StaticFiles(directory="ops/static", html=True), name="static")
 
 # ---- Situations SSE consumer (shadow mode) ----
-SSE_COUNTER = Counter(
+SSE_COUNTER = get_or_create_counter(
     "situation_events_consumed_total",
     "Number of situation events consumed by Ops",
-    ["name"],
-    registry=REGISTRY,
+    labelnames=("name",),
 )
 
 
@@ -740,3 +744,6 @@ async def _start_situations_consumer():
             pass
 
     asyncio.create_task(_run())
+
+# FastAPI expects `app` attribute in some tests/utilities.
+app = APP

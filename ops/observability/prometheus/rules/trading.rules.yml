@@ -1,0 +1,83 @@
+groups:
+- name: trading-core
+  interval: 15s
+  rules:
+  - record: trading:orders_rate_1m
+    expr: sum by (venue) (increase(orders_submitted_total[1m]))
+
+  - record: trading:fills_rate_1m
+    expr: sum by (venue) (increase(orders_filled_total[1m]))
+
+  - record: trading:submit_latency_p95_ms
+    expr: histogram_quantile(0.95, sum by (le, job) (rate(submit_to_ack_ms_bucket[5m])))
+  - record: trading:fill_latency_p95_ms
+    expr: histogram_quantile(0.95, sum by (le, job) (rate(fill_latency_ms_bucket[5m])))
+
+  - record: trading:mark_price_usd
+    expr: max by (symbol, venue) (mark_price_usd)
+
+  - record: trading:exposure_usd
+    expr: sum by (job, venue) (last_over_time(exposure_usd[2m]))
+  - record: trading:pnl_realized_usd
+    expr: sum(pnl_realized_total)
+  - record: trading:equity_usd
+    expr: sum by (job, venue) (last_over_time(equity_usd[2m]))
+
+  - record: trading:upnl_usd
+    expr: sum by (venue) (last_over_time(upnl_usd[2m]))
+
+  - record: trading:error_rate_pct
+    expr: 100 * sum by (venue) (rate(engine_venue_errors_total[5m])) / clamp_min(sum by (venue) (rate(orders_submitted_total[5m])), 1)
+
+- name: kraken-risk
+  interval: 15s
+  rules:
+  - alert: KrakenTelemetryStale
+    expr: risk_metrics_freshness_sec > 120
+    for: 1m
+    labels:
+      severity: warning
+      venue: kraken
+    annotations:
+      summary: "Kraken telemetry stale"
+      description: "risk_metrics_freshness_sec={{ $value }}s > 120s"
+
+  - alert: KrakenBufferLow
+    expr: risk_equity_buffer_usd < 300
+    for: 30s
+    labels:
+      severity: warning
+      venue: kraken
+    annotations:
+      summary: "Equity buffer low"
+      description: "Buffer {{ $value | humanize }} USD < 300"
+
+  - alert: KrakenBufferCritical
+    expr: risk_equity_buffer_usd < 150
+    for: 15s
+    labels:
+      severity: critical
+      venue: kraken
+    annotations:
+      summary: "Equity buffer CRITICAL"
+      description: "Buffer {{ $value | humanize }} USD < 150"
+
+  - alert: KrakenExposureNearCap
+    expr: clamp_min(exposure_cap_usd{venue="kraken"} - venue_exposure_usd{venue="kraken"}, 0) < 500
+    for: 2m
+    labels:
+      severity: warning
+      venue: kraken
+    annotations:
+      summary: "Exposure near cap"
+      description: "Headroom < 500 USD to exposure cap"
+
+  - alert: KrakenExposureBreach
+    expr: venue_exposure_usd{venue="kraken"} > exposure_cap_usd{venue="kraken"}
+    for: 30s
+    labels:
+      severity: critical
+      venue: kraken
+    annotations:
+      summary: "Exposure cap breached"
+      description: "Exposure exceeds cap for 30s"

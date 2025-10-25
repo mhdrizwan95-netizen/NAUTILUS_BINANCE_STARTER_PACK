@@ -79,4 +79,3 @@ def append_row_to_parquet(row: Dict[str, Any], parq_path: str = PARQUET_PATH) ->
     except Exception:
         # Best-effort logging only
         pass
-

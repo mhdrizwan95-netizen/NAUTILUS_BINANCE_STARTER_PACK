@@ -1,0 +1,85 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "gnetId": null,
+  "graphTooltip": 0,
+  "id": null,
+  "links": [],
+  "panels": [
+    {
+      "type": "row",
+      "title": "Event Breakout – Overview",
+      "collapsed": false,
+      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "panels": []
+    },
+    {
+      "type": "stat",
+      "title": "Open EVENT positions",
+      "targets": [
+        {"expr": "event_bo_open_positions", "refId": "A"}
+      ],
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 1},
+      "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    },
+    {
+      "type": "timeseries",
+      "title": "Plans: DRY vs LIVE (rate)",
+      "targets": [
+        {"expr": "sum(rate(event_bo_plans_total{dry=\"true\"}[5m]))", "legendFormat": "DRY", "refId": "A"},
+        {"expr": "sum(rate(event_bo_plans_total{dry=\"false\"}[5m]))", "legendFormat": "LIVE", "refId": "B"}
+      ],
+      "gridPos": {"h": 8, "w": 9, "x": 6, "y": 1}
+    },
+    {
+      "type": "timeseries",
+      "title": "Trades (rate)",
+      "targets": [
+        {"expr": "sum(rate(event_bo_trades_total[5m]))", "legendFormat": "trades", "refId": "A"}
+      ],
+      "gridPos": {"h": 8, "w": 9, "x": 15, "y": 1}
+    },
+    {
+      "type": "timeseries",
+      "title": "Skips by reason (rate)",
+      "targets": [
+        {"expr": "sum(rate(event_bo_skips_total[5m])) by (reason)", "legendFormat": "{{reason}}", "refId": "A"}
+      ],
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 9}
+    },
+    {
+      "type": "timeseries",
+      "title": "Half-size applied (rate)",
+      "targets": [
+        {"expr": "sum(rate(event_bo_half_size_applied_total[5m]))", "legendFormat": "half-size", "refId": "A"}
+      ],
+      "gridPos": {"h": 8, "w": 6, "x": 12, "y": 9}
+    },
+    {
+      "type": "timeseries",
+      "title": "Trailing stop updates (rate)",
+      "targets": [
+        {"expr": "sum(rate(event_bo_trail_updates_total[5m]))", "legendFormat": "trail updates", "refId": "A"}
+      ],
+      "gridPos": {"h": 8, "w": 6, "x": 18, "y": 9}
+    },
+    {
+      "type": "stat",
+      "title": "Efficiency: trades / live plans (last 1h)",
+      "targets": [
+        {"expr": "sum(increase(event_bo_trades_total[1h])) / clamp_min(sum(increase(event_bo_plans_total{dry=\"false\"}[1h])), 1)", "refId": "A"}
+      ],
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 17},
+      "options": {"colorMode": "value", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}}
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["event_breakout", "crypto"],
+  "templating": {"list": []},
+  "time": {"from": "now-24h", "to": "now"},
+  "timezone": "",
+  "title": "Event Breakout – KPIs",
+  "version": 1
+}

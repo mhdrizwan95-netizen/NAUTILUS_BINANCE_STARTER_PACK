@@ -2,45 +2,43 @@
 from __future__ import annotations
 import os, asyncio, time, math, logging, httpx
 from datetime import datetime, timezone
-from prometheus_client import Gauge
-from ops.prometheus import REGISTRY
+from ops.prometheus import REGISTRY, get_or_create_gauge
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
-PORTFOLIO_EQUITY = Gauge(
+def _venue_label(base_url: str) -> str:
+    host = base_url.split("//")[-1].split("/")[0]
+    host = host.split(":")[0]
+    return host.upper()
+
+PORTFOLIO_EQUITY = get_or_create_gauge(
     "portfolio_equity_usd",
     "Total portfolio equity (USD)",
-    registry=REGISTRY,
     multiprocess_mode="max",
 )
-PORTFOLIO_CASH = Gauge(
+PORTFOLIO_CASH = get_or_create_gauge(
     "portfolio_cash_usd",
     "Total portfolio cash (USD)",
-    registry=REGISTRY,
     multiprocess_mode="max",
 )
-PORTFOLIO_GAIN = Gauge(
+PORTFOLIO_GAIN = get_or_create_gauge(
     "portfolio_gain_usd",
     "Gain/Loss since prior close or start-of-day (USD)",
-    registry=REGISTRY,
     multiprocess_mode="max",
 )
-PORTFOLIO_RET = Gauge(
+PORTFOLIO_RET = get_or_create_gauge(
     "portfolio_return_pct",
     "Return % since prior close or start-of-day",
-    registry=REGISTRY,
     multiprocess_mode="max",
 )
-PORTFOLIO_PREV = Gauge(
+PORTFOLIO_PREV = get_or_create_gauge(
     "portfolio_equity_prev_close_usd",
     "Baseline equity used for gain/return calc",
-    registry=REGISTRY,
     multiprocess_mode="max",
 )
-PORTFOLIO_LAST = Gauge(
+PORTFOLIO_LAST = get_or_create_gauge(
     "ops_portfolio_last_refresh_epoch",
     "Unix time of last portfolio refresh",
-    registry=REGISTRY,
     multiprocess_mode="max",
 )
 
@@ -92,6 +90,11 @@ async def portfolio_collector_loop(interval_sec: int = 10):
     Baseline resets at UTC midnight or if not yet set.
     """
     global _BASELINE_EQUITY, _BASELINE_DAYKEY
+
+    # Reset baseline whenever the collector loop (re)starts so tests and
+    # short-lived processes begin with a clean slate.
+    _BASELINE_EQUITY = None
+    _BASELINE_DAYKEY = None
 
     endpoints = [e.strip() for e in os.getenv(
         "ENGINE_ENDPOINTS",

@@ -4,6 +4,7 @@ import math, time
 from dataclasses import replace
 from typing import Dict, Optional, Tuple, List
 from ..config import load_strategy_config
+from .calibration import adjust_confidence
 
 
 class _StrategyConfigProxy:
@@ -59,6 +60,7 @@ def combine(symbol: str, ma_side: Optional[str], ma_conf: float,
     score = (w_ma * ma_val * ma_conf) + (w_hmm * hmm_val * hmm_conf)
     conf = abs((w_ma * ma_conf) + (w_hmm * hmm_conf))
     effective_conf = ma_conf if not has_hmm else conf
+    effective_conf = adjust_confidence(symbol, effective_conf)
 
     if effective_conf < S.ensemble_min_conf:
         return None  # no strong consensus

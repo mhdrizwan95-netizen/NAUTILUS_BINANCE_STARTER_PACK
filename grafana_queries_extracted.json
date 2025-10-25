@@ -1,0 +1,11 @@
+{"id":1,"title":"Total Equity (USD)","exprs":["equity_usd"]}
+{"id":2,"title":"Total UPNL (USD)","exprs":["sum(market_value_usd{job=~\"$venue\"})"]}
+{"id":3,"title":"Realized PnL (Δ window)","exprs":["clamp_min(sum(increase(pnl_realized_total{job=~\"$venue\"}[$__range])), 0)"]}
+{"id":4,"title":"Active Venues (up)","exprs":["sum(up{job=~\"$venue\"})"]}
+{"id":5,"title":"Global Breaker","exprs":["max by (job) (breaker_state{job=~\"$venue\"})"]}
+{"id":111,"title":"Binance • Equity (USD)","exprs":["sum(equity_usd{instance=\"engine_binance:8003\"})"]}
+{"id":112,"title":"IBKR • Equity (USD)","exprs":["sum(equity_usd{instance=\"engine_ibkr:8003\"})"]}
+{"id":20,"title":"Errors & Rejections (by venue)","exprs":["clamp_min(sum by (job) (increase(orders_rejected_total{job=~\"$venue\"}[$__range])), 0)"]}
+{"id":21,"title":"Recon Lag (by venue)","exprs":["max by (job) (reconcile_lag_seconds{job=~\"$venue\"})"]}
+{"id":22,"title":"Trading Enabled (by venue)","exprs":["max by (job) (trading_enabled{job=~\"$venue\"})"]}
+{"id":30,"title":"Screener throughput (if present)","exprs":["clamp_min(sum(rate(screener_candidates_total[$__rate_interval])) * 60, 0)"]}

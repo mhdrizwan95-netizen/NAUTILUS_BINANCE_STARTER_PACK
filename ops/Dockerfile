@@ -1,3 +1,25 @@
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN python -m pip install --upgrade pip && \
+    pip install --prefix=/install \
+      httpx>=0.27 \
+      requests>=2.32 \
+      pandas>=2.2 \
+      numpy>=1.24 \
+      pyarrow>=14.0 \
+      prometheus-client>=0.20
+
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -8,10 +30,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install only what we need (httpx). If the root image is available, we can swap to requirements.txt.
-RUN python -m pip install --upgrade pip && \
-    pip install httpx>=0.27 requests>=2.32 pandas>=2.2 numpy>=1.24 pyarrow>=14.0 prometheus-client>=0.20
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
+COPY --from=builder /install /usr/local
 COPY ops/ ./ops/
 
 ENV ENGINE_URL=http://engine_binance:8003 \
