@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from typing import Any, Literal, Optional
+from time import time as _now
 import httpx
 
 from engine.config import get_settings, load_fee_config, load_ibkr_fee_config, ibkr_min_notional_usd
@@ -42,53 +43,64 @@ async def place_market_order_async(*, symbol: str, side: str, quote: float | Non
 class OrderRouter:
     """Handles order validation and routing across multiple venues."""
 
-    def __init__(self, default_client: BinanceREST, portfolio: Portfolio) -> None:
+    def __init__(self, default_client, portfolio: Portfolio, venue: str | None = None) -> None:
         self._portfolio = portfolio
         self._settings = get_settings()
-        # Set the default client for backwards compatibility
-        _CLIENTS["BINANCE"] = default_client
+        self._venue = (venue or self._settings.venue).upper()
+        # Register default client for this router's venue
+        set_exchange_client(self._venue, default_client)
+        if self._venue == "BINANCE":
+            _CLIENTS["BINANCE"] = default_client
         self.snapshot_loaded = False  # NEW
         self._last_snapshot: dict | None = None
 
     async def initialize_balances(self) -> None:
-        # Only initialize Binance balances for backwards compatibility
-        # IBKR would need separate balance initialization
+        client = _CLIENTS.get(self._venue)
+        if client is None or not hasattr(client, "account_snapshot"):
+            return
         try:
-            if "BINANCE" in _CLIENTS:
-                account = await _CLIENTS["BINANCE"].account_snapshot()
-                # Spot balances
-                balances = account.get("balances", [])
-                futures_positions = account.get("positions", [])
+            account = await client.account_snapshot()
+            balances = account.get("balances", [])
+            futures_positions = account.get("positions", [])
 
-                if balances:
-                    # Spot path: set cash/equity from USDT balance
-                    for bal in balances:
-                        asset = bal.get("asset")
-                        free = float(bal.get("free", 0.0))
-                        locked = float(bal.get("locked", 0.0))
-                        total = free + locked
-                        if asset == "USDT":
-                            self._portfolio.state.cash = total
-                            self._portfolio.state.equity = total
-                    self._balances = balances
-                else:
-                    # Futures path: use totalWalletBalance and import open positions
-                    try:
-                        usdt = float(account.get("totalWalletBalance", 0.0))
-                        if usdt:
-                            self._portfolio.state.cash = usdt
-                            self._portfolio.state.equity = usdt
-                    except Exception:
-                        pass
-                    self._positions = futures_positions
-                    # Import non-zero positions into internal portfolio for mark-to-market
-                    try:
-                        self._import_futures_positions(futures_positions)
-                    except Exception:
-                        pass
+            base_currency = "USDT" if self._venue == "BINANCE" else "USD"
 
-                self._last_snapshot = account
-                self.snapshot_loaded = True
+            if balances:
+                # Set cash/equity from matching currency balance
+                for bal in balances:
+                    asset = bal.get("asset")
+                    free = float(bal.get("free", 0.0))
+                    locked = float(bal.get("locked", 0.0))
+                    total = free + locked
+                    if asset and asset.upper() in {base_currency, "USD", "USDT"}:
+                        self._portfolio.state.cash = total
+                        self._portfolio.state.equity = total
+                        break
+                self._balances = balances
+
+            if futures_positions:
+                try:
+                    self._import_futures_positions(futures_positions)
+                except Exception:
+                    pass
+
+            if not balances:
+                try:
+                    wallet = float(account.get("totalWalletBalance") or account.get("availableBalance") or 0.0)
+                    if wallet:
+                        self._portfolio.state.cash = wallet
+                        self._portfolio.state.equity = wallet
+                except Exception:
+                    pass
+
+            self._last_snapshot = account
+            self.snapshot_loaded = True
+            try:
+                from engine.metrics import update_portfolio_gauges
+                st = self._portfolio.state
+                update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
+            except Exception:
+                pass
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
@@ -193,72 +205,79 @@ class OrderRouter:
             loop.close()
 
     async def _place_market_order_async(self, *, symbol: str, side: str, quote: float | None, quantity: float | None) -> dict[str, Any]:
+        # Venue routing is now handled at the app level - just pass to core function
         return await _place_market_order_async_core(symbol, side, quote, quantity, self._portfolio)
-        # Decide venue
-        venue = symbol.split(".")[1] if "." in symbol else None
-        base = symbol.split(".")[0].upper()
-
-        # Venue auto-detection: crypto symbols default to Binance, others to IBKR
-        if venue is None:
-            default_venue = "BINANCE" if base.endswith("USDT") else "IBKR"
-            symbol = f"{base}.{default_venue}"
-            venue = default_venue
-
-        client = _CLIENTS.get(venue)
-        if client is None:
-            raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
-
-        # Price lookup
-        px = await _resolve_last_price(client, venue, base, symbol)
-        if px is None or px <= 0:
-            raise ValueError(f"NO_PRICE: No last price for {symbol}")
-
-        # Specs lookup or fallback
-        spec: SymbolSpec | None = (SPECS.get(venue) or {}).get(base)
-        if venue == "IBKR" and spec is None:
-            # default for US equities
-            spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
-        elif venue == "BINANCE" and spec is None:
-            # default for crypto
-            spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
-
-        if spec is None:
-            raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
-
-        # Quote→qty or direct qty; IBKR requires integer shares
-        did_round = False
-        if quote is not None and (quantity is None or quantity == 0):
-            raw_qty = float(quote) / float(px)
-            quantity = _round_step(raw_qty, spec.step_size)
-            did_round = (quantity != raw_qty)
-        elif quantity is not None:
-            quantity = _round_step(float(quantity), spec.step_size)
-            did_round = True
-
-        if did_round:
-            REGISTRY["orders_rounded_total"].inc()
-
-        if abs(quantity) < spec.min_qty:
-            orders_rejected.inc()
-            raise ValueError(f"QTY_TOO_SMALL: Rounded qty {quantity} < min_qty {spec.min_qty}")
-
-        quantity_val = float(quantity) if quantity is not None else 0.0
-        notional = abs(quantity_val) * float(px)
-        min_notional = spec.min_notional
-        if venue == "IBKR":
-            min_notional = max(min_notional, ibkr_min_notional_usd())
-
-        if notional < min_notional:
-            orders_rejected.inc()
-            raise ValueError(f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}")
-
-        # Submit
     async def market_quantity(self, symbol: str, side: Side, quantity: float) -> dict[str, Any]:
         """Backwards compatibility for existing code"""
         # For now, assume Binance if not specified
         if not "." in symbol:
             symbol = f"{symbol}.BINANCE"
         return await self._place_market_order_async(symbol=symbol, side=side, quote=None, quantity=quantity)
+
+    # ---- Safe router wrappers (capability-checked, no-throw) ----
+    async def list_open_entries(self) -> list[dict]:
+        client = _CLIENTS.get(self._venue)
+        if client is None:
+            return []
+        api_fn = getattr(client, "list_open_orders", None)
+        if api_fn is None:
+            return []
+        try:
+            res = api_fn()
+            if hasattr(res, "__await__"):
+                res = await res
+            if isinstance(res, list):
+                return res
+        except Exception:
+            return []
+        return []
+
+    async def amend_stop_reduce_only(self, symbol: str, side: Side, stop_price: float, qty: float) -> None:
+        import os, logging
+        if os.getenv("ALLOW_STOP_AMEND", "").lower() not in {"1", "true", "yes"}:
+            logging.getLogger(__name__).info(
+                f"[STOP-AMEND:DRY] %s %s stop=%s qty=%s", symbol, side, stop_price, qty
+            )
+            return
+        client = _CLIENTS.get(self._venue)
+        if client is None:
+            return
+        # Race guard: ensure position still open
+        try:
+            base = symbol.split(".")[0].upper()
+            pos = getattr(self._portfolio.state, "positions", {}).get(base)
+            if pos is None or abs(float(getattr(pos, "quantity", 0.0)) or 0.0) <= 0.0:
+                return
+        except Exception:
+            pass
+        api_fn = getattr(client, "amend_reduce_only_stop", None)
+        if api_fn is None:
+            return
+        try:
+            res = api_fn(symbol=symbol, side=side, stop_price=float(stop_price), quantity=float(qty))
+            if hasattr(res, "__await__"):
+                await res
+        except Exception as e:
+            # Ignore benign not-found races
+            msg = str(e).upper()
+            if "NOT_FOUND" in msg or "ORDER_NOT_FOUND" in msg:
+                return
+            return
+
+    async def place_reduce_only_market(self, symbol: str, side: Side, qty: float):
+        client = _CLIENTS.get(self._venue)
+        if client is None:
+            return None
+        api_fn = getattr(client, "place_reduce_only_market", None)
+        if api_fn is None:
+            return None
+        try:
+            res = api_fn(symbol=symbol, side=side, quantity=float(qty))
+            if hasattr(res, "__await__"):
+                res = await res
+            return res
+        except Exception:
+            return None
 
     async def _quote_to_quantity(self, symbol: str, side: Side, quote: float) -> float:
         venue = symbol.split(".")[1] if "." in symbol else None
@@ -281,12 +300,17 @@ class OrderRouter:
             spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
         elif venue == "BINANCE" and spec is None:
             spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
+        elif venue == "KRAKEN" and spec is None:
+            spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
 
         if spec is None:
             raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
 
         raw_qty = float(quote) / float(px)
-        qty = _round_step(raw_qty, spec.step_size)
+        if venue == "KRAKEN":
+            qty = _round_step_up(raw_qty, spec.step_size)
+        else:
+            qty = _round_step(raw_qty, spec.step_size)
         if qty <= 0:
             raise ValueError(f"QTY_TOO_SMALL: Quote {quote:.4f} -> qty {qty:.8f}")
         return qty
@@ -301,7 +325,7 @@ class OrderRouter:
 
     def exchange_client(self):
         """Shim for persistence layer."""
-        return exchange_client("BINANCE")  # Default to Binance for backwards compatibility
+        return exchange_client(self._venue)
 
     def trade_symbols(self):
         """Shim for persistence layer."""
@@ -329,7 +353,7 @@ class OrderRouter:
 
 
 def _normalize_symbol(symbol: str) -> str:
-    return symbol.replace(".BINANCE", "").upper()
+    return symbol.split(".")[0].upper()
 
 
 async def _place_market_order_async_core(symbol: str, side: str, quote: float | None, quantity: float | None, portfolio: Optional[Portfolio]) -> dict[str, Any]:
@@ -355,6 +379,8 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
         spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
     elif venue == "BINANCE" and spec is None:
         spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
+    elif venue == "KRAKEN" and spec is None:
+        spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
 
     if spec is None:
         raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
@@ -363,10 +389,16 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
     did_round = False
     if quote is not None and (quantity is None or quantity == 0):
         raw_qty = float(quote) / float(px)
-        quantity = _round_step(raw_qty, spec.step_size)
+        if venue == "KRAKEN":
+            quantity = _round_step_up(raw_qty, spec.step_size)
+        else:
+            quantity = _round_step(raw_qty, spec.step_size)
         did_round = (quantity != raw_qty)
     elif quantity is not None:
-        quantity = _round_step(float(quantity), spec.step_size)
+        if venue == "KRAKEN":
+            quantity = _round_step_up(float(quantity), spec.step_size)
+        else:
+            quantity = _round_step(float(quantity), spec.step_size)
         did_round = True
 
     if did_round:
@@ -402,7 +434,19 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
             fee = (fee_cfg.bps / 10_000.0) * fill_notional
     else:
         clean_symbol = base
-        if quote is not None and (quantity is None or quantity == 0):
+        if venue == "KRAKEN":
+            slip = 0.002
+            limit_price = px * (1 + slip) if side.upper() == "BUY" else px * (1 - slip)
+            limit_price = max(limit_price, 0.0)
+            submit = getattr(client, "submit_limit_order", None)
+            if submit is None:
+                submit = getattr(client, "submit_market_order", None)
+            if submit is None:
+                raise ValueError("CLIENT_MISSING_METHOD: submit_limit_order")
+            t0 = time.time()
+            res = await submit(symbol=clean_symbol, side=side, quantity=float(quantity), price=limit_price, time_in_force="IOC")
+            t1 = time.time()
+        elif quote is not None and (quantity is None or quantity == 0):
             submit = getattr(client, "submit_market_quote", None)
             if submit is None:
                 raise ValueError("CLIENT_MISSING_METHOD: submit_market_quote")
@@ -454,6 +498,41 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
     res["fee_usd"] = float(fee)
     res["rounded_qty"] = round(float(quantity), 8)
     res["venue"] = venue
+    # Feature-gated slippage telemetry and policy (log-only)
+    try:
+        import os, logging
+        cap_spot = float(os.getenv("SPOT_TAKER_MAX_SLIP_BPS", "25"))
+        cap_fut = float(os.getenv("FUT_TAKER_MAX_SLIP_BPS", "15"))
+        last_px = float(px)
+        avg_px = float(res.get("avg_fill_price") or last_px)
+        slip_bps = abs(avg_px - last_px) / max(last_px, 1e-12) * 10_000.0
+        is_fut = (venue.upper() == "BINANCE" and os.getenv("BINANCE_MODE", "").lower().startswith("futures")) or venue.upper() == "KRAKEN"
+        cap = cap_fut if is_fut else cap_spot
+        if slip_bps > cap:
+            logging.getLogger(__name__).warning(
+                "[SLIPPAGE] %s %.1fbps > cap %.1fbps (venue=%s)", symbol, slip_bps, cap, venue
+            )
+            # Emit skip event for heatmap rollups
+            try:
+                from engine.core.event_bus import BUS
+                BUS.fire("event_bo.skip", {"symbol": base, "reason": "slippage"})
+            except Exception:
+                pass
+        # Histogram observation (optional)
+        try:
+            from engine.metrics import exec_slippage_bps as _slip_hist
+            intent = os.getenv("SLIPPAGE_INTENT", "GENERIC")
+            _slip_hist.labels(symbol=base, venue=venue, intent=intent).observe(slip_bps)
+        except Exception:
+            pass
+        # Emit slippage sample for overrides
+        try:
+            from engine.core.event_bus import BUS
+            BUS.fire("exec.slippage", {"symbol": base, "venue": venue, "bps": slip_bps})
+        except Exception:
+            pass
+    except Exception:
+        pass
     return res
 
 
@@ -462,6 +541,13 @@ def _round_step(value: float, step: float) -> float:
         return value
     factor = 1 / step
     return round(value * factor) / factor
+
+
+def _round_step_up(value: float, step: float) -> float:
+    if step <= 0:
+        return value
+    factor = 1 / step
+    return math.ceil(value * factor) / factor
 
 
 async def _resolve_last_price(client, venue: str, base: str, symbol: str) -> float | None:
@@ -533,48 +619,62 @@ class OrderRouterExt(OrderRouter):
         Fetch a fresh snapshot from the venue and update local cache.
         Used by /account_snapshot?force=1 and any ad-hoc refreshers.
         """
-        account = await _CLIENTS["BINANCE"].account_snapshot()
+        client = _CLIENTS.get(self._venue)
+        if client is None or not hasattr(client, "account_snapshot"):
+            return self._last_snapshot or {"balances": [], "positions": []}
+
+        account = await client.account_snapshot()
 
         balances = account.get("balances", []) if isinstance(account, dict) else []
         positions = account.get("positions", []) if isinstance(account, dict) else []
 
-        # Spot path: if balances present, update cash/equity from USDT
-        if balances:
-            self._balances = balances
-            self._positions = positions
-            self._last_snapshot = account
-            self.snapshot_loaded = True
+        self._balances = balances
+        self._positions = positions
+        self._last_snapshot = account
+        self.snapshot_loaded = True
 
-            try:
-                usdt = 0.0
+        base_currency = "USDT" if self._venue == "BINANCE" else "USD"
+
+        try:
+            if balances:
+                total = 0.0
                 for bal in balances:
-                    if bal.get("asset") == "USDT":
-                        usdt = float(bal.get("free", 0.0)) + float(bal.get("locked", 0.0))
+                    asset = (bal.get("asset") or "").upper()
+                    if asset in {base_currency, "USD", "USDT"}:
+                        total = float(bal.get("free", 0.0)) + float(bal.get("locked", 0.0))
                         break
-                if usdt > 0:
-                    self._portfolio.state.cash = usdt
-                    self._portfolio.state.equity = usdt
+                if total > 0:
+                    self._portfolio.state.cash = total
+                    self._portfolio.state.equity = total
                     from engine.metrics import update_portfolio_gauges
                     s = self._portfolio.state
                     update_portfolio_gauges(s.cash, s.realized, s.unrealized, s.exposure)
-            except Exception:
-                pass
-        else:
-            # Futures path: use totalWalletBalance and import open positions
-            self._positions = positions
-            self._last_snapshot = account
-            self.snapshot_loaded = True
-            try:
-                usdt = float(account.get("totalWalletBalance", 0.0))
-                if usdt > 0:
-                    self._portfolio.state.cash = usdt
-                    self._portfolio.state.equity = usdt
-            except Exception:
-                pass
+            else:
+                wallet = float(
+                    account.get("totalWalletBalance")
+                    or account.get("availableBalance")
+                    or account.get("availableMargin")
+                    or 0.0
+                )
+                if wallet > 0:
+                    self._portfolio.state.cash = wallet
+                    self._portfolio.state.equity = wallet
+        except Exception:
+            pass
+
+        if positions:
             try:
                 self._import_futures_positions(positions)
             except Exception:
                 pass
+
+        try:
+            from engine.metrics import update_portfolio_gauges
+            st = self._portfolio.state
+            update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
+        except Exception:
+            pass
+
         return self._last_snapshot or {"balances": [], "positions": []}
 
     async def get_account_snapshot(self) -> dict:
@@ -607,6 +707,8 @@ class OrderRouterExt(OrderRouter):
             spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
         elif venue == "BINANCE" and spec is None:
             spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
+        elif venue == "KRAKEN" and spec is None:
+            spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
         if spec is None:
             raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
 
@@ -674,3 +776,207 @@ class OrderRouterExt(OrderRouter):
         res["rounded_qty"] = float(q_rounded)
         res["venue"] = venue
         return res
+
+    # ---- Shadow maker path for scalps (logs only; still executes taker) ----
+    async def place_entry(self, symbol: str, side: Side, qty: float, *, venue: str, intent: str = ""):
+        import os, logging
+        # Resolve best reference prices; fall back to last
+        last_px = await self.get_last_price(symbol)
+        if last_px is None or last_px <= 0:
+            last_px = 0.0
+        # Optional risk-parity sizing override (when qty <= 0 or explicitly enabled)
+        try:
+            if os.getenv("RISK_PARITY_ENABLED", "").lower() in {"1", "true", "yes"} and (qty is None or qty <= 0):
+                from engine.risk.sizer import risk_parity_qty, clamp_notional
+                md = _MDAdapter(self)
+                tf = os.getenv("RISK_PARITY_TF", "5m")
+                n = int(float(os.getenv("RISK_PARITY_N", "14")))
+                per_risk = float(os.getenv("PER_TRADE_RISK_USD", os.getenv("PER_TRADE_USD", "40")))
+                computed = risk_parity_qty(per_risk, md, symbol.split(".")[0], tf, n)
+                if computed > 0 and last_px > 0:
+                    min_usd = float(os.getenv("RISK_PARITY_MIN_NOTIONAL_USD", "20"))
+                    max_usd = float(os.getenv("RISK_PARITY_MAX_NOTIONAL_USD", "500"))
+                    qty = clamp_notional(computed, last_px, min_usd, max_usd)
+                    logging.getLogger(__name__).info("[RISK-PARITY] %s qty=%.8f", symbol, qty)
+        except Exception:
+            pass
+        # Apply auto cutback/mute (feature-gated)
+        try:
+            if os.getenv("AUTO_CUTBACK_ENABLED", "").lower() in {"1", "true", "yes"}:
+                from engine.execution.venue_overrides import VenueOverrides
+                if not hasattr(self, "_overrides"):
+                    self._overrides = VenueOverrides()  # type: ignore[attr-defined]
+                ov = self._overrides  # type: ignore[attr-defined]
+                mult = float(ov.get_size_mult(symbol))
+                if mult and mult > 0 and mult != 1.0:
+                    qty = float(qty) * mult
+                    logging.getLogger(__name__).info("[CUTBACK] %s qty mult=%.2f -> %.8f", symbol, mult, qty)
+                if intent.upper() == "SCALP" and not ov.scalp_enabled(symbol):
+                    logging.getLogger(__name__).warning("[MUTED] SCALP disabled for %s; blocking entry", symbol)
+                    return {"status": "blocked", "reason": "SCALP_MUTED", "symbol": symbol}
+        except Exception:
+            pass
+        shadow = os.getenv("SCALP_MAKER_SHADOW", "").lower() in {"1", "true", "yes"}
+        if intent.upper() == "SCALP" and shadow:
+            ref = float(last_px)
+            improve_bps = float(os.getenv("MAKER_PRICE_IMPROVE_BPS", "1"))
+            improve = ref * improve_bps / 10_000.0
+            limit_px = (ref - improve) if side == "BUY" else (ref + improve)
+            tif = "IOC" if (venue.lower() == "futures" or os.getenv("BINANCE_MODE", "").lower().startswith("futures")) else "GTC"
+            logging.getLogger(__name__).info(
+                "[SCALP:MAKER:SHADOW] %s %s qty=%s px=%.8f tif=%s", symbol, side, qty, limit_px, tif
+            )
+        # Execute taker path for now (no behavior change)
+        # Pre-flight min notional step guard
+        try:
+            import os
+            min_block_usd = float(os.getenv("MIN_NOTIONAL_BLOCK_USD", os.getenv("MIN_NOTIONAL_USDT", "5")))
+            q_rounded = self.round_step(symbol, float(qty))
+            if (q_rounded <= 0.0) or (float(qty) * float(last_px) < min_block_usd):
+                logging.getLogger(__name__).warning("[MIN_NOTIONAL_BLOCK] %s notional=%.4f below %.2f or step rounds to 0", symbol, float(qty) * float(last_px), min_block_usd)
+                return {"status": "blocked", "reason": "MIN_NOTIONAL_BLOCK", "symbol": symbol}
+        except Exception:
+            pass
+        res = await self._place_market_order_async(symbol=symbol, side=side, quote=None, quantity=qty)
+        # Emit trade.fill for synchronous fills
+        try:
+            self._emit_fill(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)
+        except Exception:
+            pass
+        return res
+
+    # Utility methods used by guards/sizers
+    async def list_positions(self):
+        out = []
+        try:
+            st = self._portfolio.state
+            for sym, pos in (st.positions or {}).items():
+                qty = float(getattr(pos, "quantity", 0.0) or 0.0)
+                out.append({"symbol": sym, "qty": qty})
+        except Exception:
+            return []
+        return out
+
+    async def set_trading_enabled(self, enabled: bool):
+        try:
+            # Delegate to risk_guardian flag file writer
+            from engine.risk_guardian import _write_trading_flag
+            _write_trading_flag(bool(enabled))
+        except Exception:
+            pass
+
+    def set_preferred_quote(self, quote: str) -> None:
+        try:
+            self._preferred_quote = quote.upper()
+        except Exception:
+            self._preferred_quote = quote.upper()
+
+    async def auto_net_hedge_btc(self, percent: float = 0.30):
+        # Placeholder: calculate net delta and open a BTCUSDT opposite position; best-effort noop for now
+        return None
+
+
+class _MDAdapter:
+    def __init__(self, router: OrderRouterExt) -> None:
+        self.router = router
+
+    def last(self, symbol: str):
+        # Synchronous helper for ATR sizing path
+        import asyncio
+        res = asyncio.get_event_loop().run_until_complete(self.router.get_last_price(f"{symbol}.BINANCE"))
+        return res
+
+    def atr(self, symbol: str, tf: str = "5m", n: int = 14):
+        # Use exchange klines to compute ATR quickly
+        import math
+        import asyncio
+        client = self.router.exchange_client()
+        if client is None or not hasattr(client, "klines"):
+            return 0.0
+        kl = client.klines(symbol, interval=tf, limit=max(n + 1, 15))
+        if hasattr(kl, "__await__"):
+            kl = asyncio.get_event_loop().run_until_complete(kl)
+        if not isinstance(kl, list) or len(kl) < 2:
+            return 0.0
+        prev_close = None
+        trs = []
+        for row in kl[-(n + 1):]:
+            high = float(row[2]); low = float(row[3]); close = float(row[4])
+            if prev_close is None:
+                tr = high - low
+            else:
+                tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            trs.append(tr)
+            prev_close = close
+        if len(trs) <= 1:
+            return 0.0
+        trs = trs[1:]
+        return sum(trs) / len(trs)
+
+    # ---- Rounding helpers ----
+    def round_step(self, symbol: str, qty: float) -> float:
+        try:
+            base = symbol.split(".")[0].upper()
+            spec = (SPECS.get(self._venue) or {}).get(base)
+            step = spec.step_size if spec else 0.0
+            if step <= 0:
+                step = 1e-6
+            return _round_step(float(qty), float(step))
+        except Exception:
+            return qty
+
+    def round_tick(self, symbol: str, price: float) -> float:
+        try:
+            base = symbol.split(".")[0].upper()
+            spec = (SPECS.get(self._venue) or {}).get(base)
+            tick = getattr(spec, "tick_size", 0.0) if spec else 0.0
+            return _round_tick(float(price), float(tick))
+        except Exception:
+            return price
+
+    def qty_step(self, symbol: str) -> float:
+        try:
+            base = symbol.split(".")[0].upper()
+            spec = (SPECS.get(self._venue) or {}).get(base)
+            return float(spec.step_size) if spec else 1e-6
+        except Exception:
+            return 1e-6
+
+    async def place_reduce_only_limit(self, symbol: str, side: Side, qty: float, price: float):
+        client = _CLIENTS.get(self._venue)
+        if client is None:
+            return None
+        submit = getattr(client, "submit_limit_order", None)
+        if submit is None:
+            return None
+        # Best-effort; some venues accept reduceOnly param; ignore if unsupported
+        params = dict(symbol=symbol.split(".")[0], side=side, quantity=float(qty), price=float(price), time_in_force="GTC")
+        if "reduce_only" in submit.__code__.co_varnames:  # type: ignore[attr-defined]
+            params["reduce_only"] = True  # type: ignore[index]
+        res = submit(**params)
+        if hasattr(res, "__await__"):
+            res = await res
+        return res
+
+    # ---- Fill emitter ----
+    def _emit_fill(self, res: dict[str, Any], *, symbol: str, side: str, venue: str, intent: str) -> None:
+        try:
+            bus = getattr(self, "_bus", None) or getattr(self, "bus", None)
+            if not bus:
+                return
+            filled = float(res.get("filled_qty_base") or res.get("executedQty") or 0.0)
+            avg = float(res.get("avg_fill_price") or res.get("avgPrice") or 0.0)
+            if filled and avg:
+                payload = {
+                    "ts": float(res.get("ts") or _now()),
+                    "symbol": symbol,
+                    "side": side,
+                    "venue": venue,
+                    "intent": intent or "GENERIC",
+                    "order_id": res.get("order_id") or res.get("orderId"),
+                    "filled_qty": float(filled),
+                    "avg_price": float(avg),
+                }
+                bus.fire("trade.fill", payload)
+        except Exception:
+            pass

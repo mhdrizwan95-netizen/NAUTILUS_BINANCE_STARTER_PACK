@@ -21,4 +21,3 @@ async def stream():
             yield f"data: {json.dumps(evt)}\n\n"
 
     return StreamingResponse(gen(), media_type="text/event-stream")
-

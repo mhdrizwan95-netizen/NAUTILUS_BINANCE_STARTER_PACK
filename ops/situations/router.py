@@ -95,4 +95,3 @@ async def ingest_bar(bar: Dict[str, Any]):
         raise HTTPException(400, "symbol required")
     hits = _matcher.evaluate(symbol, feats, ts=ts)
     return {"hits": hits}
-

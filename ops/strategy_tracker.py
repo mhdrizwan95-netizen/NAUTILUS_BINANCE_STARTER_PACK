@@ -129,27 +129,33 @@ async def strategy_tracker_loop():
                     metrics[model].pop(0)
 
                 arr = metrics[model]
-                if len(arr) >= 5:  # Need minimum samples for stats
+                reg = registry.get(model, {}).copy()
+
+                # Maintain rolling samples for governance stats
+                historic = reg.get("samples", [])
+                if isinstance(historic, list):
+                    new_samples = (historic + [total_return])[-60:]
+                else:
+                    new_samples = [total_return]
+                reg["samples"] = new_samples
+                reg["realized"] = float(round(pnl, 6))
+                reg["last_pnl"] = float(round(total_return, 6))
+
+                if len(arr) >= 5:
                     mu = mean(arr)
                     sigma = pstdev(arr) or 1e-6  # Avoid division by zero
                     sharpe = mu / sigma if sigma > 0 else 0.0
                     dd = max(arr) - min(arr) if len(arr) > 1 else 0.0
 
-                    reg = registry.get(model, {})
-                    reg.update({
-                        "sharpe": float(sharpe),
-                        "drawdown": float(dd),
-                        "realized": float(pnl),
-                        "trades": reg.get("trades", 0) + 1,
-                        "last_pnl": float(total_return),
-                        "samples": len(arr)
-                    })
-                    registry[model] = reg
+                    reg["sharpe"] = float(sharpe)
+                    reg["drawdown"] = float(dd)
 
-                    # Export to Prometheus
                     SHARPE_GAUGE.labels(model=model).set(float(sharpe))
                     DD_GAUGE.labels(model=model).set(float(dd))
-                    REALIZED_GAUGE.labels(model=model).set(float(pnl))
+
+                REALIZED_GAUGE.labels(model=model).set(float(pnl))
+
+                registry[model] = reg
 
             save_registry(registry)
             samples += 1

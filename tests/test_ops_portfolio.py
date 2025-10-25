@@ -1,9 +1,10 @@
-import os, importlib
+import os, importlib, asyncio, contextlib
 import pytest
 import respx
 from httpx import Response
 from fastapi.testclient import TestClient
 from ops.portfolio_collector import portfolio_collector_loop, PORTFOLIO_EQUITY, PORTFOLIO_GAIN, PORTFOLIO_RET
+from ops.portfolio_collector import _venue_label
 
 @pytest.fixture(autouse=True)
 def _env_clear(monkeypatch):
@@ -78,10 +79,14 @@ def test_portfolio_api_endpoint(monkeypatch):
     )
 
     # Update metrics first
-    task = asyncio.create_task(portfolio_collector_loop(interval_sec=1))
-    import asyncio as asyncio_module
-    asyncio_module.run(asyncio_module.sleep(1.5))
-    task.cancel()
+    async def _run_once():
+        task = asyncio.create_task(portfolio_collector_loop(interval_sec=1))
+        await asyncio.sleep(1.5)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run_once())
 
     # Test API endpoint
     r = c.get("/aggregate/portfolio")
@@ -109,5 +114,4 @@ def test_portfolio_collector_venue_extraction():
 
     # The venue extraction logic in portfolio collector is similar
     for url, expected_venue in test_urls:
-        venue_clean = url.split("//")[-1].split(":")[0].replace("engine_", "").upper()
-        assert venue_clean == expected_venue
+        assert _venue_label(url) == expected_venue

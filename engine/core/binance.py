@@ -319,6 +319,66 @@ class BinanceREST:
         # Fallback (should never reach due to return above)
         return {"balances": [], "positions": []}
 
+    async def margin_account(self) -> dict[str, Any]:
+        """Fetch cross-margin account summary if available (spot SAPI).
+
+        Returns a dict that may include a field `marginLevel`.
+        Best-effort: returns {} if endpoint not available or in futures mode.
+        """
+        try:
+            if self._is_futures:
+                return {}
+            settings = get_settings()
+            params = {
+                "timestamp": _now_ms(),
+                "recvWindow": settings.recv_window,
+            }
+            params["signature"] = self._sign(params)
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._settings.timeout,
+                headers={"X-MBX-APIKEY": self._settings.api_key},
+            ) as client:
+                path = "/sapi/v1/margin/account"
+                self._log_request("GET", path, params=params)
+                r = await client.get(path, params=params)
+            r.raise_for_status()
+            return r.json()
+        except Exception:
+            return {}
+
+    async def klines(self, symbol: str, interval: str = "1m", limit: int = 30) -> list:
+        try:
+            path = "/fapi/v1/klines" if self._is_futures else "/api/v3/klines"
+            params = {"symbol": symbol, "interval": interval, "limit": limit}
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._settings.timeout,
+                headers={"X-MBX-APIKEY": self._settings.api_key},
+            ) as client:
+                self._log_request("GET", path, params=params)
+                r = await client.get(path, params=params)
+            r.raise_for_status()
+            return r.json()
+        except Exception:
+            return []
+
+    async def book_ticker(self, symbol: str) -> dict[str, Any]:
+        try:
+            path = "/fapi/v1/ticker/bookTicker" if self._is_futures else "/api/v3/ticker/bookTicker"
+            params = {"symbol": symbol}
+            async with httpx.AsyncClient(
+                base_url=self._base,
+                timeout=self._settings.timeout,
+                headers={"X-MBX-APIKEY": self._settings.api_key},
+            ) as client:
+                self._log_request("GET", path, params=params)
+                r = await client.get(path, params=params)
+            r.raise_for_status()
+            return r.json()
+        except Exception:
+            return {}
+
     async def my_trades_since(self, symbol: str, start_ms: int) -> list[dict[str, Any]]:
         """
         Fetch account trades for a symbol since a given timestamp (ms).

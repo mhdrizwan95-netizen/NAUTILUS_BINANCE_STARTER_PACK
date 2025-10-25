@@ -27,4 +27,3 @@ class Situation(BaseModel):
 
     class Config:
         extra = "ignore"
-

@@ -248,7 +248,7 @@ M15 Calibration Notebook — validates RewardBook convergence and TinyMLP learni
 
 Use FAST or PAPER calibration VS Code tasks or terminal scripts to generate diagnostic PNGs.
 
-**FAST (via Backtest):** Run 'Calibrate (FAST via Backtest)' to run backtest → calibration automatically.  
+**FAST (via Backtest):** Run 'Calibrate (FAST via Backtest)' to run backtest → calibration automatically.
 **PAPER (Testnet):** Run 'Calibrate (PAPER 15m)' to run paper trading → calibration automatically.
 
 For manual runs:

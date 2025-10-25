@@ -1,30 +1,31 @@
 # ops/pnl_collector.py
 from __future__ import annotations
 import os, asyncio, time, logging, httpx
-from prometheus_client import Gauge
-from ops.prometheus import REGISTRY
+from ops.prometheus import REGISTRY, get_or_create_gauge
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
+def _venue_label(base_url: str) -> str:
+    host = base_url.split("//")[-1].split("/")[0]
+    host = host.split(":")[0]
+    return host.upper()
+
 # Prometheus Gauges per venue
-PNL_REALIZED = Gauge(
+PNL_REALIZED = get_or_create_gauge(
     "pnl_realized_total",
     "Realized PnL per venue (USD)",
-    ["venue"],
-    registry=REGISTRY,
+    labelnames=("venue",),
     multiprocess_mode="max",
 )
-PNL_UNREALIZED = Gauge(
+PNL_UNREALIZED = get_or_create_gauge(
     "pnl_unrealized_total",
     "Unrealized PnL per venue (USD)",
-    ["venue"],
-    registry=REGISTRY,
+    labelnames=("venue",),
     multiprocess_mode="max",
 )
-PNL_LAST_REFRESH = Gauge(
+PNL_LAST_REFRESH = get_or_create_gauge(
     "ops_pnl_last_refresh_epoch",
     "Unix time of last PnL refresh",
-    registry=REGISTRY,
     multiprocess_mode="max",
 )
 
@@ -56,7 +57,7 @@ async def pnl_collector_loop():
             for e, res in zip(endpoints, results):
                 if not isinstance(res, dict):
                     continue
-                venue = e.split("//")[-1].split(":")[0].replace("engine_", "").upper()
+                venue = _venue_label(e)
                 pnl = res.get("pnl") or {}
                 realized = float(pnl.get("realized", 0.0))
                 unrealized = float(pnl.get("unrealized", 0.0))

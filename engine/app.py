@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 import json
 import logging
+import math
+import random
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal, Optional, Any, Callable, cast
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -16,15 +19,16 @@ import httpx as _httpx
 import os
 from engine.config import get_settings, load_risk_config, QUOTE_CCY
 from engine.core.binance import BinanceREST
-from engine.core.order_router import OrderRouter, set_exchange_client
-from engine.core.order_router import OrderRouterExt
-from engine.core.portfolio import Portfolio
+from engine.core.kraken import KrakenREST
+from engine.core.order_router import OrderRouterExt, set_exchange_client
+from engine.core.portfolio import Portfolio, Position
 from engine.core.event_bus import BUS, initialize_event_bus, publish_order_event, publish_risk_event
 from engine.core import alert_daemon
 from engine.risk import RiskRails
 from engine import metrics
 from engine.idempotency import CACHE, append_jsonl
 from engine.state import SnapshotStore
+import engine.state as state_mod
 from engine.reconcile import reconcile_since_snapshot
 from engine import strategy
 from engine.universe import configured_universe, last_prices
@@ -71,8 +75,17 @@ class _DummyBinanceREST:
             "status": "FILLED",
         }
 
+    async def close(self) -> None:
+        return None
+
     def get_last_price(self, symbol: str):
-        return self._price
+        price = self.ticker_price(symbol)
+        if isinstance(price, dict):
+            return float(price.get("price", self._price))
+        try:
+            return float(price)
+        except Exception:
+            return self._price
 
     def ticker_price(self, symbol: str):
         return {"price": self._price}
@@ -80,15 +93,195 @@ class _DummyBinanceREST:
     def my_trades_since(self, symbol: str, start_ms: int):
         return []
 
+    async def safe_price(self, symbol: str):
+        return self._price
 
-if VENUE == "BINANCE" and (not settings.api_key or not settings.api_secret):
-    rest_client = _DummyBinanceREST()
+    async def exchange_filter(self, symbol: str):
+        class _Filter:
+            step_size = 0.0001
+            min_qty = 0.0001
+            min_notional = 5.0
+            max_notional = 1_000_000.0
+            tick_size = 0.0001
+
+        return _Filter()
+
+    async def refresh_portfolio(self):
+        return None
+
+    async def bulk_premium_index(self):
+        return {}
+
+    async def account(self):
+        return {}
+
+    async def position_risk(self):
+        return []
+
+    async def hedge_mode(self):
+        return False
+
+
+if VENUE == "BINANCE":
+    if not settings.api_key or not settings.api_secret:
+        rest_client = _DummyBinanceREST()
+    else:
+        rest_client = BinanceREST()
+elif VENUE == "KRAKEN":
+    rest_client = KrakenREST()
 else:
     rest_client = BinanceREST()
+
+if VENUE == "KRAKEN":
+    KRAKEN_REST: KrakenREST | None = cast(Optional[KrakenREST], rest_client)
+else:
+    KRAKEN_REST = None
+
+
+def _kraken_configured_products() -> list[str]:
+    raw = os.getenv("KRAKEN_TRADED_SYMBOLS") or "PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN"
+    values: list[str] = []
+    for token in raw.split(","):
+        item = token.strip()
+        if not item:
+            continue
+        values.append(item.split(".")[0].strip().upper())
+    if not values:
+        values.append("PI_XBTUSD")
+    return sorted(set(values))
+
+
+def _kraken_symbol_base(symbol: str) -> str:
+    return symbol.split(".")[0].upper()
+
+
+_KRAKEN_PRODUCTS = _kraken_configured_products() if VENUE == "KRAKEN" else []
+_KRAKEN_MARK_WARN_SEC = 5.0
+_KRAKEN_MARK_PAGE_SEC = 15.0
+_KRAKEN_MARK_FORCE_SEC = 60.0
+_kraken_mark_ts: dict[str, float] = {}
+_kraken_mark_alert_state: dict[str, int] = {}
+
+
+async def _kraken_safe_price(symbol: str) -> float | None:
+    if KRAKEN_REST is None:
+        return None
+    result = await KRAKEN_REST.safe_price(symbol)
+    if isinstance(result, (int, float)) and math.isfinite(float(result)):
+        return float(result)
+    return None
+
+
+def _kraken_record_mark(symbol: str, raw_price: float, ts: float) -> None:
+    if VENUE != "KRAKEN":
+        return
+    base = _kraken_symbol_base(symbol)
+    try:
+        price = float(raw_price)
+    except (TypeError, ValueError):
+        return
+    if not math.isfinite(price) or price <= 0.0:
+        return
+    _kraken_mark_ts[base] = ts
+    _kraken_mark_alert_state[base] = 0
+    try:
+        metrics.mark_price_freshness_sec.labels(symbol=base, venue="kraken").set(0.0)
+        metrics.mark_price_by_symbol.labels(symbol=base).set(price)
+        metrics.MARK_PRICE.labels(symbol=base, venue="kraken").set(price)
+        _price_map[base] = price
+    except Exception:
+        pass
+    if KRAKEN_REST is not None:
+        try:
+            KRAKEN_REST.cache_price(base, price)
+        except Exception:
+            pass
+
+
+def _kraken_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
+    _kraken_record_mark(sym, price, ts)
+
+
+async def _kraken_refresh_mark_prices(now: float) -> None:
+    if VENUE != "KRAKEN":
+        return
+    products = _KRAKEN_PRODUCTS or ["PI_XBTUSD"]
+    for base in products:
+        last_ts = _kraken_mark_ts.get(base)
+        freshness = float("inf") if last_ts is None else max(0.0, now - last_ts)
+        try:
+            metrics.mark_price_freshness_sec.labels(symbol=base, venue="kraken").set(freshness)
+        except Exception:
+            pass
+
+        state = _kraken_mark_alert_state.get(base, 0)
+        if freshness >= _KRAKEN_MARK_PAGE_SEC and state < 2:
+            _kraken_risk_logger.error("Kraken mark stale %.1fs (paging) for %s", freshness, base)
+            state = 2
+        elif freshness >= _KRAKEN_MARK_WARN_SEC and state < 1:
+            _kraken_risk_logger.warning("Kraken mark stale %.1fs for %s", freshness, base)
+            state = 1
+        force_rest = freshness >= _KRAKEN_MARK_FORCE_SEC
+        if force_rest and state < 3:
+            _kraken_risk_logger.warning("Kraken mark stale %.1fs, forcing REST refresh for %s", freshness, base)
+            state = 3
+        _kraken_mark_alert_state[base] = state
+
+        if freshness < _KRAKEN_MARK_WARN_SEC and last_ts is not None:
+            continue
+
+        price: float | None = None
+        try:
+            if force_rest:
+                ticker = getattr(rest_client, "ticker_price", None)
+                if callable(ticker):
+                    candidate = ticker(base)
+                    if inspect.isawaitable(candidate):
+                        candidate = await candidate
+                    if isinstance(candidate, (int, float)) and math.isfinite(float(candidate)):
+                        price = float(candidate)
+            else:
+                price = await _kraken_safe_price(base)
+        except Exception as exc:
+            if force_rest:
+                _kraken_risk_logger.error("Kraken REST price fetch failed for %s: %s", base, exc)
+            else:
+                _kraken_risk_logger.debug("Kraken safe_price failed for %s: %s", base, exc)
+            price = None
+
+        if isinstance(price, (int, float)) and price > 0.0:
+            _kraken_record_mark(base, float(price), now)
+            continue
+
+        try:
+            metrics.MARK_PRICE.labels(symbol=base, venue="kraken").set(0.0)
+            metrics.mark_price_by_symbol.labels(symbol=base).set(0.0)
+        except Exception:
+            pass
+
+
 portfolio = Portfolio()
-router = OrderRouterExt(rest_client, portfolio)
+router = OrderRouterExt(rest_client, portfolio, venue=VENUE)
+order_router = router
+try:
+    # Expose BUS on router for event publishing (e.g., trade.fill)
+    router.bus = BUS  # type: ignore[attr-defined]
+except Exception:
+    pass
 startup_lock = asyncio.Lock()
 _refresh_logger = logging.getLogger("engine.refresh")
+_startup_logger = logging.getLogger("engine.startup")
+_persist_logger = logging.getLogger("engine.persistence")
+_kraken_risk_logger = logging.getLogger("engine.kraken.telemetry")
+
+store = None
+try:
+    from engine.storage import sqlite as _sqlite_store
+    _sqlite_store.init()
+    store = _sqlite_store
+    _persist_logger.info("SQLite persistence initialized at %s", Path("data/runtime/trades.db").resolve())
+except Exception:
+    _persist_logger.exception("SQLite initialization failed")
 
 # Attach metrics router
 app.include_router(metrics.router)
@@ -105,6 +298,16 @@ if not IS_EXPORTER:
     app.include_router(strategy.router)
 
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        val = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(val):
+        return None
+    return val
+
+
 def _config_hash() -> str:
     """Generate stable hash of key config for provenance tracking."""
     keys = [
@@ -117,6 +320,29 @@ def _config_hash() -> str:
     blob = "|".join(f"{k}={os.getenv(k, '')}" for k in keys)
     import hashlib
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
+
+
+def _maybe_emit_strategy_tick(symbol: str, price: float, *, ts: float | None = None) -> None:
+    """Forward mark updates into the strategy loop when enabled."""
+    if price is None or price <= 0:
+        return
+    try:
+        cfg = getattr(strategy, "S_CFG", None)
+        if cfg is None or not getattr(cfg, "enabled", False):
+            return
+        qualified = symbol if "." in symbol else f"{symbol}.BINANCE"
+        strategy.on_tick(qualified, float(price), ts or time.time())
+        try:
+            base = qualified.split(".")[0].upper()
+            venue = qualified.split(".")[1].lower()
+            metrics.strategy_ticks_total.labels(symbol=base, venue=venue).inc()
+        except Exception:
+            pass
+    except Exception:
+        try:
+            _refresh_logger.debug("Strategy tick emit failed for %s", symbol, exc_info=True)
+        except Exception:
+            pass
 
 @app.get("/readyz")
 def readyz():
@@ -139,7 +365,7 @@ def version():
         "build_at": os.getenv("BUILD_AT", ""),
     }
 
-_store = SnapshotStore()
+_store = SnapshotStore(state_mod.SNAP_PATH)
 _boot_status = {"snapshot_loaded": False, "reconciled": False}
 _last_reconcile_ts = 0.0  # Track reconcile freshness
 _last_specs_refresh = 0.0  # Track venue specs freshness
@@ -149,15 +375,24 @@ _last_position_symbols: set[str] = set()
 _price_map = {}  # symbol -> markPrice
 _snapshot_counter = 0
 
+_kraken_risk_loop_task: asyncio.Task | None = None
+_kraken_risk_stop_event = asyncio.Event()
+
 
 class MarketOrderRequest(BaseModel):
     """Market order request. Exactly one of {quantity, quote} must be provided."""
-    model_config = ConfigDict(extra="forbid")  # reject unexpected fields
+    model_config = ConfigDict(extra="ignore")  # allow unknown fields
 
     symbol: str = Field(..., description="e.g., BTCUSDT.BINANCE")
     side: Literal["BUY", "SELL"]
     quote: Optional[float] = Field(None, gt=0, description="Quote currency amount (USDT).")
     quantity: Optional[float] = Field(None, gt=0, description="Base asset quantity.")
+    venue: Optional[str] = Field(None, description="Trading venue. Defaults to VENUE env var.")
+
+    @field_validator("venue")
+    @classmethod
+    def _normalize_venue(cls, value: Optional[str]) -> Optional[str]:
+        return value.upper() if value else None
 
     @model_validator(mode="after")
     def validate_exclusive(self):
@@ -183,9 +418,48 @@ class LimitOrderRequest(BaseModel):
         return self
 
 
+def _record_venue_error(venue: str, exc: Exception) -> None:
+    """Best-effort metric hook for venue-facing errors."""
+    try:
+        venue_label = (venue or VENUE).upper()
+        error_label = "UNKNOWN"
+        message = str(exc) or ""
+        lowered = message.lower()
+        if "authentication" in lowered:
+            error_label = "AUTHENTICATION"
+        elif "no_price" in lowered or "NO_PRICE" in message:
+            error_label = "NO_PRICE"
+        elif ":" in message:
+            error_label = message.split(":", 1)[0].strip().upper().replace(" ", "_")
+        elif message:
+            error_label = message.strip().upper().replace(" ", "_")
+        else:
+            error_label = exc.__class__.__name__.upper()
+        metrics.venue_errors.labels(venue=venue_label, error=error_label[:64]).inc()
+    except Exception:
+        pass
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     async with startup_lock:
+        _startup_logger.info("Startup sequence started (role=%s, venue=%s)", ROLE, VENUE)
+        try:
+            h = _config_hash()
+            flags = {k: os.getenv(k) for k in [
+                "EVENT_BREAKOUT_ENABLED","EVENT_BREAKOUT_DRY_RUN","EVENT_BREAKOUT_METRICS",
+                "DEX_FEED_ENABLED","SCALP_MAKER_SHADOW","ALLOW_STOP_AMEND","AUTO_CUTBACK_ENABLED",
+                "RISK_PARITY_ENABLED","DEPEG_GUARD_ENABLED","FUNDING_GUARD_ENABLED"
+            ] if os.getenv(k) is not None}
+            _startup_logger.info("Config hash=%s flags=%s", h, flags)
+        except Exception:
+            pass
+        # Start event bus early so other tasks can publish
+        try:
+            await initialize_event_bus()
+            _startup_logger.info("Event bus initialized")
+        except Exception:
+            _startup_logger.warning("Event bus init failed", exc_info=True)
         await router.initialize_balances()
         # Optional: seed starting cash for demo/test if no balances detected
         try:
@@ -198,13 +472,14 @@ async def on_startup() -> None:
                     if val > 0:
                         state.cash = val
                         state.equity = val
-        except Exception:
-            pass
+                        _startup_logger.info("Seeded starting cash of %s USD", val)
+        except Exception as exc:
+            _startup_logger.warning("Unable to seed starting cash: %s", exc, exc_info=True)
         # Initialize portfolio metrics
         state = portfolio.state
-        metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
-
         metrics.reset_core_metrics()
+        metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
+        _startup_logger.info("Startup sequence completed")
 
 
 async def _refresh_specs_periodically():
@@ -231,6 +506,7 @@ async def _refresh_specs_periodically():
 async def _start_specs_refresh():
     """Start the background venue specs refresh task."""
     asyncio.create_task(_refresh_specs_periodically())
+    _startup_logger.info("Scheduled venue specs refresh task")
 
 
 @app.on_event("startup")
@@ -245,11 +521,11 @@ async def _init_multi_venue_clients():
         if os.getenv("IBKR_HOST"):
             ibkr_client = IbkrClient()
             set_exchange_client("IBKR", ibkr_client)
-            print("IBKR client initialized and registered")
+            _startup_logger.info("IBKR client initialized and registered")
     except ImportError:
-        print("[WARN] IBKR client not available - ib-insync not installed")
+        _startup_logger.warning("IBKR client not available - ib-insync not installed", exc_info=True)
     except Exception as e:
-        print(f"[WARN] IBKR client initialization failed: {e}")
+        _startup_logger.exception("IBKR client initialization failed: %s", e)
 
 
 @app.on_event("startup")
@@ -258,11 +534,192 @@ async def _start_reconciliation():
     try:
         from engine.core.reconcile_daemon import reconcile_loop
         asyncio.create_task(reconcile_loop())
-        print("[SYNC] Reconciliation daemon started")
+        _startup_logger.info("Reconciliation daemon started")
     except ImportError:
-        print("[WARN] Reconciliation module not available")
-    except Exception as e:
-        print(f"[WARN] Reconciliation daemon startup failed: {e}")
+        _startup_logger.warning("Reconciliation module not available", exc_info=True)
+    except Exception:
+        _startup_logger.exception("Reconciliation daemon startup failed")
+
+
+# Optional: start risk guardian and DEX feed when enabled via env
+_GUARDIAN = None
+
+
+@app.on_event("startup")
+async def _start_guardian_and_feeds():
+    if IS_EXPORTER:
+        return
+    # Risk guardian
+    try:
+        from engine.risk_guardian import RiskGuardian, load_guardian_config
+        cfg = load_guardian_config()
+        if cfg.enabled:
+            global _GUARDIAN
+            _GUARDIAN = RiskGuardian(cfg)
+            await _GUARDIAN.start()
+            _startup_logger.info("Risk guardian started")
+            # Wire soft/critical handlers if bus is running
+            try:
+                from engine.handlers import risk_handlers
+                BUS.subscribe("risk.cross_health_soft", risk_handlers.on_cross_health_soft(router, cfg))
+                BUS.subscribe("risk.cross_health_critical", risk_handlers.on_cross_health_critical(router, cfg))
+            except Exception:
+                _startup_logger.warning("Risk handlers did not wire", exc_info=True)
+    except Exception:
+        _startup_logger.warning("Risk guardian failed to start", exc_info=True)
+
+    # DEX feed loop
+    try:
+        import os
+        if os.getenv("DEX_FEED_ENABLED", "").lower() in {"1", "true", "yes"}:
+            from engine.feeds.dexscreener import dexscreener_loop
+            asyncio.create_task(dexscreener_loop(), name="dexscreener-feed")
+            _startup_logger.info("DEX Screener feed started")
+    except Exception:
+        _startup_logger.warning("DEX Screener feed failed to start", exc_info=True)
+
+    # Binance announcements poller (publish-only)
+    try:
+        import os
+        if os.getenv("ANN_ENABLED", "").lower() in {"1", "true", "yes"}:
+            from engine.feeds.binance_announcements import run as ann_run
+            asyncio.create_task(ann_run(), name="binance-announcements")
+            _startup_logger.info("Binance announcements poller started")
+            # Optional: breakout handler wiring
+            if os.getenv("EVENT_BREAKOUT_ENABLED", "").lower() in {"1", "true", "yes"}:
+                from engine.handlers.breakout_handlers import on_binance_listing
+                BUS.subscribe("events.binance_listing", on_binance_listing(router))
+                _startup_logger.info("Announcement breakout handler wired")
+                # Trailing watcher (only when not dry-run and enabled)
+                if os.getenv("EVENT_BREAKOUT_DRY_RUN", "").lower() not in {"1", "true", "yes"} and os.getenv("EVENT_BREAKOUT_TRAIL_LOOP_ENABLED", "").lower() in {"1", "true", "yes"}:
+                    try:
+                        from engine.strategies.event_breakout_trail import EventBreakoutTrailer
+                        trailer = EventBreakoutTrailer(router)
+                        asyncio.create_task(trailer.run())
+                        _startup_logger.info("Event breakout trailing watcher started")
+                    except Exception:
+                        _startup_logger.warning("Failed to start event breakout trailer", exc_info=True)
+    except Exception:
+        _startup_logger.warning("Announcements poller failed to start", exc_info=True)
+
+    # Wire Event Breakout consumer (subscribe to strategy.event_breakout)
+    try:
+        if os.getenv("EVENT_BREAKOUT_ENABLED", "").lower() in {"1", "true", "yes"}:
+            from engine.strategies.event_breakout import EventBreakout
+            bo = EventBreakout(router)
+            # SIGHUP reload if denylist enabled
+            if os.getenv("EVENT_BREAKOUT_DENYLIST_ENABLED", "").lower() in {"1", "true", "yes"}:
+                try:
+                    bo.enable_sighup_reload(bo.cfg.denylist_path)
+                except Exception:
+                    _startup_logger.info("SIGHUP not supported for denylist reload")
+            # Entropy-based auto-denylist wiring
+            if os.getenv("ENTROPY_DENY_ENABLED", "").lower() in {"1", "true", "yes"}:
+                try:
+                    BUS.subscribe("event_bo.skip", bo.on_skip_entropy)
+                    _startup_logger.info("Entropy deny wiring enabled")
+                except Exception:
+                    pass
+            BUS.subscribe("strategy.event_breakout", bo.on_event)
+            _startup_logger.info("Event Breakout consumer wired")
+    except Exception:
+        _startup_logger.warning("Event Breakout consumer failed to wire", exc_info=True)
+
+    # Start Telegram digest (if enabled)
+    try:
+        if os.getenv("TELEGRAM_ENABLED", "").lower() in {"1", "true", "yes"}:
+            from ops.notify.telegram import Telegram
+            from ops.notify.bridge import NotifyBridge
+            from engine.telemetry.rollups import EventBORollup, EventBOBuckets
+            from engine.ops.digest import DigestJob
+            tg = Telegram(os.getenv("TELEGRAM_BOT_TOKEN", ""), os.getenv("TELEGRAM_CHAT_ID", ""), _startup_logger)
+            # Notify bridge (relay BUS notify.telegram)
+            bridge_enabled = os.getenv("TELEGRAM_BRIDGE_ENABLED", "true").lower() in {"1", "true", "yes"}
+            try:
+                NotifyBridge(tg, BUS, _startup_logger, enabled=bridge_enabled)
+                _startup_logger.info("Telegram notify bridge %s", "enabled" if bridge_enabled else "disabled")
+            except Exception:
+                pass
+            roll = EventBORollup()
+            # Optional 6h buckets
+            buckets = EventBOBuckets(
+                bucket_minutes=int(float(os.getenv("DIGEST_6H_BUCKET_MIN", "360"))),
+                max_buckets=int(float(os.getenv("DIGEST_6H_MAX_BUCKETS", "4")))
+            )
+            # Subscribe to event breakout rollup events
+            def _subs(bus, fn):
+                BUS.subscribe("event_bo.plan_dry", lambda data: fn("plans_dry", data))
+                BUS.subscribe("event_bo.plan_live", lambda data: fn("plans_live", data))
+                BUS.subscribe("event_bo.trade", lambda data: fn("trades", data))
+                BUS.subscribe("event_bo.skip", lambda data: fn(f"skip_{data.get('reason')}", data))
+                BUS.subscribe("event_bo.half", lambda data: fn("half_applied", data))
+                BUS.subscribe("event_bo.trail", lambda data: fn("trail_update", data))
+
+            _subs(BUS, lambda key, d: roll.inc(key, d.get("symbol")))
+            _subs(BUS, lambda key, d: buckets.inc(key, d.get("symbol")))
+            job = DigestJob(roll, tg, log=_startup_logger)
+            job.buckets = buckets
+            asyncio.create_task(job.run())
+            _startup_logger.info("Telegram digest job started")
+    except Exception:
+        _startup_logger.warning("Telegram digest failed to start", exc_info=True)
+
+    # Guards: Depeg and Funding
+    try:
+        if os.getenv("DEPEG_GUARD_ENABLED", "").lower() in {"1", "true", "yes"}:
+            from engine.guards.depeg_guard import DepegGuard
+            depeg = DepegGuard(router, bus=BUS, log=_startup_logger)
+            async def _loop_depeg():
+                while True:
+                    try:
+                        await depeg.tick()
+                        from engine.metrics import risk_depeg_active
+                        now = __import__("time").time()
+                        val = 1 if now < depeg.safe_until else 0
+                        try:
+                            risk_depeg_active.set(val)
+                        except Exception:
+                            pass
+                    except Exception:
+                        pass
+                    await asyncio.sleep(60)
+            asyncio.create_task(_loop_depeg())
+            _startup_logger.info("Depeg guard started")
+    except Exception:
+        _startup_logger.warning("Depeg guard wiring failed", exc_info=True)
+
+    try:
+        if os.getenv("FUNDING_GUARD_ENABLED", "").lower() in {"1", "true", "yes"}:
+            from engine.guards.funding_guard import FundingGuard
+            funding = FundingGuard(router, bus=BUS, log=_startup_logger)
+            async def _loop_funding():
+                while True:
+                    try:
+                        await funding.tick()
+                    except Exception:
+                        pass
+                    await asyncio.sleep(300)
+            asyncio.create_task(_loop_funding())
+            _startup_logger.info("Funding guard started")
+    except Exception:
+        _startup_logger.warning("Funding guard wiring failed", exc_info=True)
+
+    # Auto cutback/mute overrides (symbol-level execution control)
+    try:
+        if os.getenv("AUTO_CUTBACK_ENABLED", "").lower() in {"1", "true", "yes"}:
+            from engine.execution.venue_overrides import VenueOverrides
+            ov = VenueOverrides()
+            # Listen to slippage samples and skip events
+            BUS.subscribe("event_bo.skip", lambda d: ov.record_skip(d.get("symbol", ""), str(d.get("reason", ""))))
+            BUS.subscribe("exec.slippage", lambda d: ov.record_slippage_sample(d.get("symbol", ""), float(d.get("bps", 0.0))))
+            # attach to router for place_entry consult
+            try:
+                setattr(router, "_overrides", ov)
+            except Exception:
+                pass
+            _startup_logger.info("Auto cutback/mute overrides enabled")
+    except Exception:
+        _startup_logger.warning("Auto cutback wiring failed", exc_info=True)
 
 
 @app.post("/reconcile/manual")
@@ -279,24 +736,80 @@ async def manual_reconciliation():
 # Startup restoration: load snapshot and best-effort reconcile
 def _startup_load_snapshot_and_reconcile():
     # 1) Load prior snapshot (if present) so UI has immediate state
-    if _store.load():
+    snap = _store.load()
+    if snap:
+        _startup_logger.info("Loaded persisted portfolio snapshot (ts_ms=%s)", snap.get("ts_ms"))
         _boot_status["snapshot_loaded"] = True
+        try:
+            state = portfolio.state
+            state.cash = float(snap.get("cash", state.cash))
+            state.equity = float(snap.get("equity", state.equity))
+            pnl = snap.get("pnl") or {}
+            state.realized = float(pnl.get("realized", state.realized))
+            state.unrealized = float(pnl.get("unrealized", state.unrealized))
+            state.exposure = float(snap.get("exposure", state.exposure))
+            state.positions.clear()
+            for entry in snap.get("positions", []):
+                try:
+                    sym = (entry.get("symbol") or "").split(".")[0].upper()
+                    qty = float(entry.get("qty_base", 0.0))
+                    if qty == 0.0:
+                        continue
+                    pos = Position(symbol=sym)
+                    pos.quantity = qty
+                    pos.avg_price = float(entry.get("avg_price_quote", 0.0))
+                    pos.last_price = float(entry.get("last_price_quote", pos.avg_price))
+                    pos.upl = float(entry.get("unrealized_usd", 0.0))
+                    pos.rpl = float(entry.get("realized_usd", 0.0))
+                    state.positions[sym] = pos
+                except Exception:
+                    continue
+            try:
+                _last_position_symbols.clear()
+                _last_position_symbols.update(state.positions.keys())
+            except Exception:
+                pass
+            metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
+        except Exception:
+            _startup_logger.warning("Failed to hydrate portfolio from snapshot", exc_info=True)
+    else:
+        _startup_logger.info("No persisted portfolio snapshot found; starting fresh")
     # 2) Best-effort reconcile to catch up with missed fills
     try:
         post_reconcile()  # same logic; small universe should be fast
     except Exception:
         # Non-fatal — engine can still serve, UI can trigger /reconcile manually
-        pass
+        _startup_logger.warning("Initial reconcile on startup failed", exc_info=True)
     # 3) Start strategy scheduler if enabled
     try:
         strategy.start_scheduler()
+        _startup_logger.info("Strategy scheduler started")
     except Exception:
-        pass
+        _startup_logger.warning("Strategy scheduler failed to start", exc_info=True)
     return True
 
 
 # Run extra startup restoration after startup event
-_startup_load_snapshot_and_reconcile()
+# Initialize strategy hooks
+momentum_strategy = None
+try:
+    if VENUE == "KRAKEN":
+        from strategies.momo_15m import Momentum15m
+        from engine import strategy as _strategy_mod
+        momentum_strategy = Momentum15m(engine=router, symbol="PI_XBTUSD")
+        _startup_logger.info("Momentum15m strategy initialized for Kraken")
+        base_symbol = momentum_strategy.symbol.split(".")[0]
+
+        def _momentum_listener(sym: str, price: float, ts: float, *, _base=base_symbol, _strategy=momentum_strategy):
+            if sym.split(".")[0] == _base:
+                _strategy.on_tick(price, ts)
+
+        try:
+            _strategy_mod.register_tick_listener(_momentum_listener)
+        except Exception:
+            _startup_logger.warning("Momentum strategy listener registration failed", exc_info=True)
+except Exception:
+    _startup_logger.exception("Strategy initialization failed")
 
 
 @app.on_event("shutdown")
@@ -333,12 +846,38 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
         })
         return JSONResponse(content={"status": "rejected", **err}, status_code=status)
 
+    # Apply venue-suffix to symbol if not present, defaulting to request venue or env VENUE
+    venue = (req.venue or "").upper() or VENUE
+    if "." not in req.symbol:
+        req.symbol = f"{req.symbol}.{venue}"
+
     # ——— Existing execution path (left intact) ———
     try:
         if req.quote is not None:
             result = await router.market_quote(req.symbol, req.side, req.quote)
         else:
             result = await router.market_quantity(req.symbol, req.side, req.quantity or 0.0)
+
+        # Store order persistently
+        order_id = result.get("id") or str(int(time.time() * 1000))
+        if "id" not in result:
+            result["id"] = order_id
+        if store is not None:
+            try:
+                store.insert_order({
+                    "id": order_id,
+                    "venue": venue.lower(),
+                    "symbol": (result.get("symbol") or req.symbol).rsplit(".", 1)[0],
+                    "side": req.side,
+                    "qty": req.quantity or req.quote,
+                    "price": result.get("price") or result.get("avg_fill_price"),
+                    "status": "PLACED",
+                    "ts_accept": int(time.time() * 1000),
+                    "ts_update": int(time.time() * 1000)
+                })
+            except Exception:
+                _persist_logger.exception("Failed to persist order %s", order_id)
+
         metrics.orders_submitted.inc()
 
         # Terminal status counters now increment in Portfolio.apply_fill();
@@ -374,6 +913,7 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
         return resp
     except Exception as exc:  # pylint: disable=broad-except
         metrics.orders_rejected.inc()
+        _record_venue_error(venue, exc)
         # Surface Binance error payloads for easier debugging
         try:
             if isinstance(exc, _httpx.HTTPStatusError) and exc.response is not None:
@@ -413,11 +953,34 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
         })
         return JSONResponse(content={"status": "rejected", **err}, status_code=status)
 
+    venue = req.symbol.split(".")[1].upper() if "." in req.symbol else VENUE
+    if "." not in req.symbol:
+        req.symbol = f"{req.symbol}.{venue}"
+
     try:
         if req.quote is not None:
             result = await router.limit_quote(req.symbol, req.side, req.quote, req.price, req.timeInForce)
         else:
             result = await router.limit_quantity(req.symbol, req.side, req.quantity or 0.0, req.price, req.timeInForce)
+
+        # Store order persistently
+        order_id = result.get("id") or str(int(time.time() * 1000))
+        if store is not None:
+            try:
+                store.insert_order({
+                    "id": order_id,
+                    "venue": venue.lower(),
+                    "symbol": (result.get("symbol") or req.symbol).rsplit(".", 1)[0],
+                    "side": req.side,
+                    "qty": req.quantity or req.quote,
+                    "price": req.price,
+                    "status": "PLACED",
+                    "ts_accept": int(time.time() * 1000),
+                    "ts_update": int(time.time() * 1000)
+                })
+            except Exception:
+                _persist_logger.exception("Failed to persist order %s", order_id)
+
         metrics.orders_submitted.inc()
 
         # Apply immediate fill (best-effort)
@@ -446,6 +1009,7 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
         return resp
     except Exception as exc:
         metrics.orders_rejected.inc()
+        _record_venue_error(venue, exc)
         try:
             if isinstance(exc, _httpx.HTTPStatusError) and exc.response is not None:
                 status = exc.response.status_code
@@ -508,12 +1072,38 @@ async def get_portfolio():
     """
     Fast read via router if available, else return last snapshot.
     """
+    persisted_snapshot: dict | None = None
     try:
         snap = router.portfolio_snapshot()
+        needs_overlay = (
+            ("equity_usd" not in snap)
+            or ("cash_usd" not in snap)
+            or not snap.get("positions")
+            or not snap.get("pnl")
+        )
+        if needs_overlay:
+            persisted_snapshot = _store.load()
+            if persisted_snapshot:
+                if "cash_usd" not in snap and persisted_snapshot.get("cash_usd") is not None:
+                    snap["cash_usd"] = float(persisted_snapshot.get("cash_usd"))
+                if "equity_usd" not in snap and persisted_snapshot.get("equity_usd") is not None:
+                    snap["equity_usd"] = float(persisted_snapshot.get("equity_usd"))
+                if not snap.get("positions"):
+                    snap["positions"] = list(persisted_snapshot.get("positions", []))
+                if not snap.get("pnl") and persisted_snapshot.get("pnl"):
+                    snap["pnl"] = dict(persisted_snapshot.get("pnl") or {})
+                if "ts_ms" not in snap and persisted_snapshot.get("ts_ms") is not None:
+                    snap["ts_ms"] = persisted_snapshot.get("ts_ms")
     except Exception:
         snap = _store.load()
+        persisted_snapshot = snap
         if not snap:
             raise HTTPException(status_code=404, detail="No portfolio available")
+        snap.setdefault("equity_usd", snap.get("equity"))
+        if "equity" not in snap and snap.get("cash_usd") is not None and snap.get("pnl"):
+            pnl = snap.get("pnl") or {}
+            snap["equity_usd"] = float(snap.get("cash_usd") or 0.0) + float(pnl.get("unrealized", 0.0))
+        return snap
     # Ensure UI gets USDT-normalized exposure per-position and dust-hidden hint
     try:
         prices = await last_prices()
@@ -549,43 +1139,51 @@ async def get_portfolio():
             # and accumulate across ALL open positions.
             try:
                 snap2 = await router.get_account_snapshot()
-                positions2 = snap2.get("positions", []) if isinstance(snap2, dict) else []
-                total_unreal = 0.0
-                g = metrics.REGISTRY.get("pnl_unrealized_symbol")
-                for pp in positions2:
-                    try:
-                        qty = float(pp.get("positionAmt", 0) or 0)
-                        if abs(qty) <= 0.0:
-                            continue
-                        sym = str(pp.get("symbol", ""))
-                        # Prefer venue-provided unrealizedProfit for mark-based PnL
-                        upnl = float(pp.get("unrealizedProfit", 0.0) or 0.0)
-                        total_unreal += upnl
-                        if g is not None and sym:
-                            g.labels(symbol=sym).set(upnl)
-                    except Exception:
+            except Exception as exc:
+                _persist_logger.warning("Futures snapshot fetch failed", exc_info=True)
+                snap2 = None
+
+            positions2 = snap2.get("positions", []) if isinstance(snap2, dict) else []
+            total_unreal = 0.0
+            g = metrics.REGISTRY.get("pnl_unrealized_symbol")
+            for pp in positions2:
+                try:
+                    qty = float(pp.get("positionAmt", 0) or 0)
+                    if abs(qty) <= 0.0:
                         continue
-                # market_value_usd := total unrealized (not Σ qty*price) for linear futures
-                metrics.set_core_metric("market_value_usd", total_unreal)
-                # Pull wallet cash directly from the venue snapshot for futures
-                cash = 0.0
+                    sym = str(pp.get("symbol", ""))
+                    # Prefer venue-provided unrealizedProfit for mark-based PnL
+                    upnl = float(pp.get("unrealizedProfit", 0.0) or 0.0)
+                    total_unreal += upnl
+                    if g is not None and sym:
+                        g.labels(symbol=sym).set(upnl)
+                except Exception:
+                    continue
+            # market_value_usd := total unrealized (not Σ qty*price) for linear futures
+            metrics.set_core_metric("market_value_usd", total_unreal)
+            # Pull wallet cash directly from the venue snapshot for futures
+            cash = 0.0
+            if isinstance(snap2, dict):
                 try:
                     cash = float(snap2.get("totalWalletBalance") or snap2.get("walletBalance") or 0.0)
                 except Exception:
                     cash = float(getattr(state, "cash", 0.0) or 0.0)
+            else:
+                cash = float(getattr(state, "cash", 0.0) or 0.0)
 
-                # Sync in-process portfolio cash so subsequent calls are consistent
-                try:
-                    portfolio.state.cash = cash
-                except Exception:
-                    pass
+            # Sync in-process portfolio cash so subsequent calls are consistent
+            try:
+                portfolio.state.cash = cash
+            except Exception:
+                pass
 
-                # Update gauges using live cash + unrealized (venue truth)
-                metrics.update_portfolio_gauges(cash, state.realized, total_unreal, state.exposure)
-                try:
-                    metrics.set_core_metric("cash_usd", cash)
-                    metrics.set_core_metric("equity_usd", cash + total_unreal)
-                    # Margin figures (if present on snapshot)
+            # Update gauges using live cash + unrealized (venue truth)
+            metrics.update_portfolio_gauges(cash, state.realized, total_unreal, state.exposure)
+            try:
+                metrics.set_core_metric("cash_usd", cash)
+                metrics.set_core_metric("equity_usd", cash + total_unreal)
+                # Margin figures (if present on snapshot)
+                if isinstance(snap2, dict):
                     try:
                         init_m = float(snap2.get("totalInitialMargin", 0.0))
                         maint_m = float(snap2.get("totalMaintMargin", 0.0))
@@ -595,14 +1193,8 @@ async def get_portfolio():
                         metrics.set_core_metric("available_usd", avail)
                     except Exception:
                         pass
-                except Exception:
-                    pass
             except Exception:
-                # Fallback: use in-process state (already set above)
-                try:
-                    metrics.set_core_metric("market_value_usd", state.unrealized)
-                except Exception:
-                    pass
+                pass
         else:
             # Spot: signed market value = sum(qty * last)
             try:
@@ -622,6 +1214,29 @@ async def get_portfolio():
             pass
     except Exception:
         pass
+    try:
+        state = portfolio.state
+        snap.setdefault("cash_usd", float(getattr(state, "cash", 0.0)))
+        snap.setdefault("equity_usd", float(getattr(state, "equity", 0.0)))
+        pnl = snap.get("pnl") or {}
+        pnl.setdefault("realized", float(getattr(state, "realized", 0.0)))
+        pnl.setdefault("unrealized", float(getattr(state, "unrealized", 0.0)))
+        snap["pnl"] = pnl
+    except Exception:
+        pass
+
+    if "cash_usd" not in snap or "equity_usd" not in snap:
+        fallback = persisted_snapshot or _store.load() or {}
+        if "cash_usd" not in snap and fallback.get("cash_usd") is not None:
+            snap["cash_usd"] = float(fallback.get("cash_usd"))
+        if "equity_usd" not in snap:
+            if fallback.get("equity_usd") is not None:
+                snap["equity_usd"] = float(fallback.get("equity_usd"))
+            elif snap.get("equity") is not None:
+                snap["equity_usd"] = float(snap.get("equity"))
+            else:
+                pnl = snap.get("pnl") or {}
+                snap["equity_usd"] = float(snap.get("cash_usd") or 0.0) + float(pnl.get("unrealized", 0.0))
     return snap
 
 
@@ -632,11 +1247,87 @@ async def account_snapshot(force: bool = False):
     and update router cache + snapshot_loaded flag immediately.
     """
     snap = await (router.fetch_account_snapshot() if force else router.get_account_snapshot())
+
     try:
         router.snapshot_loaded = True
     except Exception:
         pass
+
+    if VENUE == "KRAKEN":
+        try:
+            await rest_client.refresh_portfolio()
+        except Exception as exc:
+            _persist_logger.warning("Failed to refresh Kraken portfolio: %s", exc)
+
+    state = portfolio.state
+    try:
+        metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
+        metrics.set_core_metric("equity_usd", float(state.equity))
+        metrics.set_core_metric("available_usd", float(snap.get("availableBalance", state.cash)))
+        metrics.set_core_metric("mark_time_epoch", time.time())
+    except Exception:
+        pass
+
+    if store is not None:
+        snapshot_ts = int(time.time() * 1000)
+        try:
+            for sym, position in state.positions.items():
+                base_sym = sym.split(".")[0]
+                store.upsert_position(
+                    VENUE.lower(),
+                    base_sym,
+                    position.quantity,
+                    position.avg_price,
+                    snapshot_ts,
+                )
+            cash_val = float(getattr(state, "cash", 0.0) or 0.0)
+            unreal_val = float(getattr(state, "unrealized", 0.0) or 0.0)
+            equity_val = float(getattr(state, "equity", cash_val + unreal_val) or (cash_val + unreal_val))
+            if isinstance(snap, dict):
+                cash_val = float(snap.get("cash_usd", cash_val) or cash_val)
+                pnl_section = snap.get("pnl") or {}
+                unreal_val = float(pnl_section.get("unrealized", unreal_val) or unreal_val)
+                equity_candidate = snap.get("equity_usd") or snap.get("equity")
+                if equity_candidate is not None:
+                    equity_val = float(equity_candidate)
+                elif not equity_val:
+                    equity_val = cash_val + unreal_val
+            store.insert_equity(VENUE.lower(), equity_val, cash_val, unreal_val, snapshot_ts)
+        except Exception:
+            _persist_logger.exception("Failed to persist account snapshot for venue %s", VENUE.lower())
+    else:
+        _persist_logger.debug("SQLite store unavailable; skipping account snapshot persistence")
+
+    current_symbols: set[str] = set()
+    for sym, position in state.positions.items():
+        key = sym.split(".")[0]
+        current_symbols.add(key)
+        metrics.set_core_symbol_metric("position_amt", symbol=key, value=float(position.quantity))
+        metrics.set_core_symbol_metric("entry_price", symbol=key, value=float(position.avg_price))
+        metrics.set_core_symbol_metric("unrealized_profit", symbol=key, value=float(position.upl))
+        if position.last_price:
+            metrics.set_core_symbol_metric("mark_price", symbol=key, value=float(position.last_price))
+    try:
+        stale = _last_position_symbols - current_symbols
+        for sym in stale:
+            metrics.set_core_symbol_metric("position_amt", symbol=sym, value=0.0)
+            metrics.set_core_symbol_metric("entry_price", symbol=sym, value=0.0)
+            metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=0.0)
+        _last_position_symbols.clear()
+        _last_position_symbols.update(current_symbols)
+    except Exception:
+        pass
+    try:
+        _store.save(state.snapshot())
+    except Exception:
+        pass
     return snap
+
+
+@app.post("/account_snapshot/refresh")
+async def account_snapshot_refresh():
+    """Force-refresh the venue snapshot and update gauges."""
+    return await account_snapshot(force=True)
 
 
 @app.post("/reconcile")
@@ -670,6 +1361,15 @@ def post_reconcile():
         raise HTTPException(status_code=500, detail=f"Reconcile failed: {e}")
 
 
+@app.on_event("startup")
+async def _bootstrap_snapshot_state():
+    """Restore snapshot + reconcile in background to avoid blocking server startup."""
+    try:
+        await asyncio.to_thread(_startup_load_snapshot_and_reconcile)
+    except Exception:
+        _startup_logger.warning("Snapshot bootstrap failed", exc_info=True)
+
+
 @app.get("/health")
 async def health():
     try:
@@ -686,6 +1386,20 @@ async def health():
     except Exception:
         pass
 
+    # Venue-specific labels for health endpoint
+    venue = VENUE.lower()
+    if venue == "kraken":
+        equity_source = "derivatives/api/v3/accounts.totalMarginValue"
+        upnl_source = "derivatives/api/v3/openpositions.unrealizedProfit"
+        price_source = "tickers.last | markPrice | bid/ask"
+        wallet_source = "derivatives/api/v3/accounts.cashBalance"
+    else:
+        # Binance (default)
+        equity_source = "fapi/v2/account.totalMarginBalance"
+        upnl_source = "positionRisk.sum(unRealizedProfit)"
+        price_source = "mark_price/premiumIndex"
+        wallet_source = "fapi/v2/account.totalWalletBalance"
+
     # Include symbols if unrestricted
     from engine.config import load_risk_config
     risk_cfg = load_risk_config()
@@ -696,6 +1410,12 @@ async def health():
             symbols = configured_universe()
         except Exception:
             pass
+
+    try:
+        metrics.MARK_PRICE.labels(symbol=base, venue="kraken").set(0.0)
+        metrics.mark_price_by_symbol.labels(symbol=base).set(0.0)
+    except Exception:
+        pass
 
     return {
         "engine": "ok",
@@ -710,13 +1430,13 @@ async def health():
         "quote_ccy": QUOTE_CCY,
         "reconcile_lag_seconds": lag,
         "symbols": symbols,
-        "price_source": "mark_price/premiumIndex" if settings.is_futures else "last_price/ticker",
+        "price_source": price_source,
         "basis_source": "positionRisk" if settings.is_futures else "in_memory",
         "positions_tracked": len(_basis_cache),
         "symbols_universe": len(_price_map) if _price_map else None,
-        "equity_source": "fapi/v2/account.totalMarginBalance",
-        "upnl_source": "positionRisk.sum(unRealizedProfit)",
-        "wallet_source": "fapi/v2/account.totalWalletBalance",
+        "equity_source": equity_source,
+        "upnl_source": upnl_source,
+        "wallet_source": wallet_source,
     }
 
 
@@ -794,9 +1514,9 @@ async def _start_event_bus():
         return
     try:
         await initialize_event_bus()
-        print("[BUS] Event bus started - system is now reactive!")
-    except Exception as e:
-        print(f"[WARN] Event bus startup failed: {e}")
+        _startup_logger.info("Event bus started")
+    except Exception:
+        _startup_logger.exception("Event bus startup failed")
 
 
 @app.on_event("startup")
@@ -806,9 +1526,9 @@ async def _start_alerting():
         return
     try:
         await alert_daemon.initialize_alerting()
-        print("[ALERT] Alerting system started - system is now conscious!")
-    except Exception as e:
-        print(f"[WARN] Alerting startup failed: {e}")
+        _startup_logger.info("Alerting system started")
+    except Exception:
+        _startup_logger.exception("Alerting startup failed")
 
 
 @app.on_event("startup")
@@ -819,9 +1539,9 @@ async def _start_governance():
     try:
         from ops import governance_daemon
         await governance_daemon.initialize_governance()
-        print("[GOV] 🧠 Autonomous Governance activated - system now has FREE WILL!")
-    except Exception as e:
-        print(f"[WARN] Governance startup failed: {e}")
+        _startup_logger.info("Autonomous governance activated")
+    except Exception:
+        _startup_logger.exception("Governance startup failed")
 
 
 @app.on_event("startup")
@@ -848,9 +1568,279 @@ async def _subscribe_governance_hooks():
         pass
 
 
+async def _refresh_binance_futures_snapshot() -> None:
+    """Single refresh tick for Binance futures accounts."""
+    global _price_map, _basis_cache, _snapshot_counter
+
+    try:
+        _refresh_logger.debug("refresh tick")
+    except Exception:
+        pass
+
+    try:
+        price_data = await rest_client.bulk_premium_index()
+        if price_data:
+            _price_map = price_data
+            now_ts = time.time()
+            for sym, px in price_data.items():
+                try:
+                    metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(float(px))
+                except Exception:
+                    pass
+                _maybe_emit_strategy_tick(sym, float(px or 0.0), ts=now_ts)
+    except Exception:
+        pass
+
+    try:
+        acc_data = await rest_client.account()
+    except Exception:
+        acc_data = {}
+    if acc_data:
+        try:
+            wallet = float(acc_data.get("totalWalletBalance", 0.0))
+            upnl = float(acc_data.get("totalUnrealizedProfit", 0.0))
+            equity = float(acc_data.get("totalMarginBalance", 0.0))
+        except Exception:
+            wallet = upnl = equity = 0.0
+
+        metrics.set_core_metric("cash_usd", wallet)
+        metrics.set_core_metric("equity_usd", equity)
+        metrics.set_core_metric("market_value_usd", upnl)
+
+        try:
+            init_m = float(acc_data.get("totalInitialMargin", 0.0))
+            maint_m = float(acc_data.get("totalMaintMargin", 0.0))
+            avail = float(acc_data.get("availableBalance", acc_data.get("maxWithdrawAmount", 0.0)))
+            metrics.set_core_metric("initial_margin_usd", init_m)
+            metrics.set_core_metric("maint_margin_usd", maint_m)
+            metrics.set_core_metric("available_usd", avail)
+        except Exception:
+            pass
+
+    try:
+        pos_data = await rest_client.position_risk()
+    except Exception:
+        pos_data = []
+    pos_data = [p for p in pos_data if float(p.get("positionAmt", 0.0)) != 0.0]
+
+    is_hedge = False
+    try:
+        is_hedge = await rest_client.hedge_mode()
+    except Exception:
+        is_hedge = False
+
+    if is_hedge:
+        legs = [p for p in pos_data if p.get("positionSide") in ("LONG", "SHORT")]
+    else:
+        legs = [p for p in pos_data if p.get("positionSide", "BOTH") == "BOTH"]
+
+    if legs:
+        try:
+            upnl_total = sum(float(p.get("unRealizedProfit", 0.0)) for p in legs)
+            metrics.set_core_metric("market_value_usd", upnl_total)
+        except Exception:
+            pass
+
+    current_symbols: set[str] = set()
+    by_symbol: dict[str, dict[str, float]] = {}
+    for p in pos_data:
+        sym = p.get("symbol", "")
+        if not sym:
+            continue
+        entry = float(p.get("entryPrice", 0.0) or 0.0)
+        amt = float(p.get("positionAmt", 0.0) or 0.0)
+        upnl_sym = float(p.get("unRealizedProfit", 0.0) or 0.0)
+        agg = by_symbol.setdefault(sym, {"amt": 0.0, "entry": 0.0, "upnl": 0.0})
+        agg["amt"] += amt
+        if entry and amt:
+            try:
+                weight = abs(amt)
+                agg["entry"] = (
+                    agg.get("entry", 0.0) * abs(agg.get("amt", 0.0)) + entry * weight
+                ) / max(1e-9, abs(agg.get("amt", 0.0)) + weight)
+            except Exception:
+                agg["entry"] = entry or agg.get("entry", 0.0)
+        agg["upnl"] += upnl_sym
+
+    for sym, agg in by_symbol.items():
+        if agg.get("amt", 0.0) == 0.0:
+            continue
+        current_symbols.add(sym)
+        _basis_cache[sym] = {
+            "entry_price": float(agg.get("entry", 0.0)),
+            "position_amt": float(agg.get("amt", 0.0)),
+            "last_sync_epoch": time.time(),
+        }
+        try:
+            metrics.set_core_symbol_metric("position_amt", symbol=sym, value=float(agg.get("amt", 0.0)))
+            metrics.set_core_symbol_metric("entry_price", symbol=sym, value=float(agg.get("entry", 0.0)))
+            metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=float(agg.get("upnl", 0.0)))
+            mark = 0.0
+            try:
+                mark = float(_price_map.get(sym, 0.0)) if isinstance(_price_map, dict) else 0.0
+            except Exception:
+                mark = 0.0
+            if mark:
+                metrics.set_core_symbol_metric("mark_price", symbol=sym, value=mark)
+                try:
+                    metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(mark)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    try:
+        stale = _last_position_symbols - current_symbols
+        for sym in stale:
+            metrics.set_core_symbol_metric("position_amt", symbol=sym, value=0.0)
+            metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=0.0)
+            metrics.set_core_symbol_metric("entry_price", symbol=sym, value=0.0)
+        _last_position_symbols.clear()
+        _last_position_symbols.update(current_symbols)
+    except Exception:
+        pass
+
+    now_ts = time.time()
+    metrics.set_core_metric("mark_time_epoch", now_ts)
+    metrics.set_core_metric("metrics_heartbeat", now_ts)
+    _snapshot_counter += 1
+    metrics.set_core_metric("snapshot_id", _snapshot_counter)
+
+
+async def _refresh_binance_spot_snapshot() -> None:
+    """Single refresh tick tailored for Binance spot accounts."""
+    global _price_map, _basis_cache, _snapshot_counter
+
+    symbol_filter: set[str] = set()
+    try:
+        raw_symbols = await asyncio.to_thread(configured_universe)
+        symbol_filter = {s.split(".")[0].upper() for s in raw_symbols}
+    except Exception:
+        symbol_filter = set()
+
+    try:
+        base = (settings.spot_base or settings.api_base or "").rstrip("/") or "https://api.binance.com"
+        async with _httpx.AsyncClient(base_url=base, timeout=settings.timeout) as client:
+            resp = await client.get("/api/v3/ticker/price")
+            resp.raise_for_status()
+            payload = resp.json()
+    except Exception:
+        payload = None
+
+    if isinstance(payload, list):
+        new_map: dict[str, float] = {}
+        for item in payload:
+            sym = str(item.get("symbol", "")).upper()
+            if not sym:
+                continue
+            if symbol_filter and sym not in symbol_filter:
+                continue
+            try:
+                px = float(item.get("price", 0.0))
+            except Exception:
+                continue
+            if px > 0:
+                new_map[sym] = px
+                _maybe_emit_strategy_tick(sym, px)
+        if new_map:
+            _price_map = new_map
+            for sym, px in new_map.items():
+                try:
+                    metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
+                except Exception:
+                    continue
+
+    try:
+        account = await rest_client.account_snapshot()
+    except Exception:
+        account = {}
+
+    balances = account.get("balances") if isinstance(account, dict) else None
+    wallet = 0.0
+    if isinstance(balances, list):
+        for bal in balances:
+            asset = (bal.get("asset") or "").upper()
+            if asset == QUOTE_CCY:
+                try:
+                    free = float(bal.get("free", 0.0))
+                    locked = float(bal.get("locked", 0.0))
+                except Exception:
+                    free = locked = 0.0
+                wallet = free + locked
+                break
+
+    state = portfolio.state
+    try:
+        state.cash = wallet
+    except Exception:
+        pass
+
+    unreal = float(getattr(state, "unrealized", 0.0) or 0.0)
+    equity = wallet + unreal
+    try:
+        state.equity = equity
+    except Exception:
+        pass
+
+    metrics.set_core_metric("cash_usd", wallet)
+    metrics.set_core_metric("available_usd", wallet)
+    metrics.set_core_metric("market_value_usd", unreal)
+    metrics.set_core_metric("equity_usd", equity)
+
+    now_ts = time.time()
+    current_symbols: set[str] = set()
+    for sym, position in state.positions.items():
+        base_sym = sym.split(".")[0].upper()
+        qty = float(getattr(position, "quantity", 0.0) or 0.0)
+        if qty == 0.0:
+            continue
+        current_symbols.add(base_sym)
+        _basis_cache[base_sym] = {
+            "entry_price": float(getattr(position, "avg_price", 0.0) or 0.0),
+            "position_amt": qty,
+            "last_sync_epoch": now_ts,
+        }
+        try:
+            metrics.set_core_symbol_metric("position_amt", symbol=base_sym, value=qty)
+            metrics.set_core_symbol_metric("entry_price", symbol=base_sym, value=float(getattr(position, "avg_price", 0.0) or 0.0))
+            metrics.set_core_symbol_metric("unrealized_profit", symbol=base_sym, value=float(getattr(position, "upl", 0.0) or 0.0))
+            mark = 0.0
+            try:
+                mark = float(_price_map.get(base_sym, 0.0)) if isinstance(_price_map, dict) else 0.0
+            except Exception:
+                mark = 0.0
+            if mark:
+                metrics.set_core_symbol_metric("mark_price", symbol=base_sym, value=mark)
+                try:
+                    metrics.MARK_PRICE.labels(symbol=base_sym, venue="binance").set(mark)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    try:
+        stale = _last_position_symbols - current_symbols
+        for sym in stale:
+            metrics.set_core_symbol_metric("position_amt", symbol=sym, value=0.0)
+            metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=0.0)
+            metrics.set_core_symbol_metric("entry_price", symbol=sym, value=0.0)
+        _last_position_symbols.clear()
+        _last_position_symbols.update(current_symbols)
+    except Exception:
+        pass
+
+    metrics.set_core_metric("mark_time_epoch", now_ts)
+    metrics.set_core_metric("metrics_heartbeat", now_ts)
+    _snapshot_counter += 1
+    metrics.set_core_metric("snapshot_id", _snapshot_counter)
+
+
 async def _refresh_venue_data():
     """Background task to refresh price map, basis cache, and account totals from venue."""
     global _price_map, _basis_cache, _snapshot_counter
+
+    if VENUE != "BINANCE":
+        return
 
     try:
         _refresh_logger.info("Starting venue refresh loop (pid=%s, venue=%s, futures=%s)", os.getpid(), VENUE, settings.is_futures)
@@ -859,156 +1849,209 @@ async def _refresh_venue_data():
 
     while True:
         try:
-            if VENUE == "BINANCE" and settings.is_futures:
-                try:
-                    _refresh_logger.debug("refresh tick")
-                except Exception:
-                    pass
-                # Refresh mark prices (best-effort)
-                try:
-                    price_data = await rest_client.bulk_premium_index()
-                    if price_data:
-                        _price_map = price_data
-                except Exception:
-                    pass
-
-                # Account totals for cash/equity/UPNL and margin figures
-                try:
-                    acc_data = await rest_client.account()
-                except Exception:
-                    acc_data = {}
-                if acc_data:
-                    try:
-                        wallet = float(acc_data.get("totalWalletBalance", 0.0))
-                        upnl = float(acc_data.get("totalUnrealizedProfit", 0.0))
-                        equity = float(acc_data.get("totalMarginBalance", 0.0))
-                    except Exception:
-                        wallet = upnl = equity = 0.0
-
-                    metrics.set_core_metric("cash_usd", wallet)
-                    metrics.set_core_metric("equity_usd", equity)
-                    metrics.set_core_metric("market_value_usd", upnl)
-
-                    try:
-                        init_m = float(acc_data.get("totalInitialMargin", 0.0))
-                        maint_m = float(acc_data.get("totalMaintMargin", 0.0))
-                        avail = float(acc_data.get("availableBalance", acc_data.get("maxWithdrawAmount", 0.0)))
-                        metrics.set_core_metric("initial_margin_usd", init_m)
-                        metrics.set_core_metric("maint_margin_usd", maint_m)
-                        metrics.set_core_metric("available_usd", avail)
-                    except Exception:
-                        pass
-
-                # Position risk for per-symbol stats + consistency on UPNL
-                try:
-                    pos_data = await rest_client.position_risk()
-                except Exception:
-                    pos_data = []
-                pos_data = [p for p in pos_data if float(p.get("positionAmt", 0.0)) != 0.0]
-
-                is_hedge = False
-                try:
-                    is_hedge = await rest_client.hedge_mode()
-                except Exception:
-                    is_hedge = False
-
-                if is_hedge:
-                    legs = [p for p in pos_data if p.get("positionSide") in ("LONG", "SHORT")]
-                else:
-                    legs = [p for p in pos_data if p.get("positionSide", "BOTH") == "BOTH"]
-
-                if legs:
-                    try:
-                        upnl_total = sum(float(p.get("unRealizedProfit", 0.0)) for p in legs)
-                        metrics.set_core_metric("market_value_usd", upnl_total)
-                    except Exception:
-                        pass
-
-                current_symbols: set[str] = set()
-                by_symbol: dict[str, dict[str, float]] = {}
-                for p in pos_data:
-                    sym = p.get("symbol", "")
-                    if not sym:
-                        continue
-                    entry = float(p.get("entryPrice", 0.0) or 0.0)
-                    amt = float(p.get("positionAmt", 0.0) or 0.0)
-                    upnl_sym = float(p.get("unRealizedProfit", 0.0) or 0.0)
-                    agg = by_symbol.setdefault(sym, {"amt": 0.0, "entry": 0.0, "upnl": 0.0})
-                    agg["amt"] += amt
-                    if entry and amt:
-                        try:
-                            weight = abs(amt)
-                            agg["entry"] = (
-                                agg.get("entry", 0.0) * abs(agg.get("amt", 0.0)) + entry * weight
-                            ) / max(1e-9, abs(agg.get("amt", 0.0)) + weight)
-                        except Exception:
-                            agg["entry"] = entry or agg.get("entry", 0.0)
-                    agg["upnl"] += upnl_sym
-
-                for sym, agg in by_symbol.items():
-                    if agg.get("amt", 0.0) == 0.0:
-                        continue
-                    current_symbols.add(sym)
-                    _basis_cache[sym] = {
-                        "entry_price": float(agg.get("entry", 0.0)),
-                        "position_amt": float(agg.get("amt", 0.0)),
-                        "last_sync_epoch": time.time(),
-                    }
-                    try:
-                        metrics.set_core_symbol_metric("position_amt", symbol=sym, value=float(agg.get("amt", 0.0)))
-                        metrics.set_core_symbol_metric("entry_price", symbol=sym, value=float(agg.get("entry", 0.0)))
-                        metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=float(agg.get("upnl", 0.0)))
-                        mark = 0.0
-                        try:
-                            mark = float(_price_map.get(sym, 0.0)) if isinstance(_price_map, dict) else 0.0
-                        except Exception:
-                            mark = 0.0
-                        if mark:
-                            metrics.set_core_symbol_metric("mark_price", symbol=sym, value=mark)
-                    except Exception:
-                        pass
-
-                try:
-                    stale = _last_position_symbols - current_symbols
-                    for sym in stale:
-                        metrics.set_core_symbol_metric("position_amt", symbol=sym, value=0.0)
-                        metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=0.0)
-                        metrics.set_core_symbol_metric("entry_price", symbol=sym, value=0.0)
-                    _last_position_symbols.clear()
-                    _last_position_symbols.update(current_symbols)
-                except Exception:
-                    pass
-
-                now_ts = time.time()
-                metrics.set_core_metric("mark_time_epoch", now_ts)
-                metrics.set_core_metric("metrics_heartbeat", now_ts)
-                _snapshot_counter += 1
-                metrics.set_core_metric("snapshot_id", _snapshot_counter)
-
+            if settings.is_futures:
+                await _refresh_binance_futures_snapshot()
+            else:
+                await _refresh_binance_spot_snapshot()
         except Exception:
             try:
                 _refresh_logger.exception("refresh loop error")
             except Exception:
                 pass
-            pass
-
         await asyncio.sleep(5)
+
+
+async def _kraken_risk_metrics_loop() -> None:
+    base_interval = max(_safe_float(os.getenv("KRAKEN_RISK_INTERVAL_SEC")) or 5.0, 3.0)
+    min_interval = base_interval
+    max_interval = max(30.0, base_interval * 6.0)
+    backoff_factor = 2.0
+    jitter_pct = 0.2
+    interval = base_interval
+    failure_streak = 0
+    last_snapshot: dict[str, Any] | None = None
+
+    _kraken_risk_stop_event.clear()
+
+    # Prewarm gauges for Grafana legends
+    try:
+        cap_val = max(0.0, float(RAILS.cfg.exposure_cap_venue_usd))
+        metrics.venue_exposure_usd.labels(venue="kraken").set(0.0)
+        metrics.exposure_cap_usd.labels(venue="kraken").set(cap_val)
+        metrics.risk_exposure_headroom_usd.labels(venue="kraken").set(cap_val)
+        metrics.kraken_equity_usd.set(0.0)
+        metrics.kraken_unrealized_usd.set(0.0)
+        metrics.kraken_equity_drawdown_pct.set(0.0)
+        metrics.risk_metrics_freshness_sec.set(0.0)
+        for product in _KRAKEN_PRODUCTS or ["PI_XBTUSD"]:
+            try:
+                metrics.mark_price_freshness_sec.labels(symbol=product, venue="kraken").set(float("inf"))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    while True:
+        tick_start = time.monotonic()
+        snapshot: dict[str, Any] | None = None
+        try:
+            snapshot = await router.get_account_snapshot()
+            if snapshot:
+                last_snapshot = snapshot
+                failure_streak = 0
+                if interval > base_interval:
+                    interval = max(base_interval, interval / backoff_factor)
+        except Exception as exc:
+            failure_streak += 1
+            interval = min(max_interval, max(min_interval, interval * backoff_factor))
+            _kraken_risk_logger.warning("Kraken snapshot fetch failed (streak=%s): %s", failure_streak, exc)
+            snapshot = last_snapshot
+
+        if snapshot is None:
+            try:
+                snapshot = router.portfolio_snapshot()
+            except Exception:
+                snapshot = None
+
+        snap_dict = snapshot if isinstance(snapshot, dict) else None
+
+        if snap_dict is not None:
+            try:
+                RAILS.refresh_snapshot_metrics(snap_dict, venue="kraken")
+
+                equity_val = _safe_float(snap_dict.get("equity_usd") or snap_dict.get("equity"))
+                if equity_val is not None:
+                    metrics.kraken_equity_usd.set(equity_val)
+                    drawdown_pct = RAILS._compute_drawdown_pct(equity_val)  # type: ignore[attr-defined]
+                    metrics.kraken_equity_drawdown_pct.set(max(0.0, drawdown_pct))
+
+                pnl_raw = snap_dict.get("pnl")
+                pnl_section = pnl_raw if isinstance(pnl_raw, dict) else {}
+                unreal_val = _safe_float(pnl_section.get("unrealized")) or 0.0
+                metrics.kraken_unrealized_usd.set(unreal_val)
+
+                positions = snap_dict.get("positions")
+                if isinstance(positions, list):
+                    now_ts = time.time()
+                    for pos in positions:
+                        try:
+                            sym_raw = pos.get("symbol") or ""
+                            base = _kraken_symbol_base(sym_raw)
+                            last_px = pos.get("last_price_quote")
+                            if last_px is None:
+                                last_px = await _kraken_safe_price(base)
+                            if isinstance(last_px, (int, float)) and last_px > 0.0:
+                                _kraken_record_mark(base, float(last_px), now_ts)
+                        except Exception:
+                            continue
+
+                snap_ts = None
+                raw_ts = snap_dict.get("ts")
+                raw_ts_ms = snap_dict.get("ts_ms")
+                if isinstance(raw_ts, (int, float)) and math.isfinite(float(raw_ts)):
+                    snap_ts = float(raw_ts)
+                elif isinstance(raw_ts_ms, (int, float)) and math.isfinite(float(raw_ts_ms)):
+                    snap_ts = float(raw_ts_ms) / 1000.0
+                freshness = max(0.0, time.time() - snap_ts) if snap_ts is not None else 0.0
+                metrics.risk_metrics_freshness_sec.set(freshness)
+            except Exception:
+                _kraken_risk_logger.exception("Failed to update Kraken risk telemetry")
+        else:
+            try:
+                metrics.risk_metrics_freshness_sec.set(float("inf"))
+            except Exception:
+                pass
+
+        if VENUE == "KRAKEN":
+            await _kraken_refresh_mark_prices(time.time())
+
+        elapsed = time.monotonic() - tick_start
+        sleep_base = max(0.5, interval - elapsed)
+        jitter = random.uniform(1.0 - jitter_pct, 1.0 + jitter_pct)
+        sleep_for = max(0.5, sleep_base) * jitter
+
+        if _kraken_risk_stop_event.is_set():
+            break
+
+        try:
+            await asyncio.wait_for(_kraken_risk_stop_event.wait(), timeout=sleep_for)
+        except asyncio.TimeoutError:
+            pass
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _kraken_risk_logger.exception("Kraken telemetry wait interrupted")
+
+        if _kraken_risk_stop_event.is_set():
+            break
+
+
+@app.on_event("startup")
+async def _start_kraken_ws():
+    """Start Kraken WebSocket price feeds for real-time pricing."""
+    if VENUE == "KRAKEN":
+        try:
+            from engine.core.kraken_ws import KrakenWS
+            products = _KRAKEN_PRODUCTS or ["PI_XBTUSD"]
+            from engine import strategy as _strategy_mod
+
+            ws = KrakenWS(
+                products=products,
+                portfolio=portfolio,
+                on_price_cb=_strategy_mod.on_tick,
+                rest_client=rest_client,
+                price_hook=_kraken_on_mark,
+            )
+            asyncio.create_task(ws.run())  # fire-and-forget
+            _startup_logger.info("Kraken websocket price feeds started for products=%s (role=%s)", products, ROLE)
+        except Exception:
+            _startup_logger.exception("Kraken websocket startup failed")
 
 
 @app.on_event("startup")
 async def _start_venue_refresh():
     """Start background venue data refresh."""
-    # Avoid cross-polluting IBKR metrics by not running Binance refresh loop
-    if VENUE == "BINANCE" and IS_EXPORTER:
-        base_url = settings.api_base or "default"
-        _refresh_logger.info(
-            "Starting background refresh task venue=%s mode=%s base=%s pid=%s",
-            VENUE,
-            settings.mode,
-            base_url,
-            os.getpid(),
-        )
-        asyncio.create_task(_refresh_venue_data())
+    if VENUE != "BINANCE":
+        return
+    base_url = settings.api_base or "default"
+    role = "exporter" if IS_EXPORTER else "trader"
+    _refresh_logger.info(
+        "Starting background refresh task venue=%s mode=%s base=%s pid=%s role=%s",
+        VENUE,
+        settings.mode,
+        base_url,
+        os.getpid(),
+        role,
+    )
+    asyncio.create_task(_refresh_venue_data())
+
+
+@app.on_event("startup")
+async def _start_kraken_risk_loop():
+    if VENUE != "KRAKEN" or IS_EXPORTER:
+        return
+    global _kraken_risk_loop_task
+    if _kraken_risk_loop_task and not _kraken_risk_loop_task.done():
+        return
+    _kraken_risk_loop_task = asyncio.create_task(_kraken_risk_metrics_loop())
+    _kraken_risk_logger.info("Kraken risk telemetry loop scheduled")
+
+
+@app.on_event("shutdown")
+async def _stop_kraken_risk_loop():
+    global _kraken_risk_loop_task
+    if _kraken_risk_loop_task is None:
+        return
+    _kraken_risk_stop_event.set()
+    _kraken_risk_loop_task.cancel()
+    try:
+        await _kraken_risk_loop_task
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        _kraken_risk_logger.exception("Kraken telemetry loop shutdown error")
+    finally:
+        _kraken_risk_loop_task = None
 
 
 @app.on_event("startup")
@@ -1029,6 +2072,10 @@ def _init_prom_multiproc_dir():
                 continue
             except Exception:
                 pass
+        try:
+            _startup_logger.info("Prometheus multiprocess directory: %s", path)
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -1043,6 +2090,19 @@ def get_event_stats():
 def get_alert_stats():
     """Get alerting system statistics."""
     return {"alerting": alert_daemon._alert_daemon.get_stats() if alert_daemon._alert_daemon else {}}
+
+
+@app.get("/limits")
+def get_limits():
+    cfg = RAILS.cfg
+    return {
+        "trading_enabled": cfg.trading_enabled,
+        "min_notional_usdt": cfg.min_notional_usdt,
+        "max_notional_usdt": cfg.max_notional_usdt,
+        "max_orders_per_min": cfg.max_orders_per_min,
+        "exposure_cap_symbol_usd": cfg.exposure_cap_symbol_usd,
+        "exposure_cap_total_usd": cfg.exposure_cap_total_usd,
+    }
 
 
 @app.get("/risk/config")

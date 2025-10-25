@@ -1,0 +1,22 @@
+base_quote: USDT
+risk:
+  per_trade_usd: 40
+  per_event_usd: 10
+  max_daily_loss: 100
+  max_open_positions: 5
+  cross_health_floor: 1.35
+futures_leverage:
+  BTCUSDT: 5
+  ETHUSDT: 5
+  default_major: 3
+  default_mid: 2
+filters:
+  min_vol_usd_major: 10000000
+  min_vol_usd_mid: 2000000
+  min_price: 0.05
+  max_spread_pct: 0.20
+dex:
+  max_live_positions: 1
+  max_slippage_pct: 0.8
+  tax_max_pct: 5
+

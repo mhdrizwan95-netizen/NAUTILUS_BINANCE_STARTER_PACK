@@ -239,7 +239,7 @@ class ClusterRiskAllocator:
         # Compute average Jaccard similarity over history
         similarities = []
 
-        for hist_labels in historical_labels[-min(10, len(historical_labels))]:  # Last 10 periods
+        for hist_labels in historical_labels[-min(10, len(historical_labels)):]:  # Last 10 periods
             # Compute adjusted Rand index or simple overlap
             current_set = set(f"{i}_{c}" for i, c in enumerate(cluster_labels))
             hist_set = set(f"{i}_{c}" for i, c in enumerate(hist_labels))

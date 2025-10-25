@@ -17,7 +17,7 @@ class Position:
 
     def to_dict(self) -> dict:
         return {
-            "symbol": f"{self.symbol}.BINANCE",
+            "symbol": self.symbol,
             "qty_base": self.quantity,
             "avg_price_quote": self.avg_price,
             "last_price_quote": self.last_price,

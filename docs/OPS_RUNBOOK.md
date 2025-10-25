@@ -1,186 +1,173 @@
 # OPS Runbook
 
-## Routine Tasks
+This playbook captures the day-to-day checklist for running the Nautilus HMM stack, how to control trading, and what to do when things misbehave.
 
-| Task | Command | Notes |
-|------|----------|-------|
-| View live PnL dashboard | `open http://localhost:8002/pnl_dashboard.html` | Served by Ops API |
-| Inspect governance policies | `cat ops/policies.yaml` | YAML reloaded on change |
-| Adjust model weights | `curl -X POST http://localhost:8002/strategy/weights …` | Requires `X-OPS-TOKEN` |
-| Check allocations | `cat ops/capital_allocations.json` | Updated continuously by allocator |
-| Pause trading | `curl -X POST http://localhost:8002/kill …` | Mirrors `TRADING_ENABLED` flag |
-| Export daily PnL CSV | `python ops/export_pnl.py` | Outputs to `ops/exports/` |
-| Open Grafana overview | `open http://localhost:3000` | After observability stack is up |
-| Inspect Prometheus targets | `open http://localhost:9090/targets` | Confirms scrape status |
+## Daily Checks
 
-## Recovery
+| Check | Command / Location | Pass Criteria |
+|-------|--------------------|---------------|
+| Engine & exporter metrics | `make smoke-exporter` | `equity_usd`, `cash_usd`, `market_value_usd`, `metrics_heartbeat`, `risk_equity_buffer_usd`, `kraken_equity_usd` return non-empty values and residual ≈ 0. |
+| Prometheus scrape status | `make smoke-prom` or `http://localhost:9090/targets` | `engine_binance`, `engine_kraken`, `ops`, and exporters show `health: "up"`. |
+| Ops API status | `curl http://localhost:8002/status | jq` | `{"trading_enabled": true}` (or expected value) and balances populated. |
+| Grafana dashboards | `http://localhost:3000` (Command Center) | Panels update, no `No data` warnings, metrics heartbeat < 60s. |
+| Executor health (if enabled) | `docker compose logs -f executor` | No repeated retry loops or venue errors. |
+| Universe/Situations services | `curl http://localhost:8009/health`, `curl http://localhost:8011/health` | Return `{"ok": true}`. |
+| Strategy ingest rate | `curl -G --data-urlencode 'query=rate(strategy_ticks_total{venue="binance"}[1m])' http://localhost:9090/api/v1/query | jq` | >0 for actively traded symbols; zero means mark feed stalled. |
+| Tick→order latency | `curl -G --data-urlencode 'query=histogram_quantile(0.95, rate(strategy_tick_to_order_latency_ms_bucket[5m]))' http://localhost:9090/api/v1/query | jq` | <150 ms during stable periods; investigate spikes. |
+| Health LEDs | `health_state`, `risk_depeg_active` in Grafana | 0=OK,1=DEGRADED,2=HALTED; alerts on sustained non‑OK. |
 
-1. Stop containers: `docker compose down`
-2. Ensure latest snapshot: `engine/state/portfolio.json`
-3. Restart: `docker compose up -d`
-4. If observability is enabled: `cd ops/observability && docker compose -f docker-compose.observability.yml up -d`
-   The reconciliation daemon auto-restores open orders.
+## Operational Controls
 
-## Troubleshooting
+| Action | Command | Notes |
+|--------|---------|-------|
+| Pause trading | `curl -X POST http://localhost:8002/kill -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" -d '{"enabled": false}'` | Sets `TRADING_ENABLED=false` in engine via governance. |
+| Resume trading | Same as above with `{"enabled": true}` | Confirm by checking `/status` and `metrics_trading_enabled`. |
+| Adjust strategy weights | `curl -X POST http://localhost:8002/strategy/weights -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" -H "Content-Type: application/json" -d '{"weights":{"ma_v1":0.3,"hmm_v1":0.7}}'` | Updates `ops/strategy_weights.json`; allocator loop reflects on next tick. |
+| Update HMM calibration | Edit `engine/models/hmm_calibration.json` (or `HMM_CALIBRATION_PATH`), wait 60 s or restart engine | Controls confidence gain, quote multiplier, cooldown scale; shared between backtests and live. |
+| Trigger manual reconciliation | `curl -X POST http://localhost:8003/reconcile/manual` | Returns counts of fills applied; safe to run any time. |
+| Submit a test order | `make order ORDER_SYMBOL=BTCUSDT.BINANCE ORDER_SIDE=BUY ORDER_QUOTE=25` | Use small notional; confirm via metrics/logs. |
+| Fetch portfolio snapshot | `curl http://localhost:8003/state | jq` (if exposed) or inspect `engine/state/portfolio.json` | Use for audits and recovery validation. |
+| View latest orders | `tail -n 20 engine/logs/orders.jsonl | jq` | Real-time audit trail. |
+| Flip feature flags | Edit `.env` and restart or export env in compose overrides | Start modules in dry‑run where available; validate metrics first. |
 
-| Symptom | Check | Remedy |
-|----------|-------|--------|
-| Orders rejected | `engine/logs/orders.jsonl` | Confirm risk rails thresholds |
-| Missing metrics | `curl http://localhost:8002/metrics` → 500? | Restart `hmm_ops`; verify `/tmp/prom_multiproc` permissions |
-| Prometheus scrape failing | Grafana > Connections > Data sources | Ensure `hmm_ops:8002` reachable inside network |
-| Telegram silent | `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID` env vars | Verify API key |
-| High latency | `histogram_quantile` panel in Grafana | Investigate venue network or throttling |
-| Memory usage | `docker stats hmm_ops` | Restart container if > 2GB |
+## Restart & Recovery
 
-## Governance Testing
-
-```bash
-# Simulate drawdown
-python - <<'EOF'
-from engine.core.event_bus import BUS
-import asyncio
-asyncio.run(BUS.publish("metrics.update", {"pnl_unrealized": -150}))
-EOF
-
-Watch for [GOV] 📉 Exposure reduced in logs.
-```
-
-## Monitoring Dashboards
-
-### Production Metrics Check
-```bash
-# Aggregated venue metrics
-curl http://localhost:8002/aggregate/metrics | jq '.venues.engine_binance'
-
-# Portfolio snapshot (equity, cash, gain)
-curl http://localhost:8002/aggregate/portfolio | jq
-
-# Canary promotion status
-curl http://localhost:8002/strategy/status | jq '.leaderboard[0]'
-```
-
-### Log Analysis
-```bash
-# Recent errors
-tail -n 50 ops/logs/ops.log | grep ERROR
-
-# Order execution times
-grep "routing_time" engine/logs/orders.jsonl | tail -20
-
-# Capital allocation changes
-tail -f ops/capital_allocations.json | jq '.capital_quota_usd'
-```
-
-## Emergency Procedures
-
-### Circuit Breaker Activation
-1. **Immediate Pause:**
+1. **Graceful stop**
    ```bash
-   curl -X POST http://localhost:8002/kill \
-     -H "X-OPS-TOKEN: $(cat .ops_token)" \
-     -d '{"enabled": false}'
+   make down        # core services
+   make down-all    # include observability if needed
    ```
-
-2. **Risk Assessment:**
-   - Check positions: `engine/state/portfolio.json`
-   - Review exposure: `ops/aggregate_exposure.json`
-   - Analyze drawdown: `ops/pnl_dashboard.html`
-
-3. **Gradual Resume:**
+2. **Inspect state**
+   - `engine/state/portfolio.json` — ensure last snapshot timestamp looks reasonable.
+   - `data/runtime/trades.db` — optional: `sqlite3 data/runtime/trades.db '.tables'`.
+   - `engine/logs/orders.jsonl` — confirm last trades prior to incident.
+3. **Clean start**
    ```bash
-   # Reduce model weights to 10% of normal
-   curl -X POST http://localhost:8002/strategy/weights \
-     -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" \
-     -H "Content-Type: application/json" \
-     -d '{"weights": {"model1": 0.01}}'
-
-   # Slowly scale back up over hours
-   curl -X POST http://localhost:8002/strategy/weights \
-     -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" \
-     -H "Content-Type: application/json" \
-     -d '{"weights": {"model1": 0.1}}'
+   make up-core
+   make up-obs      # optional
    ```
+4. **Validate**
+   - `curl http://localhost:8003/readyz`
+   - `make smoke-exporter`
+   - `curl http://localhost:8002/status | jq '.snapshot_loaded, .balances'`
+   - Watch Grafana heartbeat panels.
+5. **If state looks wrong**
+   - Stop services.
+   - Restore `engine/state/portfolio.json` and `data/runtime/trades.db` from backup.
+   - Restart and re-run reconciliation (`/reconcile/manual`).
 
-### Data Corruption Recovery
-1. **Stop all services:** `docker compose down`
-2. **Backup corrupted files:** `cp -r ops/ backup_$(date +%s)/`
-3. **Clean restart:** `docker compose up -d --build`
-4. **Validate restoration:** Check latest PnL export matches expectations
+## Troubleshooting Guide
 
-### Market Disruption Response
-1. **Increase cooldowns:** Edit `capital_policy.json` to extend allocation freeze
-2. **Switch to conservative models:** Adjust `strategy_weights.json` to favor stable strategies
-3. **Reduce position sizes:** Update `MIN_NOTIONAL_USDT` in engine configs
-4. **Monitor closely:** Enable high-frequency alerting
+| Symptom | What to inspect | Remedy |
+|---------|-----------------|--------|
+| Orders rejected unexpectedly | `engine/logs/app.log`, `/orders` response JSON, `RiskRails` metrics (`breaker_rejections_total`, `risk_equity_floor_breach`) | Check `TRADING_ENABLED`, notional limits, exposure caps, equity floor/drawdown breakers. Adjust env or policies, or call `/kill` to reset. |
+| Metrics frozen (heartbeat > 60s) | Exporter container logs (`docker compose logs engine_binance_exporter`), Prometheus targets, DNS/network | Restart exporter, ensure exporter and Prometheus share `nautilus_trading_network` (see `docs/network-dns-fix.md`). |
+| Tick ingestion stalled (`strategy_ticks_total` flat) | Trader logs, Binance REST connectivity, `/health` | Ensure `VENUE=BINANCE` refresh task logs `Starting background refresh task`; restart trader if missing. |
+| Latency spike (`strategy_tick_to_order_latency_ms` > 250 ms) | Host CPU, Python GC (`python_gc_*` gauges), engine logs | Reduce symbol fan-out, verify no heavy work inside `_notify_listeners`, consider scaling hardware. |
+| Prometheus scrape errors | `make smoke-prom`, Prometheus UI errors | Validate targets in `ops/observability/prometheus/prometheus.yml`; ensure containers running; reload via `make prom-reload`. |
+| High venue error rate / breaker tripped | `engine/logs/orders.jsonl`, `engine/logs/events.jsonl`, metrics `engine_venue_errors_total`, `venue_error_rate_pct` | Investigate root cause; reduce trading exposure; kill switch if necessary; consider raising `VENUE_ERROR_BREAKER_PCT` temporarily once resolved. |
+| Executor spamming retries | `docker compose logs executor`, `ops/auto_probe.py` logs | Check engine health; throttle via env (`EXEC_INTERVAL_SEC`, `DRY_RUN=true`) or stop executor (`make executor-down`). |
+| Universe / screener stale | `curl http://localhost:8009/universe | jq`, `curl http://localhost:8010/scan` | Restart affected service; watch rate-limit gauges (`screener` metrics). |
+| SQLite backlog | `ls -lh data/runtime/trades.db`, `engine/storage/sqlite` queue size (enable debug logs) | Usually self-healing; if locked, restart engine to recreate connection. |
 
-## Performance Tuning
+## Incident Playbooks
 
-### Throughput Optimization
-```yaml
-# ops/policies.yaml - increase concurrency
-max_concurrent_signals: 50
-worker_threads: 8
-signal_queue_size: 1000
-```
+### Circuit breaker tripped
+1. Alerts trigger when `venue_error_rate_pct` or `risk_equity_floor_breach` flips to 1.
+2. Confirm via `/metrics` and engine logs; inspect `risk_equity_buffer_usd`, `risk_equity_drawdown_pct`, `venue_exposure_usd{venue="kraken"}`.
+3. Pause trading (`/kill`), investigate upstream API (Binance/Kraken) or account equity changes.
+4. Once stable, clear venue breaker by calling `RiskRails.record_result(True)` or restart; equity breaker auto-resets after `EQUITY_COOLDOWN_SEC` once buffer > 0.
+5. Resume trading gradually (lower `MAX_NOTIONAL_USDT`, adjust strategy weights) and monitor buffer/drawdown gauges.
 
-### Memory Optimization
-```yaml
-# Limit metrics history
-metrics_retention_hours: 24
-allocation_history_limit: 100
+### Depeg detected (USDT instability)
+1. Alert fires when `risk_depeg_active>0` (and Telegram health shows 🔴 HALTED with reason `depeg_trigger`).
+2. Engine halts new entries; if `DEPEG_EXIT_RISK=true`, it will reduce existing positions.
+3. Validate peg via `USDTUSDC` and `BTCUSDT/BTCUSDC` parity.
+4. After cooldown and manual validation, re‑arm trading (engine emits health OK on daily reset or via manual helper).
 
-# Reduce dashboard polling frequency
-dashboard_refresh_sec: 10
-```
+### Missing server‑side stop
+1. StopValidator detects missing SL (`stop_validator_missing_total`); repairs if `STOP_VALIDATOR_REPAIR=true`.
+2. Telegram (shield icon) pings on repair if `STOPVAL_NOTIFY_ENABLED=true`.
+3. Investigate root cause (order rejection, symbol limits); ensure protection survives reconnects.
 
-### Latency Optimization
-- Enable HTTP/2 if available
-- Use Redis for event bus (SSE fallback)
-- Pre-warm price caches
-- Optimize Prometheus queries
+### Funding spike (upcoming)
+1. When `FUNDING_GUARD_ENABLED=true`, spikes above threshold are trimmed automatically; optional hedge with BTC.
+2. Confirm trim in orders log and funding panels. Consider hedging if trims are frequent.
 
-## Backup & Restore
+### Unreconciled fills detected
+1. `reconcile_lag_seconds` > acceptable threshold or equities mismatch.
+2. Run `curl -X POST http://localhost:8003/reconcile/manual`.
+3. Inspect `engine/logs/orders.jsonl` for missing fills.
+4. If still mismatch, export account snapshot manually (Binance/Kraken API) and adjust `engine/state/portfolio.json` before restart.
 
-### State Backup
-```bash
-# Daily backup of critical state
-tar -czf backup_$(date +%Y%m%d).tar.gz \
-  ops/strategy_registry.json \
-  ops/capital_allocations.json \
-  engine/state/ \
-  ops/logs/*.jsonl
-```
+### Portfolio drift after restart
+1. Compare `engine/state/portfolio.json` to account snapshot.
+2. Check `engine/logs/orders.jsonl` for missing trades during downtime.
+3. Run reconciliation and restart exporter.
+4. Update snapshot manually if required; ensure `SnapshotStore.save` writes the adjusted state.
 
-### Disaster Recovery
-```bash
-# From recent backup
-docker compose down
-tar -xzf recent_backup.tar.gz
-docker compose up -d
+### Ops API unresponsive
+1. `curl http://localhost:8002/readyz` fails.
+2. Check container logs (`docker compose logs ops`).
+3. Restart Ops container (`docker compose up -d --no-deps --force-recreate ops`).
+4. Validate metrics (`curl http://localhost:8002/metrics`) and dashboards.
 
-# Validate
-curl http://localhost:8002/status | jq '.state.recovered'
-```
+## Observability Routines
 
-## Capacity Planning
+- **Validate dashboards after config changes**:
+  ```bash
+  make validate-obs
+  ```
+- **Reload Prometheus after rule updates**:
+  ```bash
+  make prom-reload
+  ```
+- **Restart Grafana to pick up new dashboards**:
+  ```bash
+  make grafana-restart
+  ```
+- **Query metrics quickly**:
+  ```bash
+  curl -fsS -G --data-urlencode 'query=increase(orders_submitted_total[5m])' http://localhost:9090/api/v1/query
+  ```
+- **Strategy latency spot check**:
+  ```bash
+  curl -fsS -G --data-urlencode 'query=histogram_quantile(0.5, rate(strategy_tick_to_order_latency_ms_bucket[5m]))' http://localhost:9090/api/v1/query
+  ```
 
-### Scaling Signals
-- Current: 100 signals/minute
-- Threshold: 500 signals/minute (scale OPS horizontally)
+- **Event Breakout KPIs**: import `ops/observability/grafana/dashboards/event_breakout_kpis.json` and `slippage_heatmap.json`; keep `EVENT_BREAKOUT_METRICS=true`.
 
-### Scaling Metrics
-- Current: 50 venues × 10 models = 500 time series
-- Threshold: 5000 time series (upgrade Prometheus)
+## Backups & Compliance
 
-### Scaling Storage
-- Current: 5GB/day logs
-- Threshold: 50GB/day (implement log rotation/compression)
+- Snapshot critical files daily:
+  - `engine/state/portfolio.json`
+  - `data/runtime/trades.db`
+  - `ops/capital_allocations.json`
+  - `ops/strategy_weights.json`
+  - `engine/logs/orders.jsonl`
+- Archive to off-host storage with timestamped tarballs.
+- Rotate API keys periodically; update `.env` and restart engines after rotation.
+- Review `ops/policies.yaml` after policy edits; keep a changelog for auditability.
 
-## Security Checklist
+Keep this runbook updated whenever new services are added, endpoints change, or incident responses evolve. The fastest path to calm operations is an up-to-date playbook.
 
-- [ ] API tokens rotated monthly
-- [ ] SSH keys updated quarterly
-- [ ] Environment files encrypted at rest
-- [ ] Network firewall rules current
-- [ ] Audit logs backed up securely
-- [ ] Container images vulnerability scanned
+## Staged Go‑Live (first 72h)
+
+Use flags to stage risk safely (see docs/FEATURE_FLAGS.md for full list):
+
+Hour 0–12 (observe only)
+- EVENT_BREAKOUT_METRICS=true
+- TELEGRAM_ENABLED=true DIGEST_INTERVAL_MIN=1440
+- AUTO_CUTBACK_ENABLED=true, RISK_PARITY_ENABLED=true
+- DEPEG_GUARD_ENABLED=true DEPEG_EXIT_RISK=false
+- FUNDING_GUARD_ENABLED=true FUNDING_HEDGE_RATIO=0.00
+- Keep EVENT_BREAKOUT_DRY_RUN=true
+
+Hour 12–36 (small live)
+- EVENT_BREAKOUT_ENABLED=true
+- EVENT_BREAKOUT_DRY_RUN=false (5‑minute half‑size window)
+- Keep DEX exec off; maker remains shadow unless logs prove it
+
+Hour 36–72 (expand cautiously)
+- If futures taker slippage > 8–10 bps and maker posting looks good, enable real maker for scalps (futures only)
+- Flip DEPEG_EXIT_RISK=true after synthetic test; FUNDING_HEDGE_RATIO=0.30 if trims look clean

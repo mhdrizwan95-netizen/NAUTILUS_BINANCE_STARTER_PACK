@@ -13,6 +13,11 @@ class MarketOrderIn(BaseModel):
     side: str = Field(..., pattern="^(?i)(buy|sell)$")
     quote: float | None = Field(None, gt=0)
     quantity: float | None = Field(None, gt=0)
+    venue: str | None = Field(
+        None,
+        description="Optional trading venue override, e.g. KRAKEN. "
+        "If omitted the engine falls back to its configured VENUE.",
+    )
 
     @model_validator(mode="after")
     def check_exclusive(self):
@@ -31,6 +36,8 @@ class MarketOrderIn(BaseModel):
             base["quote"] = self.quote
         else:
             base["quantity"] = self.quantity
+        if self.venue:
+            base["venue"] = self.venue.upper()
         return base
 
 

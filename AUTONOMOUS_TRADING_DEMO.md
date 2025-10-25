@@ -14,7 +14,7 @@ This document demonstrates the **fully autonomous, self-improving HMM trading sy
 - Risk monitoring with alerts
 - Production deployment configuration
 
-### ✅ Phase 3-4: HMM Strategy Intelligence  
+### ✅ Phase 3-4: HMM Strategy Intelligence
 - Feature engineering pipeline (returns, volatility, VWAP, z-score, volume)
 - Gaussian HMM regime detection (bull/bear/chop states)
 - Confidence-thresholded trading decisions
@@ -42,7 +42,7 @@ The system **closes the loop** from data ingestion to autonomous model improveme
 🗂️ HISTORICAL DATA (CSV/Exchange)
     ↓
 🚂 TRAIN HMM MODEL (Gaussian HMM Classifiers)
-    ↓  
+    ↓
 📊 BACKTEST SCORER (Live Logic Fidelity)
     ↓
 📋 MODEL REGISTRY (Version Control + Validation)
@@ -50,7 +50,7 @@ The system **closes the loop** from data ingestion to autonomous model improveme
 🤖 AUTO-COMPARISON (Statistical Improvement Testing)
     ↓
 🔥 AUTO-PROMOTION (Only Better Models)
-    ↓  
+    ↓
 ⚡ LIVE ENGINE (Hot-Swappable Active Model)
     ↓
 📈 PERFORMANCE MONITORING (Risk Limits + Exposure Tracking)
@@ -93,7 +93,7 @@ python scripts/train_hmm_policy.py \
   --states 3 \
   --out engine/models/hmm_policy_v2.pkl
 
-# 2. Backtest with identical live logic  
+# 2. Backtest with identical live logic
 python scripts/backtest_hmm.py \
   --csv data/BTCUSDT_1m.csv \
   --model engine/models/hmm_policy_v2.pkl \
@@ -139,7 +139,7 @@ docker compose restart engine_binance engine_bybit
 
 ```
 📊 Model Comparison:
-  Current: Sharpe=1.27  
+  Current: Sharpe=1.27
   Latest : Sharpe=1.31
 
 ❌ Auto-promotion criteria not met.
@@ -156,7 +156,7 @@ docker compose restart engine_binance engine_bybit
 # Cross-venue exposure (updated every 30s by daemon)
 curl http://localhost:8001/aggregate/exposure | jq '.total_exposure_usd'
 
-# Strategy performance 
+# Strategy performance
 tail -f engine/logs/orders.jsonl | jq "select(.tag | startswith(\"hmm_\"))"
 grep '"exp"' engine/logs/orders.jsonl | jq -r '.exp' | sort | uniq -c
 
@@ -168,7 +168,7 @@ ls -la engine/models/active_hmm_policy.pkl
 ```
 
 ### Registry History:
-```bash  
+```bash
 python scripts/model_registry.py list  # See all model lineage
 python scripts/model_registry.py info --tag hmm_v2  # Detailed model info
 ```
@@ -194,7 +194,7 @@ python scripts/model_registry.py info --tag hmm_v2  # Detailed model info
 ### 🔄 Autonomic Capabilities:
 
 1. **Self-Learning**: Trains on new data autonomously
-2. **Self-Evaluation**: Backtests all model candidates  
+2. **Self-Evaluation**: Backtests all model candidates
 3. **Self-Judgment**: Compares metrics statistically
 4. **Self-Improvement**: Deploys only proven better models
 5. **Self-Monitoring**: Alerts on exposure limit breaches
@@ -208,14 +208,14 @@ Your AI trading system has evolved into an **enterprise-grade quant factory**:
 
 - **🤖 Intelligence Layer**: Rolling features → HMM regimes → signals
 - **📊 Validation Layer**: Backtest scorer ← live logic fidelity
-- **🗂️ Governance Layer**: Registry ← audit trails ← promotion trails  
+- **🗂️ Governance Layer**: Registry ← audit trails ← promotion trails
 - **🔄 Autonomy Layer**: Auto-comparison ← self-promotion ← continuous improvement
 - **🛡️ Safety Layer**: Zero bypass rails + cross-venue monitoring
 - **📈 Scaling Layer**: Multi-engine deployment + venue neutrality
 
 ### This Creates:
 - **Autonomous model improvement** (trains → validates → promotes automatically)
-- **Rigorous experimental discipline** (every model faces quantitative judgment)  
+- **Rigorous experimental discipline** (every model faces quantitative judgment)
 - **Risk-averse deployment** (only statistically superior models promoted)
 - **Production traceability** (complete ancestry and performance history)
 - **Multi-venue intelligence** (cross-market position management)

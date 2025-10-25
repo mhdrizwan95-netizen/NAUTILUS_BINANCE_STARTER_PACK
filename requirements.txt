@@ -14,3 +14,4 @@ matplotlib>=3.7
 watchfiles
 pydantic>=2.6,<3
 PyYAML>=6.0
+websockets>=11.0

@@ -1,40 +1,29 @@
-# Minimal governance policies to ensure the daemon has sane defaults.
+# Autonomous Governance Policies for demo - wide-open governance
 
-rules:
-  # Test-friendly: Trigger via /governance/simulate/poor_performance
-  - trigger: metrics.update
-    name: test_small_drawdown_reduce
-    condition: "data.get('pnl_unrealized', 0) < -10"
-    action: reduce_exposure
-    priority: high
-    cooldown_seconds: 0
-    description: "Test rule: small drawdown → reduce exposure"
+governance:
+  autopilot_enabled: true        # let strategy place orders automatically
+  breaker_enabled: false         # disable global circuit breaker for demo
+  # Huge ceilings so you don't hit rails during the demo
+  max_exposure_usd: 10_000_000
+  max_symbol_exposure_usd: 5_000_000
+  max_order_notional_usd: 1_000_000
+  max_orders_per_minute: 10_000
+  # Keep idempotency ON (saves you from duplicate order storms)
+  idempotency_enabled: true
+  idempotency_window_s: 120
 
-  # Test-friendly: Trigger via /governance/simulate/market_stress
-  - trigger: price.anomaly
-    name: test_vol_spike_pause
-    condition: "data.get('volatility_spike', False) == True"
-    action: pause_trading
-    priority: high
-    cooldown_seconds: 0
-    description: "Market stress: volatility spike → pause trading"
+risk:
+  # Runtime checks toned way down
+  slippage_bps_limit: 10_000       # 100% slippage tolerance (demo only)
+  price_staleness_s: 3600          # allow old marks
+  max_drawdown_pct: 100.0
+  covariance_ready_required: false
+  require_snapshot_loaded: false
+  # Allow trading while reconciling (demo)
+  allow_trade_during_reconcile: true
 
-  # Recovery: allow quick resume via /governance/simulate/great_performance
-  - trigger: metrics.update
-    name: test_recovery_resume
-    condition: "data.get('sharpe', 0) > 1.5"
-    action: immediate_resume
-    priority: medium
-    cooldown_seconds: 0
-    description: "Recovery condition met → immediate resume"
-
-  # Restore exposure cap when performance recovers
-  - trigger: metrics.update
-    name: performance.recovery_restore_exposure
-    condition: "data.get('sharpe', 0) > 1.5"
-    action: set_max_notional
-    params:
-      value: 1000
-    priority: medium
-    cooldown_seconds: 300
-    description: "Recovery detected → restore max notional cap"
+strategy:
+  # No cool-downs / throttles
+  submit_cooldown_s: 0
+  recon_interval_s: 1
+  min_signal_score: -999999

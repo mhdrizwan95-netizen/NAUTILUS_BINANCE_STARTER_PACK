@@ -1,9 +1,10 @@
-import os, importlib
+import os, importlib, asyncio, contextlib
 import pytest
 import respx
 from httpx import Response
 from fastapi.testclient import TestClient
 from ops.pnl_collector import pnl_collector_loop, PNL_REALIZED, PNL_UNREALIZED
+from ops.pnl_collector import _venue_label
 
 @pytest.fixture(autouse=True)
 def _env_clear(monkeypatch):
@@ -77,10 +78,14 @@ def test_pnl_api_endpoint(monkeypatch):
     )
 
     # Update the metrics first
-    task = asyncio.create_task(pnl_collector_loop())
-    import asyncio
-    asyncio.run(asyncio.sleep(1))
-    task.cancel()
+    async def _run_once():
+        task = asyncio.create_task(pnl_collector_loop())
+        await asyncio.sleep(1)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run_once())
 
     # Now test the API endpoint
     r = c.get("/aggregate/pnl")
@@ -111,5 +116,4 @@ def test_pnl_venue_name_extraction():
     ]
 
     for url, expected_venue in test_venue_urls:
-        venue_clean = url.split("//")[-1].split(":")[0].replace("engine_", "").upper()
-        assert venue_clean == expected_venue
+        assert _venue_label(url) == expected_venue

@@ -23,4 +23,3 @@ class SituationStore:
         if name in self.sits:
             self.sits[name].priority = float(p)
             PATH.write_text(json.dumps([s.model_dump() for s in self.active()], indent=2))
-

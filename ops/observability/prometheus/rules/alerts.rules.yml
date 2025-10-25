@@ -1,0 +1,84 @@
+groups:
+- name: trading-alerts
+  rules:
+  - alert: AutopilotOrderBurst
+    expr: trading:orders_rate_1m > 10
+    for: 30m
+    labels: {severity: warn}
+    annotations:
+      summary: Order burst
+      description: "Orders >10/s for 30m (rate={{ $value }})"
+
+  - alert: DailyLossBreaker
+    expr: trading:pnl_realized_usd < (-0.005 * trading:equity_usd)
+    for: 30m
+    labels: {severity: page}
+    annotations:
+      summary: Daily loss breaker
+      description: "PnL {{ $value }} < -0.5% equity"
+
+  - alert: ExposureLimitNear
+    expr: trading:exposure_usd > 0.9 * on() max_notional_usdt
+    for: 30m
+    labels: {severity: warn}
+    annotations:
+      summary: Exposure nearing limit
+      description: "Exposure {{ $value }} vs max"
+
+  - alert: EngineDown
+    expr: up{job=~"engine_.*"} == 0
+    for: 30s
+    labels: {severity: page}
+    annotations:
+      summary: "Engine {{ $labels.job }} down"
+      description: "Target not scraping for 30s (demo tolerant)"
+
+  - alert: KrakenAuthErrorsSpike
+    expr: increase(engine_venue_errors_total{venue="KRAKEN",error="AUTHENTICATION"}[5m]) > 0
+    for: 2m
+    labels: {severity: page}
+    annotations:
+      summary: "Kraken authentication failing"
+      description: "Authentication errors observed in the last 5 minutes"
+
+  - alert: KrakenNoPriceRejections
+    expr: increase(engine_venue_errors_total{venue="KRAKEN",error="NO_PRICE"}[5m]) > 0
+    for: 2m
+    labels: {severity: warn}
+    annotations:
+      summary: "Kraken order rejections due to missing price"
+      description: "NO_PRICE errors surfaced in the last 5 minutes"
+
+  - alert: KrakenSnapshotStalled
+    expr: max_over_time(snapshot_loaded{job=~"engine_kraken.*"}[2m]) == 0
+    for: 2m
+    labels: {severity: page}
+    annotations:
+      summary: "Kraken snapshot stalled"
+      description: "Snapshot gauge has been zero for over 2 minutes"
+
+  - alert: KrakenMarkStale
+    expr: (time() - max_over_time(trading:mark_price_usd{venue="kraken"}[5m])) > 90
+    for: 1m
+    labels: {severity: page}
+    annotations:
+      summary: "Kraken mark price stale (>90s)"
+      description: "No mark_price_usd updates for >90 seconds on {{ $labels.symbol }}"
+
+  - alert: ReconcileLag
+    expr: reconcile_lag_seconds > 60
+    for: 2m
+    labels: {severity: page}
+    annotations: {summary: "Reconcile lag > 60s", runbook: "docs/runbooks/reconcile.md"}
+
+  - alert: OrdersRejectRatioHigh
+    expr: sum(rate(orders_rejected_total[5m])) / clamp_min(sum(rate(orders_submitted_total[5m])),1) > 0.2
+    for: 5m
+    labels: {severity: warn}
+    annotations: {summary: "High reject ratio (>20%/5m)"}
+
+  - alert: EquityDropFast
+    expr: (max_over_time(trading:equity_usd[10m]) - last_over_time(trading:equity_usd[1m])) / clamp_min(max_over_time(trading:equity_usd[10m]),1) > 0.05
+    for: 2m
+    labels: {severity: page}
+    annotations: {summary: "Equity down >5% in 10m"}

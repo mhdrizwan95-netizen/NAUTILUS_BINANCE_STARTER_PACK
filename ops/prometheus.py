@@ -9,7 +9,14 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from prometheus_client import CollectorRegistry, CONTENT_TYPE_LATEST, generate_latest, multiprocess
+from prometheus_client import (
+    CollectorRegistry,
+    CONTENT_TYPE_LATEST,
+    Counter,
+    Gauge,
+    generate_latest,
+    multiprocess,
+)
 
 _MULTIPROC_DIR = os.getenv("PROMETHEUS_MULTIPROC_DIR")
 
@@ -34,6 +41,30 @@ REGISTRY = CollectorRegistry()
 if _MULTIPROC_DIR:
     _cleanup_multiproc_dir(_MULTIPROC_DIR)
     multiprocess.MultiProcessCollector(REGISTRY)
+
+
+def _get_existing_metric(name: str):
+    """Return an already-registered metric if it exists in the shared registry."""
+    try:
+        return REGISTRY._names_to_collectors.get(name)  # type: ignore[attr-defined]
+    except Exception:
+        return None
+
+
+def get_or_create_counter(name: str, documentation: str, **kwargs) -> Counter:
+    """Create a Counter unless it already exists (useful across reloads/tests)."""
+    existing = _get_existing_metric(name)
+    if existing:
+        return existing  # type: ignore[return-value]
+    return Counter(name, documentation, registry=REGISTRY, **kwargs)
+
+
+def get_or_create_gauge(name: str, documentation: str, **kwargs) -> Gauge:
+    """Create a Gauge unless it already exists (useful across reloads/tests)."""
+    existing = _get_existing_metric(name)
+    if existing:
+        return existing  # type: ignore[return-value]
+    return Gauge(name, documentation, registry=REGISTRY, **kwargs)
 
 
 def render_latest() -> tuple[bytes, str]:

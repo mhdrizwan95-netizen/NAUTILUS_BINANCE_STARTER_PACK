@@ -40,4 +40,3 @@ class Matcher:
                 })
                 self.cool[key] = ts + s.cooldown_sec
         return hits
-

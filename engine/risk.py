@@ -1,9 +1,26 @@
 from __future__ import annotations
-import time, threading, collections
+
+import math
+import time
+import threading
+import collections
 from collections import deque, defaultdict
-from typing import Deque, Dict, Literal
+from typing import Any, Callable, Deque, Dict, Literal, Optional
+
 from .config import RiskConfig, load_risk_config
-from .metrics import breaker_rejections, venue_error_rate_pct, breaker_state
+from .metrics import (
+    breaker_rejections,
+    venue_error_rate_pct,
+    breaker_state,
+    venue_exposure_usd,
+    risk_equity_buffer_usd,
+    risk_equity_drawdown_pct,
+    risk_equity_floor_breach,
+    exposure_cap_usd,
+    risk_equity_floor_usd,
+    risk_equity_drawdown_limit_pct,
+    risk_exposure_headroom_usd,
+)
 
 class RiskError(Exception):
     def __init__(self, code: str, message: str):
@@ -38,6 +55,10 @@ class RiskRails:
         self._err_lock = threading.Lock()
         self._err_window = collections.deque()  # (ts, ok_bool)
         self._breaker_tripped = False
+        self._equity_peak = 0.0
+        self._equity_breaker_active = False
+        self._equity_breaker_until = 0.0
+        self._last_equity = 0.0
 
     def check_order(
         self,
@@ -60,7 +81,13 @@ class RiskRails:
             breaker_rejections.inc()
             return False, {"error": e.code, "message": str(e)}
 
-        # Trading toggle
+        # Trading toggle (single source of truth: flag file overrides config)
+        if _trading_disabled_via_flag():
+            return False, {
+                "error": "TRADING_DISABLED",
+                "message": "Trading disabled by daily stop or operator flag.",
+                "hint": "Remove or set state/trading_enabled.flag=true to re-enable at boundary.",
+            }
         if not self.cfg.trading_enabled:
             return False, {
                 "error": "TRADING_DISABLED",
@@ -78,6 +105,19 @@ class RiskRails:
                     "message": f"{symbol} is not enabled.",
                     "allowed": [f"{s}.BINANCE" for s in sorted(self.cfg.trade_symbols)],
                 }
+
+        # Symbol quarantine (soft gate): two recent stops -> temporary block
+        try:
+            from . import risk_quarantine as _rq  # lazy import to avoid cycles
+            q, remain = _rq.is_quarantined(symbol)
+        except Exception:
+            q, remain = (False, 0.0)
+        if q:
+            return False, {
+                "error": "SYMBOL_QUARANTINED",
+                "message": f"{symbol} is temporarily quarantined for {remain:.0f}s due to repeated stops.",
+                "cooldown_sec": remain,
+            }
 
         # Exactly one of quote or quantity
         if (quote is None and quantity is None) or (quote is not None and quantity is not None):
@@ -103,25 +143,101 @@ class RiskRails:
                 }
 
         # Exposure breakers (symbol & total)
+        snap: Dict[str, Any] = {}
+        prices: Callable[[str], float]
         try:
-            snap = order_router.portfolio_snapshot()
-            prices = order_router.exchange_client().get_last_price
+            router_mod = order_router
+            snap_fn = getattr(router_mod, "portfolio_snapshot", None)
+            raw_snap = snap_fn() if callable(snap_fn) else {}
+            if isinstance(raw_snap, dict):
+                snap = raw_snap
+
+            client = None
+            exch_fn = getattr(router_mod, "exchange_client", None)
+            if callable(exch_fn):
+                client = exch_fn()
+            get_price = getattr(client, "get_last_price", None) if client is not None else None
+
+            if callable(get_price):
+                def _price_lookup(sym: str) -> float:
+                    try:
+                        res = get_price(sym)
+                        if hasattr(res, "__await__"):
+                            return 0.0
+                        if isinstance(res, (int, float)):
+                            return float(res)
+                        return float(res)  # type: ignore[arg-type]
+                    except Exception:
+                        return 0.0
+
+                prices = _price_lookup
+            else:
+                prices = lambda _: 0.0
         except Exception:
-            snap, prices = ({}, lambda _: None)
+            snap = {}
+            prices = lambda _: 0.0
+
         symbol_base = symbol.split(".")[0]
-        last = prices(f"{symbol_base}.BINANCE") or 0
+        venue = symbol.split(".")[1].upper() if "." in symbol else "BINANCE"
+
+        def _resolve_price(sym: str) -> float:
+            try:
+                px = prices(sym)
+                if hasattr(px, "__await__"):
+                    # Cannot await in sync context; fall back to 0
+                    return 0.0
+                return float(px or 0.0)
+            except Exception:
+                return 0.0
+
+        base_symbol = symbol_base if symbol_base.endswith("USD") else f"{symbol_base}USD"
+        primary_lookup = symbol if "." in symbol else f"{symbol_base}.BINANCE"
+        last_price = _resolve_price(primary_lookup)
+        if last_price == 0.0:
+            last_price = _resolve_price(base_symbol)
+
         qty = float(quantity) if quantity else 0.0
         quote_amt = float(quote) if quote else 0.0
-        # approximate resulting exposure change in USD
-        delta_usd = quote_amt if quote_amt else qty * float(last or 0)
-        total_expo = float(snap.get("equity_usd", 0)) - float(snap.get("cash_usd", 0))
-        # sum symbol exposure
+        side_mult = 1.0 if side.upper() == "BUY" else -1.0
+        delta_signed = side_mult * (quote_amt if quote_amt else qty * float(last_price or 0.0))
+
+        raw_positions = snap.get("positions") if isinstance(snap, dict) else None
+        positions = list(raw_positions) if isinstance(raw_positions, (list, tuple)) else []
         sym_expo = 0.0
-        for p in (snap.get("positions") or []):
-            if p.get("symbol","").split(".")[0] == symbol_base:
-                sym_expo += float(p.get("qty_base",0)) * float(p.get("last_price_quote") or last or 0)
-        sym_after = abs(sym_expo + delta_usd)
-        total_after = abs(total_expo + delta_usd)
+        total_expo = 0.0
+        venue_exposures: Dict[str, float] = defaultdict(float)
+
+        for pos in positions:
+            try:
+                if not isinstance(pos, dict):
+                    continue
+                pos_symbol_raw = pos.get("symbol") or ""
+                pos_symbol = pos_symbol_raw.upper()
+                if not pos_symbol:
+                    continue
+                pos_base = pos_symbol.split(".")[0]
+                pos_venue = pos_symbol.split(".")[1].upper() if "." in pos_symbol else "BINANCE"
+                qty_base = float(pos.get("qty_base", 0.0) or 0.0)
+                mark_px = pos.get("last_price_quote")
+                if not mark_px:
+                    if "." in pos_symbol:
+                        mark_px = _resolve_price(pos_symbol)
+                    else:
+                        mark_px = _resolve_price(f"{pos_base}.BINANCE")
+                value = qty_base * float(mark_px or 0.0)
+                venue_exposures[pos_venue] += value
+                total_expo += value
+                if pos_base == symbol_base:
+                    sym_expo += value
+            except Exception:
+                continue
+
+        # Update exposure gauges
+        self._update_exposure_gauges(venue_exposures)
+
+        sym_after = abs(sym_expo + delta_signed)
+        total_after = abs(total_expo + delta_signed)
+        venue_after = abs(venue_exposures.get(venue, 0.0) + delta_signed)
         if sym_after > self.cfg.exposure_cap_symbol_usd:
             breaker_rejections.inc()
             return False, {
@@ -134,6 +250,17 @@ class RiskRails:
                 "error": "EXPOSURE_TOTAL_CAP",
                 "message": f"Total exposure cap exceeded: {total_after:.2f} > {self.cfg.exposure_cap_total_usd}",
             }
+        if venue_after > self.cfg.exposure_cap_venue_usd:
+            breaker_rejections.inc()
+            return False, {
+                "error": "EXPOSURE_VENUE_CAP",
+                "message": f"Venue exposure cap exceeded for {venue}: {venue_after:.2f} > {self.cfg.exposure_cap_venue_usd}",
+            }
+
+        metrics_state = self.refresh_snapshot_metrics(snap)
+        if metrics_state.breaker_active:
+            breaker_rejections.inc()
+            return False, metrics_state.breaker_payload
 
         # Rate limiting
         if not self.ratelimiter.allow():
@@ -144,6 +271,194 @@ class RiskRails:
             }
 
         return True, {}
+
+    class SnapshotMetricsState:
+        __slots__ = ("breaker_active", "breaker_payload")
+
+        def __init__(self, breaker_active: bool, breaker_payload: dict[str, Any] | None = None) -> None:
+            self.breaker_active = breaker_active
+            self.breaker_payload = breaker_payload or {}
+
+    def refresh_snapshot_metrics(self, snap: dict[str, Any] | None, venue: str | None = None) -> "RiskRails.SnapshotMetricsState":
+        """Refresh risk gauges from a portfolio snapshot.
+
+        Snapshot contract (best-effort):
+        - `equity_usd` (float) or fallback `equity`
+        - `cash_usd` / `cash` and `pnl.unrealized` for derived equity
+        - `positions`: list of dicts containing `symbol`, `qty_base`, `last_price_quote`
+        - `ts` (seconds) or `ts_ms` (milliseconds) timestamps for freshness tracking
+        Additional keys are ignored. Example payload::
+
+            {
+                "ts": 1_700_000_000,
+                "equity_usd": 10_500.0,
+                "pnl": {"unrealized": 120.0},
+                "positions": [
+                    {
+                        "symbol": "PI_XBTUSD.KRAKEN",
+                        "qty_base": 0.5,
+                        "last_price_quote": 42_000.0
+                    }
+                ]
+            }
+        """
+        venue_key = venue.lower() if venue else None
+        self._update_exposures_from_snapshot(snap, venue_key)
+
+        equity_raw = self._extract_equity(snap)
+        equity = self._sanitize_float(equity_raw)
+        now = time.time()
+        breaker_payload: dict[str, Any] | None = None
+        breaker_active = False
+
+        self._set_config_gauges(venue_key)
+
+        if equity is not None:
+            self._last_equity = equity
+            if self._equity_peak <= 0.0 or equity > self._equity_peak:
+                self._equity_peak = equity
+
+            drawdown_pct = self._compute_drawdown_pct(equity)
+            buffer_usd = max(0.0, equity - self.cfg.equity_floor_usd)
+            floor_breach = equity < self.cfg.equity_floor_usd
+            drawdown_breach = drawdown_pct >= self.cfg.equity_drawdown_limit_pct
+
+            try:
+                risk_equity_buffer_usd.set(buffer_usd)
+                risk_equity_drawdown_pct.set(drawdown_pct)
+            except Exception:
+                pass
+
+            if floor_breach or drawdown_breach:
+                breaker_active = True
+                self._equity_breaker_active = True
+                self._equity_breaker_until = max(self._equity_breaker_until, now + self.cfg.equity_cooldown_sec)
+                try:
+                    risk_equity_floor_breach.set(1)
+                except Exception:
+                    pass
+                remaining = self._equity_breaker_until - now
+                breaker_payload = {
+                    "error": "EQUITY_FLOOR" if floor_breach else "EQUITY_DRAWDOWN",
+                    "message": f"Equity breaker active ({remaining:.0f}s cooldown)",
+                    "cooldown_sec": max(0.0, remaining),
+                }
+            else:
+                if self._equity_breaker_active and now >= self._equity_breaker_until:
+                    self._equity_breaker_active = False
+                if not self._equity_breaker_active:
+                    try:
+                        risk_equity_floor_breach.set(0)
+                    except Exception:
+                        pass
+        else:
+            if self._equity_breaker_active and now >= self._equity_breaker_until:
+                self._equity_breaker_active = False
+            if not self._equity_breaker_active:
+                try:
+                    risk_equity_floor_breach.set(0)
+                except Exception:
+                    pass
+
+        return RiskRails.SnapshotMetricsState(breaker_active=breaker_active, breaker_payload=breaker_payload)
+
+    def _extract_equity(self, snap: dict[str, Any] | None) -> Optional[float]:
+        snap_dict = snap if isinstance(snap, dict) else None
+        if snap_dict is None:
+            return None
+        try:
+            for key in ("equity_usd", "equity"):
+                val = snap_dict.get(key)
+                if val is not None:
+                    return float(val)
+            cash = self._sanitize_float(snap_dict.get("cash_usd"))
+            if cash is None:
+                cash = self._sanitize_float(snap_dict.get("cash"))
+            pnl_candidate = snap_dict.get("pnl")
+            pnl_section = pnl_candidate if isinstance(pnl_candidate, dict) else {}
+            unrealized = self._sanitize_float(pnl_section.get("unrealized"))
+            if cash is not None or unrealized is not None:
+                return (cash or 0.0) + (unrealized or 0.0)
+        except Exception:
+            return None
+        return None
+
+    def _compute_drawdown_pct(self, equity: float) -> float:
+        peak = self._equity_peak
+        if peak <= 0.0:
+            return 0.0
+        dd = max((peak - equity) / peak * 100.0, 0.0)
+        if not math.isfinite(dd) or dd < 0.0:
+            return 0.0
+        return dd
+
+    def _sanitize_float(self, value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            val = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(val):
+            return None
+        return val
+
+    def _update_exposure_gauges(self, venue_exposures: Dict[str, float]) -> None:
+        try:
+            for ven, val in venue_exposures.items():
+                safe_val = abs(val) if math.isfinite(val) else 0.0
+                venue_exposure_usd.labels(venue=ven).set(max(0.0, safe_val))
+                cap = max(0.0, float(self.cfg.exposure_cap_venue_usd))
+                headroom = max(0.0, cap - safe_val)
+                risk_exposure_headroom_usd.labels(venue=ven).set(headroom)
+        except Exception:
+            pass
+
+    def _update_exposures_from_snapshot(self, snap: dict[str, Any] | None, venue_default: str | None) -> None:
+        if not isinstance(snap, dict):
+            if venue_default is not None:
+                self._update_exposure_gauges({venue_default: 0.0})
+            return
+
+        positions = snap.get("positions") if isinstance(snap, dict) else None
+        if not isinstance(positions, list):
+            if venue_default is not None:
+                self._update_exposure_gauges({venue_default: 0.0})
+            return
+
+        exposures: Dict[str, float] = defaultdict(float)
+        for pos in positions:
+            if not isinstance(pos, dict):
+                continue
+            symbol_raw = pos.get("symbol")
+            if not isinstance(symbol_raw, str) or not symbol_raw:
+                continue
+            parts = symbol_raw.split(".")
+            pos_base = parts[0]
+            pos_venue = (parts[1] if len(parts) > 1 else venue_default or "binance").lower()
+            qty = self._sanitize_float(pos.get("qty_base")) or 0.0
+            last_px = self._sanitize_float(pos.get("last_price_quote"))
+            if last_px is None:
+                last_px = 0.0
+            value = qty * last_px
+            exposures[pos_venue] += value
+
+        if venue_default is not None and venue_default not in exposures:
+            exposures[venue_default] = 0.0
+
+        if exposures:
+            self._update_exposure_gauges(exposures)
+
+    def _set_config_gauges(self, venue_key: str | None) -> None:
+        try:
+            risk_equity_floor_usd.set(self.cfg.equity_floor_usd)
+            risk_equity_drawdown_limit_pct.set(self.cfg.equity_drawdown_limit_pct)
+            if venue_key is not None:
+                cap = max(0.0, float(self.cfg.exposure_cap_venue_usd))
+                exposure_cap_usd.labels(venue=venue_key).set(cap)
+                risk_exposure_headroom_usd.labels(venue=venue_key).set(cap)
+        except Exception:
+            pass
 
     def record_result(self, ok: bool):
         """Record venue operation result for error rate monitoring."""
@@ -164,3 +479,27 @@ class RiskRails:
         """Check if circuit breaker is tripped."""
         if self._breaker_tripped:
             raise RiskError("VENUE_BREAKER_OPEN", "Venue error-rate breaker is open; strategy paused.")
+        if self._equity_breaker_active:
+            now = time.time()
+            if now < self._equity_breaker_until:
+                remaining = self._equity_breaker_until - now
+                raise RiskError("EQUITY_BREAKER_OPEN", f"Equity breaker cooling down ({remaining:.0f}s remaining)")
+            # Cooldown expired but equity breaker still flagged; reset.
+            self._equity_breaker_active = False
+            try:
+                risk_equity_floor_breach.set(0)
+            except Exception:
+                pass
+
+
+def _trading_disabled_via_flag() -> bool:
+    try:
+        import os
+        path = "state/trading_enabled.flag"
+        if not os.path.exists(path):
+            return False
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = (fh.read() or "").strip().lower()
+        return raw in {"0", "false", "no", "off"}
+    except Exception:
+        return False

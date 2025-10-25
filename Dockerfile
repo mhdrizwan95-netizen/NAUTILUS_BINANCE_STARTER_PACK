@@ -1,21 +1,40 @@
-# Multi-arch, small, stable wheels
-FROM python:3.11-slim as base
+# Builder stage: install deps with build tooling
+FROM python:3.11-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# System deps for scientific libs & uvloop wheels (slim-friendly)
+WORKDIR /build
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl ca-certificates tini \
+    build-essential curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN python -m pip install --upgrade pip \
+ && pip install --prefix=/install -r requirements.txt
+
+# Runtime stage
+FROM python:3.11-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    OPS_BASE="http://ops:8001" \
+    DASH_BASE="http://dash:8002" \
+    PROMETHEUS_MULTIPROC_DIR="/tmp/prom_multiproc"
 
 WORKDIR /app
 
-# Install Python deps first (layer cache)
-COPY requirements.txt .
-RUN python -m pip install --upgrade pip && pip install -r requirements.txt
+# Runtime deps only
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates tini \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /install /usr/local
 
 # Copy code
 COPY . .
@@ -26,11 +45,6 @@ RUN useradd -m appuser \
  && chown appuser:appuser /tmp/prom_multiproc \
  && chown -R appuser:appuser /app
 USER appuser
-
-# Default envs; override in compose
-ENV OPS_BASE="http://ops:8001" \
-    DASH_BASE="http://dash:8002" \
-    PROMETHEUS_MULTIPROC_DIR="/tmp/prom_multiproc"
 
 # Uvicorn entrypoints (set by compose)
 CMD ["bash","-lc","echo 'Set a command in docker-compose.yml'"]

@@ -97,8 +97,8 @@ SYMBOL=BTCUSDT.BINANCE         # spot
 # or: SYMBOL=BTCUSDT-PERP.BINANCE  # perps
 ```
 
-**Get Testnet keys:**  
-- Spot Testnet: generate keys and use the testnet base URL.  
+**Get Testnet keys:**
+- Spot Testnet: generate keys and use the testnet base URL.
 - UM-Futures Testnet: create Futures Testnet account and keys.
 
 
@@ -106,10 +106,10 @@ SYMBOL=BTCUSDT.BINANCE         # spot
 
 Two options:
 
-**A) Quick-start (trades + book ticker via Binance)**  
+**A) Quick-start (trades + book ticker via Binance)**
 Use REST to pull trades/aggTrades and book snapshots to craft features. Good enough to train an initial HMM+Policy.
 
-**B) High‑fidelity (recommended) with Tardis**  
+**B) High‑fidelity (recommended) with Tardis**
 Pull tick‑level order book deltas + trades and export to Parquet. Use Nautilus’ Tardis integration for backtests and faster model iteration.
 
 Either way, transform to a uniform dataframe with timestamps in **ns**.

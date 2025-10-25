@@ -16,4 +16,3 @@ if cfg_path.exists():
     CFG = UCfg(quote=y.get("universe_builder", {}).get("quote", "USDT"))
 else:
     CFG = UCfg()
-

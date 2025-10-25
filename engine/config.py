@@ -33,6 +33,22 @@ class Settings:
             host = os.getenv("IBKR_HOST", "127.0.0.1")
             port = os.getenv("IBKR_PORT", "7497")
             self.base_url = f"{host}:{port}"
+        elif venue == "KRAKEN":
+            # Kraken Futures configuration
+            self.mode = os.getenv("KRAKEN_MODE", "testnet").lower()
+            self.is_futures = True
+            self.base_url = os.getenv("KRAKEN_BASE_URL", "https://demo-futures.kraken.com").rstrip("/")
+            # Kraken API credentials (secret provided base64 encoded per Kraken docs)
+            self.api_key = os.getenv("KRAKEN_API_KEY", "")
+            self.api_secret = os.getenv("KRAKEN_API_SECRET", "")
+            # Optional websocket endpoints
+            self.ws_url = os.getenv(
+                "KRAKEN_WS_URL",
+                "wss://demo-futures.kraken.com/ws/v1",
+            )
+            # Compatibility aliases so downstream code can reuse attr names
+            self.spot_base = self.base_url
+            self.futures_base = self.base_url
         else:
             # Binance-specific configuration
             mode = os.getenv("BINANCE_MODE", "demo").lower()
@@ -81,10 +97,17 @@ class Settings:
             if self.is_futures and not self.futures_base:
                 raise RuntimeError(f"BINANCE_FUTURES_BASE must be set for futures mode, got: {self.futures_base}")
 
-        self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
-        self.timeout = float(os.getenv("BINANCE_API_TIMEOUT", "10"))
+        if venue == "KRAKEN":
+            self.recv_window = 0
+            self.timeout = float(os.getenv("KRAKEN_API_TIMEOUT", os.getenv("BINANCE_API_TIMEOUT", "10")))
+        else:
+            self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
+            self.timeout = float(os.getenv("BINANCE_API_TIMEOUT", "10"))
         self.trading_enabled = os.getenv("TRADING_ENABLED", "true").lower() not in {"0", "false", "no"}
-        self.allowed_symbols = _split_symbols(os.getenv("TRADE_SYMBOLS", "BTCUSDT.BINANCE"))
+        default_symbols = "BTCUSDT.BINANCE"
+        if venue == "KRAKEN":
+            default_symbols = "PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN"
+        self.allowed_symbols = _split_symbols(os.getenv("TRADE_SYMBOLS", default_symbols))
         self.min_notional = float(os.getenv("MIN_NOTIONAL_USDT", "10"))
         self.max_notional = float(os.getenv("MAX_NOTIONAL_USDT", "10000"))
 
@@ -143,6 +166,13 @@ class RiskConfig:
     exposure_cap_total_usd: float
     venue_error_breaker_pct: float
     venue_error_window_sec: int
+    exposure_cap_venue_usd: float
+    equity_floor_usd: float
+    equity_drawdown_limit_pct: float
+    equity_cooldown_sec: int
+
+
+DEFAULT_TRADE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
 
 
 def load_risk_config() -> RiskConfig:
@@ -152,7 +182,8 @@ def load_risk_config() -> RiskConfig:
         # Set to None for dynamic loading in the app startup
         trade_symbols = None
     else:
-        trade_symbols = [s.strip() for s in TRADE_SYMBOLS_ENV.split(",") if s.strip()] or None
+        parsed = [s.strip() for s in TRADE_SYMBOLS_ENV.split(",") if s.strip()]
+        trade_symbols = parsed or DEFAULT_TRADE_SYMBOLS.copy()
     # Futures venues typically have higher min notional (e.g., 100 USDT on testnet).
     # If MIN_NOTIONAL_USDT not explicitly set, choose a sensible per-mode default.
     default_min_notional = 100.0 if getattr(settings, "is_futures", False) else 5.0
@@ -167,6 +198,10 @@ def load_risk_config() -> RiskConfig:
         exposure_cap_total_usd=_as_float(os.getenv("EXPOSURE_CAP_TOTAL_USD"), 10_000.0),
         venue_error_breaker_pct=_as_float(os.getenv("VENUE_ERROR_BREAKER_PCT"), 50.0),
         venue_error_window_sec=_as_int(os.getenv("VENUE_ERROR_WINDOW_SEC"), 60),
+        exposure_cap_venue_usd=_as_float(os.getenv("EXPOSURE_CAP_VENUE_USD"), 10_000.0),
+        equity_floor_usd=_as_float(os.getenv("EQUITY_FLOOR_USD"), 500.0),
+        equity_drawdown_limit_pct=_as_float(os.getenv("EQUITY_DRAWDOWN_LIMIT_PCT"), 35.0),
+        equity_cooldown_sec=_as_int(os.getenv("EQUITY_COOLDOWN_SEC"), 300),
     )
 
 # ---- Quote currency + universe helpers ----
@@ -175,7 +210,9 @@ QUOTE_CCY = os.getenv("QUOTE_CCY", "USDT").upper()
 def norm_symbol(sym: str) -> str:
     """Ensure symbols are in BASEQUOTE (e.g., BTCUSDT) without venue suffix."""
     s = sym.split(".")[0].upper()
-    return s if s.endswith(QUOTE_CCY) else f"{s}{QUOTE_CCY}"
+    if s.endswith(QUOTE_CCY) or s.endswith("USD"):
+        return s
+    return f"{s}{QUOTE_CCY}"
 
 async def list_all_testnet_pairs() -> List[str]:
     """Fetch all tradeable spot pairs from Binance testnet."""

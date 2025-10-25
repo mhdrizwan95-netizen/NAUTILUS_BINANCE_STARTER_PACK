@@ -47,4 +47,3 @@ def pred_ok(pred: dict, feats: Dict[str, Any]) -> bool:
             return False
         return ((a - prev) / abs(prev)) * 100.0 > thr
     return False
-

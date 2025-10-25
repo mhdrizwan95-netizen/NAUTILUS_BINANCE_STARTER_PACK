@@ -15,4 +15,3 @@ def orderbook(sym: str, limit: int = 10):
     return httpx.get(
         f"{BASE}/api/v3/depth", params={"symbol": sym, "limit": limit}, timeout=10
     ).json()
-

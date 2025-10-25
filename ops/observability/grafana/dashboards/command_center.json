@@ -35,18 +35,20 @@
     "list": [
       {
         "name": "venue",
-        "type": "custom",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
         "label": "Venues",
-        "query": "engine_binance,engine_ibkr",
-        "includeAll": false,
+        "query": "label_values(up, job)",
+        "includeAll": true,
         "multi": true,
+        "refresh": 1,
         "current": {
           "selected": true,
-          "text": "engine_binance + engine_ibkr",
-          "value": [
-            "engine_binance",
-            "engine_ibkr"
-          ]
+          "text": "All",
+          "value": "$__all"
         }
       },
       {
@@ -81,21 +83,9 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(equity_usd{job=~\"$venue\"})"
+          "expr": "equity_usd"
         }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "currencyUSD"
-        }
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        }
-      }
+      ]
     },
     {
       "id": 2,
@@ -231,6 +221,10 @@
         "w": 24,
         "x": 0,
         "y": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     },
     {
@@ -250,7 +244,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(equity_usd{job=\"engine_binance\"})"
+          "expr": "sum(equity_usd{instance=\"engine_binance:8003\"})"
         }
       ],
       "fieldConfig": {
@@ -283,7 +277,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(equity_usd{job=\"engine_ibkr\"})"
+          "expr": "sum(equity_usd{instance=\"engine_ibkr:8003\"})"
         }
       ],
       "fieldConfig": {
@@ -450,6 +444,166 @@
           "displayMode": "list",
           "placement": "bottom"
         }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Equity & PnL",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "trading:equity_usd",
+          "refId": "A"
+        },
+        {
+          "expr": "trading:pnl_realized_usd",
+          "refId": "B"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Exposure (stacked)",
+      "options": {
+        "legend": {
+          "showLegend": true
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "stacking": {
+              "mode": "normal"
+            }
+          }
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 34
+      },
+      "targets": [
+        {
+          "expr": "sum by(job) (trading:exposure_usd)",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Orders Rate (1m)",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "trading:orders_rate_1m",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "table",
+      "title": "Orders by Symbol (5m)",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 42
+      },
+      "targets": [
+        {
+          "expr": "increase(orders_submitted_total[5m])",
+          "refId": "A"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Submit p95 / Fill p95 (ms)",
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
+      "targets": [
+        {
+          "expr": "trading:submit_latency_p95_ms",
+          "refId": "A"
+        },
+        {
+          "expr": "trading:fill_latency_p95_ms",
+          "refId": "B"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Trading Enabled (global)",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 48
+      },
+      "targets": [
+        {
+          "expr": "trading_enabled"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Max Notional (USDT)",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 48
+      },
+      "targets": [
+        {
+          "expr": "max_notional_usdt"
+        }
+      ],
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
       }
     }
   ]

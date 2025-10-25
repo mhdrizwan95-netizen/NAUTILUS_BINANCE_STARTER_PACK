@@ -1,0 +1,35 @@
+{
+  "title": "Execution – Slippage Heatmap",
+  "panels": [
+    {
+      "type": "heatmap",
+      "title": "Slippage warnings by symbol (rate, last 1h)",
+      "targets": [
+        {"expr": "sum by (symbol) (rate(event_bo_skips_total{reason=\"slippage\"}[5m]))", "refId": "A"}
+      ],
+      "gridPos": {"h": 12, "w": 14, "x": 0, "y": 0}
+    },
+    {
+      "type": "table",
+      "title": "Top slippage offenders (last 1h)",
+      "targets": [
+        {"expr": "topk(20, sum by (symbol,venue,intent) (rate(exec_slippage_bps_bucket{le=\"+Inf\"}[5m])))", "refId": "A"}
+      ],
+      "gridPos": {"h": 12, "w": 10, "x": 14, "y": 0},
+      "options": {"showHeader": true}
+    },
+    {
+      "type": "timeseries",
+      "title": "Avg slippage bps by venue/intent",
+      "targets": [
+        {"expr": "sum(rate(exec_slippage_bps_sum[5m])) by (venue,intent) / clamp_min(sum(rate(exec_slippage_bps_count[5m])) by (venue,intent), 1)", "refId": "A"}
+      ],
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12}
+    }
+  ],
+  "time": {"from": "now-24h", "to": "now"},
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "version": 1
+}

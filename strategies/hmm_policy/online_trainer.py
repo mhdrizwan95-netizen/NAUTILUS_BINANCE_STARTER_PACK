@@ -107,18 +107,18 @@ class OnlineFineTuner:
         if now is None:
             now = time.time()
 
+        # Safety check: recent performance acceptable?
+        if not self._performance_check_ok():
+            self.is_enabled = False
+            print(f"[OnlineFineTuner] Auto-disabled: recent performance below threshold")
+            return False
+
         # Check cooldown
         if (now - self.last_update_ts) < self.cool_s:
             return False
 
         # Check if we have enough data
         if len(self.x_buffer) < self.batch_size:
-            return False
-
-        # Safety check: recent performance acceptable?
-        if not self._performance_check_ok():
-            self.is_enabled = False
-            print(f"[OnlineFineTuner] Auto-disabled: recent performance below threshold")
             return False
 
         # Perform update

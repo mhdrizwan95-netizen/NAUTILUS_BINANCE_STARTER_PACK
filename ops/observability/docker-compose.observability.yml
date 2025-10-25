@@ -13,7 +13,7 @@ services:
     ports:
       - "9090:9090"
     networks:
-      - hmm_net
+      - trading_net
 
   grafana:
     image: grafana/grafana:11.2.2
@@ -34,13 +34,38 @@ services:
     depends_on:
       - prometheus
     networks:
-      - hmm_net
+      - trading_net
+
+  loki:
+    image: grafana/loki:2.9.7
+    container_name: hmm_loki
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/tmp/loki
+      - ./loki/config.yml:/etc/loki/local-config.yaml:ro
+    networks:
+      - trading_net
+
+  promtail:
+    image: grafana/promtail:2.9.7
+    container_name: hmm_promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - /var/log:/var/log:ro
+      - ./promtail/config.yml:/etc/promtail/config.yml:ro
+    depends_on:
+      - loki
+    networks:
+      - trading_net
 
 networks:
-  hmm_net:
+  trading_net:
     external: true
-    name: nautilus_binance_starter_pack_default
+    name: nautilus_trading_network
 
 volumes:
   prometheus_data:
   grafana_data:
+  loki_data:
