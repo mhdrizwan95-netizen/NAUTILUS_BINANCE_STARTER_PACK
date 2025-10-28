@@ -485,32 +485,17 @@ services:
       context: .
     command: python -m ops.allocator_daemon
     environment:
-      - DECK_URL=http://hmm_deck:8002
-      - REFRESH_SEC=${ALLOCATOR_REFRESH_SEC:-600}
-      - EMA_ALPHA=${ALLOCATOR_EMA_ALPHA:-0.35}
-      - EXPLORATION=${ALLOCATOR_EXPLORATION:-0.08}
-      - MIN_SHARE=${ALLOCATOR_MIN_SHARE:-0.00}
-      - MAX_SHARE=${ALLOCATOR_MAX_SHARE:-1.00}
-      - DECK_TOKEN=${DECK_TOKEN:-}
-    depends_on:
-      - hmm_deck
-    restart: unless-stopped
-    profiles: ["allocator"]
-
-  hmm_allocator:
-    build:
-      context: .
-    command: python -m ops.allocator_daemon
-    environment:
+      # Talk to Deck inside the compose network (internal Deck port is 8002)
       DECK_URL: http://hmm_deck:8002
+      # Tuning knobs (override via env or .env as needed)
       REFRESH_SEC: ${ALLOCATOR_REFRESH_SEC:-600}
       EMA_ALPHA: ${ALLOCATOR_EMA_ALPHA:-0.35}
       EXPLORATION: ${ALLOCATOR_EXPLORATION:-0.08}
       MIN_SHARE: ${ALLOCATOR_MIN_SHARE:-0.00}
       MAX_SHARE: ${ALLOCATOR_MAX_SHARE:-1.00}
+      # Optional: only needed if Deck token auth is enabled
       DECK_TOKEN: ${DECK_TOKEN:-}
     depends_on:
-      - ${OPS_SERVICE_NAME:-hmm_ops}
       - hmm_deck
     restart: unless-stopped
     profiles: ["allocator"]
