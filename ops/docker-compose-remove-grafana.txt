@@ -1,0 +1,7 @@
+# Remove Grafana / Loki / Promtail blocks from docker-compose.yml.
+# Delete the following service sections entirely if present:
+#   grafana
+#   loki
+#   promtail
+# Drop any associated volumes or networks for those services.
+# This clears the static dashboard stack so the Deck can take its place.
