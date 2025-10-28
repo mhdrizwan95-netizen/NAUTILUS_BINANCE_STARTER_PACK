@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import sys
 from collections import defaultdict
 from contextlib import suppress
+from datetime import datetime
 from typing import Dict, Tuple
 
 from pathlib import Path
@@ -18,6 +20,11 @@ from prometheus_client.parser import text_string_to_metric_families
 from engine.runtime.config import RuntimeConfig, load_runtime_config
 from engine.metrics import generate_latest
 from tools.synthetic_feed import run_synthetic_runtime
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
 
 
 def _build_harness_namespace(args: argparse.Namespace) -> argparse.Namespace:
@@ -156,6 +163,21 @@ def _evaluate_metrics(args: argparse.Namespace, cfg: RuntimeConfig, families: Di
     return failures
 
 
+def _load_thresholds_file(thresholds_file: str) -> dict:
+    """Load thresholds from YAML file, return empty dict if not available."""
+    if yaml is None:
+        print("[WARN] PyYAML not available, cannot load thresholds file")
+        return {}
+    try:
+        with open(thresholds_file, 'r') as f:
+            thresholds = yaml.safe_load(f)
+            print(f"[INFO] Loaded thresholds from {thresholds_file}: {thresholds}")
+            return thresholds or {}
+    except Exception as e:
+        print(f"[WARN] Failed to load thresholds from {thresholds_file}: {e}")
+        return {}
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run synthetic harness and evaluate stabilization checks.")
     parser.add_argument("--config", default="config/runtime.yaml")
@@ -172,15 +194,90 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-latency-p95", type=float, default=0.400)
     parser.add_argument("--max-failure-rate", type=float, default=0.005)
     parser.add_argument("--bucket-headroom", type=float, default=0.02)
+    parser.add_argument("--thresholds", default=None, help="YAML file with default thresholds")
     return parser.parse_args()
+
+
+def _apply_threshold_defaults(args: argparse.Namespace) -> argparse.Namespace:
+    """Apply defaults from thresholds file to argparse namespace."""
+    if args.thresholds:
+        thresholds = _load_thresholds_file(args.thresholds)
+        # Apply YAML values as defaults, but CLI args take precedence
+        for key, value in thresholds.items():
+            attr_name = key.replace('-', '_')
+            if hasattr(args, attr_name):
+                # CLI args override YAML defaults (CLI will have non-default values)
+                current_value = getattr(args, attr_name)
+                # Simple heuristic: if value matches parser default, apply YAML default
+                parser = argparse.ArgumentParser()
+                parser.add_argument(f"--{key}", dest=attr_name)
+                test_args, _ = parser.parse_known_args([])
+                default_value = getattr(test_args, attr_name)
+                if current_value == default_value:
+                    setattr(args, attr_name, value)
+                    print(f"[INFO] Using YAML threshold {key}={value}")
+    return args
+
+
+def _generate_report(args: argparse.Namespace, cfg: RuntimeConfig, families: Dict[str, Tuple], failures: int) -> dict:
+    """Generate JSON report with stabilization results."""
+    timestamp = datetime.utcnow().isoformat()
+    mismatch_total = _sum_counter(families, "strategy_leverage_mismatch_total")
+    quantile_data = _histogram_quantiles(
+        families,
+        "strategy_signal_latency_seconds_bucket",
+        (0.5, 0.95),
+    )
+    submitted = _sum_counter(families, "orders_submitted_total")
+    rejected = _sum_counter(families, "orders_rejected_total")
+    failure_rate = (rejected / submitted) if submitted else 0.0
+    bucket_usage = _gauge_values(families, "strategy_bucket_usage_fraction", "bucket")
+
+    # Calculate worst latencies
+    worst_p50 = max((quantiles.get(0.5, 0.0) for quantiles in quantile_data.values()), default=0.0)
+    worst_p95 = max((quantiles.get(0.95, 0.0) for quantiles in quantile_data.values()), default=0.0)
+
+    return {
+        "timestamp": timestamp,
+        "config": args.config,
+        "duration_seconds": args.duration_seconds,
+        "symbols_per_strategy": args.symbols_per_strategy,
+        "results": {
+            "leverage_mismatches": int(mismatch_total),
+            "max_allowed_mismatches": args.allowed_leverage_mismatches,
+            "latency_max_p50": round(worst_p50, 4),
+            "latency_max_p95": round(worst_p95, 4),
+            "latency_threshold_p50": args.max_latency_p50,
+            "latency_threshold_p95": args.max_latency_p95,
+            "order_failure_rate": round(failure_rate, 6),
+            "max_failure_rate": args.max_failure_rate,
+            "bucket_usage": {k: round(v, 4) for k, v in bucket_usage.items()},
+            "bucket_headroom": args.bucket_headroom,
+            "config_budgets": {k: getattr(cfg.buckets, k, None) for k in bucket_usage.keys()},
+        },
+        "passed": failures == 0,
+        "failure_count": failures,
+    }
+
+
+def _save_report(report: dict) -> None:
+    """Save report to ops/reports/ directory."""
+    timestamp = datetime.fromisoformat(report["timestamp"]).strftime("%Y%m%d_%H%M%S")
+    filename = f"ops/reports/stabilization_{timestamp}.json"
+    with open(filename, 'w') as f:
+        json.dump(report, f, indent=2)
+    print(f"[INFO] Report saved to {filename}")
 
 
 def main() -> None:
     args = parse_args()
+    args = _apply_threshold_defaults(args)
     asyncio.run(_run_harness(args))
     cfg = load_runtime_config(args.config)
     families = _collect_metrics()
     failures = _evaluate_metrics(args, cfg, families)
+    report = _generate_report(args, cfg, families, failures)
+    _save_report(report)
     if failures:
         print(f"[SUMMARY] Stabilization check failed ({failures} issue(s) detected).")
         sys.exit(1)

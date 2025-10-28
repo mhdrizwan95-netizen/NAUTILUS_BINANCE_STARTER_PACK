@@ -82,3 +82,30 @@ groups:
     for: 2m
     labels: {severity: page}
     annotations: {summary: "Equity down >5% in 10m"}
+
+  - alert: StrategyLeverageMismatch
+    expr: strategy_leverage_mismatch_total > 0
+    for: 5m
+    labels: {severity: warn}
+    annotations:
+      summary: "Leverage configuration mismatch detected"
+      description: "{{ $value }} leverage mismatches in stabilization period"
+      runbook: "ops/run_stabilization_checks.py"
+
+  - alert: StrategyBucketUsageCritical
+    expr: strategy_bucket_usage_fraction > 0.98
+    for: 10m
+    labels: {severity: critical}
+    annotations:
+      summary: "Critical bucket usage detected"
+      description: "Bucket {{ $labels.bucket }} usage at {{ $value | humanizePercentage }} (>98%)"
+      runbook: "ops/run_stabilization_checks.py"
+
+  - alert: StabilizationJobFailed
+    expr: stabilization_job_exit_code != 0
+    for: 5m
+    labels: {severity: page}
+    annotations:
+      summary: "Stabilization soak failed"
+      description: "Nightly stabilization check failed - investigate before deployment"
+      runbook: "ops/run_stabilization_checks.py"

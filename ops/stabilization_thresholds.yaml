@@ -1,0 +1,6 @@
+allowed_leverage_mismatches: 0
+max_latency_p50: 0.2
+max_latency_p95: 0.5
+max_order_failure_rate: 0.005
+max_bucket_usage_fraction: 1.0
+bucket_headroom: 0.02

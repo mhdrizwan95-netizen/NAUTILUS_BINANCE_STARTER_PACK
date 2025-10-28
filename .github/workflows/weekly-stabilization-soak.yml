@@ -1,0 +1,46 @@
+name: Weekly 48h Stabilization Soak
+on:
+  schedule:
+    - cron: "0 1 * * 6"   # Saturdays 1 AM UTC
+  workflow_dispatch:      # manual trigger
+
+jobs:
+  soak-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3000  # 50 hours (GitHub max is ~6 hours, may need self-hosted)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run 48-hour stabilization soak
+        run: |
+          python3 ops/run_stabilization_checks.py \
+            --config config/runtime.yaml \
+            --duration-seconds 172800 \
+            --symbols-per-strategy 80 \
+            --thresholds ops/stabilization_thresholds.yaml
+
+      - name: Upload stabilization report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: weekly-soak-report-${{ github.run_number }}
+          path: ops/reports/
+          retention-days: 90
