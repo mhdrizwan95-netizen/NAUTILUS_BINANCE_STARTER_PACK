@@ -105,6 +105,7 @@ def run_once() -> int:
 
 
 def main() -> None:
+    global TOP_N, OUTPUT_FILE
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="Run refresh loop")
     parser.add_argument("--interval-sec", type=int, default=3600, help="Refresh interval in seconds")
@@ -112,8 +113,6 @@ def main() -> None:
     parser.add_argument("--out", default=OUTPUT_FILE, help="Output file path")
     args = parser.parse_args()
 
-    # Override globals for daemon mode
-    global TOP_N, OUTPUT_FILE
     TOP_N = args.top_n
     OUTPUT_FILE = args.out
 

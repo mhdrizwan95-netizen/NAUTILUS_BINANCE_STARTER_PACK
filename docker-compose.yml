@@ -457,11 +457,12 @@ services:
       context: .
       dockerfile: ops/Dockerfile
     container_name: hmm_slip_trainer
+    profiles: ["labs"]  # optional training job
     command: >
       sh -c "python - <<'PY'\nfrom ops.slip_model import train_from_parquet; train_from_parquet()\nPY"
     volumes:
       - ./data:/app/data
-    restart: unless-stopped
+    restart: "no"
     networks:
       - trading_net
 
