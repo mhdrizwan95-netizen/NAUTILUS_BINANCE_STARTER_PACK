@@ -7,6 +7,9 @@ import json
 import logging
 import math
 import random
+from contextlib import suppress
+from functools import partial
+from threading import Lock
 from pathlib import Path
 from typing import Literal, Optional, Any, Callable, cast
 
@@ -35,6 +38,13 @@ import engine.state as state_mod
 from engine.reconcile import reconcile_since_snapshot
 from engine import strategy
 from engine.universe import configured_universe, last_prices
+from engine.telemetry.publisher import (
+    publish_metrics as deck_publish_metrics,
+    publish_fill as deck_publish_fill,
+    latency_percentiles as deck_latency_percentiles,
+    record_realized_total as deck_record_realized_total,
+    consume_latency as deck_consume_latency,
+)
 
 app = FastAPI(title="HMM Engine", version="0.1.0")
 
@@ -44,6 +54,11 @@ IS_EXPORTER = ROLE == "exporter"
 VENUE = os.getenv("VENUE", "BINANCE").upper()
 risk_cfg = load_risk_config()
 RAILS = RiskRails(risk_cfg)
+DECK_PUSH_DISABLED = os.getenv("DECK_DISABLE_PUSH", "").lower() in {"1", "true", "yes"}
+DECK_METRICS_INTERVAL_SEC = max(1.0, float(os.getenv("DECK_METRICS_INTERVAL_SEC", "2.0")))
+_deck_metrics_task: Optional[asyncio.Task] = None
+_deck_realized_lock = Lock()
+_deck_last_realized = 0.0
 
 
 class _DummyBinanceREST:
@@ -300,6 +315,10 @@ async def _kraken_refresh_mark_prices(now: float) -> None:
 
 
 portfolio = Portfolio()
+try:
+    _deck_last_realized = float(getattr(portfolio.state, "realized", 0.0) or 0.0)
+except Exception:
+    _deck_last_realized = 0.0
 router = OrderRouterExt(rest_client, portfolio, venue=VENUE)
 order_router = router
 try:
@@ -312,6 +331,114 @@ _refresh_logger = logging.getLogger("engine.refresh")
 _startup_logger = logging.getLogger("engine.startup")
 _persist_logger = logging.getLogger("engine.persistence")
 _kraken_risk_logger = logging.getLogger("engine.kraken.telemetry")
+_deck_logger = logging.getLogger("engine.deck")
+
+
+def _deck_symbol(base: str, venue: str) -> str:
+    base = base.upper()
+    if "." in base:
+        return base
+    venue_norm = venue.upper() if venue else VENUE
+    return f"{base}.{venue_norm}"
+
+
+def _deck_fill_handler(event: dict[str, Any]) -> None:
+    if DECK_PUSH_DISABLED:
+        return
+    global _deck_last_realized
+    try:
+        base = str(event.get("symbol") or "").upper()
+        venue = str(event.get("venue") or VENUE).upper()
+        if not base:
+            return
+        symbol = _deck_symbol(base, venue)
+        latency_ms = deck_consume_latency(symbol) or deck_consume_latency(base) or 0.0
+        meta = event.get("strategy_meta") or {}
+        try:
+            pnl_meta = float(meta.get("pnl_usd", 0.0))
+        except (TypeError, ValueError):
+            pnl_meta = 0.0
+        pnl_usd = pnl_meta
+        try:
+            global _deck_last_realized
+            with _deck_realized_lock:
+                current_realized = float(getattr(portfolio.state, "realized", 0.0) or 0.0)
+                delta = current_realized - _deck_last_realized
+                _deck_last_realized = current_realized
+            if abs(delta) > 1e-9:
+                pnl_usd = delta
+        except Exception:
+            pass
+        strategy_name = (
+            event.get("strategy_tag")
+            or meta.get("strategy")
+            or event.get("intent")
+            or "unclassified"
+        )
+        fill_payload = {
+            "ts": float(event.get("ts") or time.time()),
+            "strategy": str(strategy_name),
+            "symbol": symbol,
+            "side": str(event.get("side") or "").lower(),
+            "pnl_usd": pnl_usd,
+            "latency_ms": float(latency_ms or 0.0),
+            "info": {
+                "order_id": event.get("order_id"),
+                "qty": event.get("filled_qty"),
+                "price": event.get("avg_price"),
+                "intent": event.get("intent"),
+            },
+        }
+        fill_payload["info"] = {k: v for k, v in fill_payload["info"].items() if v is not None}
+        deck_publish_fill(fill_payload)
+    except Exception as exc:  # pragma: no cover - telemetry best effort
+        _deck_logger.debug("Deck fill publish failed: %s", exc)
+
+
+async def _deck_metrics_loop() -> None:
+    if DECK_PUSH_DISABLED or IS_EXPORTER:
+        return
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            await asyncio.sleep(DECK_METRICS_INTERVAL_SEC)
+            state = portfolio.state
+            equity = float(getattr(state, "equity", 0.0) or 0.0)
+            realized = float(getattr(state, "realized", 0.0) or 0.0)
+            pnl_24h = deck_record_realized_total(realized)
+            p50, p95 = deck_latency_percentiles()
+            try:
+                positions_open = sum(
+                    1
+                    for pos in (state.positions or {}).values()
+                    if abs(getattr(pos, "quantity", 0.0) or 0.0) > 0.0
+                )
+            except Exception:
+                positions_open = 0
+            breaker_flags = {
+                "equity": RAILS.equity_breaker_open(),
+                "venue": RAILS.venue_breaker_open(),
+            }
+            drawdown_pct = RAILS.current_drawdown_pct()
+            error_rate_pct = RAILS.current_error_rate_pct()
+            publish_fn = partial(
+                deck_publish_metrics,
+                equity_usd=equity,
+                pnl_24h=pnl_24h,
+                drawdown_pct=drawdown_pct,
+                positions=positions_open,
+                tick_p50_ms=p50,
+                tick_p95_ms=p95,
+                error_rate_pct=error_rate_pct,
+                breaker=breaker_flags,
+                pnl_by_strategy=None,
+            )
+            await loop.run_in_executor(None, publish_fn)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # pragma: no cover - telemetry best effort
+            _deck_logger.debug("Deck metrics publish failed: %s", exc)
+
 
 store = None
 try:
@@ -1827,8 +1954,35 @@ async def _start_event_bus():
 
         SIGNAL_QUEUE.start(BUS)
         _startup_logger.info("Signal priority queue dispatcher online")
+        if not DECK_PUSH_DISABLED:
+            BUS.subscribe("trade.fill", _deck_fill_handler)
+            _deck_logger.info("Deck fill bridge subscribed to trade.fill")
     except Exception:
         _startup_logger.exception("Event bus startup failed")
+
+
+@app.on_event("startup")
+async def _start_deck_metrics():
+    """Launch background loop that pushes live metrics to the Deck."""
+    if IS_EXPORTER or DECK_PUSH_DISABLED:
+        return
+    global _deck_metrics_task
+    if _deck_metrics_task and not _deck_metrics_task.done():
+        return
+    _deck_metrics_task = asyncio.create_task(_deck_metrics_loop(), name="deck-metrics")
+    _deck_logger.info("Deck metrics loop started (interval=%.1fs)", DECK_METRICS_INTERVAL_SEC)
+
+
+@app.on_event("shutdown")
+async def _stop_deck_metrics():
+    """Stop Deck metrics loop on shutdown."""
+    global _deck_metrics_task
+    if not _deck_metrics_task:
+        return
+    _deck_metrics_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await _deck_metrics_task
+    _deck_metrics_task = None
 
 
 @app.on_event("startup")

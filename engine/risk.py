@@ -475,6 +475,38 @@ class RiskRails:
                 venue_error_rate_pct.set(rate)
                 breaker_state.set(1 if self._breaker_tripped else 0)
 
+    def current_error_rate_pct(self) -> float:
+        """Return the rolling venue error rate percentage."""
+        with self._err_lock:
+            if not self._err_window:
+                return 0.0
+            errs = sum(1 for _, ok in self._err_window if not ok)
+            return float(100.0 * errs / len(self._err_window))
+
+    def venue_breaker_open(self) -> bool:
+        """True if the venue error-rate breaker is tripped."""
+        return bool(self._breaker_tripped)
+
+    def equity_breaker_open(self) -> bool:
+        """True if the equity breaker is currently enforced."""
+        if not self._equity_breaker_active:
+            return False
+        now = time.time()
+        return now < self._equity_breaker_until
+
+    def current_drawdown_pct(self) -> float:
+        """Return the latest computed equity drawdown percentage."""
+        if self._last_equity <= 0.0:
+            return 0.0
+        try:
+            return max(0.0, float(self._compute_drawdown_pct(self._last_equity)))
+        except Exception:
+            return 0.0
+
+    def last_equity(self) -> float:
+        """Return the last observed equity value (best effort)."""
+        return float(self._last_equity or 0.0)
+
     def check_breaker(self):
         """Check if circuit breaker is tripped."""
         if self._breaker_tripped:

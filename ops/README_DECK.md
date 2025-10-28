@@ -43,3 +43,21 @@ If you prefer not to touch your base file, use `ops/docker-compose.override.yml`
 
 ## Dynamic Universe
 Use `engine/universe/scorer.py` to compute per-symbol Opportunity Scores every ~30s and feed to strategies + Deck.
+
+## Token Auth (optional)
+Set `DECK_TOKEN` on the Deck container to require `X-Deck-Token` on all POST routes.
+- If `DECK_TOKEN` is unset/empty → POSTs are open (default).
+- If set → POSTs require the header; GET `/status` and `WS /ws` stay open.
+
+## Optional Allocator Service
+An allocator daemon can auto-tilt strategy `risk_share` based on rolling PnL.
+It's disabled by default via Compose profiles.
+
+Start (with Deck running):
+```bash
+docker compose --profile allocator up -d hmm_allocator
+```
+
+Env knobs: `ALLOCATOR_REFRESH_SEC`, `ALLOCATOR_EMA_ALPHA`, `ALLOCATOR_EXPLORATION`,
+`ALLOCATOR_MIN_SHARE`, `ALLOCATOR_MAX_SHARE`. It posts to `DECK_URL` and, if auth is on,
+sends `X-Deck-Token`.

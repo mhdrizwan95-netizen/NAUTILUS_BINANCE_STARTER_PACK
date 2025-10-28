@@ -7,7 +7,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -19,7 +19,7 @@ app.add_middleware(
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"],
+    allow_headers=["*", "X-Deck-Token"],
 )
 
 STATE: Dict[str, Any] = {
@@ -59,6 +59,7 @@ CLIENTS: Set[WebSocket] = set()
 TRADES: List[Dict[str, Any]] = []
 _MAX_TRADE_BUFFER = 400
 _LAT_SAMPLE_SIZE = 200
+DECK_TOKEN = os.environ.get("DECK_TOKEN", "")
 
 _METRIC_ALIASES = {
     "tick_p50_ms": "tick_to_order_ms_p50",
@@ -194,6 +195,17 @@ def _merge_metrics(state_metrics: Dict[str, Any], updates: Dict[str, Any]) -> bo
     return changed
 
 
+def require_token(request: Request) -> None:
+    """Enforce token auth on POST routes when configured."""
+    if not DECK_TOKEN:
+        return
+    token = request.headers.get("X-Deck-Token")
+    if token != DECK_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid deck token"
+        )
+
+
 @app.get("/status")
 async def status() -> JSONResponse:
     async with STATE_LOCK:
@@ -202,7 +214,8 @@ async def status() -> JSONResponse:
 
 
 @app.post("/risk/mode")
-async def set_mode(payload: ModeIn) -> Dict[str, Any]:
+async def set_mode(payload: ModeIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     async with STATE_LOCK:
         STATE["mode"] = payload.mode
     await broadcast({"type": "mode", "mode": payload.mode})
@@ -210,7 +223,8 @@ async def set_mode(payload: ModeIn) -> Dict[str, Any]:
 
 
 @app.post("/kill")
-async def kill(toggle: ToggleIn) -> Dict[str, Any]:
+async def kill(toggle: ToggleIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     async with STATE_LOCK:
         STATE["kill"] = toggle.enabled
     await broadcast({"type": "kill", "enabled": toggle.enabled})
@@ -218,7 +232,8 @@ async def kill(toggle: ToggleIn) -> Dict[str, Any]:
 
 
 @app.post("/allocator/weights")
-async def set_weights(body: RiskShareIn) -> Dict[str, Any]:
+async def set_weights(body: RiskShareIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     async with STATE_LOCK:
         strategies = STATE["strategies"]
         if body.strategy not in strategies:
@@ -234,7 +249,8 @@ async def set_weights(body: RiskShareIn) -> Dict[str, Any]:
 
 
 @app.post("/universe/weights")
-async def set_universe(body: UniverseWeightsIn) -> Dict[str, Any]:
+async def set_universe(body: UniverseWeightsIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     async with STATE_LOCK:
         STATE["universe_weights"] = body.model_dump()
         payload = {"type": "universe_weights", **STATE["universe_weights"]}
@@ -243,7 +259,8 @@ async def set_universe(body: UniverseWeightsIn) -> Dict[str, Any]:
 
 
 @app.post("/strategies/{strategy}")
-async def update_strategy(strategy: str, body: StrategyStateIn) -> Dict[str, Any]:
+async def update_strategy(strategy: str, body: StrategyStateIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     async with STATE_LOCK:
         strategies = STATE["strategies"]
         if strategy not in strategies:
@@ -259,7 +276,8 @@ async def update_strategy(strategy: str, body: StrategyStateIn) -> Dict[str, Any
 
 
 @app.post("/metrics")
-async def update_metrics(metrics: MetricsUpdateIn) -> Dict[str, Any]:
+async def update_metrics(metrics: MetricsUpdateIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     updates: Dict[str, Any] = {}
     for field in (
         "equity_usd",
@@ -296,7 +314,8 @@ async def update_metrics(metrics: MetricsUpdateIn) -> Dict[str, Any]:
 
 
 @app.post("/metrics/push")
-async def metrics_push(body: MetricsPushIn) -> Dict[str, Any]:
+async def metrics_push(body: MetricsPushIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     async with STATE_LOCK:
         changed = False
         state_metrics = STATE.setdefault("metrics", {})
@@ -323,7 +342,8 @@ async def metrics_push(body: MetricsPushIn) -> Dict[str, Any]:
 
 
 @app.post("/top")
-async def update_top_symbols(body: TopSymbolsIn) -> Dict[str, Any]:
+async def update_top_symbols(body: TopSymbolsIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     async with STATE_LOCK:
         STATE["top_symbols"] = [entry.model_dump() for entry in body.symbols]
         payload = {"type": "top", "symbols": list(STATE["top_symbols"])}
@@ -332,7 +352,8 @@ async def update_top_symbols(body: TopSymbolsIn) -> Dict[str, Any]:
 
 
 @app.post("/trades")
-async def ingest_trade(body: TradeIn) -> Dict[str, Any]:
+async def ingest_trade(body: TradeIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
     metrics_payload: Optional[Dict[str, Any]] = None
     async with STATE_LOCK:
         trade = body.model_dump()

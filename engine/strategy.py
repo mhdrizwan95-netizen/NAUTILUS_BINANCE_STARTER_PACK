@@ -13,6 +13,7 @@ from . import metrics
 from .core import order_router
 from .core.market_resolver import resolve_market
 from .core.event_bus import BUS
+from .telemetry.publisher import record_tick_latency
 from .strategies import policy_hmm, ensemble_policy
 from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
 from .strategies.trend_follow import TrendStrategyModule, load_trend_config
@@ -553,6 +554,10 @@ def _record_tick_latency(symbol: str) -> None:
     latency_ms = max(0.0, (time.time() - tick_ts) * 1000.0)
     try:
         metrics.strategy_tick_to_order_latency_ms.observe(latency_ms)
+    except Exception:
+        pass
+    try:
+        record_tick_latency(symbol, latency_ms)
     except Exception:
         pass
 

@@ -478,8 +478,24 @@ services:
       - "${DECK_PORT:-8012}:8002"
     environment:
       - DECK_STATIC_DIR=./deck
+      - DECK_TOKEN=${DECK_TOKEN:-}
+
+  hmm_allocator:
+    build:
+      context: .
+    command: python -m ops.allocator_daemon
+    environment:
+      - DECK_URL=http://hmm_deck:8002
+      - REFRESH_SEC=${ALLOCATOR_REFRESH_SEC:-600}
+      - EMA_ALPHA=${ALLOCATOR_EMA_ALPHA:-0.35}
+      - EXPLORATION=${ALLOCATOR_EXPLORATION:-0.08}
+      - MIN_SHARE=${ALLOCATOR_MIN_SHARE:-0.00}
+      - MAX_SHARE=${ALLOCATOR_MAX_SHARE:-1.00}
+      - DECK_TOKEN=${DECK_TOKEN:-}
     depends_on:
-      - ${OPS_SERVICE_NAME:-hmm_ops}
+      - hmm_deck
+    restart: unless-stopped
+    profiles: ["allocator"]
 
 networks:
   trading_net:
