@@ -1,0 +1,17 @@
+body{margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:#0b0f14;color:#e6edf3}
+.topbar{display:flex;align-items:center;gap:12px;padding:12px 16px;background:#101620;position:sticky;top:0;border-bottom:1px solid #1b2230}
+.brand{font-weight:700;letter-spacing:.4px}
+.pill{display:flex;align-items:center;gap:8px;background:#0f1722;border:1px solid #1b2230;padding:6px 10px;border-radius:999px}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);grid-gap:16px;padding:16px}
+section{background:#0f1722;border:1px solid #1b2230;border-radius:10px;padding:12px}
+h3{margin:0 0 10px 0;font-size:14px;color:#b7c4d6}
+button{background:#1e2a3a;border:1px solid #2a3b56;border-radius:8px;color:#e6edf3;padding:8px 12px;cursor:pointer}
+button.danger{background:#3a1e1e;border-color:#633434}
+table{width:100%;border-collapse:collapse}
+th,td{border-bottom:1px solid #1b2230;padding:6px 8px;font-size:12px}
+th{text-align:left;color:#95a3b7}
+select{background:#0b0f14;color:#e6edf3;border:1px solid #2a3b56;border-radius:6px;padding:4px 8px}
+.badge{display:inline-block;padding:2px 6px;border-radius:6px;font-size:11px}
+.badge.ok{background:#12361f;color:#7ad48a}
+.badge.warn{background:#3a2612;color:#f3cb7a}
+.badge.err{background:#3a1212;color:#f07c7c}
