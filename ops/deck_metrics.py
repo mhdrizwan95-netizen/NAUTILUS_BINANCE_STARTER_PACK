@@ -26,23 +26,34 @@ from typing import Dict
 import requests
 
 DECK_URL = os.environ.get("DECK_URL", "http://localhost:8002").rstrip("/")
+DECK_TOKEN = os.environ.get("DECK_TOKEN", "")
+
+
+def _headers() -> Dict[str, str]:
+    headers = {"Content-Type": "application/json"}
+    if DECK_TOKEN:
+        headers["X-Deck-Token"] = DECK_TOKEN
+    return headers
 
 
 def _post(path: str, payload: Dict) -> None:
-    response = requests.post(f"{DECK_URL}{path}", json=payload, timeout=5)
+    response = requests.post(f"{DECK_URL}{path}", json=payload, headers=_headers(), timeout=5)
     response.raise_for_status()
 
 
-def push_metrics(**kwargs) -> None:
+def push_metrics(**kwargs) -> bool:
     """Push numeric metrics (equity, pnl, latency, breaker status) to the Deck."""
     _post("/metrics/push", {"metrics": kwargs})
+    return True
 
 
-def push_strategy_pnl(pnl_by_strategy: Dict[str, float]) -> None:
+def push_strategy_pnl(pnl_by_strategy: Dict[str, float]) -> bool:
     """Push per-strategy PnL to the Deck."""
     _post("/metrics/push", {"pnl_by_strategy": pnl_by_strategy})
+    return True
 
 
-def push_fill(fill_event: Dict) -> None:
+def push_fill(fill_event: Dict) -> bool:
     """Send a trade/fill event (used by the Deck to derive latency distribution)."""
     _post("/trades", fill_event)
+    return True
