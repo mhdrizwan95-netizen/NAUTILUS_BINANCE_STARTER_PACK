@@ -264,6 +264,8 @@ def _save_report(report: dict) -> None:
     """Save report to ops/reports/ directory."""
     timestamp = datetime.fromisoformat(report["timestamp"]).strftime("%Y%m%d_%H%M%S")
     filename = f"ops/reports/stabilization_{timestamp}.json"
+    report_path = Path(filename)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
     with open(filename, 'w') as f:
         json.dump(report, f, indent=2)
     print(f"[INFO] Report saved to {filename}")

@@ -29,6 +29,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Prepare reports directory
+        run: mkdir -p ops/reports
+
       - name: Run stabilization soak
         run: |
           python3 ops/run_stabilization_checks.py \
