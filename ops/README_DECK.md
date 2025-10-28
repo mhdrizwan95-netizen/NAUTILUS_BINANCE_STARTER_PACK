@@ -20,6 +20,34 @@ Set `DECK_STATIC_DIR` if you want to serve the UI from an alternate path. When r
 - `POST /top` — push Opportunity Score leaderboard
 - `GET /status` / `WS /ws` — streaming snapshot for the Deck UI
 
+## Security (optional): Deck Token
+
+POST routes can be guarded with a shared token. Set the token on the Deck container:
+
+```bash
+DECK_TOKEN=change-me
+```
+
+Clients (engine allocator / metrics) must send: `X-Deck-Token: <token>`.
+
+Behavior:
+- `DECK_TOKEN` unset or empty → token auth disabled (open POSTs).
+- `DECK_TOKEN` set → all POSTs require the header; GET/WS remain open.
+
+## Optional Allocator Service (off by default)
+
+We ship an allocator daemon that tilts strategy `risk_share` by rolling PnL. Enable it on demand with Compose profiles:
+
+```bash
+docker compose --profile allocator up -d hmm_allocator
+```
+
+Disable by stopping the service or omitting the profile. Environment knobs:
+`ALLOCATOR_REFRESH_SEC`, `ALLOCATOR_EMA_ALPHA`, `ALLOCATOR_EXPLORATION`,
+`ALLOCATOR_MIN_SHARE`, `ALLOCATOR_MAX_SHARE`.
+
+Allocator targets the Deck at `DECK_URL` (e.g., `http://hmm_deck:8002`). If Deck token auth is enabled, set the same `DECK_TOKEN` for the allocator container.
+
 ## Wire dynamic policy into RiskRails
 Import from `engine.dynamic_policy` and replace static env caps with the helper functions.
 
