@@ -1,8 +1,8 @@
 from __future__ import annotations
-import asyncio, inspect, os
+import asyncio, inspect, logging, os
 import threading, time, uuid
 from collections import deque, defaultdict
-from typing import Callable, Deque, Dict, List, Optional, cast
+from typing import Any, Callable, Deque, Dict, List, Optional, cast
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -11,13 +11,196 @@ from .risk import RiskRails, Side
 from .idempotency import CACHE, append_jsonl
 from . import metrics
 from .core import order_router
+from .core.market_resolver import resolve_market
+from .core.event_bus import BUS
 from .strategies import policy_hmm, ensemble_policy
 from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
+from .strategies.trend_follow import TrendStrategyModule, load_trend_config
+from .strategies.scalping import ScalpStrategyModule, load_scalp_config
+try:
+    from .strategies.symbol_scanner import SymbolScanner, load_symbol_scanner_config
+except Exception:  # pragma: no cover - optional component
+    SymbolScanner = None  # type: ignore
+    load_symbol_scanner_config = None  # type: ignore
 
 router = APIRouter()
 S_CFG = load_strategy_config()
 R_CFG = load_risk_config()
 RAILS = RiskRails(R_CFG)
+SYMBOL_SCANNER = None
+if SymbolScanner and load_symbol_scanner_config:
+    try:
+        _scanner_cfg = load_symbol_scanner_config()
+        if _scanner_cfg.enabled:
+            SYMBOL_SCANNER = SymbolScanner(_scanner_cfg)
+            SYMBOL_SCANNER.start()
+    except Exception:
+        SYMBOL_SCANNER = None
+
+TREND_CFG = None
+TREND_MODULE: Optional[TrendStrategyModule] = None
+try:
+    TREND_CFG = load_trend_config()
+    if TREND_CFG.enabled:
+        TREND_MODULE = TrendStrategyModule(TREND_CFG, scanner=SYMBOL_SCANNER)
+except Exception:
+    TREND_MODULE = None
+
+SCALP_CFG = None
+SCALP_MODULE: Optional[ScalpStrategyModule] = None
+try:
+    SCALP_CFG = load_scalp_config()
+    if SCALP_CFG.enabled:
+        SCALP_MODULE = ScalpStrategyModule(SCALP_CFG)
+except Exception:
+    SCALP_MODULE = None
+
+_SCALP_BUS_WIRED = False
+_SCALP_WATCH_LOCK = threading.Lock()
+_ACTIVE_SCALP_WATCHES: Dict[str, threading.Thread] = {}
+
+
+def _wire_scalp_fill_handler() -> None:
+    global _SCALP_BUS_WIRED
+    if _SCALP_BUS_WIRED:
+        return
+    try:
+        BUS.subscribe("trade.fill", _scalp_fill_handler)
+        _SCALP_BUS_WIRED = True
+        logging.getLogger(__name__).info("Scalping fill handler wired")
+    except Exception:
+        logging.getLogger(__name__).warning("Scalping fill handler wiring failed", exc_info=True)
+
+
+def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
+    if not SCALP_MODULE or not getattr(SCALP_MODULE, "enabled", False):
+        return
+    meta = evt.get("strategy_meta")
+    tag = str(evt.get("strategy_tag") or "")
+    if not isinstance(meta, dict):
+        return
+    if not tag.startswith("scalp"):
+        return
+    symbol = str(evt.get("symbol") or "").upper()
+    venue = str(evt.get("venue") or "BINANCE").upper()
+    side = str(evt.get("side") or "").upper()
+    if not symbol or side not in {"BUY", "SELL"}:
+        return
+    qty = float(evt.get("filled_qty") or 0.0)
+    if qty <= 0.0:
+        return
+    stop_px = float(meta.get("stop_price") or 0.0)
+    target_px = float(meta.get("take_profit") or 0.0)
+    if stop_px <= 0.0 or target_px <= 0.0:
+        return
+    order_id = str(evt.get("order_id") or "") or f"{symbol}:{evt.get('ts', time.time())}"
+    _start_scalp_bracket_watch(
+        order_id=order_id,
+        symbol=symbol,
+        venue=venue,
+        side=side,
+        qty=qty,
+        stop_px=stop_px,
+        target_px=target_px,
+    )
+
+
+def _start_scalp_bracket_watch(
+    *,
+    order_id: str,
+    symbol: str,
+    venue: str,
+    side: str,
+    qty: float,
+    stop_px: float,
+    target_px: float,
+) -> None:
+    poll = 1.0
+    ttl = 180.0
+    if SCALP_CFG:
+        try:
+            poll = max(0.5, min(5.0, float(SCALP_CFG.window_sec) / 12.0))
+            ttl = max(60.0, float(SCALP_CFG.window_sec) * 3.0)
+        except Exception:
+            poll = max(poll, 1.0)
+            ttl = max(ttl, 180.0)
+
+    key = order_id or f"{symbol}:{side}:{int(time.time() * 1000)}"
+
+    def _watch() -> None:
+        logger = logging.getLogger(__name__)
+        qualified = symbol if "." in symbol else f"{symbol}.{venue}"
+        end_time = time.time() + ttl
+        exit_side = "SELL" if side == "BUY" else "BUY"
+        triggered: Optional[str] = None
+
+        def _submit_exit(exit_tag: str) -> None:
+            try:
+                sig = StrategySignal(
+                    symbol=qualified,
+                    side=exit_side,
+                    quote=None,
+                    quantity=qty,
+                    dry_run=None,
+                    tag=exit_tag,
+                    meta=None,
+                )
+                _execute_strategy_signal(sig)
+                try:
+                    metrics.scalp_bracket_exits_total.labels(
+                        symbol=symbol, venue=venue.lower(), mode=exit_tag
+                    ).inc()
+                except Exception:
+                    pass
+            except Exception:
+                logger.warning("[SCALP] exit submission failed for %s", qualified, exc_info=True)
+
+        while time.time() < end_time:
+            px = _latest_price(qualified)
+            if px is None or px <= 0.0:
+                time.sleep(poll)
+                continue
+            if side == "BUY":
+                if px >= target_px:
+                    triggered = "scalp_tp"
+                    _submit_exit(triggered)
+                    break
+                if px <= stop_px:
+                    triggered = "scalp_sl"
+                    _submit_exit(triggered)
+                    break
+            else:
+                if px <= target_px:
+                    triggered = "scalp_tp"
+                    _submit_exit(triggered)
+                    break
+                if px >= stop_px:
+                    triggered = "scalp_sl"
+                    _submit_exit(triggered)
+                    break
+            time.sleep(poll)
+        if triggered is None:
+            logger.info(
+                "[SCALP] bracket timeout for %s side=%s qty=%.6f (stop=%.6f tp=%.6f)",
+                qualified,
+                side,
+                qty,
+                stop_px,
+                target_px,
+            )
+        with _SCALP_WATCH_LOCK:
+            _ACTIVE_SCALP_WATCHES.pop(key, None)
+
+    with _SCALP_WATCH_LOCK:
+        if key in _ACTIVE_SCALP_WATCHES:
+            return
+        thread = threading.Thread(target=_watch, name=f"scalp-bracket-{symbol}", daemon=True)
+        _ACTIVE_SCALP_WATCHES[key] = thread
+    thread.start()
+
+
+if SCALP_MODULE and getattr(SCALP_MODULE, "enabled", False):
+    _wire_scalp_fill_handler()
 
 class _MACross:
     def __init__(self, fast: int, slow: int):
@@ -59,6 +242,8 @@ class StrategySignal(BaseModel):
     quantity: Optional[float] = Field(None, description="Base qty (alternative)")
     dry_run: Optional[bool] = Field(None, description="Override STRATEGY_DRY_RUN")
     tag: Optional[str] = Field(None, description="Optional label (e.g. 'ma_cross')")
+    meta: Optional[Dict[str, Any]] = Field(None, description="Optional strategy metadata (e.g. stops, targets)")
+    market: Optional[str] = Field(None, description="Preferred Binance market (spot, futures, margin)")
 
 @router.post("/strategy/signal")
 def post_strategy_signal(sig: StrategySignal, request: Request):
@@ -87,6 +272,7 @@ def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = N
             "quote": sig.quote,
             "quantity": sig.quantity,
             "tag": sig.tag or "strategy",
+            "meta": sig.meta,
             "idempotency_key": key,
             "timestamp": time.time(),
         }
@@ -101,10 +287,39 @@ def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = N
 
     from .app import router as order_router_instance
 
-    if sig.quantity is not None:
-        res = order_router_instance.market_quantity(sig.symbol, side_literal, sig.quantity)
-    else:
-        res = order_router_instance.market_quote(sig.symbol, side_literal, sig.quote or 0.0)
+    router_ctx = {
+        "meta": sig.meta,
+        "tag": sig.tag or "strategy",
+        "symbol": sig.symbol,
+        "side": sig.side,
+        "market": (sig.market.lower() if isinstance(sig.market, str) else sig.market),
+    }
+    try:
+        setattr(order_router_instance, "_strategy_pending_meta", router_ctx)
+    except Exception:
+        router_ctx = None
+
+    try:
+        # Use synchronous wrapper to avoid un-awaited coroutine warnings
+        res = order_router_instance.place_market_order(
+            symbol=sig.symbol,
+            side=side_literal,
+            quote=(None if sig.quantity is not None else (sig.quote or 0.0)),
+            quantity=(sig.quantity if sig.quantity is not None else None),
+            market=(sig.market.lower() if isinstance(sig.market, str) else sig.market),
+        )
+    finally:
+        if router_ctx is not None:
+            try:
+                if getattr(order_router_instance, "_strategy_pending_meta", None) is router_ctx:
+                    delattr(order_router_instance, "_strategy_pending_meta")
+            except AttributeError:
+                pass
+            except Exception:
+                try:
+                    setattr(order_router_instance, "_strategy_pending_meta", None)
+                except Exception:
+                    pass
 
     _record_tick_latency(sig.symbol)
 
@@ -113,6 +328,7 @@ def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = N
         "status": "submitted",
         "order": res,
         "tag": sig.tag or "strategy",
+        "meta": sig.meta,
         "idempotency_key": key,
         "timestamp": time.time(),
     }
@@ -169,6 +385,73 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
     # Entry block window (startup/reconnect warmup)
     if time.time() < _entry_block_until:
         return
+
+    if SCALP_MODULE and SCALP_MODULE.enabled:
+        scalp_decision = None
+        try:
+            scalp_decision = SCALP_MODULE.handle_tick(qualified, price, ts_val)
+        except Exception:
+            scalp_decision = None
+        if scalp_decision:
+            scalp_symbol = str(scalp_decision.get("symbol") or qualified)
+            scalp_side = str(scalp_decision.get("side") or "BUY")
+            scalp_quote = float(scalp_decision.get("quote") or S_CFG.quote_usdt)
+            scalp_tag = str(scalp_decision.get("tag") or "scalp")
+            default_market = scalp_decision.get("market") or ("futures" if getattr(SCALP_CFG, "allow_shorts", True) else "spot")
+            resolved_market = resolve_market(scalp_symbol, default_market)
+            sig = StrategySignal(
+                symbol=scalp_symbol,
+                side=scalp_side,
+                quote=scalp_quote,
+                quantity=None,
+                dry_run=None,
+                tag=scalp_tag,
+                meta=scalp_decision.get("meta"),
+                market=resolved_market,
+            )
+            result = _execute_strategy_signal(sig)
+            if result.get("status") == "submitted":
+                scalp_base = scalp_symbol.split(".")[0]
+                scalp_venue = scalp_symbol.split(".")[1] if "." in scalp_symbol else "BINANCE"
+                try:
+                    metrics.strategy_orders_total.labels(
+                        symbol=scalp_base, venue=scalp_venue, side=scalp_side, source=scalp_tag
+                    ).inc()
+                except Exception:
+                    pass
+            return
+
+    if TREND_MODULE and TREND_MODULE.enabled:
+        trend_decision = None
+        try:
+            trend_decision = TREND_MODULE.handle_tick(qualified, price, ts_val)
+        except Exception:
+            trend_decision = None
+        if trend_decision:
+            trend_symbol = str(trend_decision.get("symbol") or qualified)
+            trend_side = str(trend_decision.get("side") or "BUY")
+            trend_quote = float(trend_decision.get("quote") or S_CFG.quote_usdt)
+            trend_tag = str(trend_decision.get("tag") or "trend_follow")
+            default_market = trend_decision.get("market") if isinstance(trend_decision, dict) else None
+            if not default_market:
+                default_market = "futures" if getattr(TREND_CFG, "allow_shorts", False) else "spot"
+            resolved_market = resolve_market(trend_symbol, default_market)
+            sig = StrategySignal(
+                symbol=trend_symbol,
+                side=trend_side,
+                quote=trend_quote,
+                quantity=None,
+                dry_run=None,
+                tag=trend_tag,
+                market=resolved_market,
+            )
+            result = _execute_strategy_signal(sig)
+            if result.get("status") == "submitted":
+                try:
+                    metrics.strategy_orders_total.labels(symbol=base, venue=venue, side=trend_side, source=trend_tag).inc()
+                except Exception:
+                    pass
+            return
 
     # --- MA crossing decision ---
     ma_side = _mac.push(qualified, price)
@@ -236,6 +519,7 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
         if not _cooldown_ready(qualified, price, max(conf_to_emit, 0.0), venue):
             return
         source_tag = signal_meta.get("exp", "ensemble_v1" if fused else "ma_v1")
+        market_choice = resolve_market(qualified, S_CFG.default_market)
         sig = StrategySignal(
             symbol=qualified,
             side=signal_side,
@@ -243,6 +527,7 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
             quantity=None,
             dry_run=None,
             tag=source_tag,
+            market=market_choice,
         )
 
         result = _execute_strategy_signal(sig)

@@ -37,6 +37,7 @@ Quick index of the most useful environment flags. Start modules in dry‑run whe
 - Telegram bridge: `TELEGRAM_BRIDGE_ENABLED` (relay BUS `notify.telegram`)
 - Health TG: `HEALTH_TG_ENABLED`, `HEALTH_DEBOUNCE_SEC`
 - Digest: `DIGEST_INTERVAL_MIN`, `DIGEST_INCLUDE_SYMBOLS`, `DIGEST_6H_ENABLED`, `DIGEST_6H_BUCKET_MIN`, `DIGEST_6H_MAX_BUCKETS`
+- Telegram networking: `TELEGRAM_FORCE_IPV4` (force IPv4 connector inside Docker to avoid IPv6‑only DNS resolution issues)
 
 ## WS & Fills
 - WS fills listener: `EXEC_FILLS_LISTENER_ENABLED`
@@ -45,4 +46,3 @@ Quick index of the most useful environment flags. Start modules in dry‑run whe
 ## Execution Defaults
 - Taker slippage caps: `SPOT_TAKER_MAX_SLIP_BPS`, `FUT_TAKER_MAX_SLIP_BPS`
 - Maker shadow: `SCALP_MAKER_SHADOW`, `MAKER_PRICE_IMPROVE_BPS`
-

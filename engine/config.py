@@ -23,6 +23,8 @@ class Settings:
         self.base_url = ""
         self.mode = ""
         self.is_futures = False
+        self.options_base = ""
+        self.options_enabled = False
 
         if venue == "IBKR":
             # IBKR-specific configuration
@@ -53,11 +55,19 @@ class Settings:
             # Binance-specific configuration
             mode = os.getenv("BINANCE_MODE", "demo").lower()
             self.mode = mode
-            self.is_futures = mode.startswith("futures")
+            futures_tokens = ("futures", "usdm", "coinm", "perp")
+            self.is_futures = any(token in mode for token in futures_tokens)
 
-            # Set both base URLs explicitly
-            self.spot_base = os.getenv("BINANCE_SPOT_BASE", os.getenv("DEMO_SPOT_BASE", "https://testnet.binance.vision"))
-            self.futures_base = os.getenv("BINANCE_FUTURES_BASE", os.getenv("DEMO_USDM_BASE", "https://testnet.binancefuture.com"))
+            demo_indicators = ("demo", "test", "paper")
+            is_demo_like = any(token in mode for token in demo_indicators)
+
+            spot_base_default = "https://testnet.binance.vision"
+            futures_demo_default = "https://testnet.binancefuture.com"
+            futures_live_default = "https://fapi.binance.com"
+
+            self.spot_base = os.getenv("BINANCE_SPOT_BASE", os.getenv("DEMO_SPOT_BASE", spot_base_default))
+            futures_live_base = os.getenv("BINANCE_USDM_BASE") or os.getenv("BINANCE_FUTURES_BASE", futures_live_default)
+            futures_demo_base = os.getenv("DEMO_USDM_BASE", futures_demo_default)
 
             # Prefer explicit demo/testnet credentials if provided
             demo_key = os.getenv("DEMO_API_KEY") or os.getenv("DEMO_API_KEY_SPOT")
@@ -66,18 +76,15 @@ class Settings:
             live_key = os.getenv("BINANCE_API_KEY", "")
             live_secret = os.getenv("BINANCE_API_SECRET", "")
 
-            # Set credentials based on mode, keeping existing logic but with separate base URL selection
             if self.is_futures:
-                if mode in {"futures_testnet", "futures_paper", "futures-demo"}:
-                    self.api_key = demo_key or live_key
-                    self.api_secret = demo_secret or live_secret
-                    self.base_url = self.futures_base
-                else:
-                    self.api_key = live_key
-                    self.api_secret = live_secret
-                    self.base_url = os.getenv("BINANCE_FUTURES_BASE", "https://fapi.binance.com")
+                base_choice = futures_demo_base if is_demo_like else futures_live_base
+                self.api_key = demo_key or live_key if is_demo_like else live_key
+                self.api_secret = demo_secret or live_secret if is_demo_like else live_secret
+                self.futures_base = base_choice
+                self.base_url = base_choice
             else:
-                if mode in {"demo", "testnet", "paper"}:
+                self.futures_base = futures_live_base
+                if is_demo_like:
                     self.api_key = demo_key or live_key
                     self.api_secret = demo_secret or live_secret
                     self.base_url = self.spot_base
@@ -85,6 +92,9 @@ class Settings:
                     self.api_key = live_key
                     self.api_secret = live_secret
                     self.base_url = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
+
+            self.options_base = os.getenv("BINANCE_OPTIONS_BASE", "https://vapi.binance.com").rstrip("/")
+            self.options_enabled = _as_bool(os.getenv("BINANCE_OPTIONS_ENABLED"), False)
 
             # Only require credentials for Binance venue
             if not self.api_key or not self.api_secret:
@@ -190,7 +200,7 @@ def load_risk_config() -> RiskConfig:
     return RiskConfig(
         trading_enabled=_as_bool(os.getenv("TRADING_ENABLED"), True),
         min_notional_usdt=_as_float(os.getenv("MIN_NOTIONAL_USDT"), default_min_notional),
-        max_notional_usdt=_as_float(os.getenv("MAX_NOTIONAL_USDT"), 200.0),
+        max_notional_usdt=_as_float(os.getenv("MAX_NOTIONAL_USDT"), 400.0),
         max_orders_per_min=_as_int(os.getenv("MAX_ORDERS_PER_MIN"), 30),
         trade_symbols=trade_symbols,
         dust_threshold_usd=_as_float(os.getenv("DUST_THRESHOLD_USD"), 2.0),
@@ -271,6 +281,7 @@ class StrategyConfig:
     fast: int
     slow: int
     quote_usdt: float
+    default_market: str
     # HMM policy knobs
     hmm_enabled: bool
     hmm_model_path: str
@@ -287,6 +298,11 @@ class StrategyConfig:
 def load_strategy_config() -> StrategyConfig:
     # Defaults: safe and conservative
     symbols = _as_list(os.getenv("STRATEGY_SYMBOLS")) or _as_list(os.getenv("TRADE_SYMBOLS"))
+    try:
+        settings = get_settings()
+        default_market = os.getenv("STRATEGY_DEFAULT_MARKET") or ("futures" if getattr(settings, "is_futures", False) else "spot")
+    except Exception:
+        default_market = os.getenv("STRATEGY_DEFAULT_MARKET", "spot")
     return StrategyConfig(
         enabled=_as_bool(os.getenv("STRATEGY_ENABLED"), False),
         dry_run=_as_bool(os.getenv("STRATEGY_DRY_RUN"), True),
@@ -295,6 +311,7 @@ def load_strategy_config() -> StrategyConfig:
         fast=_as_int(os.getenv("STRATEGY_FAST"), 9),
         slow=_as_int(os.getenv("STRATEGY_SLOW"), 21),
         quote_usdt=_as_float(os.getenv("STRATEGY_QUOTE_USDT"), 10.0),
+        default_market=default_market.lower(),
         hmm_enabled=_as_bool(os.getenv("HMM_ENABLED"), False),
         hmm_model_path=os.getenv("HMM_MODEL_PATH", "engine/models/hmm_policy.pkl"),
         hmm_window=_as_int(os.getenv("HMM_WINDOW"), 120),

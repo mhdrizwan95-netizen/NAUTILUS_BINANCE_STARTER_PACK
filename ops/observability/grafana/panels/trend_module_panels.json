@@ -1,0 +1,130 @@
+{
+  "title": "Trend Module Overview",
+  "uid": "trend-module-template",
+  "schemaVersion": 39,
+  "version": 1,
+  "templating": {
+    "list": [
+      {
+        "name": "venue",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "refresh": 2,
+        "hide": 2,
+        "query": "label_values(trend_follow_signals_total, venue)",
+        "current": {
+          "text": "BINANCE",
+          "value": "BINANCE"
+        }
+      },
+      {
+        "name": "symbol",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "refresh": 2,
+        "hide": 0,
+        "query": "label_values(trend_follow_signals_total{venue=\"$venue\"}, symbol)",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Trend Signals Rate (5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (symbol) (rate(trend_follow_signals_total{venue=\"$venue\", symbol=~\"$symbol\"}[5m]))",
+          "legendFormat": "{{symbol}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Trend Trades by Outcome (24h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (result) (increase(trend_follow_trades_total{venue=\"$venue\", symbol=~\"$symbol\"}[24h]))",
+          "legendFormat": "{{result}}",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Stop Distance Distribution (bps, 24h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(trend_follow_stop_distance_bp_bucket{venue=\"$venue\", symbol=~\"$symbol\"}[24h]))",
+          "legendFormat": "{{le}} bps",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps"
+        }
+      }
+    },
+    {
+      "type": "histogram",
+      "title": "Trade PnL % Histogram (30d)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "expr": "sum by (le) (increase(trend_follow_trade_pnl_pct_bucket{venue=\"$venue\", symbol=~\"$symbol\"}[30d]))",
+          "legendFormat": "{{le}} %",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    }
+  ]
+}

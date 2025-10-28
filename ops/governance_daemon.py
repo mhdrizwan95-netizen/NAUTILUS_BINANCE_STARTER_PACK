@@ -187,14 +187,14 @@ class GovernanceDaemon:
                 logging.info("[GOV] ▶️ TRADING RESUMED by autonomous governance")
 
             elif action == "reduce_exposure":
-                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "200"))
+                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 new_max = max(current_max * 0.7, 10.0)  # Reduce by 30%, minimum $10
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 self.metrics.performance_actions += 1
                 logging.warning(f"[GOV] 📉 EXPOSURE REDUCED: ${current_max} → ${new_max}")
 
             elif action == "moderate_reductions":
-                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "200"))
+                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 new_max = max(current_max * 0.85, 20.0)  # Reduce by 15%, minimum $20
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 self.metrics.performance_actions += 1
@@ -202,14 +202,14 @@ class GovernanceDaemon:
 
             elif action == "emergency_reductions":
                 # Emergency 50% reduction
-                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "200"))
+                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 new_max = max(current_max * 0.5, 5.0)  # Reduce by 50%, minimum $5
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 self.metrics.emergency_actions += 1
                 logging.critical(f"[GOV] 🚨 EMERGENCY REDUCTIONS: ${current_max} → ${new_max}")
 
             elif action == "increase_exposure":
-                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "200"))
+                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 new_max = min(current_max * 1.2, 1000.0)  # Increase by 20%, maximum $1000
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 logging.info(f"[GOV] 📈 EXPOSURE INCREASED: ${current_max} → ${new_max}")
@@ -219,15 +219,15 @@ class GovernanceDaemon:
                 try:
                     target = float((rule.params or {}).get("value"))
                 except Exception:
-                    target = float(os.getenv("MAX_NOTIONAL_BASELINE", os.getenv("MAX_NOTIONAL_USDT", "200")))
-                old = float(os.getenv("MAX_NOTIONAL_USDT", "200"))
+                    target = float(os.getenv("MAX_NOTIONAL_BASELINE", os.getenv("MAX_NOTIONAL_USDT", "400")))
+                old = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 os.environ["MAX_NOTIONAL_USDT"] = str(target)
                 logging.info(f"[GOV] 🎚️ MAX_NOTIONAL set: ${old} → ${target}")
 
             elif action == "gradual_resume":
                 # Gradual resumption - enable trading with reduced limits first
                 os.environ["TRADING_ENABLED"] = "true"
-                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "200"))
+                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 resume_max = min(current_max, 50.0)  # Start with $50 limit
                 os.environ["MAX_NOTIONAL_USDT"] = str(resume_max)
                 logging.info(f"[GOV] 🔄 GRADUAL RESUME: Trading enabled @ ${resume_max} limit")
@@ -261,7 +261,7 @@ class GovernanceDaemon:
                 logging.warning(f"[GOV] 🐌 ORDER RATE REDUCED: {current_rate}/min → {new_rate}/min")
 
             elif action == "gradual_risk_increase":
-                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "200"))
+                current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 new_max = min(current_max * 1.15, 500.0)  # 15% increase, max $500
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 logging.info(f"[GOV] 📊 RISK GRADUAL INCREASE: ${current_max} → ${new_max}")

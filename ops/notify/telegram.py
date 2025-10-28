@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import aiohttp
 import logging
+import os
+import socket
 
 
 class Telegram:
@@ -18,9 +20,17 @@ class Telegram:
             "parse_mode": parse_mode,
             "disable_web_page_preview": True,
         }
+        # Optional IPv4-only connector to avoid IPv6-only resolution in Docker
+        force_ipv4 = os.getenv("TELEGRAM_FORCE_IPV4", "").lower() in {"1", "true", "yes"}
+        connector = None
         try:
-            async with aiohttp.ClientSession() as s:
-                async with s.post(url, json=payload, timeout=10) as r:
+            if force_ipv4:
+                connector = aiohttp.TCPConnector(family=socket.AF_INET)
+        except Exception:
+            connector = None
+        try:
+            async with aiohttp.ClientSession(connector=connector) as s:
+                async with s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     if r.status != 200:
                         try:
                             body = await r.text()
@@ -29,4 +39,3 @@ class Telegram:
                         self.log.warning("[TG] send status %s: %s", r.status, body)
         except Exception as e:
             self.log.warning("[TG] send error: %s", e)
-

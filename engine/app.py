@@ -20,7 +20,10 @@ import os
 from engine.config import get_settings, load_risk_config, QUOTE_CCY
 from engine.core.binance import BinanceREST
 from engine.core.kraken import KrakenREST
-from engine.core.order_router import OrderRouterExt, set_exchange_client
+from engine.core.binance_ws import BinanceWS
+from engine.ops.bracket_governor import BracketGovernor
+from engine.core.order_router import OrderRouterExt, set_exchange_client, _MDAdapter
+from engine.ops.stop_validator import StopValidator
 from engine.core.portfolio import Portfolio, Position
 from engine.core.event_bus import BUS, initialize_event_bus, publish_order_event, publish_risk_event
 from engine.core import alert_daemon
@@ -55,7 +58,7 @@ class _DummyBinanceREST:
             "positions": [],
         }
 
-    async def submit_market_quote(self, symbol: str, side: str, quote: float):
+    async def submit_market_quote(self, symbol: str, side: str, quote: float, market: str | None = None):
         qty = float(quote) / self._price if self._price else float(quote)
         return {
             "symbol": symbol,
@@ -65,7 +68,7 @@ class _DummyBinanceREST:
             "status": "FILLED",
         }
 
-    async def submit_market_order(self, symbol: str, side: str, quantity: float):
+    async def submit_market_order(self, symbol: str, side: str, quantity: float, market: str | None = None, reduce_only: bool = False):
         qty = float(quantity)
         return {
             "symbol": symbol,
@@ -78,7 +81,7 @@ class _DummyBinanceREST:
     async def close(self) -> None:
         return None
 
-    def get_last_price(self, symbol: str):
+    def get_last_price(self, symbol: str, market: str | None = None):
         price = self.ticker_price(symbol)
         if isinstance(price, dict):
             return float(price.get("price", self._price))
@@ -87,11 +90,20 @@ class _DummyBinanceREST:
         except Exception:
             return self._price
 
-    def ticker_price(self, symbol: str):
+    def ticker_price(self, symbol: str, market: str | None = None):
         return {"price": self._price}
 
     def my_trades_since(self, symbol: str, start_ms: int):
         return []
+
+    async def order_status(self, symbol: str, *, order_id: int | str | None = None, client_order_id: str | None = None):
+        return {
+            "symbol": symbol,
+            "orderId": order_id or 0,
+            "status": "FILLED",
+            "executedQty": float("nan"),
+            "avgPrice": self._price,
+        }
 
     async def safe_price(self, symbol: str):
         return self._price
@@ -202,6 +214,33 @@ def _kraken_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
     _kraken_record_mark(sym, price, ts)
 
 
+# ---- Binance WebSocket mark handler -----------------------------------------
+_binance_mark_ts: dict[str, float] = {}
+_BINANCE_WS_SYMBOLS: list[str] = []
+
+def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
+    base = sym.split(".")[0].upper() if "." in sym else sym.upper()
+    try:
+        price_f = float(price)
+        if price_f <= 0:
+            return
+    except Exception:
+        return
+    _binance_mark_ts[base] = ts or time.time()
+    try:
+        metrics.MARK_PRICE.labels(symbol=base, venue="binance").set(price_f)
+        metrics.mark_price_by_symbol.labels(symbol=base).set(price_f)
+        metrics.mark_price_freshness_sec.labels(symbol=base, venue="binance").set(0.0)
+        _price_map[base] = price_f
+    except Exception:
+        pass
+    # Emit strategy tick + increment strategy_ticks_total via helper
+    try:
+        _maybe_emit_strategy_tick(qual, price_f, ts=ts or time.time())
+    except Exception:
+        pass
+
+
 async def _kraken_refresh_mark_prices(now: float) -> None:
     if VENUE != "KRAKEN":
         return
@@ -292,6 +331,11 @@ except Exception:
     pass
 metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
 
+_stop_validator: StopValidator | None = None
+_LISTING_SNIPER = None
+_MOMENTUM_BREAKOUT = None
+_MEME_SENTIMENT = None
+_AIRDROP_PROMO = None
 
 # Attach strategy router only for trading role
 if not IS_EXPORTER:
@@ -327,17 +371,18 @@ def _maybe_emit_strategy_tick(symbol: str, price: float, *, ts: float | None = N
     if price is None or price <= 0:
         return
     try:
-        cfg = getattr(strategy, "S_CFG", None)
-        if cfg is None or not getattr(cfg, "enabled", False):
-            return
         qualified = symbol if "." in symbol else f"{symbol}.BINANCE"
-        strategy.on_tick(qualified, float(price), ts or time.time())
+        # Always count ticks for observability, even if strategy disabled
         try:
             base = qualified.split(".")[0].upper()
             venue = qualified.split(".")[1].lower()
             metrics.strategy_ticks_total.labels(symbol=base, venue=venue).inc()
         except Exception:
             pass
+        # Only drive strategy loop when enabled
+        cfg = getattr(strategy, "S_CFG", None)
+        if cfg is not None and getattr(cfg, "enabled", False):
+            strategy.on_tick(qualified, float(price), ts or time.time())
     except Exception:
         try:
             _refresh_logger.debug("Strategy tick emit failed for %s", symbol, exc_info=True)
@@ -387,7 +432,9 @@ class MarketOrderRequest(BaseModel):
     side: Literal["BUY", "SELL"]
     quote: Optional[float] = Field(None, gt=0, description="Quote currency amount (USDT).")
     quantity: Optional[float] = Field(None, gt=0, description="Base asset quantity.")
+    market: Optional[str] = Field(None, description="Preferred market within venue (spot/futures/margin).")
     venue: Optional[str] = Field(None, description="Trading venue. Defaults to VENUE env var.")
+    market: Optional[str] = Field(None, description="Preferred market within venue (spot/futures/margin).")
 
     @field_validator("venue")
     @classmethod
@@ -543,6 +590,8 @@ async def _start_reconciliation():
 
 # Optional: start risk guardian and DEX feed when enabled via env
 _GUARDIAN = None
+_DEX_SNIPER = None
+_DEX_WATCHER = None
 
 
 @app.on_event("startup")
@@ -578,6 +627,52 @@ async def _start_guardian_and_feeds():
     except Exception:
         _startup_logger.warning("DEX Screener feed failed to start", exc_info=True)
 
+    # DEX sniper wiring
+    try:
+        from engine.dex import DexExecutor, DexState, load_dex_config
+        from engine.dex.wallet import DexWallet
+        from engine.dex.router import DexRouter
+        from engine.dex.oracle import DexPriceOracle
+        from engine.dex.watcher import DexWatcher
+        from engine.handlers.dex_handlers import on_dex_candidate
+        from engine.strategies.dex_sniper import DexSniper
+
+        dex_cfg = load_dex_config()
+        if dex_cfg.exec_enabled:
+            global _DEX_SNIPER
+            wallet = DexWallet(
+                rpc_url=dex_cfg.rpc_url,
+                chain_id=dex_cfg.chain_id,
+                private_key=dex_cfg.wallet_private_key,
+                max_gas_price_wei=dex_cfg.max_gas_price_wei,
+            )
+            router = DexRouter(web3=wallet.w3, router_address=dex_cfg.router_address)
+            state = DexState(dex_cfg.state_path)
+            executor = DexExecutor(
+                wallet=wallet,
+                router=router,
+                stable_token=dex_cfg.stable_token,
+                wrapped_native=dex_cfg.wrapped_native_token,
+                gas_limit=dex_cfg.gas_limit,
+                slippage_bps=dex_cfg.slippage_bps,
+            )
+            _DEX_SNIPER = DexSniper(dex_cfg, state, executor)
+            BUS.subscribe("strategy.dex_candidate", on_dex_candidate(_DEX_SNIPER))
+            _startup_logger.info(
+                "DEX sniper wired (max_live=%s, tierA=%.2f, tierB=%.2f)",
+                dex_cfg.max_live_positions,
+                dex_cfg.size_tier_a,
+                dex_cfg.size_tier_b,
+            )
+            if dex_cfg.watcher_enabled:
+                global _DEX_WATCHER
+                oracle = DexPriceOracle(transport=dex_cfg.price_oracle)
+                _DEX_WATCHER = DexWatcher(dex_cfg, state, executor, oracle)
+                _DEX_WATCHER.start()
+                _startup_logger.info("DEX watcher loop started")
+    except Exception:
+        _startup_logger.warning("DEX sniper wiring failed", exc_info=True)
+
     # Binance announcements poller (publish-only)
     try:
         import os
@@ -602,6 +697,25 @@ async def _start_guardian_and_feeds():
     except Exception:
         _startup_logger.warning("Announcements poller failed to start", exc_info=True)
 
+    # Momentum breakout module
+    try:
+        from engine.strategies.momentum_breakout import MomentumBreakout, load_momentum_config
+        from engine import strategy as _strategy_mod
+
+        momentum_cfg = load_momentum_config()
+        if momentum_cfg.enabled:
+            global _MOMENTUM_BREAKOUT
+            scanner = getattr(_strategy_mod, "SYMBOL_SCANNER", None)
+            _MOMENTUM_BREAKOUT = MomentumBreakout(router, RAILS, momentum_cfg, scanner=scanner)
+            _MOMENTUM_BREAKOUT.start()
+            _startup_logger.info(
+                "Momentum breakout module started (notional=%.0f, interval=%.1fs)",
+                momentum_cfg.notional_usd,
+                momentum_cfg.interval_sec,
+            )
+    except Exception:
+        _startup_logger.warning("Momentum breakout wiring failed", exc_info=True)
+
     # Wire Event Breakout consumer (subscribe to strategy.event_breakout)
     try:
         if os.getenv("EVENT_BREAKOUT_ENABLED", "").lower() in {"1", "true", "yes"}:
@@ -625,6 +739,106 @@ async def _start_guardian_and_feeds():
     except Exception:
         _startup_logger.warning("Event Breakout consumer failed to wire", exc_info=True)
 
+    # Meme sentiment strategy wiring
+    try:
+        from engine.strategies.meme_coin_sentiment import MemeCoinSentiment, load_meme_coin_config
+
+        meme_cfg = load_meme_coin_config()
+        global _MEME_SENTIMENT
+        if meme_cfg.enabled:
+            if _MEME_SENTIMENT is None:
+                _MEME_SENTIMENT = MemeCoinSentiment(router, RAILS, rest_client, meme_cfg)
+                BUS.subscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
+                _startup_logger.info(
+                    "Meme sentiment strategy enabled (risk_pct=%.2f%%, min_score=%.2f, lock=%.0fs)",
+                    meme_cfg.per_trade_risk_pct * 100.0,
+                    meme_cfg.min_social_score,
+                    meme_cfg.trade_lock_sec,
+                )
+            else:
+                _MEME_SENTIMENT.cfg = meme_cfg
+                _MEME_SENTIMENT.rest_client = rest_client
+                _startup_logger.info("Meme sentiment strategy configuration refreshed")
+        else:
+            if _MEME_SENTIMENT is not None:
+                try:
+                    BUS.unsubscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
+                except Exception:
+                    pass
+                _MEME_SENTIMENT = None
+                _startup_logger.info("Meme sentiment strategy disabled via configuration")
+    except Exception:
+        _startup_logger.warning("Meme sentiment strategy wiring failed", exc_info=True)
+
+    # Listing sniper wiring
+    try:
+        from engine.strategies.listing_sniper import ListingSniper, load_listing_sniper_config
+
+        listing_cfg = load_listing_sniper_config()
+        if listing_cfg.enabled:
+            global _LISTING_SNIPER
+            if _LISTING_SNIPER is None:
+                _LISTING_SNIPER = ListingSniper(router, RAILS, rest_client, listing_cfg)
+                BUS.subscribe("events.external_feed", _LISTING_SNIPER.on_external_event)
+                _startup_logger.info(
+                    "Listing sniper enabled (risk_pct=%.2f%%, notional_min=%.1f, max=%.1f)",
+                    listing_cfg.per_trade_risk_pct * 100.0,
+                    listing_cfg.min_notional_usd,
+                    listing_cfg.max_notional_usd,
+                )
+            else:
+                _LISTING_SNIPER.cfg = listing_cfg
+                _LISTING_SNIPER.rest_client = rest_client
+                _startup_logger.info("Listing sniper configuration refreshed")
+        else:
+            if _LISTING_SNIPER is not None:
+                try:
+                    BUS.unsubscribe("events.external_feed", _LISTING_SNIPER.on_external_event)
+                except Exception:
+                    pass
+                try:
+                    await _LISTING_SNIPER.shutdown()
+                except Exception:
+                    pass
+                _LISTING_SNIPER = None
+                _startup_logger.info("Listing sniper disabled via configuration")
+    except Exception:
+        _startup_logger.warning("Listing sniper wiring failed", exc_info=True)
+
+    # Airdrop / promotion watcher wiring
+    try:
+        from engine.strategies.airdrop_promo import AirdropPromoWatcher, load_airdrop_promo_config
+
+        airdrop_cfg = load_airdrop_promo_config()
+        global _AIRDROP_PROMO
+        if airdrop_cfg.enabled:
+            if _AIRDROP_PROMO is None:
+                _AIRDROP_PROMO = AirdropPromoWatcher(router, RAILS, rest_client, airdrop_cfg)
+                BUS.subscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
+                _startup_logger.info(
+                    "Airdrop promo watcher enabled (default_notional=%.1f, min_reward=%.1f)",
+                    airdrop_cfg.default_notional_usd,
+                    airdrop_cfg.min_expected_reward_usd,
+                )
+            else:
+                _AIRDROP_PROMO.cfg = airdrop_cfg
+                _AIRDROP_PROMO.rest_client = rest_client
+                _startup_logger.info("Airdrop promo watcher configuration refreshed")
+        else:
+            if _AIRDROP_PROMO is not None:
+                try:
+                    BUS.unsubscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
+                except Exception:
+                    pass
+                try:
+                    await _AIRDROP_PROMO.shutdown()
+                except Exception:
+                    pass
+                _AIRDROP_PROMO = None
+                _startup_logger.info("Airdrop promo watcher disabled via configuration")
+    except Exception:
+        _startup_logger.warning("Airdrop promo watcher wiring failed", exc_info=True)
+
     # Start Telegram digest (if enabled)
     try:
         if os.getenv("TELEGRAM_ENABLED", "").lower() in {"1", "true", "yes"}:
@@ -638,6 +852,32 @@ async def _start_guardian_and_feeds():
             try:
                 NotifyBridge(tg, BUS, _startup_logger, enabled=bridge_enabled)
                 _startup_logger.info("Telegram notify bridge %s", "enabled" if bridge_enabled else "disabled")
+            except Exception:
+                pass
+            # Health notifier (BUS -> Telegram) if enabled
+            try:
+                from engine.ops.health_notify import HealthNotifier
+                import time as _t
+                hcfg = {
+                    "HEALTH_TG_ENABLED": os.getenv("HEALTH_TG_ENABLED", "true").lower() in {"1","true","yes"},
+                    "HEALTH_DEBOUNCE_SEC": int(float(os.getenv("HEALTH_DEBOUNCE_SEC", "10"))),
+                }
+                HealthNotifier(hcfg, BUS, tg, _startup_logger, _t, metrics)
+                _startup_logger.info("Telegram health notifier wired")
+            except Exception:
+                _startup_logger.warning("Health notifier wiring failed", exc_info=True)
+            # Lightweight fills -> Telegram helper (until Alertmanager is in place)
+            try:
+                async def _on_fill_tele(evt):
+                    sym = (evt.get("symbol") or "").upper()
+                    side = (evt.get("side") or "").upper()
+                    px = float(evt.get("avg_price") or 0.0)
+                    qty = float(evt.get("filled_qty") or 0.0)
+                    if not sym or px <= 0 or qty <= 0:
+                        return
+                    BUS.fire("notify.telegram", {"text": f"✅ Fill: *{sym}* {side} qty={qty:.6f} @ `{px}`"})
+                BUS.subscribe("trade.fill", _on_fill_tele)
+                _startup_logger.info("Telegram fill pings enabled")
             except Exception:
                 pass
             roll = EventBORollup()
@@ -814,6 +1054,48 @@ except Exception:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _AIRDROP_PROMO
+    try:
+        if _MOMENTUM_BREAKOUT is not None:
+            await _MOMENTUM_BREAKOUT.stop()
+            _MOMENTUM_BREAKOUT = None
+    except Exception:
+        _startup_logger.warning("Momentum breakout shutdown encountered errors", exc_info=True)
+    try:
+        if _LISTING_SNIPER is not None:
+            await _LISTING_SNIPER.shutdown()
+    except Exception:
+        _startup_logger.warning("Listing sniper shutdown failed", exc_info=True)
+    try:
+        if _MEME_SENTIMENT is not None:
+            from engine.core.event_bus import BUS
+            try:
+                BUS.unsubscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
+            except Exception:
+                pass
+            _MEME_SENTIMENT = None
+    except Exception:
+        _startup_logger.warning("Meme sentiment shutdown failed", exc_info=True)
+    try:
+        if _AIRDROP_PROMO is not None:
+            from engine.core.event_bus import BUS
+
+            try:
+                BUS.unsubscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
+            except Exception:
+                pass
+            try:
+                await _AIRDROP_PROMO.shutdown()
+            except Exception:
+                _startup_logger.warning("Airdrop promo watcher shutdown failed", exc_info=True)
+            _AIRDROP_PROMO = None
+    except Exception:
+        _startup_logger.warning("Airdrop promo shutdown encountered errors", exc_info=True)
+    try:
+        from engine.core.signal_queue import SIGNAL_QUEUE
+        await SIGNAL_QUEUE.stop()
+    except Exception:
+        pass
     await rest_client.close()
 
 
@@ -854,9 +1136,9 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
     # ——— Existing execution path (left intact) ———
     try:
         if req.quote is not None:
-            result = await router.market_quote(req.symbol, req.side, req.quote)
+            result = await router.market_quote(req.symbol, req.side, req.quote, market=(req.market.lower() if isinstance(req.market, str) else None))
         else:
-            result = await router.market_quantity(req.symbol, req.side, req.quantity or 0.0)
+            result = await router.market_quantity(req.symbol, req.side, req.quantity or 0.0, market=(req.market.lower() if isinstance(req.market, str) else None))
 
         # Store order persistently
         order_id = result.get("id") or str(int(time.time() * 1000))
@@ -864,6 +1146,7 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
             result["id"] = order_id
         if store is not None:
             try:
+                _persist_logger.info("Persisting order %s in SQLite", order_id)
                 store.insert_order({
                     "id": order_id,
                     "venue": venue.lower(),
@@ -875,6 +1158,7 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
                     "ts_accept": int(time.time() * 1000),
                     "ts_update": int(time.time() * 1000)
                 })
+                _persist_logger.debug("Order %s stored successfully", order_id)
             except Exception:
                 _persist_logger.exception("Failed to persist order %s", order_id)
 
@@ -967,6 +1251,7 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
         order_id = result.get("id") or str(int(time.time() * 1000))
         if store is not None:
             try:
+                _persist_logger.info("Persisting order %s in SQLite", order_id)
                 store.insert_order({
                     "id": order_id,
                     "venue": venue.lower(),
@@ -978,6 +1263,7 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
                     "ts_accept": int(time.time() * 1000),
                     "ts_update": int(time.time() * 1000)
                 })
+                _persist_logger.debug("Order %s stored successfully", order_id)
             except Exception:
                 _persist_logger.exception("Failed to persist order %s", order_id)
 
@@ -1455,8 +1741,13 @@ async def get_prices():
 async def promote_strategy(request: Request):
     """Hot-swap to a new strategy model at runtime."""
     import os
-    data = await request.json()
-    tag = data.get("model_tag")
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="JSON body required: {\"model_tag\": \"<tag>\"}")
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON payload (expected object)")
+    tag = (data or {}).get("model_tag")
     if not tag:
         raise HTTPException(status_code=400, detail="model_tag required")
 
@@ -1471,6 +1762,9 @@ async def promote_strategy(request: Request):
             await strategy.reload_model(tag)
     except AttributeError:
         pass  # Strategy layer doesn't support hot reload, that's ok
+    except Exception as exc:
+        # Surface reload errors clearly to caller
+        raise HTTPException(status_code=500, detail=f"reload_model failed: {exc}")
 
     return {"message": f"Strategy switched to {tag}", "model_tag": tag}
 
@@ -1508,6 +1802,20 @@ async def sse_stream():
 
 
 @app.on_event("startup")
+async def _start_external_feeds():
+    """Launch external data feed connectors described in YAML config."""
+    if IS_EXPORTER:
+        return
+    try:
+        from engine.feeds.external_connectors import spawn_external_feeds_from_config
+        started = await spawn_external_feeds_from_config()
+        if started:
+            _startup_logger.info("External feed connectors started: %s", ", ".join(started))
+    except Exception:
+        _startup_logger.warning("External feed connectors failed to start", exc_info=True)
+
+
+@app.on_event("startup")
 async def _start_event_bus():
     """Initialize the real-time event bus."""
     if IS_EXPORTER:
@@ -1515,6 +1823,10 @@ async def _start_event_bus():
     try:
         await initialize_event_bus()
         _startup_logger.info("Event bus started")
+        from engine.core.signal_queue import SIGNAL_QUEUE
+
+        SIGNAL_QUEUE.start(BUS)
+        _startup_logger.info("Signal priority queue dispatcher online")
     except Exception:
         _startup_logger.exception("Event bus startup failed")
 
@@ -1542,6 +1854,42 @@ async def _start_governance():
         _startup_logger.info("Autonomous governance activated")
     except Exception:
         _startup_logger.exception("Governance startup failed")
+
+
+@app.on_event("startup")
+async def _start_bracket_governor():
+    if IS_EXPORTER:
+        return
+    try:
+        if os.getenv("BRACKET_GOVERNOR_ENABLED", "true").lower() in {"1","true","yes"}:
+            BracketGovernor(router, BUS, _startup_logger).wire()
+    except Exception:
+        _startup_logger.warning("Bracket governor wiring failed", exc_info=True)
+
+
+@app.on_event("startup")
+async def _start_stop_validator() -> None:
+    global _stop_validator
+    if IS_EXPORTER:
+        return
+    enabled = os.getenv("STOP_VALIDATOR_ENABLED", "true").lower() in {"1", "true", "yes"}
+    if not enabled:
+        return
+    cfg = {
+        "STOP_VALIDATOR_ENABLED": enabled,
+        "STOP_VALIDATOR_REPAIR": os.getenv("STOP_VALIDATOR_REPAIR", "true").lower() in {"1", "true", "yes"},
+        "STOP_VALIDATOR_GRACE_SEC": float(os.getenv("STOP_VALIDATOR_GRACE_SEC", "2")),
+        "STOP_VALIDATOR_INTERVAL_SEC": float(os.getenv("STOP_VALIDATOR_INTERVAL_SEC", "5")),
+        "STOPVAL_NOTIFY_ENABLED": os.getenv("STOPVAL_NOTIFY_ENABLED", "false").lower() in {"1", "true", "yes"},
+        "STOPVAL_NOTIFY_DEBOUNCE_SEC": float(os.getenv("STOPVAL_NOTIFY_DEBOUNCE_SEC", "60")),
+    }
+    try:
+        md = _MDAdapter(router)
+        _stop_validator = StopValidator(cfg, router, md, log=_startup_logger, metrics=metrics, bus=BUS)
+        asyncio.create_task(_stop_validator.run())
+        _startup_logger.info("Stop Validator started (repair=%s)", cfg["STOP_VALIDATOR_REPAIR"])
+    except Exception:
+        _startup_logger.warning("Stop Validator startup failed", exc_info=True)
 
 
 @app.on_event("startup")
@@ -1580,14 +1928,26 @@ async def _refresh_binance_futures_snapshot() -> None:
     try:
         price_data = await rest_client.bulk_premium_index()
         if price_data:
-            _price_map = price_data
             now_ts = time.time()
-            for sym, px in price_data.items():
+            new_map: dict[str, float] = {}
+            for sym, payload in price_data.items():
+                raw_px = payload
+                if isinstance(payload, dict):
+                    raw_px = payload.get("markPrice") or payload.get("price") or 0.0
                 try:
-                    metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(float(px))
+                    px = float(raw_px or 0.0)
+                except Exception:
+                    px = 0.0
+                if px <= 0.0:
+                    continue
+                new_map[sym] = px
+                try:
+                    metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
                 except Exception:
                     pass
-                _maybe_emit_strategy_tick(sym, float(px or 0.0), ts=now_ts)
+                _maybe_emit_strategy_tick(sym, px, ts=now_ts)
+            if new_map:
+                _price_map = new_map
     except Exception:
         pass
 
@@ -1676,10 +2036,15 @@ async def _refresh_binance_futures_snapshot() -> None:
             metrics.set_core_symbol_metric("entry_price", symbol=sym, value=float(agg.get("entry", 0.0)))
             metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=float(agg.get("upnl", 0.0)))
             mark = 0.0
-            try:
-                mark = float(_price_map.get(sym, 0.0)) if isinstance(_price_map, dict) else 0.0
-            except Exception:
-                mark = 0.0
+            if isinstance(_price_map, dict):
+                try:
+                    raw_mark = _price_map.get(sym, 0.0)
+                    if isinstance(raw_mark, dict):
+                        mark = float(raw_mark.get("markPrice", 0.0) or 0.0)
+                    else:
+                        mark = float(raw_mark or 0.0)
+                except Exception:
+                    mark = 0.0
             if mark:
                 metrics.set_core_symbol_metric("mark_price", symbol=sym, value=mark)
                 try:
@@ -1805,10 +2170,15 @@ async def _refresh_binance_spot_snapshot() -> None:
             metrics.set_core_symbol_metric("entry_price", symbol=base_sym, value=float(getattr(position, "avg_price", 0.0) or 0.0))
             metrics.set_core_symbol_metric("unrealized_profit", symbol=base_sym, value=float(getattr(position, "upl", 0.0) or 0.0))
             mark = 0.0
-            try:
-                mark = float(_price_map.get(base_sym, 0.0)) if isinstance(_price_map, dict) else 0.0
-            except Exception:
-                mark = 0.0
+            if isinstance(_price_map, dict):
+                try:
+                    raw_mark = _price_map.get(base_sym, 0.0)
+                    if isinstance(raw_mark, dict):
+                        mark = float(raw_mark.get("markPrice", 0.0) or 0.0)
+                    else:
+                        mark = float(raw_mark or 0.0)
+                except Exception:
+                    mark = 0.0
             if mark:
                 metrics.set_core_symbol_metric("mark_price", symbol=base_sym, value=mark)
                 try:
@@ -2024,6 +2394,81 @@ async def _start_venue_refresh():
         role,
     )
     asyncio.create_task(_refresh_venue_data())
+
+
+@app.on_event("startup")
+async def _start_binance_ws():
+    if VENUE != "BINANCE":
+        return
+    # Feature flag
+    if os.getenv("BINANCE_WS_ENABLED", "true").lower() not in {"1", "true", "yes"}:
+        return
+    # Determine WS base URL
+    if settings.is_futures:
+        if "test" in (settings.mode or ""):
+            ws_base = "wss://stream.binancefuture.com/stream"
+        else:
+            ws_base = "wss://fstream.binance.com/stream"
+    else:
+        if (settings.mode or "").startswith("demo") or "test" in (settings.mode or ""):
+            ws_base = "wss://testnet.binance.vision/stream"
+        else:
+            ws_base = "wss://stream.binance.com:9443/stream"
+
+    # Select symbols: prefer configured allowlist; else a small default set
+    try:
+        allowed = configured_universe()
+        bases = [s.split(".")[0].upper() for s in allowed][:100] if allowed else []
+    except Exception:
+        bases = []
+    if not bases:
+        bases = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+
+    role = "exporter" if IS_EXPORTER else "trader"
+    try:
+        from engine import strategy as _strategy_mod
+        on_cb = None if IS_EXPORTER else _strategy_mod.on_tick
+        ws = BinanceWS(
+            symbols=bases,
+            url_base=ws_base,
+            is_futures=settings.is_futures,
+            role=role,
+            on_price_cb=on_cb,
+            price_hook=_binance_on_mark,
+        )
+        asyncio.create_task(ws.run())
+        # remember symbols for freshness loop
+        global _BINANCE_WS_SYMBOLS
+        _BINANCE_WS_SYMBOLS = list(bases)
+        _startup_logger.warning("Binance WS started (%s, futures=%s, symbols=%d, ws_base=%s)", role, settings.is_futures, len(bases), ws_base)
+    except Exception:
+        _startup_logger.warning("Binance WS failed to start", exc_info=True)
+
+
+@app.on_event("startup")
+async def _start_binance_ws_freshness() -> None:
+    if VENUE != "BINANCE":
+        return
+    if os.getenv("BINANCE_WS_ENABLED", "true").lower() not in {"1", "true", "yes"}:
+        return
+    async def loop():
+        while True:
+            now = time.time()
+            try:
+                for base in list(_BINANCE_WS_SYMBOLS) or []:
+                    last_ts = _binance_mark_ts.get(base)
+                    freshness = float("inf") if last_ts is None else max(0.0, now - last_ts)
+                    try:
+                        metrics.mark_price_freshness_sec.labels(symbol=base, venue="binance").set(freshness)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            await asyncio.sleep(5)
+    try:
+        asyncio.create_task(loop())
+    except Exception:
+        pass
 
 
 @app.on_event("startup")

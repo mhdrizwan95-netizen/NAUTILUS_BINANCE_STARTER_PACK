@@ -1,0 +1,23 @@
+{
+  "summary": {
+    "symbol": "ETHUSDT",
+    "trades": 1,
+    "win_rate": 0.0,
+    "avg_win_pct": 0.0,
+    "avg_loss_pct": -0.0367249429441868,
+    "equity_end": 1997.245629279186,
+    "equity_start": 2000.0,
+    "max_drawdown_pct": -0.13771853604069975
+  },
+  "trades": [
+    {
+      "entry_ts": 1759795199999,
+      "exit_ts": 1759852799999,
+      "entry_px": 4684.01,
+      "exit_px": 4511.99,
+      "quote": 75.0,
+      "pnl_pct": -0.0367249429441868,
+      "pnl_quote": -2.75437072081401
+    }
+  ]
+}

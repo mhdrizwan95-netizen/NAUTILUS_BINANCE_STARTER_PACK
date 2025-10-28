@@ -1,0 +1,97 @@
+# External feed configuration loaded by engine.feeds.external_connectors
+#
+# Secrets can be referenced via ${ENV_VAR} so production deployments can source
+# credentials from the environment instead of committing them to disk.
+feeds:
+  twitter_firehose:
+    type: twitter_firehose
+    enabled: true
+    poll_interval: 8
+    priority: 0.97
+    bearer_token: ${TWITTER_BEARER_TOKEN}
+    follow_accounts: ["binance", "cz_binance", "elonmusk", "lookonchain", "whalechart", "coingecko", "meme_coin_news"]
+    keywords: ["doge", "shib", "pepe", "wojak", "floki", "bonk", "slerf", "memecoin", "listing", "airdrop", "promotion", "promo", "launchpool", "launchpad", "reward", "voucher", "campaign", "bonus", "base", "sol"]
+    expansions: ["author_id"]
+    max_results: 50
+    asset_keyword_map:
+      btc: ["BTCUSDT", "BTC"]
+      bitcoin: ["BTCUSDT", "BTC"]
+      eth: ["ETHUSDT", "ETH"]
+      ethereum: ["ETHUSDT", "ETH"]
+      doge: ["DOGEUSDT", "DOGE"]
+      shib: ["SHIBUSDT", "SHIB"]
+      shiba: ["SHIBUSDT", "SHIB"]
+      pepe: ["PEPEUSDT", "PEPE"]
+      wojak: ["WOJAKUSDT", "WOJAK"]
+      floki: ["FLOKIUSDT", "FLOKI"]
+      bonk: ["BONKUSDT", "BONK"]
+      slerf: ["SLERFUSDT", "SLERF"]
+      wif: ["WIFUSDT", "WIF"]
+      memecoin: ["MEMEUSDT", "MEME"]
+      sol: ["SOLUSDT", "SOL"]
+      bnb: ["BNBUSDT", "BNB"]
+    ttl_sec: 600
+    seed_events:
+      - payload:
+          text: "BREAKING: PEPE just ripped 45% in 20 minutes – #pepearmy going wild."
+          metrics:
+            like_count: 1200
+            retweet_count: 380
+            reply_count: 210
+        asset_hints: ["PEPEUSDT", "PEPE"]
+        priority: 0.99
+        ttl_sec: 300
+
+  binance_listings:
+    type: binance_announcements
+    enabled: true
+    poll_interval: 60
+    priority: 0.92
+    rss_url: "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageSize=30"
+    languages: ["en"]
+    asset_suffixes: ["USDT", "FDUSD", "TUSD", "BTC"]
+    ttl_sec: 1800
+    seed_events:
+      - payload:
+          title: "Binance Will List WOJAK/USDT and WOJAK/FDUSD in the Innovation Zone"
+          url: "https://www.binance.com/en/support/announcement/sample"
+          tickers: ["WOJAK"]
+        asset_hints: ["WOJAKUSDT", "WOJAKFDUSD"]
+        priority: 0.96
+        ttl_sec: 900
+
+  dex_whale:
+    type: dex_whale
+    enabled: true
+    poll_interval: 20
+    priority: 0.88
+    chains: ["eth", "bsc", "base", "solana", "ton"]
+    min_liquidity_usd: 150000
+    min_volume_usd: 350000
+    change_m5_threshold: 10.0
+    dex_api: "https://api.dexscreener.com/latest/dex/tokens"
+    ttl_sec: 900
+    seed_events:
+      - payload:
+          pair: "base:0x123"
+          symbol: "POPCAT"
+          name: "Popcat"
+          chain: "base"
+          price_usd: 0.0041
+          liquidity_usd: 220000
+          volume_1h: 980000
+          volume_24h: 5300000
+          change_5m: 16.0
+        asset_hints: ["POPCAT"]
+        priority: 0.94
+        ttl_sec: 300
+
+  macro_calendar:
+    type: macro_calendar
+    enabled: true
+    poll_interval: 3600
+    priority: 0.5
+    lookahead_hours: 96
+    ics_url: ${MACRO_CALENDAR_ICS_URL}
+    include_keywords: ["FOMC", "CPI", "NFP", "Payrolls", "Rate", "ECB"]
+    ttl_sec: 86400

@@ -1,0 +1,13 @@
+{
+  "summary": {
+    "symbol": "BTCUSDT",
+    "trades": 0,
+    "win_rate": 0.0,
+    "avg_win_pct": 0.0,
+    "avg_loss_pct": 0.0,
+    "equity_end": 2000.0,
+    "equity_start": 2000.0,
+    "max_drawdown_pct": 0.0
+  },
+  "trades": []
+}

@@ -1,214 +1,1102 @@
 {
   "id": null,
   "uid": "hmm-venue-binance",
-  "title": "HMM • Venue – Binance",
-  "tags": ["hmm","venue","binance"],
+  "title": "HMM \u2022 Venue \u2013 Binance",
+  "tags": [
+    "hmm",
+    "venue",
+    "binance"
+  ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "5s",
-  "time": { "from": "now-6h", "to": "now" },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
   "annotations": {
     "list": [
-      { "builtIn": 1, "datasource": { "type": "grafana", "uid": "-- Grafana --" }, "enable": true, "hide": true, "iconColor": "rgba(0, 211, 255, 1)", "name": "Annotations & Alerts", "type": "dashboard" }
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
     ]
   },
   "templating": {
     "list": [
-      { "name": "role", "type": "custom", "label": "Metrics Source", "query": "exporter,trader", "current": { "selected": true, "text": "Exporter", "value": "exporter" } },
-      { "name": "venue", "type": "constant", "label": "Venue", "query": "engine_binance", "current": { "selected": true, "value": "engine_binance", "text": "engine_binance" } },
-      { "name": "symbol", "type": "query", "datasource": { "type": "prometheus", "uid": "prometheus" }, "refresh": 2, "query": "label_values({__name__=~\"position_amt|entry_price\",role=\"$role\",venue=\"$venue\"}, symbol)", "includeAll": true, "multi": true, "current": { "selected": true, "text": "All", "value": ["$__all"] } },
-      { "name": "range_s", "type": "constant", "label": "range_s", "query": "${__range_s}" },
-      { "name": "rate_interval", "type": "constant", "label": "rate_interval", "query": "${__rate_interval}" }
+      {
+        "name": "job_exporter",
+        "type": "constant",
+        "label": "Exporter job",
+        "query": "engine_binance_exporter",
+        "current": {
+          "selected": true,
+          "text": "engine_binance_exporter",
+          "value": "engine_binance_exporter"
+        }
+      },
+      {
+        "name": "job_trader",
+        "type": "constant",
+        "label": "Trader job",
+        "query": "engine_binance",
+        "current": {
+          "selected": true,
+          "text": "engine_binance",
+          "value": "engine_binance"
+        }
+      },
+      {
+        "name": "symbol",
+        "type": "query",
+        "label": "Symbols",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(position_amt{job=\"$job_exporter\"}, symbol)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": [
+            "$__all"
+          ]
+        }
+      },
+      {
+        "name": "range_s",
+        "type": "constant",
+        "label": "range_s",
+        "query": "${__range_s}"
+      },
+      {
+        "name": "rate_interval",
+        "type": "constant",
+        "label": "rate_interval",
+        "query": "${__rate_interval}"
+      }
     ]
   },
   "panels": [
-    { "id": 1, "type": "stat", "title": "Equity (USDT)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "sum(last_over_time(equity_usd{job=\"$venue\"}[2m]))" } ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } },
-      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 }
-    },
-    { "id": 2, "type": "stat", "title": "Wallet (USDT)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "sum(last_over_time(cash_usd{job=\"$venue\"}[5m]))" } ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } },
-      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 }
-    },
-    { "id": 3, "type": "stat", "title": "UPNL (USDT)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "sum(last_over_time(market_value_usd{job=\"$venue\"}[2m]))" } ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2, "thresholds": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 0 } ] } } },
-      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"], "values": false } },
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 }
-    },
-    { "id": 4, "type": "stat", "title": "Trading Enabled",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "max(trading_enabled{job=\"$venue\"})" } ],
-      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "1": { "text": "ON" }, "0": { "text": "OFF" } } } ] } },
-      "options": { "textMode": "value", "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "gridPos": { "h": 4, "w": 3, "x": 12, "y": 0 }
-    },
-    { "id": 5, "type": "stat", "title": "Snapshot Loaded",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "max(snapshot_loaded{job=\"$venue\"})" } ],
-      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "1": { "text": "LOADED" }, "0": { "text": "EMPTY" } } } ] } },
-      "options": { "textMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "gridPos": { "h": 4, "w": 3, "x": 15, "y": 0 }
-    },
-    { "id": 6, "type": "stat", "title": "Mark Age (s)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "clamp_min(time() - last_over_time(mark_time_epoch{job=\"$venue\"}[15m]), 0)" } ],
-      "fieldConfig": { "defaults": { "unit": "s", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "yellow", "value": 5 }, { "color": "red", "value": 15 } ] } } },
-      "options": { "colorMode": "background", "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "gridPos": { "h": 4, "w": 4, "x": 18, "y": 0 }
-    },
-
-    { "id": 7, "type": "stat", "title": "UPNL Δ (engine vs venue)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "clamp_min(abs(sum(last_over_time(market_value_usd{job=\\\"$venue\\\"}[2m])) - sum(unrealized_profit{job=\\\"$venue\\\"})), 0)" } ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 10 } ] } } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 4 }
-    },
-
-    { "id": 10, "type": "table", "title": "Open Positions",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Equity (USDT)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
       "targets": [
-        { "refId": "A", "expr": "position_amt{job=\"$venue\",symbol=~\"$symbol\"}" },
-        { "refId": "B", "expr": "entry_price{job=\"$venue\",symbol=~\"$symbol\"}" },
-        { "refId": "C", "expr": "mark_price{job=\"$venue\",symbol=~\"$symbol\"}" },
-        { "refId": "D", "expr": "unrealized_profit{job=\"$venue\",symbol=~\"$symbol\"}" }
-      ],
-      "transformations": [
-        { "id": "labelsToFields", "options": { "mode": "columns" } },
-        { "id": "joinByField", "options": { "by": ["symbol","job"] } },
-        { "id": "calculateField", "options": { "alias": "exposure", "mode": "binary", "binary": { "left": "position_amt", "operator": "*", "right": "mark_price" } } }
+        {
+          "refId": "A",
+          "expr": "sum(last_over_time(equity_usd{job=\"$job_exporter\"}[2m]))"
+        }
       ],
       "fieldConfig": {
-        "defaults": { "custom": { "align": "auto" } },
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Wallet (USDT)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(last_over_time(cash_usd{job=\"$job_exporter\"}[5m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "UPNL (USDT)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(last_over_time(market_value_usd{job=\"$job_exporter\"}[2m]))"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red"
+              },
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "values": false
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Trading Enabled",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(trading_enabled{job=\"$job_trader\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "ON"
+                },
+                "0": {
+                  "text": "OFF"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "textMode": "value",
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 12,
+        "y": 0
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Snapshot Loaded",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(snapshot_loaded{job=\"$job_trader\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "LOADED"
+                },
+                "0": {
+                  "text": "EMPTY"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "textMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 3,
+        "x": 15,
+        "y": 0
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Mark Age (s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(time() - last_over_time(mark_time_epoch{job=\"$job_exporter\"}[15m]), 0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "yellow",
+                "value": 5
+              },
+              {
+                "color": "red",
+                "value": 15
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "colorMode": "background",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 18,
+        "y": 0
+      }
+    },
+    {
+      "id": 7,
+      "type": "stat",
+      "title": "UPNL \u0394 (engine vs venue)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(abs(sum(last_over_time(market_value_usd{job=\\\"$job_exporter\\\"}[2m])) - sum(last_over_time(unrealized_profit{job=\\\"$job_exporter\\\"}[2m]))), 0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "yellow",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 10
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 4
+      }
+    },
+    {
+      "id": 10,
+      "type": "table",
+      "title": "Open Positions",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by(symbol) (last_over_time(position_amt{job=\"$job_exporter\",symbol=~\"$symbol\"}[2m])) and on(symbol) (sum by(symbol) (last_over_time(position_amt{job=\"$job_exporter\",symbol=~\"$symbol\"}[2m])) != 0)"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by(symbol) (last_over_time(entry_price{job=\"$job_exporter\",symbol=~\"$symbol\"}[2m])) and on(symbol) (sum by(symbol) (last_over_time(position_amt{job=\"$job_exporter\",symbol=~\"$symbol\"}[2m])) != 0)"
+        },
+        {
+          "refId": "C",
+          "expr": "mark_price{job=\"$job_exporter\",symbol=~\"$symbol\"}"
+        },
+        {
+          "refId": "D",
+          "expr": "sum by(symbol) (last_over_time(unrealized_profit{job=\"$job_exporter\",symbol=~\"$symbol\"}[2m])) and on(symbol) (sum by(symbol) (last_over_time(position_amt{job=\"$job_exporter\",symbol=~\"$symbol\"}[2m])) != 0)"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        },
+        {
+          "id": "joinByField",
+          "options": {
+            "by": [
+              "symbol",
+              "job"
+            ]
+          }
+        },
+        {
+          "id": "calculateField",
+          "options": {
+            "alias": "exposure",
+            "mode": "binary",
+            "binary": {
+              "left": "position_amt",
+              "operator": "*",
+              "right": "mark_price"
+            }
+          }
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
         "overrides": [
-          { "matcher": { "id": "byName", "options": "entry_price" }, "properties": [ { "id": "unit", "value": "currencyUSD" } ] },
-          { "matcher": { "id": "byName", "options": "mark_price" }, "properties": [ { "id": "unit", "value": "currencyUSD" } ] },
-          { "matcher": { "id": "byName", "options": "unrealized_profit" }, "properties": [ { "id": "unit", "value": "currencyUSD" }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [ { "color": "red" }, { "color": "green", "value": 0 } ] } } ] },
-          { "matcher": { "id": "byName", "options": "exposure" }, "properties": [ { "id": "unit", "value": "currencyUSD" } ] }
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "entry_price"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "mark_price"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "unrealized_profit"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              },
+              {
+                "id": "thresholds",
+                "value": {
+                  "mode": "absolute",
+                  "steps": [
+                    {
+                      "color": "red"
+                    },
+                    {
+                      "color": "green",
+                      "value": 0
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "exposure"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "currencyUSD"
+              }
+            ]
+          }
         ]
       },
-      "options": { "showHeader": true }
+      "options": {
+        "showHeader": true
+      }
     },
-
-    { "id": 11, "type": "timeseries", "title": "Per-symbol UPNL",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
-      "targets": [ { "refId": "A", "expr": "sum by (symbol) (unrealized_profit{job=\"$venue\",symbol=~\"$symbol\"})", "legendFormat": "{{symbol}}" } ],
-      "fieldConfig": { "defaults": { "unit": "currencyUSD", "decimals": 2 } },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
-    },
-
-    { "id": 12, "type": "timeseries", "title": "UPNL Engine vs Sum(symbol)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 13 },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Per-symbol UPNL",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
       "targets": [
-        { "refId": "A", "expr": "sum(market_value_usd{job=\"$venue\"})", "legendFormat": "engine UPNL" },
-        { "refId": "B", "expr": "sum by (job) (sum by (symbol) (unrealized_profit{job=\"$venue\"}))", "legendFormat": "sum(symbol) UPNL" },
-        { "refId": "C", "expr": "sum(market_value_usd{job=\"$venue\"}) - sum by (job) (sum by (symbol) (unrealized_profit{job=\"$venue\"}))", "legendFormat": "Δ engine - sum(symbol)" }
+        {
+          "refId": "A",
+          "expr": "sum by (symbol) (last_over_time(unrealized_profit{job=\"$job_exporter\",symbol=~\"$symbol\"}[2m])) and on(symbol) (sum by (symbol) (last_over_time(position_amt{job=\"$job_exporter\",symbol=~\"$symbol\"}[2m])) != 0)",
+          "legendFormat": "{{symbol}}"
+        }
       ],
-      "fieldConfig": { "overrides": [ { "matcher": { "id": "byRegexp", "options": "Δ" }, "properties": [ { "id": "custom.axisPlacement", "value": "right" } ] } ] },
-      "options": { "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     },
-
-    { "id": 13, "type": "stat", "title": "Orders Submitted (window)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 13 },
-      "targets": [ { "refId": "A", "expr": "clamp_min(sum(increase(orders_submitted_total{job=\"$venue\"}[$__range])), 0)" } ],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } },
-      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } }
-    },
-    { "id": 14, "type": "stat", "title": "Orders Filled (window)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 13 },
-      "targets": [ { "refId": "A", "expr": "clamp_min(sum(increase(orders_filled_total{job=\"$venue\"}[$__range])), 0)" } ],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } },
-      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } }
-    },
-    { "id": 15, "type": "stat", "title": "Orders Rejected (window)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 13 },
-      "targets": [ { "refId": "A", "expr": "clamp_min(sum(increase(orders_rejected_total{job=\"$venue\"}[$__range])), 0)" } ],
-      "fieldConfig": { "defaults": { "unit": "short", "decimals": 0 } },
-      "options": { "colorMode": "value", "reduceOptions": { "calcs": ["lastNotNull"] } }
-    },
-
-    { "id": 16, "type": "timeseries", "title": "Orders / min",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 17 },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "UPNL Engine vs Sum(symbol)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 13
+      },
       "targets": [
-        { "refId": "A", "expr": "clamp_min(sum(rate(orders_submitted_total{job=\"$venue\"}[$__rate_interval])) * 60, 0)", "legendFormat": "submitted" },
-        { "refId": "B", "expr": "clamp_min(sum(rate(orders_filled_total{job=\"$venue\"}[$__rate_interval])) * 60, 0)", "legendFormat": "filled" },
-        { "refId": "C", "expr": "clamp_min(sum(rate(orders_rejected_total{job=\"$venue\"}[$__rate_interval])) * 60, 0)", "legendFormat": "rejected" }
+        {
+          "refId": "A",
+          "expr": "sum(market_value_usd{job=\"$job_exporter\"})",
+          "legendFormat": "engine UPNL"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (job) (sum by (symbol) (last_over_time(unrealized_profit{job=\"$job_exporter\"}[2m])))",
+          "legendFormat": "sum(symbol) UPNL"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(market_value_usd{job=\"$job_exporter\"}) - sum by (job) (sum by (symbol) (last_over_time(unrealized_profit{job=\"$job_exporter\"}[2m])))",
+          "legendFormat": "\u0394 engine - sum(symbol)"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "short" } },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+      "fieldConfig": {
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "\u0394"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              }
+            ]
+          }
+        ]
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
-    { "id": 23, "type": "stat", "title": "Quiet >15m?",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 24 },
-      "targets": [ { "refId": "A", "expr": "clamp_min(sum(increase(orders_filled_total{job=\\\"$venue\\\"}[15m])), 0)" } ],
-      "fieldConfig": { "defaults": { "mappings": [ { "type": "range", "options": { "from": 0, "to": 0, "result": { "text": "QUIET", "color": "yellow" } } }, { "type": "range", "options": { "from": 0.0000001, "to": 1e+99, "result": { "text": "ACTIVE", "color": "green" } } } ] } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
-    },
-
-    { "id": 17, "type": "timeseries", "title": "Submit → Ack Latency (ms)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 20 },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Orders Submitted (window)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 13
+      },
       "targets": [
-        { "refId": "A", "expr": "histogram_quantile(0.5, sum(rate(submit_to_ack_ms_bucket{job=\"$venue\"}[$__rate_interval])) by (le))", "legendFormat": "p50" },
-        { "refId": "B", "expr": "histogram_quantile(0.95, sum(rate(submit_to_ack_ms_bucket{job=\"$venue\"}[$__rate_interval])) by (le))", "legendFormat": "p95" },
-        { "refId": "C", "expr": "histogram_quantile(0.99, sum(rate(submit_to_ack_ms_bucket{job=\"$venue\"}[$__rate_interval])) by (le))", "legendFormat": "p99" }
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(increase(orders_submitted_total{job=\"$job_trader\"}[$__range])), 0)"
+        }
       ],
-      "fieldConfig": { "defaults": { "unit": "ms", "decimals": 1 } },
-      "options": { "legend": { "displayMode": "list", "placement": "bottom" }, "tooltip": { "mode": "multi" } }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
-
-    { "id": 18, "type": "state-timeline", "title": "Breaker State",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 8, "x": 0, "y": 26 },
-      "targets": [ { "refId": "A", "expr": "max by (job) (breaker_state{job=\"$venue\"})", "legendFormat": "{{job}}" } ],
-      "fieldConfig": { "defaults": { "mappings": [ { "type": "value", "options": { "0": { "text": "OK", "color": "gray" }, "1": { "text": "TRIPPED", "color": "red" } } } ] } },
-      "options": { "mergeValues": true }
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Orders Filled (window)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(increase(orders_filled_total{job=\"$job_trader\"}[$__range])), 0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
-    { "id": 19, "type": "stat", "title": "Venue Error Rate (%)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "max(venue_error_rate_pct{job=\"$venue\"})" } ],
-      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2 } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "gridPos": { "h": 6, "w": 8, "x": 8, "y": 26 }
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Orders Rejected (window)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(increase(orders_rejected_total{job=\"$job_trader\"}[$__range])), 0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 0
+        }
+      },
+      "options": {
+        "colorMode": "value",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     },
-    { "id": 20, "type": "stat", "title": "Reconcile Lag (s)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "targets": [ { "refId": "A", "expr": "max(reconcile_lag_seconds{job=\"$venue\"})" } ],
-      "fieldConfig": { "defaults": { "unit": "s", "decimals": 0, "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "yellow", "value": 2 }, { "color": "red", "value": 5 } ] } } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } },
-      "gridPos": { "h": 6, "w": 8, "x": 16, "y": 26 }
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Orders / min",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 17
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(rate(orders_submitted_total{job=\"$job_trader\"}[$__rate_interval])) * 60, 0)",
+          "legendFormat": "submitted"
+        },
+        {
+          "refId": "B",
+          "expr": "clamp_min(sum(rate(orders_filled_total{job=\"$job_trader\"}[$__rate_interval])) * 60, 0)",
+          "legendFormat": "filled"
+        },
+        {
+          "refId": "C",
+          "expr": "clamp_min(sum(rate(orders_rejected_total{job=\"$job_trader\"}[$__rate_interval])) * 60, 0)",
+          "legendFormat": "rejected"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
     },
-
-    { "id": 21, "type": "table", "title": "Screener Context (symbols)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 32 },
-      "targets": [ { "refId": "A", "expr": "mark_price{job=\"$venue\",symbol=~\"$symbol\"}" } ],
-      "transformations": [ { "id": "labelsToFields", "options": { "mode": "columns" } } ],
-      "options": { "showHeader": true }
-    }
-    ,
-    { "id": 22, "type": "stat", "title": "Drawdown % (window)",
-      "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 32 },
-      "targets": [ { "refId": "A", "expr": "clamp_min((sum(max_over_time(equity_usd{job=\\\"$venue\\\"}[$__range])) - sum(equity_usd{job=\\\"$venue\\\"})) / clamp_min(sum(max_over_time(equity_usd{job=\\\"$venue\\\"}[$__range])), 1e-9), 0)" } ],
-      "fieldConfig": { "defaults": { "unit": "percentunit", "decimals": 2, "thresholds": { "mode": "absolute", "steps": [ { "color": "green" }, { "color": "yellow", "value": 0.02 }, { "color": "red", "value": 0.05 } ] } } },
-      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    {
+      "id": 23,
+      "type": "stat",
+      "title": "Quiet >15m?",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(increase(orders_filled_total{job=\\\"$job_trader\\\"}[15m])), 0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "range",
+              "options": {
+                "from": 0,
+                "to": 0,
+                "result": {
+                  "text": "QUIET",
+                  "color": "yellow"
+                }
+              }
+            },
+            {
+              "type": "range",
+              "options": {
+                "from": 1e-07,
+                "to": 1e+99,
+                "result": {
+                  "text": "ACTIVE",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Submit \u2192 Ack Latency (ms)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum(rate(submit_to_ack_ms_bucket{job=\"$job_trader\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum(rate(submit_to_ack_ms_bucket{job=\"$job_trader\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum(rate(submit_to_ack_ms_bucket{job=\"$job_trader\"}[$__rate_interval])) by (le))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "decimals": 1
+        }
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "state-timeline",
+      "title": "Breaker State",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (job) (breaker_state{job=\"$job_trader\"})",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "gray"
+                },
+                "1": {
+                  "text": "TRIPPED",
+                  "color": "red"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "options": {
+        "mergeValues": true
+      }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Venue Error Rate (%)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(venue_error_rate_pct{job=\"$job_trader\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 8,
+        "y": 26
+      }
+    },
+    {
+      "id": 20,
+      "type": "stat",
+      "title": "Reconcile Lag (s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(reconcile_lag_seconds{job=\"$job_trader\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 8,
+        "x": 16,
+        "y": 26
+      }
+    },
+    {
+      "id": 21,
+      "type": "table",
+      "title": "Screener Context (symbols)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "mark_price{job=\"$job_exporter\",symbol=~\"$symbol\"}"
+        }
+      ],
+      "transformations": [
+        {
+          "id": "labelsToFields",
+          "options": {
+            "mode": "columns"
+          }
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "id": 22,
+      "type": "stat",
+      "title": "Drawdown % (window)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min((sum(max_over_time(equity_usd{job=\\\"$job_exporter\\\"}[$__range])) - sum(equity_usd{job=\\\"$job_exporter\\\"})) / clamp_min(sum(max_over_time(equity_usd{job=\\\"$job_exporter\\\"}[$__range])), 1e-9), 0)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "decimals": 2,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green"
+              },
+              {
+                "color": "yellow",
+                "value": 0.02
+              },
+              {
+                "color": "red",
+                "value": 0.05
+              }
+            ]
+          }
+        }
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
     }
   ]
 }

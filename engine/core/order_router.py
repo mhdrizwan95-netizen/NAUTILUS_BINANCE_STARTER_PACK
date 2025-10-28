@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from typing import Any, Literal, Optional
 from time import time as _now
@@ -24,20 +25,90 @@ def exchange_client(venue: str = "BINANCE"):
     return _CLIENTS.get(venue)
 
 
-def place_market_order(*, symbol: str, side: str, quote: float | None, quantity: float | None) -> dict[str, Any]:
+def place_market_order(*, symbol: str, side: str, quote: float | None, quantity: float | None, market: str | None = None) -> dict[str, Any]:
     """Legacy module-level helper retained for tests/CLI scripts."""
     import asyncio
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        return loop.run_until_complete(place_market_order_async(symbol=symbol, side=side, quote=quote, quantity=quantity))
+        return loop.run_until_complete(place_market_order_async(symbol=symbol, side=side, quote=quote, quantity=quantity, market=market))
     finally:
         loop.close()
         asyncio.set_event_loop(None)
 
 
-async def place_market_order_async(*, symbol: str, side: str, quote: float | None, quantity: float | None) -> dict[str, Any]:
-    return await _place_market_order_async_core(symbol, side, quote, quantity, None)
+async def place_market_order_async(*, symbol: str, side: str, quote: float | None, quantity: float | None, market: str | None = None) -> dict[str, Any]:
+    return await _place_market_order_async_core(symbol, side, quote, quantity, None, market=market)
+
+
+def _as_float(value: Any) -> float:
+    try:
+        if value is None:
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+async def _maybe_refresh_order_status(res: dict[str, Any], client, venue: str, clean_symbol: str, market: str | None = None) -> None:
+    """Binance FUTURES often reports executedQty=0 on placement; re-query if needed."""
+    if venue.upper() != "BINANCE":
+        return
+    if client is None:
+        return
+    fetch = getattr(client, "order_status", None)
+    if fetch is None or not callable(fetch):
+        return
+    filled = _as_float(res.get("executedQty"))
+    if filled > 0 or _as_float(res.get("filled_qty_base")) > 0:
+        return
+    order_id = res.get("orderId")
+    client_order_id = res.get("clientOrderId")
+    if not order_id and not client_order_id:
+        return
+    logger = logging.getLogger(__name__)
+    logger.debug(
+        "[ORDER_REFRESH_DEBUG] Entering refresh check: venue=%s client=%s filled=%s",
+        venue, bool(client), filled
+    )
+    logger.warning(
+        "[ORDER_REFRESH] %s orderId=%s clientOrderId=%s triggered due to executedQty=0",
+        clean_symbol,
+        order_id,
+        client_order_id,
+    )
+    try:
+        if market is not None and "market" in fetch.__code__.co_varnames:  # type: ignore[attr-defined]
+            latest = await fetch(symbol=clean_symbol, order_id=order_id, client_order_id=client_order_id, market=market)
+        else:
+            latest = await fetch(symbol=clean_symbol, order_id=order_id, client_order_id=client_order_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[ORDER_REFRESH] status fetch failed for %s: %s", clean_symbol, exc)
+        return
+    logger.debug(
+        "[ORDER_REFRESH_DEBUG] Refresh result: status=%s execQty=%s avgPrice=%s",
+        latest.get("status"), latest.get("executedQty"), latest.get("avgPrice")
+    )
+    if not isinstance(latest, dict):
+        return
+    for key in ("status", "cumQuote", "cumQty", "executedQty", "avgPrice"):
+        if latest.get(key) is not None:
+            res[key] = latest[key]
+    exec_qty = _as_float(latest.get("executedQty"))
+    if exec_qty > 0:
+        res["filled_qty_base"] = exec_qty
+        res["executedQty"] = latest.get("executedQty", exec_qty)
+    avg_price = _as_float(latest.get("avgPrice"))
+    if avg_price > 0:
+        res["avg_fill_price"] = avg_price
+    logger.warning(
+        "[ORDER_REFRESH] %s orderId=%s status=%s executedQty=%s avgPrice=%s",
+        clean_symbol,
+        latest.get("orderId"),
+        latest.get("status"),
+        latest.get("executedQty"),
+        latest.get("avgPrice"),
+    )
 
 
 class OrderRouter:
@@ -107,14 +178,8 @@ class OrderRouter:
             logger.warning("[INIT] initialize_balances failed: %s; starting with empty balances", e)
             # Leave portfolio empty; snapshot_loaded will be false
 
-    async def market_quote(self, symbol: str, side: Side, quote: float) -> dict[str, Any]:
-        """Submit a market order using quote notional when venue supports it.
-
-        For BINANCE we can submit `quoteOrderQty` directly which avoids requiring
-        a prior price lookup (useful when public ticker endpoints are flaky).
-        For other venues (e.g., IBKR) fall back to converting quote→quantity.
-        """
-        # Decide venue
+    async def market_quote(self, symbol: str, side: Side, quote: float, market: str | None = None) -> dict[str, Any]:
+        """Submit a market order using quote notional when venue supports it."""
         venue = symbol.split(".")[1] if "." in symbol else None
         base = symbol.split(".")[0].upper()
 
@@ -123,38 +188,34 @@ class OrderRouter:
             symbol = f"{base}.{default_venue}"
             venue = default_venue
 
-        # BINANCE fast-path: submit quote order without price lookup
+        market_hint = market.lower() if isinstance(market, str) and market else None
+
         if venue == "BINANCE":
             client = _CLIENTS.get("BINANCE")
             if client is None:
                 raise ValueError("VENUE_CLIENT_MISSING: No client for venue BINANCE")
 
-            # Specs lookup or sane defaults
             spec: SymbolSpec | None = (SPECS.get("BINANCE") or {}).get(base)
             if spec is None:
                 spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
 
-            # Notional guard (we already pass risk rails earlier but keep a venue check)
             if float(quote) < float(spec.min_notional):
                 orders_rejected.inc()
                 raise ValueError(f"MIN_NOTIONAL: Quote {quote:.2f} below {spec.min_notional:.2f}")
 
             submit = getattr(client, "submit_market_quote", None)
             if submit is None:
-                # Fallback to qty path if client lacks quote submit
-                qty = await self._quote_to_quantity(symbol, side, quote)
-                return await self.market_quantity(symbol, side, qty)
+                qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
+                return await self.market_quantity(symbol, side, qty, market=market_hint)
 
             t0 = time.time()
             try:
-                res = await submit(symbol=base, side=side, quote=float(quote))
+                res = await submit(symbol=base, side=side, quote=float(quote), market=market_hint)
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code if e.response is not None else 0
-                # Some testnet symbols reject quoteOrderQty for MARKET orders
-                # Gracefully fallback to quantity path on 400-series client errors
                 if code in (400, 415, 422):
-                    qty = await self._quote_to_quantity(symbol, side, quote)
-                    return await self.market_quantity(symbol, side, qty)
+                    qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
+                    return await self.market_quantity(symbol, side, qty, market=market_hint)
                 raise
             t1 = time.time()
 
@@ -163,10 +224,8 @@ class OrderRouter:
             except Exception:
                 pass
 
-            # Post-process fills & fees similar to quantity path
             fee_bps = load_fee_config("BINANCE").taker_bps
             filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or 0.0)
-            # Prefer avg_fill_price if present; else fall back to first fill price
             avg_price = float(res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", 0.0) or 0.0)
             fill_notional = abs(filled_qty) * avg_price if (filled_qty and avg_price) else float(quote)
             fee = (fee_bps / 10_000.0) * fill_notional
@@ -174,8 +233,9 @@ class OrderRouter:
             if avg_price:
                 res.setdefault("avg_fill_price", avg_price)
             res["taker_bps"] = fee_bps
+            if market_hint:
+                res.setdefault("market", market_hint)
 
-            # Apply fill to local portfolio (best-effort)
             try:
                 if filled_qty > 0 and (avg_price or fill_notional > 0):
                     px = avg_price if avg_price else (fill_notional / max(filled_qty, 1e-12))
@@ -185,13 +245,13 @@ class OrderRouter:
             except Exception:
                 pass
 
+            await self._maybe_emit_fill(res, symbol, side, venue="BINANCE", intent="")
             return res
 
-        # Other venues: fall back to quote→quantity conversion
-        qty = await self._quote_to_quantity(symbol, side, quote)
-        return await self.market_quantity(symbol, side, qty)
+        qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
+        return await self.market_quantity(symbol, side, qty, market=market_hint)
 
-    def place_market_order(self, *, symbol: str, side: str, quote: float | None, quantity: float | None) -> dict[str, Any]:
+    def place_market_order(self, *, symbol: str, side: str, quote: float | None, quantity: float | None, market: str | None = None) -> dict[str, Any]:
         """
         Multi-venue order routing. Accepts venue-qualified symbols like "AAPL.IBKR" or "BTCUSDT.BINANCE"
         """
@@ -200,19 +260,34 @@ class OrderRouter:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(self._place_market_order_async(symbol, side, quote, quantity))
+            return loop.run_until_complete(self._place_market_order_async(symbol, side, quote, quantity, market=market))
         finally:
             loop.close()
 
-    async def _place_market_order_async(self, *, symbol: str, side: str, quote: float | None, quantity: float | None) -> dict[str, Any]:
+    async def _place_market_order_async(self, *, symbol: str, side: str, quote: float | None, quantity: float | None, market: str | None = None) -> dict[str, Any]:
         # Venue routing is now handled at the app level - just pass to core function
-        return await _place_market_order_async_core(symbol, side, quote, quantity, self._portfolio)
-    async def market_quantity(self, symbol: str, side: Side, quantity: float) -> dict[str, Any]:
+        ctx = getattr(self, "_strategy_pending_meta", None)
+        market_hint = market
+        if market_hint is None and isinstance(ctx, dict):
+            market_hint = ctx.get("market") or ((ctx.get("meta") or {}).get("market"))
+        return await _place_market_order_async_core(symbol, side, quote, quantity, self._portfolio, market=market_hint)
+    async def market_quantity(self, symbol: str, side: Side, quantity: float, market: str | None = None) -> dict[str, Any]:
         """Backwards compatibility for existing code"""
         # For now, assume Binance if not specified
         if not "." in symbol:
             symbol = f"{symbol}.BINANCE"
-        return await self._place_market_order_async(symbol=symbol, side=side, quote=None, quantity=quantity)
+        result = await self._place_market_order_async(symbol=symbol, side=side, quote=None, quantity=quantity, market=market)
+        await self._maybe_emit_fill(result, symbol, side, venue=symbol.split(".")[1] if "." in symbol else self._venue, intent="")
+        return result
+
+    async def _maybe_emit_fill(self, res: dict[str, Any], symbol: str, side: Side, *, venue: str, intent: str) -> None:
+        emit = getattr(self, "_emit_fill", None)
+        if not callable(emit):
+            return
+        try:
+            emit(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)
+        except Exception:
+            pass
 
     # ---- Safe router wrappers (capability-checked, no-throw) ----
     async def list_open_entries(self) -> list[dict]:
@@ -253,8 +328,15 @@ class OrderRouter:
         api_fn = getattr(client, "amend_reduce_only_stop", None)
         if api_fn is None:
             return
+        clean_symbol = symbol.split(".")[0]
+        params = dict(symbol=clean_symbol, side=side, stop_price=float(stop_price), quantity=float(qty))
         try:
-            res = api_fn(symbol=symbol, side=side, stop_price=float(stop_price), quantity=float(qty))
+            if "close_position" in api_fn.__code__.co_varnames:  # type: ignore[attr-defined]
+                params["close_position"] = True  # type: ignore[index]
+        except Exception:
+            pass
+        try:
+            res = api_fn(**params)
             if hasattr(res, "__await__"):
                 await res
         except Exception as e:
@@ -264,22 +346,26 @@ class OrderRouter:
                 return
             return
 
-    async def place_reduce_only_market(self, symbol: str, side: Side, qty: float):
+    async def place_reduce_only_market(self, symbol: str, side: Side, qty: float, market: str | None = None):
         client = _CLIENTS.get(self._venue)
         if client is None:
             return None
         api_fn = getattr(client, "place_reduce_only_market", None)
         if api_fn is None:
             return None
+        clean_symbol = symbol.split(".")[0]
         try:
-            res = api_fn(symbol=symbol, side=side, quantity=float(qty))
+            if market is not None and "market" in api_fn.__code__.co_varnames:  # type: ignore[attr-defined]
+                res = api_fn(symbol=clean_symbol, side=side, quantity=float(qty), market=market)
+            else:
+                res = api_fn(symbol=clean_symbol, side=side, quantity=float(qty))
             if hasattr(res, "__await__"):
                 res = await res
             return res
         except Exception:
             return None
 
-    async def _quote_to_quantity(self, symbol: str, side: Side, quote: float) -> float:
+    async def _quote_to_quantity(self, symbol: str, side: Side, quote: float, *, market: str | None = None) -> float:
         venue = symbol.split(".")[1] if "." in symbol else None
         base = symbol.split(".")[0].upper()
 
@@ -291,7 +377,8 @@ class OrderRouter:
         if client is None:
             raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
 
-        px = await _resolve_last_price(client, venue, base, symbol)
+        market_hint = market.lower() if isinstance(market, str) and market else None
+        px = await _resolve_last_price(client, venue, base, symbol, market=market_hint)
         if px is None or px <= 0:
             raise ValueError(f"NO_PRICE: No last price for {symbol}")
 
@@ -356,7 +443,7 @@ def _normalize_symbol(symbol: str) -> str:
     return symbol.split(".")[0].upper()
 
 
-async def _place_market_order_async_core(symbol: str, side: str, quote: float | None, quantity: float | None, portfolio: Optional[Portfolio]) -> dict[str, Any]:
+async def _place_market_order_async_core(symbol: str, side: str, quote: float | None, quantity: float | None, portfolio: Optional[Portfolio], *, market: str | None = None) -> dict[str, Any]:
     # Decide venue
     venue = symbol.split(".")[1] if "." in symbol else None
     base = symbol.split(".")[0].upper()
@@ -370,7 +457,9 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
     if client is None:
         raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
 
-    px = await _resolve_last_price(client, venue, base, symbol)
+    market_hint: str | None = market.lower() if isinstance(market, str) and market else None
+
+    px = await _resolve_last_price(client, venue, base, symbol, market=market_hint)
     if px is None or px <= 0:
         raise ValueError(f"NO_PRICE: No last price for {symbol}")
 
@@ -451,7 +540,10 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
             if submit is None:
                 raise ValueError("CLIENT_MISSING_METHOD: submit_market_quote")
             t0 = time.time()
-            res = await submit(symbol=clean_symbol, side=side, quote=quote)
+            if venue == "BINANCE" and market_hint is not None and "market" in submit.__code__.co_varnames:  # type: ignore[attr-defined]
+                res = await submit(symbol=clean_symbol, side=side, quote=quote, market=market_hint)
+            else:
+                res = await submit(symbol=clean_symbol, side=side, quote=quote)
             t1 = time.time()
         else:
             submit = getattr(client, "submit_market_order", None)
@@ -460,10 +552,19 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
             if submit is None:
                 raise ValueError("CLIENT_MISSING_METHOD: submit_market_order")
             t0 = time.time()
-            res = submit(symbol=clean_symbol, side=side, quantity=float(quantity))
+            if venue == "BINANCE" and market_hint is not None and "market" in submit.__code__.co_varnames:  # type: ignore[attr-defined]
+                res = submit(symbol=clean_symbol, side=side, quantity=float(quantity), market=market_hint)
+            else:
+                res = submit(symbol=clean_symbol, side=side, quantity=float(quantity))
             if hasattr(res, "__await__"):
                 res = await res
             t1 = time.time()
+
+        # Futures API commonly reports NEW+executedQty=0 even when filled; quickly re-query
+        try:
+            await _maybe_refresh_order_status(res, client, venue, clean_symbol, market_hint)
+        except Exception:
+            pass
 
         try:
             REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
@@ -471,8 +572,17 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
             pass
 
         fee_bps = load_fee_config(venue).taker_bps
-        filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or quantity)
-        avg_price = float(res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", px))
+        filled_qty = _as_float(res.get("executedQty"))
+        if filled_qty <= 0:
+            filled_qty = _as_float(res.get("filled_qty_base"))
+        if filled_qty <= 0 and quantity is not None:
+            filled_qty = float(quantity)
+        fills = res.get("fills", [{}])
+        avg_price = _as_float(res.get("avg_fill_price"))
+        if avg_price <= 0 and fills:
+            avg_price = _as_float(fills[0].get("price"))
+        if avg_price <= 0:
+            avg_price = float(px)
         fill_notional = abs(filled_qty) * avg_price
         fee = (fee_bps / 10_000.0) * fill_notional
         res.setdefault("filled_qty_base", filled_qty)
@@ -498,6 +608,8 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
     res["fee_usd"] = float(fee)
     res["rounded_qty"] = round(float(quantity), 8)
     res["venue"] = venue
+    if market_hint:
+        res.setdefault("market", market_hint)
     # Feature-gated slippage telemetry and policy (log-only)
     try:
         import os, logging
@@ -506,7 +618,7 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
         last_px = float(px)
         avg_px = float(res.get("avg_fill_price") or last_px)
         slip_bps = abs(avg_px - last_px) / max(last_px, 1e-12) * 10_000.0
-        is_fut = (venue.upper() == "BINANCE" and os.getenv("BINANCE_MODE", "").lower().startswith("futures")) or venue.upper() == "KRAKEN"
+        is_fut = (venue.upper() == "BINANCE" and ((market_hint == "futures") or (market_hint is None and os.getenv("BINANCE_MODE", "").lower().startswith("futures")))) or venue.upper() == "KRAKEN"
         cap = cap_fut if is_fut else cap_spot
         if slip_bps > cap:
             logging.getLogger(__name__).warning(
@@ -550,10 +662,13 @@ def _round_step_up(value: float, step: float) -> float:
     return math.ceil(value * factor) / factor
 
 
-async def _resolve_last_price(client, venue: str, base: str, symbol: str) -> float | None:
+async def _resolve_last_price(client, venue: str, base: str, symbol: str, *, market: str | None = None) -> float | None:
     getter = getattr(client, "get_last_price", None)
     if callable(getter):
-        price = getter(symbol)
+        try:
+            price = getter(symbol, market=market)
+        except TypeError:
+            price = getter(symbol)
         if hasattr(price, "__await__"):
             price = await price
         return price
@@ -561,7 +676,10 @@ async def _resolve_last_price(client, venue: str, base: str, symbol: str) -> flo
     ticker = getattr(client, "ticker_price", None)
     if callable(ticker):
         clean = base if venue == "BINANCE" else symbol
-        price = ticker(clean)
+        try:
+            price = ticker(clean, market=market)
+        except TypeError:
+            price = ticker(clean)
         if hasattr(price, "__await__"):
             price = await price
         return price
@@ -683,11 +801,11 @@ class OrderRouterExt(OrderRouter):
             return await self.fetch_account_snapshot()
         return self._last_snapshot
 
-    async def limit_quote(self, symbol: str, side: Side, quote: float, price: float, time_in_force: str = "IOC") -> dict[str, Any]:
-        qty = await self._quote_to_quantity(symbol, side, quote)
-        return await self.limit_quantity(symbol, side, qty, price, time_in_force)
+    async def limit_quote(self, symbol: str, side: Side, quote: float, price: float, time_in_force: str = "IOC", *, market: str | None = None) -> dict[str, Any]:
+        qty = await self._quote_to_quantity(symbol, side, quote, market=market)
+        return await self.limit_quantity(symbol, side, qty, price, time_in_force, market=market)
 
-    async def limit_quantity(self, symbol: str, side: Side, quantity: float, price: float, time_in_force: str = "IOC") -> dict[str, Any]:
+    async def limit_quantity(self, symbol: str, side: Side, quantity: float, price: float, time_in_force: str = "IOC", *, market: str | None = None) -> dict[str, Any]:
         # Decide venue
         venue = symbol.split(".")[1] if "." in symbol else None
         base = symbol.split(".")[0].upper()
@@ -729,7 +847,7 @@ class OrderRouterExt(OrderRouter):
 
         # Notional
         # Use cached/last px for notional; for limit, approximate with limit price
-        px_for_notional = p_rounded if p_rounded > 0 else (await _resolve_last_price(client, venue, base, symbol) or 0)
+        px_for_notional = p_rounded if p_rounded > 0 else (await _resolve_last_price(client, venue, base, symbol, market=market.lower() if isinstance(market, str) and market else None) or 0)
         notional = abs(q_rounded) * float(px_for_notional)
         min_notional = spec.min_notional
         if venue == "IBKR":
@@ -821,7 +939,7 @@ class OrderRouterExt(OrderRouter):
             ref = float(last_px)
             improve_bps = float(os.getenv("MAKER_PRICE_IMPROVE_BPS", "1"))
             improve = ref * improve_bps / 10_000.0
-            limit_px = (ref - improve) if side == "BUY" else (ref + improve)
+            limit_px = (ref - improve) if side.upper() == "BUY" else (ref + improve)
             tif = "IOC" if (venue.lower() == "futures" or os.getenv("BINANCE_MODE", "").lower().startswith("futures")) else "GTC"
             logging.getLogger(__name__).info(
                 "[SCALP:MAKER:SHADOW] %s %s qty=%s px=%.8f tif=%s", symbol, side, qty, limit_px, tif
@@ -855,7 +973,7 @@ class OrderRouterExt(OrderRouter):
                 out.append({"symbol": sym, "qty": qty})
         except Exception:
             return []
-        return out
+        return []
 
     async def set_trading_enabled(self, enabled: bool):
         try:
@@ -977,6 +1095,30 @@ class _MDAdapter:
                     "filled_qty": float(filled),
                     "avg_price": float(avg),
                 }
+                ctx = getattr(self, "_strategy_pending_meta", None)
+                if isinstance(ctx, dict):
+                    meta = ctx.get("meta")
+                    if isinstance(meta, dict):
+                        payload["strategy_meta"] = meta
+                    tag = ctx.get("tag")
+                    if tag is not None:
+                        payload["strategy_tag"] = tag
+                    ctx_side = ctx.get("side")
+                    if ctx_side is not None:
+                        payload["strategy_side"] = ctx_side
+                    ctx_symbol = ctx.get("symbol")
+                    if ctx_symbol is not None:
+                        payload["strategy_symbol"] = ctx_symbol
+                    try:
+                        if getattr(self, "_strategy_pending_meta", None) is ctx:
+                            delattr(self, "_strategy_pending_meta")
+                    except AttributeError:
+                        pass
+                    except Exception:
+                        try:
+                            setattr(self, "_strategy_pending_meta", None)
+                        except Exception:
+                            pass
                 bus.fire("trade.fill", payload)
         except Exception:
             pass

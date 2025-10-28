@@ -3,8 +3,9 @@
 ## TL;DR
 - Multi‑venue execution engine (`engine/app.py`) with Binance/Kraken adapters, in‑memory portfolio, persistence, reconciliation, and real‑time tick routing into the MA/HMM ensemble
 - Risk rails and breakers (exposure caps, equity floor/drawdown, venue error‑rate) with rich metrics
-- Event‑driven modules: Event Breakout (dry‑run first), Stop Validator (server‑side SL fixups), Guards (Depeg, Funding)
-- Observability: Prometheus/Grafana dashboards, Telegram digest/alerts, BUS‑driven events (e.g., `trade.fill`, `health.state`)
+- Event-driven modules: Event Breakout (dry-run first), Stop Validator (server-side SL fixups), Guards (Depeg, Funding)
+- Adaptive trend stack: SMA/RSI/ATR module with auto-tuning (`TREND_AUTO_TUNE_*`) and optional symbol scanner that keeps the shortlist fresh
+- Observability: Prometheus/Grafana dashboards, Telegram digest/alerts, BUS-driven events (e.g., `trade.fill`, `health.state`)
 - Feature‑gated flags so you can dark‑launch each module safely
 
 ## Service Topology
@@ -110,7 +111,7 @@ curl -sG --data-urlencode 'query=histogram_quantile(0.95, rate(strategy_tick_to_
 
 ## Strategy & Modules
 
-The MA+HMM ensemble uses a shared calibration profile so backtests and live trading stay aligned. Create/adjust `engine/models/hmm_calibration.json` (or `HMM_CALIBRATION_PATH`) with per‑symbol overrides:
+The MA+HMM ensemble uses a shared calibration profile so backtests and live trading stay aligned. Create/adjust `engine/models/hmm_calibration.json` (or `HMM_CALIBRATION_PATH`) with per-symbol overrides:
 
 ```json
 {
@@ -139,3 +140,8 @@ To profile end‑to‑end: target median `strategy_tick_to_order_latency_ms` < 1
  - hmm_operator_handbook.md — strategy‑operator playbook and ML service notes
 
 Keep documentation up to date when adding venues, strategies, or governance features—this README should always describe what actually runs in `docker-compose.yml`.
+
+### Trend auto-tune + symbol scanner
+- Enable the adaptive trend module with `TREND_ENABLED=true` (keep `TREND_DRY_RUN=true` until you are ready to fire orders). Flip `TREND_AUTO_TUNE_ENABLED=true` to let it log every trade to `data/runtime/trend_auto_tune.json`, monitor rolling win-rate, and gently adjust RSI windows, ATR stop/target multiples, and cooldown bars (knobs: `TREND_AUTO_TUNE_MIN_TRADES`, `..._INTERVAL`, `..._STOP_MIN/MAX`, `..._WIN_LOW/HIGH`). Logs show `[TREND-AUTO] params=...` when an adjustment happens.
+- Switch on `SYMBOL_SCANNER_ENABLED=true` to let the symbol scanner periodically rank the configured universe (`SYMBOL_SCANNER_UNIVERSE`) using momentum/ATR/liquidity filters. Only the top `SYMBOL_SCANNER_TOP_N` symbols are routed into the trend module; the shortlist persists to `data/runtime/symbol_scanner_state.json` and exposes Prometheus metrics (`symbol_scanner_score`, `symbol_scanner_selected_total`).
+- Leave both flags off to fall back to the static `TREND_SYMBOLS` list.

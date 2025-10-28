@@ -24,7 +24,8 @@ DEX_API = os.getenv("DEXSCREENER_API", "https://api.dexscreener.com/latest/dex/t
 @dataclass
 class DexCandidate:
     chain: str
-    addr: str
+    token_address: str
+    pair_address: str
     symbol: str
     name: str
     price_usd: float
@@ -47,7 +48,8 @@ def _as_float(v, default=0.0) -> float:
 def _tier_for(item: Dict[str, Any]) -> Optional[DexCandidate]:
     # Extract required fields with defaults
     chain = str(item.get("chainId") or item.get("chain") or "?")
-    addr = str(item.get("address") or item.get("pairAddress") or item.get("id") or "")
+    token_addr = str((base.get("address") if isinstance(base, dict) else None) or item.get("baseTokenAddress") or "")
+    pair_addr = str(item.get("pairAddress") or item.get("address") or item.get("id") or "")
     base = (item.get("baseToken") or {})
     symbol = str(base.get("symbol") or item.get("symbol") or "?")
     name = str(base.get("name") or item.get("name") or symbol)
@@ -71,7 +73,8 @@ def _tier_for(item: Dict[str, Any]) -> Optional[DexCandidate]:
     # A more complete implementation would check social surge; placeholder keeps Tier B
     return DexCandidate(
         chain=chain,
-        addr=addr,
+        token_address=token_addr,
+        pair_address=pair_addr,
         symbol=symbol,
         name=name,
         price_usd=price,
@@ -118,16 +121,28 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
             cands = await fetch_top_gainers()
             for c in cands[:5]:
                 tier = "A" if social_roc(c.symbol) >= 2.5 else c.tier
-                await publish_strategy_event("dex_candidate", {
-                    "symbol": c.symbol,
-                    "chain": c.chain,
-                    "addr": c.addr,
-                    "tier": tier,
-                    "mcap": c.mcap_usd,
-                    "liq": c.liquidity_usd,
-                    "vol1h": c.vol_1h,
-                    "chg5m": c.change_5m,
-                })
+                await publish_strategy_event(
+                    "dex_candidate",
+                    {
+                        "symbol": c.symbol,
+                        "chain": c.chain,
+                        "addr": c.token_address,
+                        "pair": c.pair_address,
+                        "tier": tier,
+                        "price": c.price_usd,
+                        "mcap": c.mcap_usd,
+                        "liq": c.liquidity_usd,
+                        "vol1h": c.vol_1h,
+                        "vol24h": c.vol_24h,
+                        "chg5m": c.change_5m,
+                        "holders": c.holders,
+                        "meta": {
+                            "source": "dexscreener",
+                            "tier_raw": c.tier,
+                            "volume_ratio": (c.vol_1h / max((c.vol_24h / 24) or 1.0, 1e-9)),
+                        },
+                    },
+                )
         except Exception:
             pass
         await asyncio.sleep(poll_sec)

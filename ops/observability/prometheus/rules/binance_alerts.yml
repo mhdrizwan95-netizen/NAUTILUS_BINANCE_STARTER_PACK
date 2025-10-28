@@ -1,0 +1,33 @@
+groups:
+- name: binance-core
+  interval: 15s
+  rules:
+  - alert: BinanceTelemetryStale
+    expr: risk_metrics_freshness_sec > 120
+    for: 1m
+    labels:
+      severity: warning
+      venue: binance
+    annotations:
+      summary: "Binance telemetry stale"
+      description: "risk_metrics_freshness_sec={{ $value }}s > 120s"
+
+  - alert: BinanceExposureHeadroomLow
+    expr: risk_exposure_headroom_usd{venue="binance"} < 100
+    for: 30s
+    labels:
+      severity: warning
+      venue: binance
+    annotations:
+      summary: "Exposure headroom low"
+      description: "Headroom {{ $value | humanize }} USD < 100"
+
+  - alert: BinanceFillsObserved5m
+    expr: increase(orders_filled_total[5m]) > 0
+    for: 0m
+    labels:
+      severity: info
+      venue: binance
+    annotations:
+      summary: "Fills observed (5m)"
+      description: "Fills in the last 5 minutes: {{ $value }}"

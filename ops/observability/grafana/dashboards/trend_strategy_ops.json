@@ -1,0 +1,251 @@
+{
+  "id": null,
+  "uid": "trend-strategy-ops",
+  "title": "Trend Strategy Ops",
+  "tags": [
+    "trend",
+    "strategy"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "15s",
+  "time": {
+    "from": "now-12h",
+    "to": "now"
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "venue",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "refresh": 2,
+        "hide": 0,
+        "query": "label_values(trend_follow_signals_total, venue)",
+        "current": {
+          "text": "BINANCE",
+          "value": "BINANCE"
+        }
+      },
+      {
+        "name": "symbol",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "refresh": 2,
+        "hide": 0,
+        "includeAll": true,
+        "multi": true,
+        "query": "label_values(trend_follow_signals_total{venue=\"$venue\"}, symbol)",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Trend Signals Rate (5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (symbol) (rate(trend_follow_signals_total{venue=~\"$venue\", symbol=~\"$symbol\"}[5m]))",
+          "legendFormat": "{{symbol}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        }
+      }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Trades by Outcome (24h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (result) (increase(trend_follow_trades_total{venue=~\"$venue\", symbol=~\"$symbol\"}[24h]))",
+          "legendFormat": "{{result}}"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "barchart",
+      "title": "Stop Distance Distribution (bps, 24h)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (le) (increase(trend_follow_stop_distance_bp_bucket{venue=~\"$venue\", symbol=~\"$symbol\"}[24h]))",
+          "legendFormat": "{{le}} bps"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bps"
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "histogram",
+      "title": "Trade PnL % Histogram (30d)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (le, result) (increase(trend_follow_trade_pnl_pct_bucket{venue=~\"$venue\", symbol=~\"$symbol\"}[30d]))",
+          "legendFormat": "{{result}} <= {{le}}%"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Strategy Orders (Trend sources, 5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (source) (rate(strategy_orders_total{venue=~\"$venue\", symbol=~\"$symbol\", source=~\"trend.*\"}[5m]))",
+          "legendFormat": "{{source}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "stat",
+      "title": "Breaker State",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 5
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "breaker_state"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "Closed"
+                },
+                "1": {
+                  "text": "Tripped"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

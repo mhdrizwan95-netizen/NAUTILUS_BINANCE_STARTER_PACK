@@ -1,14 +1,14 @@
 {
   "metrics": {
-    "pnl_realized": 0.0,
-    "pnl_unrealized": -37268.441290004455,
+    "pnl_realized": 9.655422376860589,
+    "pnl_unrealized": 26.918330395324993,
     "drift_score": 0.0,
     "policy_confidence": 0.0,
     "order_fill_ratio": 0.0,
     "venue_latency_ms": 0.0,
-    "account_equity_usd": -32346.558617744457,
-    "cash_usd": 4921.88267226,
-    "gross_exposure_usd": 0.0
+    "account_equity_usd": 599.977295065325,
+    "cash_usd": 573.05896467,
+    "gross_exposure_usd": 1168.1684
   },
-  "ts": 1760814134.2904007
+  "ts": 1761527827.178873
 }

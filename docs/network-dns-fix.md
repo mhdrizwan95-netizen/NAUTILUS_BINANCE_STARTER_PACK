@@ -53,6 +53,67 @@ shows value > 0 after a trade.
 
 ⸻
 
+## 🔗 Ops ↔ Engine DNS Fix (Name or service not known)
+
+If `ops` logs show `engine poll error: [Errno -2] Name or service not known`, the Ops API container cannot resolve engine hostnames (e.g., `engine_binance`). Root cause is the `ops` service not being on the same user-defined network.
+
+Fix:
+- Ensure `ops` (and any helpers that talk to engines/extras like `situations`, `screener`, `executor`) are attached to the same network as engines.
+- In `docker-compose.yml`, add:
+
+```yaml
+services:
+  ops:
+    networks:
+      - trading_net
+  engine_bybit:
+    networks:
+      - trading_net
+  universe:
+    networks:
+      - trading_net
+  situations:
+    networks:
+      - trading_net
+  screener:
+    networks:
+      - trading_net
+  executor:
+    networks:
+      - trading_net
+  vol_ranker:
+    networks:
+      - trading_net
+  backfill:
+    networks:
+      - trading_net
+  slip_trainer:
+    networks:
+      - trading_net
+
+networks:
+  trading_net:
+    external: true
+    name: nautilus_trading_network
+```
+
+Then restart:
+
+```bash
+docker compose down
+docker compose up -d
+```
+
+Validate from inside `ops` container:
+
+```bash
+docker compose exec ops sh -lc 'wget -qO- http://engine_binance:8003/health && echo'
+```
+
+If this returns `{"ok": true}` or similar, DNS is fixed.
+
+⸻
+
 🧠 Lessons for Future Venues
 • Always place new services that Prometheus will scrape on the same user-defined network as Prometheus to ensure DNS name resolution works.
 • Align service names/hostnames in compose, targets, and dashboard queries so there are no mismatches in labels (job, venue, instance).
@@ -64,3 +125,13 @@ shows value > 0 after a trade.
 📋 Commit This File
 
 Add this file to the repo (e.g., docs/network-dns-fix.md) and include in your project's documentation section. This will serve as a reference for the next time you wire up a new venue (e.g., Bybit, IBKR) or new exporter service.
+
+⸻
+
+📡 Telegram DNS Sanity Check
+
+When local DNS is flaky (e.g., curl: Could not resolve host), use the built-in helper to send a Telegram test message. It automatically falls back to an IP override if DNS resolution fails:
+
+make telegram-ping
+
+Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID in your environment or in .env.

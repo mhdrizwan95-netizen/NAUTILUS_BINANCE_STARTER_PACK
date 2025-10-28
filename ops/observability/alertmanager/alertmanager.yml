@@ -1,0 +1,21 @@
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: telegram
+  group_by: ['alertname']
+  group_wait: 10s
+  group_interval: 2m
+  repeat_interval: 2h
+
+receivers:
+  - name: telegram
+    telegram_configs:
+      - bot_token: 8144814070:AAH4ruTnWt2jEOLGsFoZRTo8sNSmiZhspEw
+        chat_id: 448249054
+        parse_mode: Markdown
+        message: |
+          *{{ .Status | toUpper }}* {{ .CommonLabels.alertname }}\n
+          {{ range .Alerts }}• {{ .Annotations.summary }}\n{{ if .Annotations.description }}  _{{ .Annotations.description }}_\n{{ end }}{{ end }}
+        disable_notifications: false
+

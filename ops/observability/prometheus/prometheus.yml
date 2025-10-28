@@ -2,9 +2,15 @@ global:
   scrape_interval: 5s
   evaluation_interval: 15s
 
+alerting:
+  alertmanagers:
+  - static_configs:
+    - targets: ["alertmanager:9093"]
+
 rule_files:
   - rules/trading.rules.yml
   - rules/alerts.rules.yml
+  - rules/binance_alerts.yml
   - rules/trading.yml   # your existing rules
 
 scrape_configs:

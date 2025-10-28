@@ -66,7 +66,11 @@ async def last_prices() -> Dict[str, float]:
     for s in configured_universe():
         symbol = s.replace("USDT", "")
         if symbol in _price_map:
-            out[s] = _price_map[symbol]
+            raw = _price_map[symbol]
+            if isinstance(raw, dict):
+                out[s] = float(raw.get("markPrice", 0.0) or 0.0)
+            else:
+                out[s] = float(raw or 0.0)
             continue
         # Fallback to per-symbol fetch
         try:

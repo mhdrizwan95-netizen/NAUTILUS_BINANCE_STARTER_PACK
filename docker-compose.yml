@@ -8,12 +8,15 @@ x-engine-common: &engine_common
     dockerfile: Dockerfile
   command: >
     /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port ${ENGINE_PORT:-8003} --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
+  dns:
+    - 1.1.1.1
+    - 8.8.8.8
   environment:
     <<: *env_common
     # Common trading parameters
     TRADING_ENABLED: ${TRADING_ENABLED:-true}
     MIN_NOTIONAL_USDT: ${MIN_NOTIONAL_USDT:-5}
-    MAX_NOTIONAL_USDT: ${MAX_NOTIONAL_USDT:-200}
+    MAX_NOTIONAL_USDT: ${MAX_NOTIONAL_USDT:-400}
     MAX_ORDERS_PER_MIN: ${MAX_ORDERS_PER_MIN:-30}
     TRADE_SYMBOLS: ${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
     DUST_THRESHOLD_USD: ${DUST_THRESHOLD_USD:-2}
@@ -54,10 +57,11 @@ services:
       - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-      - TRADE_SYMBOLS=*
+      - TRADE_SYMBOLS=${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
       - BINANCE_API_TIMEOUT=15
       - BINANCE_RECV_WINDOW=60000
       - ENGINE_PORT=8003
+      - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
     volumes:
       - ./engine/state:/app/engine/state:rw
       - ./engine/logs:/app/engine/logs:rw
@@ -83,10 +87,11 @@ services:
       - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-      - TRADE_SYMBOLS=*      # ✅ Allow ALL symbols dynamically
+      - TRADE_SYMBOLS=${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
       - BINANCE_API_TIMEOUT=15       # more tolerant to slow networks
       - BINANCE_RECV_WINDOW=60000    # tolerant to clock skew
       - ENGINE_PORT=8003
+      - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
     volumes:
       - ./engine/state:/app/engine/state:rw
       - ./engine/logs:/app/engine/logs:rw
@@ -98,10 +103,10 @@ services:
     command: >
       /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 1024
     healthcheck:
-      # More lenient healthcheck to debug the timeout issue
-      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 10 http://localhost:8003/health >/dev/null"]
+      # Prefer cheap readiness endpoint to avoid transient timeouts
+      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 5 http://localhost:8003/readyz >/dev/null"]
       interval: 10s
-      timeout: 10s
+      timeout: 6s
       retries: 10
       start_period: 30s
 
@@ -199,6 +204,29 @@ services:
     command: >
       /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
 
+  strategy_runtime:
+    <<: *engine_common
+    container_name: hmm_strategy_runtime
+    profiles: ["strategy-runtime"]
+    env_file: .env
+    environment:
+      - ROLE=strategy_runtime
+      - VENUE=BINANCE
+      - RUNTIME_CONFIG_PATH=/app/config/runtime.yaml
+      - STRATEGY_DRY_RUN=true
+    volumes:
+      - ./config:/app/config:rw
+      - ./engine/logs:/app/engine/logs:rw
+    networks:
+      - trading_net
+    command: >
+      /usr/bin/tini -- python -m engine.runtime.service
+    healthcheck:
+      test: ["CMD", "sh", "-lc", "pgrep -f engine.runtime.service >/dev/null"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+
 
   engine_bybit:
     <<: *engine_common
@@ -219,6 +247,8 @@ services:
     ports:
       - "8004:8003"
       - "9104:9104"
+    networks:
+      - trading_net
 
 # Legacy single-engine service for backward compatibility (commented out)
 # engine:
@@ -262,6 +292,9 @@ services:
       ENGINE_BASE: "http://engine_binance:8003"
       ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS}"
 
+      # Situations SSE (use service name DNS)
+      SITUATIONS_SSE_URL: "http://situations:8011/events/stream"
+
       OPS_METRICS_PORT: "${OPS_METRICS_PORT:-9102}"
 
       # --- Binance mode & creds ---
@@ -279,11 +312,12 @@ services:
     ports:
       - "${OPS_PORT:-8002}:8002"
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8002/readyz | grep -q '\"ok\":true'"]
-      interval: 10s
-      timeout: 3s
+      # Allow for engine proxy call in /readyz (httpx default 5s) and avoid false timeouts
+      test: ["CMD-SHELL", "curl -fsS --max-time 8 http://127.0.0.1:8002/readyz | grep -q '\"ok\":true'"]
+      interval: 15s
+      timeout: 10s
       retries: 10
-      start_period: 10s
+      start_period: 15s
     depends_on:
       engine_binance:
         condition: service_healthy
@@ -291,6 +325,8 @@ services:
         condition: service_healthy
       engine_bybit:
         condition: service_healthy
+    networks:
+      - trading_net
 
   universe:
     build:
@@ -301,6 +337,8 @@ services:
       /usr/bin/tini -- uvicorn universe.service:APP --host 0.0.0.0 --port 8009
     ports:
       - "8009:8009"
+    networks:
+      - trading_net
 
   situations:
     build:
@@ -311,6 +349,8 @@ services:
       /usr/bin/tini -- uvicorn situations.service:APP --host 0.0.0.0 --port 8011
     ports:
       - "8011:8011"
+    networks:
+      - trading_net
 
   screener:
     build:
@@ -324,6 +364,8 @@ services:
     depends_on:
       - universe
       - situations
+    networks:
+      - trading_net
 
   executor:
     build:
@@ -374,6 +416,8 @@ services:
       engine_binance:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - trading_net
 
   vol_ranker:
     build:
@@ -388,6 +432,8 @@ services:
       engine_binance:
         condition: service_healthy
     restart: unless-stopped
+    networks:
+      - trading_net
 
   backfill:
     build:
@@ -403,6 +449,8 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Riyadh
+    networks:
+      - trading_net
 
   slip_trainer:
     build:
@@ -414,6 +462,8 @@ services:
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+    networks:
+      - trading_net
 
 networks:
   trading_net:

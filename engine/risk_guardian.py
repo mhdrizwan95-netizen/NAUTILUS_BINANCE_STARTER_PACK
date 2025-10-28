@@ -117,10 +117,10 @@ class RiskGuardian:
                     pass
             except Exception as e:
                 # Soft-fail to avoid killing the loop
-            try:
-                MET.get("engine_venue_errors_total").labels(venue="guard", error="LOOP_ERROR").inc()
-            except Exception:
-                pass
+                try:
+                    MET.get("engine_venue_errors_total").labels(venue="guard", error="LOOP_ERROR").inc()
+                except Exception:
+                    pass
             dt = max(0.0, self.cfg.poll_sec - (time.time() - t0))
             await asyncio.sleep(dt)
 

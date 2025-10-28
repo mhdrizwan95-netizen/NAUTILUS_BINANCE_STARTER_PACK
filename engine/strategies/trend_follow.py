@@ -1,0 +1,535 @@
+from __future__ import annotations
+
+import logging
+import os
+import time
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+
+import httpx
+
+from engine.config import get_settings
+from engine.core.market_resolver import resolve_market
+from .trend_params import TrendParams, TrendAutoTuner
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .symbol_scanner import SymbolScanner
+
+_TIMEFRAME_SECONDS = {
+    "15m": 15 * 60,
+    "1h": 60 * 60,
+    "4h": 4 * 60 * 60,
+    "1d": 24 * 60 * 60,
+}
+
+
+def _as_bool(value: Optional[str], default: bool) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _as_float(value: Optional[str], default: float) -> float:
+    try:
+        return float(value) if value is not None else default
+    except ValueError:
+        return default
+
+
+def _as_int(value: Optional[str], default: int) -> int:
+    try:
+        return int(float(value)) if value is not None else default
+    except ValueError:
+        return default
+
+
+def _split_symbols(value: Optional[str]) -> List[str]:
+    if not value:
+        return []
+    out = []
+    for token in value.split(","):
+        token = token.strip().upper()
+        if not token:
+            continue
+        base = token.split(".")[0]
+        out.append(base)
+    return sorted(set(out))
+
+
+@dataclass(frozen=True)
+class TrendTF:
+    interval: str
+    fast: int
+    slow: int
+    rsi_length: int = 14
+
+
+@dataclass(frozen=True)
+class TrendStrategyConfig:
+    enabled: bool
+    dry_run: bool
+    symbols: List[str]
+    fetch_limit: int
+    refresh_sec: int
+    atr_length: int
+    atr_stop_mult: float
+    atr_target_mult: float
+    swing_lookback: int
+    rsi_long_min: float
+    rsi_long_max: float
+    rsi_exit: float
+    risk_pct: float
+    min_quote_usd: float
+    fallback_equity_usd: float
+    cooldown_bars: int
+    allow_shorts: bool
+    auto_tune_enabled: bool
+    auto_tune_min_trades: int
+    auto_tune_interval: int
+    auto_tune_history: int
+    auto_tune_win_low: float
+    auto_tune_win_high: float
+    auto_tune_stop_min: float
+    auto_tune_stop_max: float
+    auto_tune_state_path: str
+    primary: TrendTF
+    secondary: TrendTF
+    regime: TrendTF
+
+
+def load_trend_config() -> TrendStrategyConfig:
+    symbols = _split_symbols(os.getenv("TREND_SYMBOLS") or os.getenv("TRADE_SYMBOLS"))
+    if not symbols:
+        symbols = ["BTCUSDT"]
+    primary = TrendTF(
+        interval=os.getenv("TREND_PRIMARY_INTERVAL", "4h"),
+        fast=_as_int(os.getenv("TREND_PRIMARY_FAST"), 50),
+        slow=_as_int(os.getenv("TREND_PRIMARY_SLOW"), 200),
+        rsi_length=_as_int(os.getenv("TREND_PRIMARY_RSI"), 14),
+    )
+    secondary = TrendTF(
+        interval=os.getenv("TREND_SECONDARY_INTERVAL", "1h"),
+        fast=_as_int(os.getenv("TREND_SECONDARY_FAST"), 100),
+        slow=_as_int(os.getenv("TREND_SECONDARY_SLOW"), 400),
+        rsi_length=_as_int(os.getenv("TREND_SECONDARY_RSI"), 14),
+    )
+    regime = TrendTF(
+        interval=os.getenv("TREND_REGIME_INTERVAL", "1d"),
+        fast=_as_int(os.getenv("TREND_REGIME_FAST"), 50),
+        slow=_as_int(os.getenv("TREND_REGIME_SLOW"), 200),
+        rsi_length=_as_int(os.getenv("TREND_REGIME_RSI"), 14),
+    )
+    return TrendStrategyConfig(
+        enabled=_as_bool(os.getenv("TREND_ENABLED"), False),
+        dry_run=_as_bool(os.getenv("TREND_DRY_RUN"), True),
+        symbols=symbols,
+        fetch_limit=_as_int(os.getenv("TREND_FETCH_LIMIT"), 720),
+        refresh_sec=_as_int(os.getenv("TREND_REFRESH_SEC"), 15 * 60),
+        atr_length=_as_int(os.getenv("TREND_ATR_LENGTH"), 14),
+        atr_stop_mult=_as_float(os.getenv("TREND_ATR_STOP_MULT"), 1.2),
+        atr_target_mult=_as_float(os.getenv("TREND_ATR_TARGET_MULT"), 2.0),
+        swing_lookback=_as_int(os.getenv("TREND_SWING_LOOKBACK"), 3),
+        rsi_long_min=_as_float(os.getenv("TREND_RSI_LONG_MIN"), 52.0),
+        rsi_long_max=_as_float(os.getenv("TREND_RSI_LONG_MAX"), 72.0),
+        rsi_exit=_as_float(os.getenv("TREND_RSI_EXIT"), 80.0),
+        risk_pct=_as_float(os.getenv("TREND_RISK_PCT"), 0.015),
+        min_quote_usd=_as_float(os.getenv("TREND_MIN_QUOTE_USD"), 75.0),
+        fallback_equity_usd=_as_float(os.getenv("TREND_FALLBACK_EQUITY"), 2_000.0),
+        cooldown_bars=_as_int(os.getenv("TREND_COOLDOWN_BARS"), 3),
+        allow_shorts=_as_bool(os.getenv("TREND_ALLOW_SHORTS"), False),
+        auto_tune_enabled=_as_bool(os.getenv("TREND_AUTO_TUNE_ENABLED"), False),
+        auto_tune_min_trades=_as_int(os.getenv("TREND_AUTO_TUNE_MIN_TRADES"), 30),
+        auto_tune_interval=_as_int(os.getenv("TREND_AUTO_TUNE_INTERVAL"), 15),
+        auto_tune_history=_as_int(os.getenv("TREND_AUTO_TUNE_HISTORY"), 200),
+        auto_tune_win_low=_as_float(os.getenv("TREND_AUTO_TUNE_WIN_LOW"), 0.4),
+        auto_tune_win_high=_as_float(os.getenv("TREND_AUTO_TUNE_WIN_HIGH"), 0.65),
+        auto_tune_stop_min=_as_float(os.getenv("TREND_AUTO_TUNE_STOP_MIN"), 0.5),
+        auto_tune_stop_max=_as_float(os.getenv("TREND_AUTO_TUNE_STOP_MAX"), 2.5),
+        auto_tune_state_path=os.getenv("TREND_AUTO_TUNE_STATE_PATH", "data/runtime/trend_auto_tune.json"),
+        primary=primary,
+        secondary=secondary,
+        regime=regime,
+    )
+
+
+def _sma(values: List[float], length: int) -> Optional[float]:
+    if length <= 0 or len(values) < length:
+        return None
+    return sum(values[-length:]) / float(length)
+
+
+def _rsi(values: List[float], length: int) -> Optional[float]:
+    if length <= 1 or len(values) <= length:
+        return None
+    gains = []
+    losses = []
+    for i in range(-length, 0):
+        delta = values[i] - values[i - 1]
+        gains.append(max(delta, 0.0))
+        losses.append(abs(min(delta, 0.0)))
+    avg_gain = sum(gains) / length
+    avg_loss = sum(losses) / length
+    if avg_loss == 0:
+        return 100.0
+    rs = avg_gain / avg_loss
+    return 100.0 - (100.0 / (1.0 + rs))
+
+
+def _atr(klines: List[List[float]], length: int) -> Optional[float]:
+    if length <= 0 or len(klines) <= length:
+        return None
+    trs: List[float] = []
+    prev_close = float(klines[-length - 1][4])
+    for row in klines[-length:]:
+        high = float(row[2])
+        low = float(row[3])
+        close = float(row[4])
+        tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        trs.append(tr)
+        prev_close = close
+    if not trs:
+        return None
+    return sum(trs) / len(trs)
+
+
+def _swing_low(klines: List[List[float]], lookback: int) -> Optional[float]:
+    if lookback <= 0 or len(klines) < lookback:
+        return None
+    lows = [float(row[3]) for row in klines[-lookback:]]
+    if not lows:
+        return None
+    return min(lows)
+
+
+class TrendStrategyModule:
+    """
+    Evaluates multi-timeframe SMA/RSI conditions and emits signals that align with the
+    Trend-following design brief documented in docs/Comprehensive Framework....
+    """
+
+    def __init__(
+        self,
+        cfg: TrendStrategyConfig,
+        *,
+        client: Optional["_SyncKlinesClient"] = None,
+        clock=time,
+        logger: Optional[logging.Logger] = None,
+        scanner: Optional["SymbolScanner"] = None,
+    ) -> None:
+        self.cfg = cfg
+        self.enabled = bool(cfg.enabled)
+        self._client = client or _SyncKlinesClient()
+        self._clock = clock
+        self._log = logger or logging.getLogger("engine.trend")
+        self._scanner = scanner
+        self._params = TrendParams.from_config(cfg)
+        self._auto_tuner = TrendAutoTuner(cfg, self._params, logger=self._log)
+        self._venue = "BINANCE"
+        try:
+            settings = get_settings()
+            self._venue = getattr(settings, "venue", "BINANCE").upper()
+        except Exception:
+            pass
+        self._default_market = "futures" if cfg.allow_shorts else "spot"
+        self._cache: Dict[str, Dict[str, List[List[float]]]] = defaultdict(dict)
+        self._last_fetch: Dict[Tuple[str, str], float] = defaultdict(float)
+        self._state: Dict[str, str] = defaultdict(lambda: "FLAT")
+        self._cooldown_until: Dict[str, float] = defaultdict(float)
+        self._entry_quote: Dict[str, float] = {}
+        self._entry_price: Dict[str, float] = {}
+        self._stop_levels: Dict[str, float] = {}
+        self._targets: Dict[str, float] = {}
+        try:
+            from engine import metrics as MET
+            self._metrics = MET
+        except Exception:
+            self._metrics = None
+
+    # --- public API ---
+    def handle_tick(self, symbol: str, price: float, ts: float) -> Optional[Dict[str, float | str]]:
+        if not self.enabled:
+            return None
+        base = symbol.split(".")[0].upper()
+        if self.cfg.symbols and base not in self.cfg.symbols:
+            return None
+        if self._scanner and not self._scanner.is_selected(base):
+            return None
+
+        now = float(ts)
+        if self._state[base] == "COOLDOWN" and now >= self._cooldown_until.get(base, 0.0):
+            self._state[base] = "FLAT"
+        if self._state[base] == "FLAT" and now < self._cooldown_until.get(base, 0.0):
+            return None
+
+        snap = self._build_snapshot(base)
+        if snap is None:
+            return None
+
+        action: Optional[Dict[str, float | str | Dict[str, float | str]]] = None
+        meta: Dict[str, float | str] = {
+            "primary_fast": snap["primary_fast"],
+            "primary_slow": snap["primary_slow"],
+            "rsi": snap["rsi_primary"],
+            "atr": snap["atr"],
+            "regime_fast": snap["regime_fast"],
+            "regime_slow": snap["regime_slow"],
+        }
+
+        if self._state[base] == "FLAT":
+            if self._long_entry_ready(snap):
+                stop = snap.get("stop")
+                target = snap.get("target")
+                atr = snap.get("atr")
+                if stop is None or target is None or atr is None:
+                    return None
+                quote = self._quote_size(price)
+                if quote <= 0:
+                    return None
+                self._state[base] = "LONG_ACTIVE"
+                self._entry_quote[base] = quote
+                self._entry_price[base] = price
+                self._stop_levels[base] = float(stop)
+                self._targets[base] = float(target)
+                meta.update({"stop": float(stop), "target": float(target), "atr": float(atr)})
+                stop_bps = self._stop_distance_bps(price, float(stop))
+                self._observe_stop_distance(base, stop_bps)
+                self._record_signal(base, "BUY", "entry")
+                market_choice = resolve_market(self._qualify(base), self._default_market)
+                action = {
+                    "symbol": self._qualify(base),
+                    "side": "BUY",
+                    "quote": quote,
+                    "tag": "trend_follow_long",
+                    "meta": meta,
+                    "market": market_choice,
+                }
+        elif self._state[base] == "LONG_ACTIVE":
+            stop = snap.get("stop")
+            target = snap.get("target")
+            if stop is not None:
+                self._stop_levels[base] = max(self._stop_levels.get(base, float(stop)), float(stop))
+            if target is not None:
+                self._targets[base] = float(target)
+            meta.update({"stop": self._stop_levels.get(base), "target": self._targets.get(base)})
+            if self._long_exit_ready(price, snap):
+                quote = max(self._entry_quote.get(base, 0.0), self.cfg.min_quote_usd)
+                self._state[base] = "COOLDOWN"
+                self._cooldown_until[base] = now + self._cooldown_horizon()
+                pnl_pct = 0.0
+                entry_px = self._entry_price.pop(base, None)
+                if entry_px and entry_px > 0:
+                    pnl_pct = ((price - entry_px) / entry_px) * 100.0
+                stop_value = self._stop_levels.get(base)
+                stop_bps = self._stop_distance_bps(entry_px or price, stop_value)
+                self._record_trade(base, pnl_pct, stop_bps, meta.copy())
+                self._record_signal(base, "SELL", "exit")
+                meta["pnl_pct"] = pnl_pct
+                self._entry_quote.pop(base, None)
+                self._stop_levels.pop(base, None)
+                self._targets.pop(base, None)
+                market_choice = resolve_market(self._qualify(base), self._default_market)
+                action = {
+                    "symbol": self._qualify(base),
+                    "side": "SELL",
+                    "quote": quote,
+                    "tag": "trend_follow_exit",
+                    "meta": meta,
+                    "market": market_choice,
+                }
+
+        if action and "meta" in action:
+            try:
+                self._log.info("[TREND] %s %s meta=%s", base, action["side"], action["meta"])
+            except Exception:
+                pass
+        return action
+
+    # --- helpers ---
+    def _qualify(self, base: str) -> str:
+        return f"{base}.{self._venue}"
+
+    def _cooldown_horizon(self) -> float:
+        base_tf = _TIMEFRAME_SECONDS.get(self.cfg.primary.interval, self.cfg.refresh_sec)
+        return float(max(1, int(self._params.cooldown_bars)) * base_tf)
+
+    def _quote_size(self, price: float) -> float:
+        equity = self._equity_snapshot()
+        if equity <= 0.0:
+            equity = self.cfg.fallback_equity_usd
+        quote = max(self.cfg.min_quote_usd, equity * self.cfg.risk_pct)
+        # price guard so notional respects min notional
+        if price <= 0:
+            return quote
+        notional = max(quote, price * 0.0001)
+        return round(notional, 2)
+
+    def _equity_snapshot(self) -> float:
+        try:
+            from engine.core import order_router
+
+            snap = order_router.portfolio_snapshot()
+            if isinstance(snap, dict):
+                equity = snap.get("equity") or snap.get("cash") or 0.0
+                return float(equity or 0.0)
+        except Exception:
+            return 0.0
+        return 0.0
+
+    def _long_entry_ready(self, snap: Dict[str, float]) -> bool:
+        fast = snap.get("primary_fast")
+        slow = snap.get("primary_slow")
+        sec_fast = snap.get("secondary_fast")
+        sec_slow = snap.get("secondary_slow")
+        regime_fast = snap.get("regime_fast")
+        regime_slow = snap.get("regime_slow")
+        rsi = snap.get("rsi_primary")
+        atr = snap.get("atr")
+        stop = snap.get("stop")
+        target = snap.get("target")
+        if None in (fast, slow, sec_fast, sec_slow, regime_fast, regime_slow, rsi, atr, stop, target):
+            return False
+        if fast <= slow:
+            return False
+        if sec_fast <= sec_slow:
+            return False
+        if regime_fast <= regime_slow:
+            return False
+        if not (self._params.rsi_long_min <= rsi <= self._params.rsi_long_max):
+            return False
+        return True
+
+    def _long_exit_ready(self, price: float, snap: Dict[str, float]) -> bool:
+        rsi = snap.get("rsi_primary")
+        fast = snap.get("primary_fast")
+        slow = snap.get("primary_slow")
+        if rsi is not None and rsi >= self._params.rsi_exit:
+            return True
+        if fast is not None and slow is not None and fast <= slow:
+            return True
+        guard = self._stop_levels.get(snap["symbol"])
+        if guard is None:
+            guard = snap.get("stop")
+        if guard is not None and price <= guard:
+            return True
+        return False
+
+    def _record_signal(self, symbol: str, side: str, state: str) -> None:
+        if not self._metrics:
+            return
+        try:
+            self._metrics.trend_follow_signals_total.labels(
+                symbol=symbol,
+                venue=self._venue,
+                side=side,
+                state=state,
+            ).inc()
+        except Exception:
+            pass
+
+    def _observe_stop_distance(self, symbol: str, distance_bps: float) -> None:
+        if not self._metrics or distance_bps is None:
+            return
+        try:
+            self._metrics.trend_follow_stop_distance_bp.labels(symbol=symbol, venue=self._venue).observe(max(distance_bps, 0.0))
+        except Exception:
+            pass
+
+    def _record_trade(self, symbol: str, pnl_pct: float, stop_bps: float, meta: Dict | None = None) -> None:
+        result = "breakeven"
+        if pnl_pct > 0.05:
+            result = "win"
+        elif pnl_pct < -0.05:
+            result = "loss"
+        if self._metrics:
+            try:
+                self._metrics.trend_follow_trades_total.labels(symbol=symbol, venue=self._venue, result=result).inc()
+                self._metrics.trend_follow_trade_pnl_pct.labels(symbol=symbol, venue=self._venue, result=result).observe(abs(pnl_pct))
+            except Exception:
+                pass
+        try:
+            self._auto_tuner.observe_trade(symbol, pnl_pct, stop_bps, meta or {})
+        except Exception:
+            self._log.debug("[TREND] auto tuner observe failed", exc_info=True)
+
+    @staticmethod
+    def _stop_distance_bps(price: float, stop: float) -> float:
+        if price <= 0 or stop is None:
+            return 0.0
+        return max(0.0, (price - stop) / price * 10_000.0)
+
+    def _build_snapshot(self, base: str) -> Optional[Dict[str, float]]:
+        primary = self._klines(base, self.cfg.primary.interval, self._params.primary_slow + 5)
+        secondary = self._klines(base, self.cfg.secondary.interval, self._params.secondary_slow + 5)
+        regime = self._klines(base, self.cfg.regime.interval, self._params.regime_slow + 5)
+        if not primary or not secondary or not regime:
+            return None
+        primary_closes = [float(row[4]) for row in primary]
+        secondary_closes = [float(row[4]) for row in secondary]
+        regime_closes = [float(row[4]) for row in regime]
+        snapshot = {
+            "symbol": base,
+            "primary_fast": _sma(primary_closes, int(self._params.primary_fast)),
+            "primary_slow": _sma(primary_closes, int(self._params.primary_slow)),
+            "secondary_fast": _sma(secondary_closes, int(self._params.secondary_fast)),
+            "secondary_slow": _sma(secondary_closes, int(self._params.secondary_slow)),
+            "regime_fast": _sma(regime_closes, int(self._params.regime_fast)),
+            "regime_slow": _sma(regime_closes, int(self._params.regime_slow)),
+            "rsi_primary": _rsi(primary_closes, self.cfg.primary.rsi_length),
+            "atr": _atr(primary, self.cfg.atr_length),
+        }
+        atr_val = snapshot["atr"]
+        swing = _swing_low(primary, self.cfg.swing_lookback)
+        if atr_val is None or swing is None:
+            snapshot["stop"] = None
+            snapshot["target"] = None
+        else:
+            snapshot["stop"] = swing - (atr_val * self._params.atr_stop_mult)
+            snapshot["target"] = primary_closes[-1] + (atr_val * self._params.atr_target_mult)
+        return snapshot
+
+    def _klines(self, base: str, interval: str, minimum: int) -> Optional[List[List[float]]]:
+        key = (base, interval)
+        now = self._clock.time()
+        cached = self._cache.get(base, {}).get(interval)
+        if cached and now - self._last_fetch[key] < self.cfg.refresh_sec:
+            return cached
+        data: Optional[List[List[float]]] = None
+        try:
+            data = self._client.klines(base, interval=interval, limit=max(self.cfg.fetch_limit, minimum))
+        except Exception as exc:
+            self._log.warning("[TREND] kline fetch failed for %s %s: %s", base, interval, exc)
+            data = None
+        if isinstance(data, list) and len(data) >= minimum:
+            self._cache[base][interval] = data
+            self._last_fetch[key] = now
+            return data
+        return cached
+
+
+class _SyncKlinesClient:
+    def __init__(self):
+        settings = get_settings()
+        base = getattr(settings, "base_url", "https://api.binance.com") or "https://api.binance.com"
+        self._base = base.rstrip("/")
+        self._timeout = getattr(settings, "timeout", 10.0)
+        self._headers = {}
+        api_key = getattr(settings, "api_key", "")
+        if api_key:
+            self._headers["X-MBX-APIKEY"] = api_key
+        self._is_futures = getattr(settings, "is_futures", False)
+
+    def klines(self, symbol: str, *, interval: str, limit: int) -> List[List[float]]:
+        path = "/fapi/v1/klines" if self._is_futures else "/api/v3/klines"
+        resp = httpx.get(
+            f"{self._base}{path}",
+            params={"symbol": symbol, "interval": interval, "limit": limit},
+            timeout=self._timeout,
+            headers=self._headers or None,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else []
+
+
+__all__ = ["TrendStrategyModule", "TrendStrategyConfig", "load_trend_config"]

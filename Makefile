@@ -54,6 +54,7 @@ help:
 	@echo "  make smoke-exporter        # verify exporter metrics & accounting identity"
 	@echo "  make smoke-prom            # verify Prom targets and freshness"
 	@echo "  make validate-obs          # validate observability queries"
+	@echo "  make telegram-ping         # send a Telegram test message (DNS-fallback)"
 	@echo "  make grafana-restart       # restart Grafana to reload dashboards"
 	@echo "  make prom-reload           # hot-reload Prometheus config"
 	@echo ""
@@ -146,6 +147,13 @@ prom-reload:
 validate-obs:
 	@echo "🔍 Validating observability pipeline queries..."
 	cd ops/observability && ./validate_obs.sh
+
+# -----------------------------------------------------------------------------
+# Notifications / Telegram
+# -----------------------------------------------------------------------------
+.PHONY: telegram-ping
+telegram-ping:
+	@scripts/telegram_ping.sh "Telegram wired ✅"
 
 # -----------------------------------------------------------------------------
 # Trading ops

@@ -1,0 +1,77 @@
+risk:
+  per_trade_pct:
+    trend: 0.015
+    momentum: 0.015
+    scalper: 0.008
+    event: 0.003
+  max_concurrent: 6
+  daily_stop_pct: 0.06
+
+buckets:
+  futures_core: 0.55
+  spot_margin: 0.30
+  event: 0.10
+  reserve: 0.05
+
+futures:
+  leverage:
+    BTCUSDT: 4
+    ETHUSDT: 4
+    default: 2
+  futures_leverage:
+    BTCUSDT: DEFAULT
+    ETHUSDT: 4
+    SOLUSDT: 3
+  hedge_mode: true
+
+execution:
+  slippage_bps_max: 20
+  post_only_when_safe: true
+  client_id_prefix: runtime
+
+symbols:
+  core:
+    - BTCUSDT
+    - ETHUSDT
+    - BNBUSDT
+    - SOLUSDT
+
+scanner:
+  top_n: 40
+  min_24h_vol_usdt: 7500000
+  refresh_seconds: 15
+
+snapshot_dir: snapshots/
+
+bus:
+  max_queue: 2048
+  signal_ttl_seconds: 90
+
+universes:
+  trend:
+    venues: ["futures"]
+    min_24h_volume_usdt: 10000000
+    min_price: 10.0
+    max_symbols: 30
+    min_open_interest_usd: 1500000
+    exclude_suffixes: ["DOWN", "UP", "BULL", "BEAR"]
+  momentum:
+    venues: ["futures"]
+    min_24h_volume_usdt: 8000000
+    min_open_interest_usd: 1200000
+    max_symbols: 25
+    exclude_contains: ["BULL", "BEAR"]
+  scalper:
+    venues: ["futures"]
+    min_24h_volume_usdt: 60000000
+    min_price: 80.0
+    max_symbols: 6
+    include_symbols: ["BTCUSDT", "ETHUSDT"]
+  event:
+    venues: ["spot"]
+    min_24h_volume_usdt: 5000000
+    min_price: 0.2
+    max_symbols: 50
+    exclude_suffixes: ["UP", "DOWN"]
+
+demo_mode: false

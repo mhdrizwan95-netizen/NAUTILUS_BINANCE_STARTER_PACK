@@ -2139,18 +2139,46 @@
       "min_qty": 0.01,
       "step_size": 0.01,
       "min_notional": 0.0
-    }
-  },
-  "KRAKEN": {
-    "PI_XBTUSD": {
-      "min_qty": 0.1,
-      "step_size": 0.1,
-      "min_notional": 10.0
     },
-    "PI_ETHUSD": {
+    "WALUSDT": {
       "min_qty": 0.1,
       "step_size": 0.1,
-      "min_notional": 10.0
+      "min_notional": 0.0
+    },
+    "EULUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "ENSOUSDT": {
+      "min_qty": 0.01,
+      "step_size": 0.01,
+      "min_notional": 0.0
+    },
+    "YBUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "ZBTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "TURTLEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "GIGGLEUSDT": {
+      "min_qty": 0.001,
+      "step_size": 0.001,
+      "min_notional": 0.0
+    },
+    "FUSDT": {
+      "min_qty": 1.0,
+      "step_size": 1.0,
+      "min_notional": 0.0
     }
   }
 }

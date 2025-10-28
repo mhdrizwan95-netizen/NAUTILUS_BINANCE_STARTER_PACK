@@ -36,6 +36,18 @@ services:
     networks:
       - trading_net
 
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: hmm_alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    networks:
+      - trading_net
+
   loki:
     image: grafana/loki:2.9.7
     container_name: hmm_loki

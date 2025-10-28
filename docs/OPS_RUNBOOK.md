@@ -10,6 +10,7 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 | Prometheus scrape status | `make smoke-prom` or `http://localhost:9090/targets` | `engine_binance`, `engine_kraken`, `ops`, and exporters show `health: "up"`. |
 | Ops API status | `curl http://localhost:8002/status | jq` | `{"trading_enabled": true}` (or expected value) and balances populated. |
 | Grafana dashboards | `http://localhost:3000` (Command Center) | Panels update, no `No data` warnings, metrics heartbeat < 60s. |
+| Trend dashboards | `Trend Strategy Ops` | `trend_follow_*` counters move when signals fire, `symbol_scanner_score` shows current shortlist. |
 | Executor health (if enabled) | `docker compose logs -f executor` | No repeated retry loops or venue errors. |
 | Universe/Situations services | `curl http://localhost:8009/health`, `curl http://localhost:8011/health` | Return `{"ok": true}`. |
 | Strategy ingest rate | `curl -G --data-urlencode 'query=rate(strategy_ticks_total{venue="binance"}[1m])' http://localhost:9090/api/v1/query | jq` | >0 for actively traded symbols; zero means mark feed stalled. |
@@ -28,7 +29,31 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 | Submit a test order | `make order ORDER_SYMBOL=BTCUSDT.BINANCE ORDER_SIDE=BUY ORDER_QUOTE=25` | Use small notional; confirm via metrics/logs. |
 | Fetch portfolio snapshot | `curl http://localhost:8003/state | jq` (if exposed) or inspect `engine/state/portfolio.json` | Use for audits and recovery validation. |
 | View latest orders | `tail -n 20 engine/logs/orders.jsonl | jq` | Real-time audit trail. |
-| Flip feature flags | Edit `.env` and restart or export env in compose overrides | Start modules in dry‑run where available; validate metrics first. |
+| Flip feature flags | Edit `.env` and restart or export env in compose overrides | Start modules in dry-run where available; validate metrics first. |
+| Force trend auto-tune reset | Delete `data/runtime/trend_auto_tune.json` and restart engine | Only do this if the state file is corrupt or you want to revert to env defaults. |
+| Re-scan symbols manually | `touch data/runtime/symbol_scanner_state.json` then restart engine or call scanner control endpoint (TBD) | Scanner automatically runs every `SYMBOL_SCANNER_INTERVAL_SEC`; manual reset forces a fresh shortlist. |
+
+### External Feed Observability
+
+- **Command Center import**: After cloning or pulling new dashboards run `make grafana-import path=ops/observability/grafana/dashboards/command_center.json` (or import manually via Grafana UI) so the `External Feed Event Rate`, `Fetch Latency p90`, `Last Event Age`, and `Error Rate` panels appear. Verify the `feed` templating variable populates with your configured sources.
+- **Prometheus alert**: Add a rule similar to:
+  ```
+  - alert: ExternalFeedStale
+    expr: time() - external_feed_last_event_epoch{source=~".*"} > 300
+    for: 10m
+    labels:
+      severity: warning
+    annotations:
+      summary: "External feed {{ $labels.source }} stale"
+      description: "No events observed for {{ $labels.source }} in 5 minutes."
+  ```
+  Place it in `ops/observability/prometheus/rules/alerts.rules.yml` (or a dedicated file) and reload Prometheus. Tune the threshold (`300` seconds here) to match each feed’s SLA.
+
+### Trend Auto-Tune & Symbol Scanner
+
+- **Auto-tune status**: look for `[TREND-AUTO]` log entries or query `trend_follow_trades_total` / `trend_follow_signals_total`; each parameter change writes to `data/runtime/trend_auto_tune.json`. If you need to disable tuning quickly, set `TREND_AUTO_TUNE_ENABLED=false` in `.env` and restart `engine_binance`.
+- **Symbol scanner status**: check the Grafana Trend dashboard (`symbol_scanner_score`, `symbol_scanner_selected_total`) or inspect `data/runtime/symbol_scanner_state.json` to see the active shortlist. If `SYMBOL_SCANNER_ENABLED=false`, the trend module falls back to `TREND_SYMBOLS`.
+- **Restart procedure**: after editing `.env` for either feature run `docker compose up -d engine_binance engine_binance_exporter`. The scanner starts a background thread; verify `[SCAN]` logs appear (or values change in Grafana) before trusting output.
 
 ## Restart & Recovery
 
