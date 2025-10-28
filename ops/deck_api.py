@@ -7,11 +7,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional, Set
 
-<<<<<<< HEAD
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
-=======
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Request, status
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -214,19 +210,6 @@ def _merge_metrics(state_metrics: Dict[str, Any], updates: Dict[str, Any]) -> bo
             state_metrics[key] = parsed
             changed = True
     return changed
-
-
-def require_token(request: Request) -> None:
-    """Enforce token auth on POST routes when configured."""
-    if not DECK_TOKEN:
-        return
-    token = request.headers.get("X-Deck-Token")
-    if token != DECK_TOKEN:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid deck token"
-        )
-
-
 @app.get("/status")
 async def status() -> JSONResponse:
     async with STATE_LOCK:
@@ -235,13 +218,8 @@ async def status() -> JSONResponse:
 
 
 @app.post("/risk/mode")
-<<<<<<< HEAD
 async def set_mode(payload: ModeIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def set_mode(payload: ModeIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     async with STATE_LOCK:
         STATE["mode"] = payload.mode
     await broadcast({"type": "mode", "mode": payload.mode})
@@ -249,13 +227,8 @@ async def set_mode(payload: ModeIn, req: Request) -> Dict[str, Any]:
 
 
 @app.post("/kill")
-<<<<<<< HEAD
 async def kill(toggle: ToggleIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def kill(toggle: ToggleIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     async with STATE_LOCK:
         STATE["kill"] = toggle.enabled
     await broadcast({"type": "kill", "enabled": toggle.enabled})
@@ -263,13 +236,8 @@ async def kill(toggle: ToggleIn, req: Request) -> Dict[str, Any]:
 
 
 @app.post("/allocator/weights")
-<<<<<<< HEAD
 async def set_weights(body: RiskShareIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def set_weights(body: RiskShareIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     async with STATE_LOCK:
         strategies = STATE["strategies"]
         if body.strategy not in strategies:
@@ -285,13 +253,8 @@ async def set_weights(body: RiskShareIn, req: Request) -> Dict[str, Any]:
 
 
 @app.post("/universe/weights")
-<<<<<<< HEAD
 async def set_universe(body: UniverseWeightsIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def set_universe(body: UniverseWeightsIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     async with STATE_LOCK:
         STATE["universe_weights"] = body.model_dump()
         payload = {"type": "universe_weights", **STATE["universe_weights"]}
@@ -300,13 +263,8 @@ async def set_universe(body: UniverseWeightsIn, req: Request) -> Dict[str, Any]:
 
 
 @app.post("/strategies/{strategy}")
-<<<<<<< HEAD
 async def update_strategy(strategy: str, body: StrategyStateIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def update_strategy(strategy: str, body: StrategyStateIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     async with STATE_LOCK:
         strategies = STATE["strategies"]
         if strategy not in strategies:
@@ -322,13 +280,8 @@ async def update_strategy(strategy: str, body: StrategyStateIn, req: Request) ->
 
 
 @app.post("/metrics")
-<<<<<<< HEAD
 async def update_metrics(metrics: MetricsUpdateIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def update_metrics(metrics: MetricsUpdateIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     updates: Dict[str, Any] = {}
     for field in (
         "equity_usd",
@@ -365,13 +318,8 @@ async def update_metrics(metrics: MetricsUpdateIn, req: Request) -> Dict[str, An
 
 
 @app.post("/metrics/push")
-<<<<<<< HEAD
 async def metrics_push(body: MetricsPushIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def metrics_push(body: MetricsPushIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     async with STATE_LOCK:
         changed = False
         state_metrics = STATE.setdefault("metrics", {})
@@ -398,13 +346,8 @@ async def metrics_push(body: MetricsPushIn, req: Request) -> Dict[str, Any]:
 
 
 @app.post("/top")
-<<<<<<< HEAD
 async def update_top_symbols(body: TopSymbolsIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def update_top_symbols(body: TopSymbolsIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     async with STATE_LOCK:
         STATE["top_symbols"] = [entry.model_dump() for entry in body.symbols]
         payload = {"type": "top", "symbols": list(STATE["top_symbols"])}
@@ -413,13 +356,8 @@ async def update_top_symbols(body: TopSymbolsIn, req: Request) -> Dict[str, Any]
 
 
 @app.post("/trades")
-<<<<<<< HEAD
 async def ingest_trade(body: TradeIn, request: Request) -> Dict[str, Any]:
     require_token(request)
-=======
-async def ingest_trade(body: TradeIn, req: Request) -> Dict[str, Any]:
-    require_token(req)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     metrics_payload: Optional[Dict[str, Any]] = None
     async with STATE_LOCK:
         trade = body.model_dump()
