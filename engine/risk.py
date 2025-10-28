@@ -523,6 +523,25 @@ class RiskRails:
             except Exception:
                 pass
 
+    def current_error_rate_pct(self) -> float:
+        """Return the rolling venue error rate percentage."""
+        with self._err_lock:
+            window = list(self._err_window)
+        if not window:
+            return 0.0
+        errors = sum(1 for _, ok in window if not ok)
+        return 100.0 * errors / len(window)
+
+    def venue_breaker_open(self) -> bool:
+        """Return True if the venue error breaker is currently tripped."""
+        return bool(self._breaker_tripped)
+
+    def equity_breaker_open(self) -> bool:
+        """Return True if the equity breaker cooldown is active."""
+        if not self._equity_breaker_active:
+            return False
+        return time.time() < self._equity_breaker_until
+
 
 def _trading_disabled_via_flag() -> bool:
     try:

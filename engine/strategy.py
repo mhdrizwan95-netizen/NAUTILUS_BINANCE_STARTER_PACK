@@ -18,6 +18,7 @@ from .strategies import policy_hmm, ensemble_policy
 from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
 from .strategies.trend_follow import TrendStrategyModule, load_trend_config
 from .strategies.scalping import ScalpStrategyModule, load_scalp_config
+from .telemetry.publisher import record_latency
 try:
     from .strategies.symbol_scanner import SymbolScanner, load_symbol_scanner_config
 except Exception:  # pragma: no cover - optional component
@@ -557,7 +558,11 @@ def _record_tick_latency(symbol: str) -> None:
     except Exception:
         pass
     try:
+<<<<<<< HEAD
         record_tick_latency(symbol, latency_ms)
+=======
+        record_latency(latency_ms)
+>>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     except Exception:
         pass
 

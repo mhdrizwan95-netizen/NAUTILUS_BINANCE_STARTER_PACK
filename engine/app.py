@@ -7,9 +7,13 @@ import json
 import logging
 import math
 import random
+<<<<<<< HEAD
 from contextlib import suppress
 from functools import partial
 from threading import Lock
+=======
+import threading
+>>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
 from pathlib import Path
 from typing import Literal, Optional, Any, Callable, cast
 
@@ -36,6 +40,12 @@ from engine.idempotency import CACHE, append_jsonl
 from engine.state import SnapshotStore
 import engine.state as state_mod
 from engine.reconcile import reconcile_since_snapshot
+from engine.telemetry.publisher import (
+    publish_metrics as deck_publish_metrics,
+    publish_fill as deck_publish_fill,
+    record_equity,
+    latency_quantiles,
+)
 from engine import strategy
 from engine.universe import configured_universe, last_prices
 from engine.telemetry.publisher import (
@@ -331,6 +341,7 @@ _refresh_logger = logging.getLogger("engine.refresh")
 _startup_logger = logging.getLogger("engine.startup")
 _persist_logger = logging.getLogger("engine.persistence")
 _kraken_risk_logger = logging.getLogger("engine.kraken.telemetry")
+<<<<<<< HEAD
 _deck_logger = logging.getLogger("engine.deck")
 
 
@@ -439,6 +450,78 @@ async def _deck_metrics_loop() -> None:
         except Exception as exc:  # pragma: no cover - telemetry best effort
             _deck_logger.debug("Deck metrics publish failed: %s", exc)
 
+=======
+_DECK_BRIDGE_ENABLED = os.getenv("DECK_BRIDGE_DISABLED", "false").lower() not in {"1", "true", "yes"}
+
+
+def _deck_thread_wrapper(func, args, kwargs):
+    try:
+        func(*args, **kwargs)
+    except Exception:
+        pass
+
+
+def _queue_deck_call(func, *args, **kwargs) -> None:
+    if not _DECK_BRIDGE_ENABLED:
+        return
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        threading.Thread(target=_deck_thread_wrapper, args=(func, args, kwargs), daemon=True).start()
+        return
+    loop.create_task(asyncio.to_thread(func, *args, **kwargs))
+
+
+def _queue_deck_metrics(pnl_by_strategy: dict[str, float] | None = None) -> None:
+    if not _DECK_BRIDGE_ENABLED:
+        return
+    try:
+        state = portfolio.state
+    except Exception:
+        return
+
+    equity = float(getattr(state, "equity", 0.0) or 0.0)
+    now = time.time()
+    pnl_24h, drawdown_pct = record_equity(equity, now=now)
+    positions_count = len(getattr(state, "positions", {}) or {})
+    tick_p50, tick_p95 = latency_quantiles()
+
+    try:
+        error_rate_pct = RAILS.current_error_rate_pct()
+    except Exception:
+        error_rate_pct = 0.0
+
+    try:
+        breaker_equity = RAILS.equity_breaker_open()
+    except Exception:
+        breaker_equity = False
+    try:
+        breaker_venue = RAILS.venue_breaker_open()
+    except Exception:
+        breaker_venue = False
+
+    metrics_kwargs = {
+        "equity_usd": equity,
+        "pnl_24h": pnl_24h,
+        "drawdown_pct": drawdown_pct,
+        "positions": positions_count,
+        "tick_p50_ms": tick_p50,
+        "tick_p95_ms": tick_p95,
+        "error_rate_pct": error_rate_pct,
+        "breaker": {"equity": breaker_equity, "venue": breaker_venue},
+        "pnl_by_strategy": pnl_by_strategy,
+    }
+
+    try:
+        snapshot = dict(portfolio.snapshot())
+        snapshot["equity_usd"] = equity
+        snapshot["cash_usd"] = float(getattr(state, "cash", 0.0) or 0.0)
+        RAILS.refresh_snapshot_metrics(snapshot, venue=VENUE)
+    except Exception:
+        pass
+
+    _queue_deck_call(deck_publish_metrics, **metrics_kwargs)
+>>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
 
 store = None
 try:
@@ -1007,6 +1090,33 @@ async def _start_guardian_and_feeds():
                 _startup_logger.info("Telegram fill pings enabled")
             except Exception:
                 pass
+            try:
+                def _on_fill_deck(evt):
+                    info = {
+                        "order_id": evt.get("order_id"),
+                        "filled_qty": evt.get("filled_qty"),
+                        "avg_price": evt.get("avg_price"),
+                        "venue": evt.get("venue"),
+                    }
+                    payload = {
+                        "ts": float(evt.get("ts") or time.time()),
+                        "strategy": (
+                            evt.get("strategy_tag")
+                            or (evt.get("strategy_meta") or {}).get("name")
+                            or evt.get("intent")
+                        ),
+                        "symbol": evt.get("symbol"),
+                        "side": evt.get("side"),
+                        "pnl_usd": evt.get("pnl_usd") or evt.get("realized_pnl"),
+                        "latency_ms": evt.get("latency_ms"),
+                        "info": {k: v for k, v in info.items() if v is not None},
+                    }
+                    deck_publish_fill({k: v for k, v in payload.items() if v is not None})
+
+                BUS.subscribe("trade.fill", _on_fill_deck)
+                _startup_logger.info("Deck fill bridge enabled")
+            except Exception:
+                _startup_logger.debug("Deck fill bridge wiring failed", exc_info=True)
             roll = EventBORollup()
             # Optional 6h buckets
             buckets = EventBOBuckets(
@@ -1153,6 +1263,10 @@ def _startup_load_snapshot_and_reconcile():
         _startup_logger.info("Strategy scheduler started")
     except Exception:
         _startup_logger.warning("Strategy scheduler failed to start", exc_info=True)
+    try:
+        _queue_deck_metrics()
+    except Exception:
+        pass
     return True
 
 
@@ -1734,6 +1848,10 @@ async def account_snapshot(force: bool = False):
         _store.save(state.snapshot())
     except Exception:
         pass
+    try:
+        _queue_deck_metrics()
+    except Exception:
+        pass
     return snap
 
 
@@ -1769,6 +1887,10 @@ def post_reconcile():
         global _last_reconcile_ts
         _last_reconcile_ts = time.time()
         metrics.reconcile_lag_seconds.set(0.0)
+        try:
+            _queue_deck_metrics()
+        except Exception:
+            pass
         return {"status": "ok", "applied_snapshot_ts_ms": snap.get("ts_ms"), "equity": snap.get("equity_usd")}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Reconcile failed: {e}")
@@ -2224,6 +2346,10 @@ async def _refresh_binance_futures_snapshot() -> None:
     metrics.set_core_metric("metrics_heartbeat", now_ts)
     _snapshot_counter += 1
     metrics.set_core_metric("snapshot_id", _snapshot_counter)
+    try:
+        _queue_deck_metrics()
+    except Exception:
+        pass
 
 
 async def _refresh_binance_spot_snapshot() -> None:
@@ -2357,6 +2483,10 @@ async def _refresh_binance_spot_snapshot() -> None:
     metrics.set_core_metric("metrics_heartbeat", now_ts)
     _snapshot_counter += 1
     metrics.set_core_metric("snapshot_id", _snapshot_counter)
+    try:
+        _queue_deck_metrics()
+    except Exception:
+        pass
 
 
 async def _refresh_venue_data():
@@ -2488,6 +2618,11 @@ async def _kraken_risk_metrics_loop() -> None:
 
         if VENUE == "KRAKEN":
             await _kraken_refresh_mark_prices(time.time())
+
+        try:
+            _queue_deck_metrics()
+        except Exception:
+            pass
 
         elapsed = time.monotonic() - tick_start
         sleep_base = max(0.5, interval - elapsed)

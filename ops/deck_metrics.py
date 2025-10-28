@@ -25,24 +25,36 @@ from typing import Dict
 
 import requests
 
+<<<<<<< HEAD
 DECK_URL = os.environ.get("DECK_URL", "http://localhost:8012").rstrip("/")
+=======
+DECK_URL = os.environ.get("DECK_URL", "http://localhost:8002").rstrip("/")
+>>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
 DECK_TOKEN = os.environ.get("DECK_TOKEN", "")
 
 
 def _headers() -> Dict[str, str]:
+<<<<<<< HEAD
     headers: Dict[str, str] = {"Content-Type": "application/json"}
+=======
+    headers = {"Content-Type": "application/json"}
+>>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     if DECK_TOKEN:
         headers["X-Deck-Token"] = DECK_TOKEN
     return headers
 
 
 def _post(path: str, payload: Dict) -> None:
+<<<<<<< HEAD
     response = requests.post(
         f"{DECK_URL}{path}",
         json=payload,
         headers=_headers(),
         timeout=5,
     )
+=======
+    response = requests.post(f"{DECK_URL}{path}", json=payload, headers=_headers(), timeout=5)
+>>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     response.raise_for_status()
 
 
