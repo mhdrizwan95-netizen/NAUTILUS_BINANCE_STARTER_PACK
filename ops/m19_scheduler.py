@@ -23,7 +23,8 @@ import shlex
 from datetime import datetime, timedelta
 import yaml
 from typing import Dict, List, Any, Optional, Tuple
-from strategies.hmm_policy import telemetry
+
+from ops.telemetry_metrics import inc_scheduler_action
 
 CFG_PATH = os.path.join("ops", "m19_scheduler.yaml")
 STATE_PATH = os.path.join("data", "processed", "m19", "scheduler_state.json")
@@ -332,13 +333,16 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
             success = exec_shell("./ops/calibrate_fast.sh")
 
         elif action == "m17":
-            # Macro/micro retraining
-            success = (exec_shell("python ops/m17_train_macro.py") and
-                      exec_shell("python ops/m17_train_micro.py"))
+            # Legacy macro/micro retraining helper retired - use notebooks/pipeline.
+            print("M17 retraining helper deprecated; define M17_COMMAND to run a custom workflow if desired.")
+            cmd = os.getenv("M17_COMMAND")
+            success = exec_shell(cmd) if cmd else True
 
         elif action == "m18":
-            # Covariance analysis/metrics refresh
-            success = exec_shell("python ops/m18_cov_diag.py")
+            # Legacy covariance diagnostics retired in favor of dashboards.
+            print("M18 covariance diagnostics deprecated; define M18_COMMAND for custom tooling.")
+            cmd = os.getenv("M18_COMMAND")
+            success = exec_shell(cmd) if cmd else True
 
         elif action == "paper_seed":
             # Brief paper trading to refresh feedback data
@@ -346,7 +350,7 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
 
         # --- new: record telemetry + WS broadcast ---
         if success:
-            telemetry.inc_scheduler_action(action)
+            inc_scheduler_action(action)
             reason = cause or "autonomous_decision"
             payload = {
                 "action": action,

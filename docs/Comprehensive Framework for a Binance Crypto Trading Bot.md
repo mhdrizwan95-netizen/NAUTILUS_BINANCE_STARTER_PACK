@@ -374,7 +374,7 @@ Each systematic strategy can be toggled on/off or weighted in capital. They prov
 Event-driven strategies seek to capture opportunities from discrete events or anomalies \'96 things that a purely technical system might not catch early. These include sudden news, social media trends, and other \'93alpha\'94 that requires understanding context beyond price charts. Our bot will have specialized modules for these scenarios:\
 \pard\tqr\tx100\tx260\li260\fi-260\sl324\slmult1\sb240\partightenfactor0
 \cf2 	\'95	
-\f2\b Meme Coin Pump Detector (Social Sentiment Strategy)
+\f2\b Meme Coin Pump Detector (Meme Sentiment Strategy)
 \f1\b0 : In the crypto world, meme coins (like Dogecoin, Shiba Inu, and many new ones) often skyrocket due to hype, social media, and community frenzy rather than fundamentals. An event-driven module will attempt to spot these early.\
 \pard\tqr\tx500\tx660\li660\fi-660\sl324\slmult1\sb240\partightenfactor0
 \cf2 	\'95	
@@ -725,7 +725,7 @@ This encompasses all the strategy logic described earlier. Each strategy can be 
 \f4 MomentumStrategyModule
 \f1  \'96 listens to price/volume events. Generates signals as described for breakouts.\
 	\'95	
-\f4 SocialSentimentModule
+\f4 MemeCoinSentimentModule
 \f1  \'96 listens to social media input. If trigger event (tweet/news) occurs, generates a signal (e.g., \'93Buy DOGE now \'96 social hype\'94).\
 	\'95	
 \f4 ListingSniperModule
@@ -779,7 +779,7 @@ This encompasses all the strategy logic described earlier. Each strategy can be 
 \pard\tqr\tx100\tx260\li260\fi-260\sl324\slmult1\sb240\partightenfactor0
 \cf2 	\'95	
 \f3\i Backtesting and Simulation
-\f1\i0 : These signal modules can be tested offline with historical data to ensure they behave as expected. This is part of development: e.g., feed historical price series to TrendStrategyModule and see if signals line up with known good indicator behavior. Similarly test SocialSentimentModule on past known events (like feed it the timeline around Elon\'92s Doge tweet in 2021 and see if it would signal a buy).\
+\f1\i0 : These signal modules can be tested offline with historical data to ensure they behave as expected. This is part of development: e.g., feed historical price series to TrendStrategyModule and see if signals line up with known good indicator behavior. Similarly test MemeCoinSentimentModule on past known events (like feed it the timeline around Elon\'92s Doge tweet in 2021 and see if it would signal a buy).\
 \
 \pard\tx560\tx1120\tx1680\tx2240\tx2800\tx3360\tx3920\tx4480\tx5040\tx5600\tx6160\tx6720\sl324\slmult1\pardirnatural\partightenfactor0
 
