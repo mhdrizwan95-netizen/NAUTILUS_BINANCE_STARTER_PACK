@@ -32,6 +32,16 @@ class SymbolFilter:
     tick_size: float = 0.0
 
 
+TRANSFER_TYPES: set[str] = {
+    "FUNDING_MAIN",
+    "MAIN_FUNDING",
+    "MAIN_UMFUTURE",
+    "UMFUTURE_MAIN",
+    "FUNDING_UMFUTURE",
+    "UMFUTURE_FUNDING",
+}
+
+
 class BinanceREST:
     """Minimal async REST client for Binance spot/futures/margin endpoints."""
 
@@ -942,6 +952,136 @@ class BinanceREST:
                     continue
                 raise RuntimeError(f"Binance error (amend_reduce_only_stop) status={status} body={body}") from e
         return None
+
+    async def _post_signed(
+        self,
+        path: str,
+        params: dict[str, Any],
+        *,
+        base: Literal["spot", "futures", "margin"] | None = None,
+        retries: int = 3,
+    ) -> Any:
+        payload = dict(params or {})
+        if "timestamp" not in payload:
+            payload["timestamp"] = _now_ms()
+        settings = get_settings()
+        payload.setdefault("recvWindow", settings.recv_window)
+        signature = self._sign(payload)
+        signed = dict(payload)
+        signed["signature"] = signature
+
+        if base == "spot":
+            base_url = self._spot_base or self._base
+        elif base == "futures":
+            base_url = self._futures_base or self._base
+        elif base == "margin":
+            base_url = self._margin_base or self._base
+        else:
+            base_url = self._base
+
+        for attempt in range(max(1, retries)):
+            try:
+                async with httpx.AsyncClient(
+                    base_url=base_url,
+                    timeout=self._settings.timeout,
+                    headers={"X-MBX-APIKEY": self._settings.api_key},
+                ) as client:
+                    self._log_request("POST", path, data=signed)
+                    resp = await client.post(path, data=signed)
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                if status in (418, 429) and attempt < (retries - 1):
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise
+
+    async def universal_transfer(self, transfer_type: str, asset: str, amount: float) -> dict[str, Any]:
+        """Universal transfer across Binance wallets (SAPI)."""
+        transfer_key = transfer_type.upper()
+        if transfer_key not in TRANSFER_TYPES:
+            raise ValueError(f"unsupported transfer type: {transfer_type}")
+        formatted_amount = f"{float(amount):.8f}".rstrip("0").rstrip(".")
+        if not formatted_amount:
+            formatted_amount = "0"
+        payload = {
+            "type": transfer_key,
+            "asset": asset.upper(),
+            "amount": formatted_amount,
+        }
+        return await self._post_signed("/sapi/v1/asset/transfer", payload, base="spot")
+
+    async def funding_balance(self, asset: str) -> float:
+        """Fetch free balance for an asset held in the Funding wallet."""
+        payload = {"asset": asset.upper()}
+        try:
+            data = await self._post_signed("/sapi/v1/asset/get-funding-asset", payload, base="spot")
+        except httpx.HTTPStatusError:
+            return 0.0
+        if isinstance(data, list):
+            for row in data:
+                if isinstance(row, dict) and str(row.get("asset", "")).upper() == asset.upper():
+                    try:
+                        return float(row.get("free") or 0.0)
+                    except (TypeError, ValueError):
+                        return 0.0
+        return 0.0
+
+    async def ensure_futures_balance(
+        self,
+        *,
+        min_fut_usdt: float,
+        topup_chunk_usdt: float,
+        asset: str = "USDT",
+    ) -> dict[str, Any]:
+        """Ensure USDⓈ-M available balance stays above threshold via Funding top-ups."""
+        snapshot = await self.account_snapshot()
+        available = float(snapshot.get("availableBalance") or 0.0)
+        result: dict[str, Any] = {
+            "ok": True,
+            "skipped": False,
+            "availableBalance_before": available,
+        }
+        if available >= float(min_fut_usdt):
+            result["skipped"] = True
+            return result
+
+        funding_free = await self.funding_balance(asset)
+        if funding_free <= 0.0:
+            result.update({"ok": False, "skipped": True, "reason": "no_funding_balance"})
+            return result
+
+        transfer_amount = min(float(topup_chunk_usdt), float(funding_free))
+        try:
+            await self.universal_transfer("FUNDING_UMFUTURE", asset, transfer_amount)
+            path = ["FUNDING_UMFUTURE"]
+        except Exception as direct_err:
+            try:
+                await self.universal_transfer("FUNDING_MAIN", asset, transfer_amount)
+                await self.universal_transfer("MAIN_UMFUTURE", asset, transfer_amount)
+                path = ["FUNDING_MAIN", "MAIN_UMFUTURE"]
+            except Exception as fallback_err:
+                result.update(
+                    {
+                        "ok": False,
+                        "skipped": False,
+                        "error": f"{direct_err}",
+                        "fallback_error": f"{fallback_err}",
+                    }
+                )
+                return result
+
+        snapshot_after = await self.account_snapshot()
+        available_after = float(snapshot_after.get("availableBalance") or 0.0)
+        result.update(
+            {
+                "path": path,
+                "amount": transfer_amount,
+                "availableBalance_after": available_after,
+            }
+        )
+        return result
 
     def _sign(self, params: dict[str, Any]) -> str:
         secret = self._settings.api_secret.encode()

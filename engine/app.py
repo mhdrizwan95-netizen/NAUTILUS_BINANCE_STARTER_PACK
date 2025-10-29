@@ -69,6 +69,21 @@ DECK_METRICS_INTERVAL_SEC = max(1.0, float(os.getenv("DECK_METRICS_INTERVAL_SEC"
 _deck_metrics_task: Optional[asyncio.Task] = None
 _deck_realized_lock = Lock()
 _deck_last_realized = 0.0
+try:
+    MIN_FUT_BAL_USDT = float(os.getenv("MIN_FUT_BAL_USDT", "300"))
+except (TypeError, ValueError):
+    MIN_FUT_BAL_USDT = 300.0
+try:
+    TOPUP_CHUNK_USDT = float(os.getenv("TOPUP_CHUNK_USDT", "500"))
+except (TypeError, ValueError):
+    TOPUP_CHUNK_USDT = 500.0
+try:
+    AUTO_TOPUP_PERIOD_SEC = float(os.getenv("AUTO_TOPUP_PERIOD_SEC", "45"))
+except (TypeError, ValueError):
+    AUTO_TOPUP_PERIOD_SEC = 45.0
+AUTO_TOPUP_PERIOD_SEC = max(5.0, AUTO_TOPUP_PERIOD_SEC)
+AUTO_TOPUP_ENABLED = os.getenv("AUTO_TOPUP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+_AUTO_TOPUP_LOG = logging.getLogger("engine.auto_topup")
 
 
 class _DummyBinanceREST:
@@ -322,6 +337,41 @@ async def _kraken_refresh_mark_prices(now: float) -> None:
             metrics.mark_price_by_symbol.labels(symbol=base).set(0.0)
         except Exception:
             pass
+
+
+async def auto_topup_worker() -> None:
+    """Background loop to keep USDⓈ-M balance topped up from Funding."""
+    if not AUTO_TOPUP_ENABLED:
+        _AUTO_TOPUP_LOG.info("auto_topup: disabled via env")
+        return
+    if VENUE != "BINANCE":
+        _AUTO_TOPUP_LOG.info("auto_topup: skipping (venue=%s)", VENUE)
+        return
+    period = AUTO_TOPUP_PERIOD_SEC
+    rest = BinanceREST(market="futures")
+    _AUTO_TOPUP_LOG.info(
+        "auto_topup: loop started (min=%.2f, chunk=%.2f, period=%.1fs)",
+        MIN_FUT_BAL_USDT,
+        TOPUP_CHUNK_USDT,
+        period,
+    )
+    while True:
+        try:
+            result = await rest.ensure_futures_balance(
+                min_fut_usdt=MIN_FUT_BAL_USDT,
+                topup_chunk_usdt=TOPUP_CHUNK_USDT,
+                asset="USDT",
+            )
+            if result.get("ok") and not result.get("skipped"):
+                _AUTO_TOPUP_LOG.info("auto_topup: transfer result=%s", result)
+            elif not result.get("ok"):
+                _AUTO_TOPUP_LOG.warning("auto_topup: transfer error=%s", result)
+        except asyncio.CancelledError:
+            _AUTO_TOPUP_LOG.info("auto_topup: worker cancelled")
+            raise
+        except Exception as exc:
+            _AUTO_TOPUP_LOG.warning("auto_topup: failure: %s", exc)
+        await asyncio.sleep(period)
 
 
 portfolio = Portfolio()
@@ -764,6 +814,16 @@ async def _start_specs_refresh():
     """Start the background venue specs refresh task."""
     asyncio.create_task(_refresh_specs_periodically())
     _startup_logger.info("Scheduled venue specs refresh task")
+
+
+@app.on_event("startup")
+async def _start_auto_topup_loop():
+    if IS_EXPORTER or VENUE != "BINANCE":
+        return
+    if not AUTO_TOPUP_ENABLED:
+        _AUTO_TOPUP_LOG.info("auto_topup: disabled; worker not started")
+        return
+    asyncio.create_task(auto_topup_worker(), name="auto-topup")
 
 
 @app.on_event("startup")
