@@ -16,7 +16,19 @@ class ExchangeClientProto:
 
 class PortfolioProto:
     """Expected minimal interface of your portfolio service."""
-    def apply_fill(self, *, symbol: str, side: str, quantity: float, price: float, fee_usd: float=0.0, ts_ms: int=0) -> None:
+
+    def apply_fill(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        quantity: float,
+        price: float,
+        fee_usd: float = 0.0,
+        ts_ms: int = 0,
+        venue: str | None = None,
+        market: str | None = None,
+    ) -> None:
         raise NotImplementedError
     def snapshot(self) -> dict:
         raise NotImplementedError
@@ -69,8 +81,21 @@ def reconcile_since_snapshot(*, portfolio: PortfolioProto, client: ExchangeClien
         except Exception:
             fee = 0.0
         if sym and qty and px:
+            venue_hint = str(t.get("venue") or "BINANCE").upper()
+            market_hint = str(t.get("market") or t.get("isIsolated") or "").strip().lower()
+            if market_hint not in {"margin", "spot", "futures", "options"}:
+                market_hint = None
+            qualified_symbol = sym if "." in sym else f"{sym}.{venue_hint}" if venue_hint else sym
             # Portfolio.apply_fill expects keyword names: quantity, fee_usd
-            portfolio.apply_fill(symbol=sym, side=side, quantity=float(qty), price=float(px), fee_usd=float(fee))
+            portfolio.apply_fill(
+                symbol=qualified_symbol,
+                side=side,
+                quantity=float(qty),
+                price=float(px),
+                fee_usd=float(fee),
+                venue=venue_hint,
+                market=market_hint,
+            )
             # Store fill persistently
             try:
                 from engine.storage import sqlite as store
