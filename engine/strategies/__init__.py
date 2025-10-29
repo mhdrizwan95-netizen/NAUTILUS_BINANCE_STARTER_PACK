@@ -1,0 +1,12 @@
+"""Canonical strategy exports for the engine package.
+
+Expose the active HMM policy modules from the unified strategies package so
+callers never need to reach for legacy ``strategies.hmm_policy`` paths.
+"""
+
+from . import policy_hmm, ensemble_policy
+
+__all__ = [
+    "policy_hmm",
+    "ensemble_policy",
+]

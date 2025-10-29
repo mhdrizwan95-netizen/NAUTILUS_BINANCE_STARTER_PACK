@@ -1,63 +1,116 @@
 from __future__ import annotations
 
-"""
-Minimal Binance announcement poller (publish-only).
+"""Minimal Binance announcement poller that feeds ``events.external_feed``.
 
-When ANN_ENABLED=true, polls at ANN_POLL_SEC and publishes
-events.binance_listing with detected tickers for "will list" posts.
+The poller keeps legacy behaviour (environment gating, naive dedupe) but now
+emits structured events through the shared signal queue so every subscriber –
+Listing Sniper, Meme Sentiment, Event Breakout, etc. – receives identical
+payloads.
 
-This is a stub: fetching/parsing logic should be replaced with a proper
-source. Currently does nothing unless configured and network reachable.
+The fetcher remains a stub; wire in a real HTTP client where
+``_fetch_announcements`` currently returns an empty list.
 """
 
 import asyncio
+import logging
 import os
+import time
 from typing import Dict, List
 
-from engine.core.event_bus import BUS
+from engine.events.publisher import publish_external_event
+from engine.events.schemas import ExternalEvent
+from engine.metrics import (
+    external_feed_errors_total,
+    external_feed_latency_seconds,
+)
+
+
+LOGGER = logging.getLogger("engine.feeds.binance_announcements")
+EVENT_SOURCE = "binance_announcements"
+DEFAULT_PRIORITY = 0.85
 
 
 async def _fetch_announcements() -> List[Dict]:
-    # Placeholder: return empty list. Extend with real fetcher.
+    """Placeholder fetcher – override with a real implementation."""
+
     return []
+
+
+async def _publish(payload: Dict[str, object], *, priority: float = DEFAULT_PRIORITY, ttl_sec: float | None = None) -> None:
+    meta = {"priority": priority}
+    if ttl_sec is not None:
+        meta["ttl_sec"] = ttl_sec
+    event = ExternalEvent(source=EVENT_SOURCE, payload=payload, meta=meta)
+    await publish_external_event(
+        event,
+        priority=priority,
+        expires_at=(time.time() + ttl_sec) if ttl_sec is not None else None,
+        asset_hints=[payload.get("symbol")],
+    )
 
 
 async def run() -> None:
     if os.getenv("ANN_ENABLED", "").lower() not in {"1", "true", "yes"}:
         return
+
     poll = float(os.getenv("ANN_POLL_SEC", "45"))
-    # Debounce by (id,ticker) with TTL 24h
-    seen: dict[str, float] = {}
-    import time
     ttl = 24 * 60 * 60
+    # Debounce by (id, ticker)
+    seen: dict[str, float] = {}
+
     while True:
+        started = time.perf_counter()
         try:
             # prune expired
             now = time.time()
-            for k, v in list(seen.items()):
-                if now >= v:
-                    seen.pop(k, None)
+            for key, expiry in list(seen.items()):
+                if now >= expiry:
+                    seen.pop(key, None)
+
             items = await _fetch_announcements()
-            for it in items:
-                _id = str(it.get("id", ""))
-                if not _id or _id in seen:
-                    # for multi-ticker dedupe, include ticker below
-                    pass
-                title = str(it.get("title", "")).lower()
-                if "will list" in title:
-                    tickers = list(it.get("tickers") or [])
-                    for tk in tickers:
-                        key = f"{_id}:{tk}"
-                        if key in seen:
-                            continue
-                        try:
-                            await BUS.publish("events.binance_listing", {"symbol": f"{tk}USDT", "time": it.get("time")})
-                        except Exception:
-                            pass
+            latency = time.perf_counter() - started
+            external_feed_latency_seconds.labels(EVENT_SOURCE).observe(latency)
+
+            for item in items:
+                ann_id = str(item.get("id", ""))
+                title = str(item.get("title", "")).lower()
+                if not ann_id and not title:
+                    continue
+
+                tickers = list(item.get("tickers") or [])
+                if not tickers:
+                    # still debounce the id to avoid repeated processing
+                    if ann_id:
+                        seen.setdefault(ann_id, now + ttl)
+                    continue
+
+                # Recognise "will list" posts
+                if "will list" not in title:
+                    if ann_id:
+                        seen.setdefault(ann_id, now + ttl)
+                    continue
+
+                for ticker in tickers:
+                    key = f"{ann_id}:{ticker}" if ann_id else ticker
+                    if key in seen:
+                        continue
+
+                    symbol = f"{ticker}USDT"
+                    payload = {
+                        "symbol": symbol.upper(),
+                        "announcement": item,
+                        "announced_at": item.get("time"),
+                        "tickers": tickers,
+                    }
+
+                    try:
+                        await _publish(payload, ttl_sec=ttl)
                         seen[key] = now + ttl
-                else:
-                    # Still debounce the id once to avoid repeated non-list items
-                    seen[_id] = now + ttl
-        except Exception:
-            pass
+                    except Exception as exc:  # noqa: BLE001
+                        external_feed_errors_total.labels(EVENT_SOURCE).inc()
+                        LOGGER.debug("binance announcement publish failed: %s", exc, exc_info=True)
+        except Exception as exc:  # noqa: BLE001
+            external_feed_errors_total.labels(EVENT_SOURCE).inc()
+            LOGGER.warning("binance announcement loop error: %s", exc, exc_info=True)
+
         await asyncio.sleep(poll)

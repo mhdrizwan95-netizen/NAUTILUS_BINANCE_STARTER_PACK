@@ -4,10 +4,14 @@ Real-time Event Bus - The Nervous System of Our Trading Organism.
 Provides async pub/sub messaging for instantaneous inter-module communication,
 turning reactive components into a coordinated trading intelligence.
 """
+from __future__ import annotations
+
 import asyncio
+import inspect
 import logging
-import json
-from typing import Dict, List, Callable, Any, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+from engine import metrics
 
 
 class EventBus:
@@ -78,6 +82,7 @@ class EventBus:
             urgent: If True, process immediately rather than queue
         """
         if not self._running:
+            logging.getLogger(__name__).debug("EventBus publish skipped; bus not running (topic=%s)", topic)
             return  # No-op if not started
 
         event = {
@@ -116,20 +121,30 @@ class EventBus:
         data = event["data"]
 
         if topic not in self._subscribers:
+            logging.getLogger(__name__).debug("EventBus: no subscribers for topic %s", topic)
             return  # No subscribers for this topic
 
         delivered = 0
         failed = 0
 
-        for handler in self._subscribers[topic]:
+        for handler in list(self._subscribers[topic]):
             try:
-                if asyncio.iscoroutinefunction(handler):
+                if inspect.iscoroutinefunction(handler):
                     await handler(data)
                 else:
-                    # Run sync handlers in thread pool
-                    await asyncio.get_event_loop().run_in_executor(None, handler, data)
-
+                    result = handler(data)
+                    if inspect.isawaitable(result):
+                        await result
                 delivered += 1
+                if topic == "events.external_feed":
+                    try:
+                        consumer = getattr(handler, "__qualname__", None) or getattr(handler, "__name__", None)
+                        if not consumer and hasattr(handler, "__self__"):
+                            consumer = handler.__self__.__class__.__name__
+                        consumer = consumer or handler.__class__.__name__
+                        metrics.events_external_feed_consumed_total.labels(consumer=consumer).inc()
+                    except Exception:  # noqa: BLE001
+                        logging.getLogger(__name__).debug("EventBus metrics update failed", exc_info=True)
             except Exception as e:
                 failed += 1
                 logging.error(f"[BUS] Handler error on '{topic}': {e}")
