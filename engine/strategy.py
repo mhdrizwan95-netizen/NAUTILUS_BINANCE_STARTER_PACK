@@ -20,6 +20,11 @@ from .strategies.trend_follow import TrendStrategyModule, load_trend_config
 from .strategies.scalping import ScalpStrategyModule, load_scalp_config
 from .telemetry.publisher import record_latency
 try:
+    from .strategies.momentum_realtime import MomentumStrategyModule, load_momentum_rt_config
+except Exception:  # pragma: no cover - optional component
+    MomentumStrategyModule = None  # type: ignore
+    load_momentum_rt_config = None  # type: ignore
+try:
     from .strategies.symbol_scanner import SymbolScanner, load_symbol_scanner_config
 except Exception:  # pragma: no cover - optional component
     SymbolScanner = None  # type: ignore
@@ -56,6 +61,22 @@ try:
         SCALP_MODULE = ScalpStrategyModule(SCALP_CFG)
 except Exception:
     SCALP_MODULE = None
+
+MOMENTUM_RT_CFG = None
+MOMENTUM_RT_MODULE: Optional[MomentumStrategyModule] = None
+if 'MomentumStrategyModule' in globals() and MomentumStrategyModule and load_momentum_rt_config:
+    try:
+        MOMENTUM_RT_CFG = load_momentum_rt_config()
+        if MOMENTUM_RT_CFG.enabled:
+            MOMENTUM_RT_MODULE = MomentumStrategyModule(MOMENTUM_RT_CFG)
+            logging.getLogger(__name__).info(
+                "Momentum RT module enabled (window=%.1fs, move>=%.2f%%, vol>=%.2fx)",
+                MOMENTUM_RT_CFG.window_sec,
+                MOMENTUM_RT_CFG.pct_move_threshold * 100.0,
+                MOMENTUM_RT_CFG.volume_spike_ratio,
+            )
+    except Exception:
+        MOMENTUM_RT_MODULE = None
 
 _SCALP_BUS_WIRED = False
 _SCALP_WATCH_LOCK = threading.Lock()
@@ -236,6 +257,71 @@ _last_tick_ts: Dict[str, float] = defaultdict(float)
 _symbol_cooldown_until: Dict[str, float] = defaultdict(float)
 _last_trade_price: Dict[str, float] = defaultdict(float)
 _entry_block_until: float = time.time() + float(os.getenv("WARMUP_SEC", "0"))
+
+
+async def _on_market_tick_event(event: Dict[str, Any]) -> None:
+    symbol = str(event.get("symbol") or "")
+    price = event.get("price")
+    if not symbol or price is None:
+        return
+    try:
+        price_f = float(price)
+    except (TypeError, ValueError):
+        return
+    ts_raw = event.get("ts")
+    try:
+        ts_val = float(ts_raw) if ts_raw is not None else time.time()
+    except (TypeError, ValueError):
+        ts_val = time.time()
+    vol_raw = event.get("volume")
+    volume: Optional[float]
+    if vol_raw is None:
+        volume = None
+    else:
+        try:
+            volume = float(vol_raw)
+        except (TypeError, ValueError):
+            volume = None
+    cfg = getattr(S_CFG, "enabled", False)
+    if not cfg:
+        return
+    on_tick(symbol, price_f, ts_val, volume)
+
+
+try:
+    BUS.subscribe("market.tick", _on_market_tick_event)
+except Exception:
+    logging.getLogger(__name__).warning("Failed to subscribe strategy to market.tick", exc_info=True)
+
+
+async def _on_market_book_event(event: Dict[str, Any]) -> None:
+    if not SCALP_MODULE or not getattr(SCALP_MODULE, "enabled", False):
+        return
+    symbol = str(event.get("symbol") or "")
+    if not symbol:
+        return
+    try:
+        bid = float(event.get("bid_price") or 0.0)
+        ask = float(event.get("ask_price") or 0.0)
+        bid_qty = float(event.get("bid_qty") or 0.0)
+        ask_qty = float(event.get("ask_qty") or 0.0)
+    except (TypeError, ValueError):
+        return
+    ts_raw = event.get("ts")
+    try:
+        ts_val = float(ts_raw) if ts_raw is not None else time.time()
+    except (TypeError, ValueError):
+        ts_val = time.time()
+    try:
+        SCALP_MODULE.handle_book(symbol, bid, ask, bid_qty, ask_qty, ts_val)
+    except Exception:
+        logging.getLogger(__name__).debug("Failed to process book for %s", symbol, exc_info=True)
+
+
+try:
+    BUS.subscribe("market.book", _on_market_book_event)
+except Exception:
+    logging.getLogger(__name__).warning("Failed to subscribe strategy to market.book", exc_info=True)
 
 class StrategySignal(BaseModel):
     symbol: str = Field(..., description="e.g. BTCUSDT.BINANCE")
@@ -424,6 +510,45 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
                 try:
                     metrics.strategy_orders_total.labels(
                         symbol=scalp_base, venue=scalp_venue, side=scalp_side, source=scalp_tag
+                    ).inc()
+                except Exception:
+                    pass
+            return
+
+    if MOMENTUM_RT_MODULE and getattr(MOMENTUM_RT_MODULE, "enabled", False):
+        momentum_decision = None
+        try:
+            momentum_decision = MOMENTUM_RT_MODULE.handle_tick(qualified, price, ts_val, volume)
+        except Exception:
+            momentum_decision = None
+        if momentum_decision:
+            momentum_symbol = str(momentum_decision.get("symbol") or qualified)
+            momentum_side = str(momentum_decision.get("side") or "BUY")
+            momentum_quote = float(momentum_decision.get("quote") or S_CFG.quote_usdt)
+            momentum_tag = str(momentum_decision.get("tag") or "momentum_rt")
+            momentum_meta = momentum_decision.get("meta")
+            default_market = momentum_decision.get("market") or (
+                "futures" if getattr(MOMENTUM_RT_CFG, "prefer_futures", True) or momentum_side == "SELL" else "spot"
+            )
+            resolved_market = resolve_market_choice(momentum_symbol, default_market)
+            sig = StrategySignal(
+                symbol=momentum_symbol,
+                side=momentum_side,
+                quote=momentum_quote,
+                quantity=None,
+                dry_run=None,
+                tag=momentum_tag,
+                meta=momentum_meta,
+                market=resolved_market,
+            )
+            result = _execute_strategy_signal(sig)
+            if result.get("status") == "submitted":
+                try:
+                    metrics.strategy_orders_total.labels(
+                        symbol=momentum_symbol.split(".")[0],
+                        venue=momentum_symbol.split(".")[1] if "." in momentum_symbol else "BINANCE",
+                        side=momentum_side,
+                        source=momentum_tag,
                     ).inc()
                 except Exception:
                     pass

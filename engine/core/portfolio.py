@@ -14,6 +14,8 @@ class Position:
     last_price: float = 0.0
     upl: float = 0.0
     rpl: float = 0.0
+    venue: str = ""
+    market: str = "spot"
 
     def to_dict(self) -> dict:
         return {
@@ -23,6 +25,8 @@ class Position:
             "last_price_quote": self.last_price,
             "unrealized_usd": self.upl,
             "realized_usd": self.rpl,
+            "venue": self.venue,
+            "market": self.market,
         }
 
 
@@ -87,10 +91,30 @@ class Portfolio:
         quantity: float,
         price: float,
         fee_usd: float,
+        *,
+        venue: str | None = None,
+        market: str | None = None,
     ) -> None:
         side = side.upper()
         qty = quantity if side == "BUY" else -quantity
-        position = self._state.positions.setdefault(symbol, Position(symbol=symbol))
+        venue_norm = (venue or "").upper()
+        market_norm = (market or ("margin" if venue_norm == "BINANCE_MARGIN" else "spot")).lower()
+        if "." in symbol:
+            symbol_key = symbol.upper()
+            if not venue_norm:
+                venue_norm = symbol_key.split(".", 1)[1]
+                if venue_norm == "BINANCE_MARGIN" and market_norm == "spot":
+                    market_norm = "margin"
+        elif venue_norm:
+            symbol_key = f"{symbol.upper()}.{venue_norm}"
+        else:
+            symbol_key = symbol.upper()
+        position = self._state.positions.setdefault(symbol_key, Position(symbol=symbol_key))
+        if venue_norm:
+            position.venue = venue_norm
+        if market_norm:
+            position.market = market_norm
+
         prev_qty = position.quantity
         new_qty = prev_qty + qty
 

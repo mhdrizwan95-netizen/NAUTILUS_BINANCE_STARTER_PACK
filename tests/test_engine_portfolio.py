@@ -14,6 +14,8 @@ def test_portfolio_apply_fill_buy_sell_cycle():
     state = portfolio.state
     assert state.cash == 10000.0 - (0.001 * 30000.0 + 0.03)
     assert state.positions["BTCUSDT.BINANCE"].quantity == 0.001
+    assert state.positions["BTCUSDT.BINANCE"].venue == "BINANCE"
+    assert state.positions["BTCUSDT.BINANCE"].market == "spot"
 
     # Update mark price
     portfolio.update_price("BTCUSDT.BINANCE", 31000.0)

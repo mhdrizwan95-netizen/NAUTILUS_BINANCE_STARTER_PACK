@@ -183,6 +183,7 @@ class RiskConfig:
     margin_enabled: bool
     margin_min_level: float
     margin_max_liability_usd: float
+    margin_max_leverage: float
     options_enabled: bool
 
 
@@ -219,6 +220,7 @@ def load_risk_config() -> RiskConfig:
         margin_enabled=_as_bool(os.getenv("MARGIN_ENABLED"), _as_bool(os.getenv("BINANCE_MARGIN_ENABLED"), False)),
         margin_min_level=_as_float(os.getenv("MARGIN_MIN_LEVEL"), 1.2),
         margin_max_liability_usd=_as_float(os.getenv("MARGIN_MAX_LIABILITY_USD"), 25_000.0),
+        margin_max_leverage=_as_float(os.getenv("MARGIN_MAX_LEVERAGE"), 3.0),
         options_enabled=_as_bool(os.getenv("OPTIONS_ENABLED"), _as_bool(os.getenv("BINANCE_OPTIONS_ENABLED"), False)),
     )
 

@@ -123,10 +123,40 @@ scalp_rsi = Gauge(
     ["symbol", "venue"],
     multiprocess_mode="livesum",
 )
+scalp_spread_bp = Gauge(
+    "scalp_spread_bp",
+    "Observed top-of-book spread used by scalping module (basis points)",
+    ["symbol", "venue"],
+    multiprocess_mode="max",
+)
+scalp_orderbook_imbalance = Gauge(
+    "scalp_orderbook_imbalance",
+    "Order book imbalance tracked by scalping module (-1 to 1)",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
 scalp_signals_total = Counter(
     "scalp_signals_total",
     "Scalping strategy signals emitted grouped by reason",
     ["symbol", "venue", "side", "reason"],
+)
+scalp_signal_ttl_sec = Gauge(
+    "scalp_signal_ttl_sec",
+    "Time-to-live applied to scalping signals (seconds)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="max",
+)
+scalp_signal_edge_bp = Gauge(
+    "scalp_signal_edge_bp",
+    "Estimated post-slippage edge of scalping signals (basis points)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="livesum",
+)
+scalp_slippage_estimate_bp = Gauge(
+    "scalp_slippage_estimate_bp",
+    "Estimated slippage for scalping orders (basis points)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="livesum",
 )
 scalp_bracket_exits_total = Counter(
     "scalp_bracket_exits_total",
@@ -142,6 +172,11 @@ strategy_ticks_total = Counter(
     "strategy_ticks_total",
     "Price ticks delivered to strategy loop",
     ["symbol", "venue"],
+)
+market_data_events_total = Counter(
+    "market_data_events_total",
+    "Market data events published to event bus",
+    ["source", "type"],
 )
 strategy_tick_to_order_latency_ms = Histogram(
     "strategy_tick_to_order_latency_ms",
@@ -263,6 +298,31 @@ momentum_breakout_cooldown_epoch = Gauge(
     multiprocess_mode="max",
 )
 
+# Real-time momentum module telemetry
+momentum_rt_breakouts_total = Counter(
+    "momentum_rt_breakouts_total",
+    "Real-time momentum breakout signals emitted",
+    ["symbol", "venue", "side", "reason"],
+)
+momentum_rt_window_return_pct = Gauge(
+    "momentum_rt_window_return_pct",
+    "Recent percentage move observed within the momentum window (pct)",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
+momentum_rt_volume_ratio = Gauge(
+    "momentum_rt_volume_ratio",
+    "Ratio of recent volume vs. baseline window for momentum module",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
+momentum_rt_cooldown_epoch = Gauge(
+    "momentum_rt_cooldown_epoch",
+    "Epoch timestamp when the real-time momentum module can trigger again",
+    ["symbol", "venue"],
+    multiprocess_mode="max",
+)
+
 # External feed telemetry
 external_feed_events_total = Counter(
     "external_feed_events_total",
@@ -309,6 +369,12 @@ listing_sniper_last_announce_epoch = Gauge(
     ["symbol"],
     multiprocess_mode="max",
 )
+listing_sniper_go_live_epoch = Gauge(
+    "listing_sniper_go_live_epoch",
+    "Scheduled go-live timestamp parsed from Binance listing announcements",
+    ["symbol"],
+    multiprocess_mode="max",
+)
 listing_sniper_cooldown_epoch = Gauge(
     "listing_sniper_cooldown_epoch",
     "Epoch timestamp when the listing sniper cooldown expires for a symbol",
@@ -330,6 +396,30 @@ meme_sentiment_orders_total = Counter(
 meme_sentiment_cooldown_epoch = Gauge(
     "meme_sentiment_cooldown_epoch",
     "Epoch timestamp when meme sentiment cooldown expires for a symbol",
+    ["symbol"],
+    multiprocess_mode="max",
+)
+
+# Social sentiment module metrics
+social_sentiment_events_total = Counter(
+    "social_sentiment_events_total",
+    "Social sentiment evaluations grouped by decision outcome",
+    ["symbol", "decision"],
+)
+social_sentiment_orders_total = Counter(
+    "social_sentiment_orders_total",
+    "Orders initiated by the social sentiment module grouped by status",
+    ["symbol", "status"],
+)
+social_sentiment_cooldown_epoch = Gauge(
+    "social_sentiment_cooldown_epoch",
+    "Epoch timestamp when social sentiment cooldown expires for a symbol",
+    ["symbol"],
+    multiprocess_mode="max",
+)
+social_sentiment_signal_score = Gauge(
+    "social_sentiment_signal_score",
+    "Most recent social sentiment signal score per symbol",
     ["symbol"],
     multiprocess_mode="max",
 )
@@ -425,6 +515,7 @@ REGISTRY = {
     "strategy_confidence": strategy_confidence,
     "strategy_orders_total": strategy_orders_total,
     "strategy_ticks_total": strategy_ticks_total,
+    "market_data_events_total": market_data_events_total,
     "strategy_tick_to_order_latency_ms": strategy_tick_to_order_latency_ms,
     "strategy_universe_size": strategy_universe_size,
     "strategy_signal_queue_len": strategy_signal_queue_len,
@@ -442,10 +533,15 @@ REGISTRY = {
     "listing_sniper_skips_total": listing_sniper_skips_total,
     "listing_sniper_orders_total": listing_sniper_orders_total,
     "listing_sniper_last_announce_epoch": listing_sniper_last_announce_epoch,
+    "listing_sniper_go_live_epoch": listing_sniper_go_live_epoch,
     "listing_sniper_cooldown_epoch": listing_sniper_cooldown_epoch,
     "meme_sentiment_events_total": meme_sentiment_events_total,
     "meme_sentiment_orders_total": meme_sentiment_orders_total,
     "meme_sentiment_cooldown_epoch": meme_sentiment_cooldown_epoch,
+    "social_sentiment_events_total": social_sentiment_events_total,
+    "social_sentiment_orders_total": social_sentiment_orders_total,
+    "social_sentiment_cooldown_epoch": social_sentiment_cooldown_epoch,
+    "social_sentiment_signal_score": social_sentiment_signal_score,
     "airdrop_promo_events_total": airdrop_events_total,
     "airdrop_promo_orders_total": airdrop_orders_total,
     "airdrop_promo_cooldown_epoch": airdrop_cooldown_epoch,

@@ -189,11 +189,13 @@ class OrderRouter:
             venue = default_venue
 
         market_hint = market.lower() if isinstance(market, str) and market else None
+        if venue == "BINANCE_MARGIN" and not market_hint:
+            market_hint = "margin"
 
-        if venue == "BINANCE":
-            client = _CLIENTS.get("BINANCE")
+        if venue in {"BINANCE", "BINANCE_MARGIN"}:
+            client = _CLIENTS.get(venue)
             if client is None:
-                raise ValueError("VENUE_CLIENT_MISSING: No client for venue BINANCE")
+                raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
 
             spec: SymbolSpec | None = (SPECS.get("BINANCE") or {}).get(base)
             if spec is None:
@@ -208,14 +210,23 @@ class OrderRouter:
                 qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
                 return await self.market_quantity(symbol, side, qty, market=market_hint)
 
+            margin_market = "margin" if venue == "BINANCE_MARGIN" else None
+            submit_market = market_hint or margin_market
+
             t0 = time.time()
+            call_kwargs = {"symbol": base, "side": side, "quote": float(quote)}
+            if submit_market is not None:
+                call_kwargs["market"] = submit_market
             try:
-                res = await submit(symbol=base, side=side, quote=float(quote), market=market_hint)
+                res = await submit(**call_kwargs)
+            except TypeError:
+                call_kwargs.pop("market", None)
+                res = await submit(**call_kwargs)
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code if e.response is not None else 0
                 if code in (400, 415, 422):
-                    qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
-                    return await self.market_quantity(symbol, side, qty, market=market_hint)
+                    qty = await self._quote_to_quantity(symbol, side, quote, market=submit_market)
+                    return await self.market_quantity(symbol, side, qty, market=submit_market)
                 raise
             t1 = time.time()
 
@@ -224,7 +235,7 @@ class OrderRouter:
             except Exception:
                 pass
 
-            fee_bps = load_fee_config("BINANCE").taker_bps
+            fee_bps = load_fee_config(venue).taker_bps
             filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or 0.0)
             avg_price = float(res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", 0.0) or 0.0)
             fill_notional = abs(filled_qty) * avg_price if (filled_qty and avg_price) else float(quote)
@@ -233,19 +244,28 @@ class OrderRouter:
             if avg_price:
                 res.setdefault("avg_fill_price", avg_price)
             res["taker_bps"] = fee_bps
-            if market_hint:
-                res.setdefault("market", market_hint)
+            if submit_market:
+                res.setdefault("market", submit_market)
 
             try:
                 if filled_qty > 0 and (avg_price or fill_notional > 0):
                     px = avg_price if avg_price else (fill_notional / max(filled_qty, 1e-12))
-                    self._portfolio.apply_fill(base, side, abs(filled_qty), px, float(fee))
+                    symbol_key = symbol if "." in symbol else f"{base}.{venue}"
+                    self._portfolio.apply_fill(
+                        symbol_key,
+                        side,
+                        abs(filled_qty),
+                        px,
+                        float(fee),
+                        venue=venue,
+                        market=submit_market,
+                    )
                     st = self._portfolio.state
                     update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
             except Exception:
                 pass
 
-            await self._maybe_emit_fill(res, symbol, side, venue="BINANCE", intent="")
+            await self._maybe_emit_fill(res, symbol, side, venue=venue, intent="")
             return res
 
         qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
@@ -378,14 +398,17 @@ class OrderRouter:
             raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
 
         market_hint = market.lower() if isinstance(market, str) and market else None
+        if venue == "BINANCE_MARGIN" and not market_hint:
+            market_hint = "margin"
         px = await _resolve_last_price(client, venue, base, symbol, market=market_hint)
         if px is None or px <= 0:
             raise ValueError(f"NO_PRICE: No last price for {symbol}")
 
-        spec: SymbolSpec | None = (SPECS.get(venue) or {}).get(base)
+        spec_key = "BINANCE" if venue == "BINANCE_MARGIN" else venue
+        spec: SymbolSpec | None = (SPECS.get(spec_key) or {}).get(base)
         if venue == "IBKR" and spec is None:
             spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
-        elif venue == "BINANCE" and spec is None:
+        elif venue in {"BINANCE", "BINANCE_MARGIN"} and spec is None:
             spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
         elif venue == "KRAKEN" and spec is None:
             spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
@@ -458,15 +481,18 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
         raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
 
     market_hint: str | None = market.lower() if isinstance(market, str) and market else None
+    if venue == "BINANCE_MARGIN" and not market_hint:
+        market_hint = "margin"
 
     px = await _resolve_last_price(client, venue, base, symbol, market=market_hint)
     if px is None or px <= 0:
         raise ValueError(f"NO_PRICE: No last price for {symbol}")
 
-    spec: SymbolSpec | None = (SPECS.get(venue) or {}).get(base)
+    spec_key = "BINANCE" if venue == "BINANCE_MARGIN" else venue
+    spec: SymbolSpec | None = (SPECS.get(spec_key) or {}).get(base)
     if venue == "IBKR" and spec is None:
         spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
-    elif venue == "BINANCE" and spec is None:
+    elif venue in {"BINANCE", "BINANCE_MARGIN"} and spec is None:
         spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
     elif venue == "KRAKEN" and spec is None:
         spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
@@ -540,10 +566,14 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
             if submit is None:
                 raise ValueError("CLIENT_MISSING_METHOD: submit_market_quote")
             t0 = time.time()
-            if venue == "BINANCE" and market_hint is not None and "market" in submit.__code__.co_varnames:  # type: ignore[attr-defined]
-                res = await submit(symbol=clean_symbol, side=side, quote=quote, market=market_hint)
-            else:
-                res = await submit(symbol=clean_symbol, side=side, quote=quote)
+            call_kwargs = {"symbol": clean_symbol, "side": side, "quote": quote}
+            if market_hint is not None:
+                call_kwargs["market"] = market_hint
+            try:
+                res = await submit(**call_kwargs)
+            except TypeError:
+                call_kwargs.pop("market", None)
+                res = await submit(**call_kwargs)
             t1 = time.time()
         else:
             submit = getattr(client, "submit_market_order", None)
@@ -552,10 +582,14 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
             if submit is None:
                 raise ValueError("CLIENT_MISSING_METHOD: submit_market_order")
             t0 = time.time()
-            if venue == "BINANCE" and market_hint is not None and "market" in submit.__code__.co_varnames:  # type: ignore[attr-defined]
-                res = submit(symbol=clean_symbol, side=side, quantity=float(quantity), market=market_hint)
-            else:
-                res = submit(symbol=clean_symbol, side=side, quantity=float(quantity))
+            call_kwargs = {"symbol": clean_symbol, "side": side, "quantity": float(quantity)}
+            if market_hint is not None:
+                call_kwargs["market"] = market_hint
+            try:
+                res = submit(**call_kwargs)
+            except TypeError:
+                call_kwargs.pop("market", None)
+                res = submit(**call_kwargs)
             if hasattr(res, "__await__"):
                 res = await res
             t1 = time.time()
@@ -594,11 +628,30 @@ async def _place_market_order_async_core(symbol: str, side: str, quote: float | 
             if venue == "IBKR":
                 filled_qty_ibkr = float(res.get("filled_qty_base") or quantity or 0.0)
                 avg_px_ibkr = float(res.get("avg_fill_price") or px)
-                portfolio.apply_fill(base, side, abs(filled_qty_ibkr), avg_px_ibkr, float(fee))
+                symbol_key = symbol if "." in symbol else f"{base}.{venue}"
+                portfolio.apply_fill(
+                    symbol_key,
+                    side,
+                    abs(filled_qty_ibkr),
+                    avg_px_ibkr,
+                    float(fee),
+                    venue=venue,
+                    market=market_hint,
+                )
             else:
                 filled_qty_bin = float(res.get("filled_qty_base") or quantity or 0.0)
                 avg_px_bin = float(res.get("avg_fill_price") or px)
-                portfolio.apply_fill(base, side, abs(filled_qty_bin), avg_px_bin, float(fee))
+                symbol_key = symbol if "." in symbol else f"{base}.{venue}"
+                effective_market = market_hint or ("margin" if venue == "BINANCE_MARGIN" else None)
+                portfolio.apply_fill(
+                    symbol_key,
+                    side,
+                    abs(filled_qty_bin),
+                    avg_px_bin,
+                    float(fee),
+                    venue=venue,
+                    market=effective_market,
+                )
             st = portfolio.state
             update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
         except Exception:
@@ -675,7 +728,7 @@ async def _resolve_last_price(client, venue: str, base: str, symbol: str, *, mar
 
     ticker = getattr(client, "ticker_price", None)
     if callable(ticker):
-        clean = base if venue == "BINANCE" else symbol
+        clean = base if venue in {"BINANCE", "BINANCE_MARGIN"} else symbol
         try:
             price = ticker(clean, market=market)
         except TypeError:
@@ -862,7 +915,23 @@ class OrderRouterExt(OrderRouter):
         if submit is None:
             raise ValueError("CLIENT_MISSING_METHOD: submit_limit_order")
         t0 = time.time()
-        res = await submit(symbol=clean_symbol, side=side, quantity=float(q_rounded), price=float(p_rounded), time_in_force=time_in_force)
+        submit_kwargs = dict(
+            symbol=clean_symbol,
+            side=side,
+            quantity=float(q_rounded),
+            price=float(p_rounded),
+            time_in_force=time_in_force,
+        )
+        effective_market = (market.lower() if isinstance(market, str) else None)
+        if not effective_market and venue == "BINANCE_MARGIN":
+            effective_market = "margin"
+        if venue in {"BINANCE", "BINANCE_MARGIN"} and effective_market is not None:
+            submit_kwargs["market"] = effective_market
+        try:
+            res = await submit(**submit_kwargs)
+        except TypeError:
+            submit_kwargs.pop("market", None)
+            res = await submit(**submit_kwargs)
         t1 = time.time()
 
         try:
@@ -883,7 +952,18 @@ class OrderRouterExt(OrderRouter):
         # Apply fill to local portfolio (best-effort)
         try:
             if filled_qty > 0 and avg_price > 0:
-                self._portfolio.apply_fill(base, side, abs(filled_qty), avg_price, float(fee))
+                symbol_key = symbol if "." in symbol else f"{base}.{venue}"
+                if not effective_market and venue == "BINANCE_MARGIN":
+                    effective_market = "margin"
+                self._portfolio.apply_fill(
+                    symbol_key,
+                    side,
+                    abs(filled_qty),
+                    avg_price,
+                    float(fee),
+                    venue=venue,
+                    market=effective_market,
+                )
                 st = self._portfolio.state
                 update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
         except Exception:

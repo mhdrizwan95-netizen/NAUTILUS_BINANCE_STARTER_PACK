@@ -22,7 +22,7 @@ import httpx as _httpx
 
 import os
 from engine.config import get_settings, load_risk_config, QUOTE_CCY
-from engine.core.binance import BinanceREST
+from engine.core.binance import BinanceREST, BinanceMarginREST
 from engine.core.kraken import KrakenREST
 from engine.core.binance_ws import BinanceWS
 from engine.ops.bracket_governor import BracketGovernor
@@ -52,8 +52,12 @@ from engine.telemetry.publisher import (
     record_realized_total as deck_record_realized_total,
     consume_latency as deck_consume_latency,
 )
+from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
 
 app = FastAPI(title="HMM Engine", version="0.1.0")
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 settings = get_settings()
 ROLE = os.getenv("ROLE", "trader").lower()
@@ -66,6 +70,8 @@ DECK_METRICS_INTERVAL_SEC = max(1.0, float(os.getenv("DECK_METRICS_INTERVAL_SEC"
 _deck_metrics_task: Optional[asyncio.Task] = None
 _deck_realized_lock = Lock()
 _deck_last_realized = 0.0
+_market_data_dispatcher: Optional[MarketDataDispatcher] = None
+_market_data_logger: Optional[MarketDataLogger] = None
 try:
     MIN_FUT_BAL_USDT = float(os.getenv("MIN_FUT_BAL_USDT", "300"))
 except (TypeError, ValueError):
@@ -200,6 +206,24 @@ elif VENUE == "KRAKEN":
 else:
     rest_client = BinanceREST()
 
+margin_rest_client: Optional[BinanceMarginREST]
+if _truthy_env("MARGIN_ENABLED") or _truthy_env("BINANCE_MARGIN_ENABLED"):
+    if settings.api_key and settings.api_secret:
+        try:
+            margin_rest_client = BinanceMarginREST()
+            set_exchange_client("BINANCE_MARGIN", margin_rest_client)
+        except Exception as margin_exc:  # noqa: BLE001
+            logging.getLogger("engine.startup").warning(
+                "[STARTUP] Failed to initialize margin REST client: %s", margin_exc
+            )
+            margin_rest_client = None
+    else:
+        margin_rest_client = None
+else:
+    margin_rest_client = None
+
+MARGIN_REST = margin_rest_client
+
 if VENUE == "KRAKEN":
     KRAKEN_REST: KrakenREST | None = cast(Optional[KrakenREST], rest_client)
 else:
@@ -292,7 +316,13 @@ def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
         pass
     # Emit strategy tick + increment strategy_ticks_total via helper
     try:
-        _maybe_emit_strategy_tick(qual, price_f, ts=ts or time.time())
+        _maybe_emit_strategy_tick(
+            qual,
+            price_f,
+            ts=ts or time.time(),
+            source="binance_ws",
+            stream="ws",
+        )
     except Exception:
         pass
 
@@ -730,6 +760,7 @@ _stop_validator: StopValidator | None = None
 _LISTING_SNIPER = None
 _MOMENTUM_BREAKOUT = None
 _MEME_SENTIMENT = None
+_SOCIAL_SENTIMENT = None
 _AIRDROP_PROMO = None
 
 # Attach strategy router only for trading role
@@ -761,23 +792,59 @@ def _config_hash() -> str:
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
-def _maybe_emit_strategy_tick(symbol: str, price: float, *, ts: float | None = None) -> None:
+def _maybe_emit_strategy_tick(
+    symbol: str,
+    price: float,
+    *,
+    ts: float | None = None,
+    source: str | None = None,
+    stream: str | None = None,
+    volume: float | None = None,
+) -> None:
     """Forward mark updates into the strategy loop when enabled."""
     if price is None or price <= 0:
         return
+    event_ts = ts or time.time()
     try:
         qualified = symbol if "." in symbol else f"{symbol}.BINANCE"
+        base = qualified.split(".")[0].upper()
+        venue = qualified.split(".")[1].upper() if "." in qualified else "BINANCE"
         # Always count ticks for observability, even if strategy disabled
         try:
-            base = qualified.split(".")[0].upper()
-            venue = qualified.split(".")[1].lower()
-            metrics.strategy_ticks_total.labels(symbol=base, venue=venue).inc()
+            metrics.strategy_ticks_total.labels(symbol=base, venue=venue.lower()).inc()
         except Exception:
             pass
-        # Only drive strategy loop when enabled
+        payload: dict[str, Any] = {
+            "symbol": qualified,
+            "base": base,
+            "venue": venue,
+            "price": float(price),
+            "ts": event_ts,
+        }
+        if source:
+            payload["source"] = source
+        if stream:
+            payload["stream"] = stream
+        if volume is not None:
+            try:
+                payload["volume"] = float(volume)
+            except (TypeError, ValueError):
+                payload["volume"] = None
+        skip_bus = source == "binance_ws" and _market_data_dispatcher is not None
+        delivered_via_bus = False
+        if not skip_bus:
+            try:
+                BUS.fire("market.tick", payload)
+                delivered_via_bus = bool(getattr(BUS, "_running", False))
+            except Exception:
+                delivered_via_bus = False
+        if skip_bus:
+            return
+        if delivered_via_bus:
+            return
         cfg = getattr(strategy, "S_CFG", None)
         if cfg is not None and getattr(cfg, "enabled", False):
-            strategy.on_tick(qualified, float(price), ts or time.time())
+            strategy.on_tick(qualified, float(price), event_ts, volume)
     except Exception:
         try:
             _refresh_logger.debug("Strategy tick emit failed for %s", symbol, exc_info=True)
@@ -1185,6 +1252,40 @@ async def _start_guardian_and_feeds():
     except Exception:
         _startup_logger.warning("Meme sentiment strategy wiring failed", exc_info=True)
 
+    # Social sentiment strategy wiring
+    try:
+        from engine.strategies.social_sentiment import (
+            SocialSentimentModule,
+            load_social_sentiment_config,
+        )
+
+        social_cfg = load_social_sentiment_config()
+        global _SOCIAL_SENTIMENT
+        if social_cfg.enabled:
+            if _SOCIAL_SENTIMENT is None:
+                _SOCIAL_SENTIMENT = SocialSentimentModule(router, RAILS, rest_client, social_cfg)
+                BUS.subscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
+                _startup_logger.info(
+                    "Social sentiment strategy enabled (risk_pct=%.2f%%, min_score=%.2f, coin_cooldown=%.0fs)",
+                    social_cfg.per_trade_risk_pct * 100.0,
+                    social_cfg.min_signal_score,
+                    social_cfg.coin_cooldown_sec,
+                )
+            else:
+                _SOCIAL_SENTIMENT.cfg = social_cfg
+                _SOCIAL_SENTIMENT.rest_client = rest_client
+                _startup_logger.info("Social sentiment strategy configuration refreshed")
+        else:
+            if _SOCIAL_SENTIMENT is not None:
+                try:
+                    BUS.unsubscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
+                except Exception:
+                    pass
+                _SOCIAL_SENTIMENT = None
+                _startup_logger.info("Social sentiment strategy disabled via configuration")
+    except Exception:
+        _startup_logger.warning("Social sentiment strategy wiring failed", exc_info=True)
+
     # Listing sniper wiring
     try:
         from engine.strategies.listing_sniper import ListingSniper, load_listing_sniper_config
@@ -1500,7 +1601,14 @@ except Exception:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _AIRDROP_PROMO
+    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _SOCIAL_SENTIMENT, _AIRDROP_PROMO, _market_data_logger
+    if _market_data_logger is not None:
+        try:
+            _market_data_logger.stop()
+            _startup_logger.info("Market data logger stopped")
+        except Exception:
+            _startup_logger.debug("Market data logger shutdown encountered issues", exc_info=True)
+        _market_data_logger = None
     try:
         if _MOMENTUM_BREAKOUT is not None:
             await _MOMENTUM_BREAKOUT.stop()
@@ -1522,6 +1630,17 @@ async def on_shutdown() -> None:
             _MEME_SENTIMENT = None
     except Exception:
         _startup_logger.warning("Meme sentiment shutdown failed", exc_info=True)
+    try:
+        if _SOCIAL_SENTIMENT is not None:
+            from engine.core.event_bus import BUS
+
+            try:
+                BUS.unsubscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
+            except Exception:
+                pass
+            _SOCIAL_SENTIMENT = None
+    except Exception:
+        _startup_logger.warning("Social sentiment shutdown failed", exc_info=True)
     try:
         if _AIRDROP_PROMO is not None:
             from engine.core.event_bus import BUS
@@ -1617,12 +1736,26 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
 
         # Apply immediate fill to internal portfolio state (best-effort)
         try:
-            sym = (result.get("symbol") or req.symbol).split(".")[0]
+            raw_symbol = result.get("symbol") or req.symbol
             qty_base = float(result.get("filled_qty_base") or 0.0)
             px = float(result.get("avg_fill_price") or 0.0)
             fee_usd = float(result.get("fee_usd") or 0.0)
-            if qty_base > 0 and px > 0:
-                portfolio.apply_fill(symbol=sym, side=req.side, quantity=qty_base, price=px, fee_usd=fee_usd)
+            venue_hint = (result.get("venue") or venue).upper()
+            market_hint = (result.get("market") or (req.market.lower() if isinstance(req.market, str) else None))
+            if raw_symbol and "." not in raw_symbol and venue_hint:
+                full_symbol = f"{raw_symbol}.{venue_hint}"
+            else:
+                full_symbol = raw_symbol
+            if qty_base > 0 and px > 0 and full_symbol:
+                portfolio.apply_fill(
+                    symbol=full_symbol,
+                    side=req.side,
+                    quantity=qty_base,
+                    price=px,
+                    fee_usd=fee_usd,
+                    venue=venue_hint,
+                    market=market_hint,
+                )
                 # Update gauges after applying the fill
                 state = portfolio.state
                 metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
@@ -1734,12 +1867,26 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
 
         # Apply immediate fill (best-effort)
         try:
-            sym = (result.get("symbol") or req.symbol).split(".")[0]
+            raw_symbol = result.get("symbol") or req.symbol
             qty_base = float(result.get("filled_qty_base") or 0.0)
             px = float(result.get("avg_fill_price") or 0.0)
             fee_usd = float(result.get("fee_usd") or 0.0)
-            if qty_base > 0 and px > 0:
-                portfolio.apply_fill(symbol=sym, side=req.side, quantity=qty_base, price=px, fee_usd=fee_usd)
+            venue_hint = (result.get("venue") or venue).upper()
+            market_hint = (result.get("market") or (req.market.lower() if isinstance(req.market, str) else None))
+            if raw_symbol and "." not in raw_symbol and venue_hint:
+                full_symbol = f"{raw_symbol}.{venue_hint}"
+            else:
+                full_symbol = raw_symbol
+            if qty_base > 0 and px > 0 and full_symbol:
+                portfolio.apply_fill(
+                    symbol=full_symbol,
+                    side=req.side,
+                    quantity=qty_base,
+                    price=px,
+                    fee_usd=fee_usd,
+                    venue=venue_hint,
+                    market=market_hint,
+                )
                 st = portfolio.state
                 metrics.update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
                 _store.save(st.snapshot())
@@ -2443,7 +2590,7 @@ async def _refresh_binance_futures_snapshot() -> None:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
                 except Exception:
                     pass
-                _maybe_emit_strategy_tick(sym, px, ts=now_ts)
+                _maybe_emit_strategy_tick(sym, px, ts=now_ts, source="rest_snapshot", stream="rest")
             if new_map:
                 _price_map = new_map
     except Exception:
@@ -2608,7 +2755,7 @@ async def _refresh_binance_spot_snapshot() -> None:
                 continue
             if px > 0:
                 new_map[sym] = px
-                _maybe_emit_strategy_tick(sym, px)
+                _maybe_emit_strategy_tick(sym, px, source="rest_snapshot", stream="rest")
         if new_map:
             _price_map = new_map
             for sym, px in new_map.items():
@@ -2938,7 +3085,7 @@ async def _start_binance_ws():
     role = "exporter" if IS_EXPORTER else "trader"
     try:
         from engine import strategy as _strategy_mod
-        on_cb = None if IS_EXPORTER else _strategy_mod.on_tick
+        on_cb = None if IS_EXPORTER else None
         stream_mode = os.getenv("BINANCE_WS_STREAM", "auto").lower()
         scalper_module = getattr(_strategy_mod, "SCALP_MODULE", None)
         if stream_mode == "auto":
@@ -2948,6 +3095,9 @@ async def _start_binance_ws():
                 stream_mode = os.getenv("SCALP_WS_STREAM", "aggtrade").lower()
             else:
                 stream_mode = "miniticker"
+        global _market_data_dispatcher
+        if _market_data_dispatcher is None:
+            _market_data_dispatcher = MarketDataDispatcher(BUS, source="binance_ws", venue="BINANCE")
         ws = BinanceWS(
             symbols=bases,
             url_base=ws_base,
@@ -2956,6 +3106,7 @@ async def _start_binance_ws():
             on_price_cb=on_cb,
             price_hook=_binance_on_mark,
             stream_type=stream_mode,
+            event_callback=_market_data_dispatcher.handle_stream_event,
         )
         asyncio.create_task(ws.run())
         # remember symbols for freshness loop
@@ -2964,6 +3115,25 @@ async def _start_binance_ws():
         _startup_logger.warning("Binance WS started (%s, futures=%s, symbols=%d, ws_base=%s)", role, settings.is_futures, len(bases), ws_base)
     except Exception:
         _startup_logger.warning("Binance WS failed to start", exc_info=True)
+
+
+@app.on_event("startup")
+async def _start_market_data_logger() -> None:
+    if os.getenv("MARKET_DATA_LOGGER", "false").lower() not in {"1", "true", "yes"}:
+        return
+    global _market_data_logger
+    if _market_data_logger is not None:
+        return
+    try:
+        rate = float(os.getenv("MARKET_DATA_LOGGER_RATE", "5.0"))
+    except (TypeError, ValueError):
+        rate = 5.0
+    try:
+        _market_data_logger = MarketDataLogger(BUS, sample_rate_hz=rate)
+        _market_data_logger.start()
+        _startup_logger.info("Market data logger subscribed (rate=%.2f Hz)", rate)
+    except Exception:
+        _startup_logger.warning("Market data logger failed to start", exc_info=True)
 
 
 @app.on_event("startup")
