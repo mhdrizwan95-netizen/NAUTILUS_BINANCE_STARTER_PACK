@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
-from typing import Callable, Iterable, List, Optional
+import time
+from typing import Any, Callable, Iterable, List, Optional
 
 import websockets
 
@@ -43,6 +45,7 @@ class BinanceWS:
         on_price_cb: Optional[Callable[[str, float, float], object]] = None,
         price_hook: Optional[Callable[[str, str, float, float], None]] = None,
         stream_type: str = "auto",
+        event_callback: Optional[Callable[[dict[str, Any]], Any]] = None,
     ) -> None:
         # Symbols must be upper for reporting; WS expects lowercase in stream names
         self.symbols = [s.upper() for s in symbols if s]
@@ -53,6 +56,7 @@ class BinanceWS:
         self._price_hook = price_hook
         self.stream_type = (stream_type or "auto").lower()
         self._tasks: list[asyncio.Task] = []
+        self._event_callback = event_callback
 
     async def run(self) -> None:
         if not self.symbols:
@@ -155,6 +159,15 @@ class BinanceWS:
                                     asyncio.create_task(res)  # type: ignore[arg-type]
                             except Exception:
                                 pass
+                        event_payload = self._build_event_payload(
+                            stype=stype,
+                            symbol=sym,
+                            price=price,
+                            ts=ts or time.time(),
+                            raw=data,
+                        )
+                        if event_payload is not None:
+                            self._emit_event(event_payload)
             except Exception as exc:
                 log.warning("[WS] Binance WS error: %s", exc)
                 try:
@@ -176,3 +189,92 @@ class BinanceWS:
         if self.stream_type in {"aggtrade", "trade", "trades"}:
             return "aggtrade"
         return "miniticker"
+
+    def _emit_event(self, payload: dict[str, Any]) -> None:
+        callback = self._event_callback
+        if not callback:
+            return
+        try:
+            result = callback(payload)
+            if asyncio.iscoroutine(result):
+                asyncio.create_task(result)
+        except Exception:
+            log.debug("[WS] event dispatch failed", exc_info=True)
+
+    def _build_event_payload(
+        self,
+        *,
+        stype: str,
+        symbol: str,
+        price: float,
+        ts: float,
+        raw: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        try:
+            price_f = float(price)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(price_f) or price_f <= 0.0:
+            return None
+        base = symbol.upper()
+        qualified = f"{base}.BINANCE"
+        payload: dict[str, Any] = {
+            "type": "tick",
+            "symbol": qualified,
+            "base": base,
+            "venue": "BINANCE",
+            "price": price_f,
+            "ts": ts or time.time(),
+            "stream": stype,
+        }
+        if isinstance(raw, dict):
+            payload["raw"] = raw
+        if stype == "aggtrade":
+            payload["type"] = "trade"
+            qty = raw.get("q") if isinstance(raw, dict) else None
+            if qty is None and isinstance(raw, dict):
+                qty = raw.get("Q") or raw.get("quantity")
+            try:
+                payload["quantity"] = float(qty) if qty is not None else 0.0
+            except (TypeError, ValueError):
+                payload["quantity"] = 0.0
+            if isinstance(raw, dict):
+                payload["trade_id"] = raw.get("a") or raw.get("t")
+                payload["is_buyer_maker"] = bool(raw.get("m"))
+        elif stype == "bookticker":
+            payload["type"] = "book"
+            bid_price = None
+            ask_price = None
+            bid_qty = None
+            ask_qty = None
+            if isinstance(raw, dict):
+                bid_price = raw.get("b") or raw.get("bidPrice")
+                ask_price = raw.get("a") or raw.get("askPrice")
+                bid_qty = raw.get("B") or raw.get("bidQty")
+                ask_qty = raw.get("A") or raw.get("askQty")
+            try:
+                payload["bid_price"] = float(bid_price) if bid_price is not None else 0.0
+            except (TypeError, ValueError):
+                payload["bid_price"] = 0.0
+            try:
+                payload["ask_price"] = float(ask_price) if ask_price is not None else 0.0
+            except (TypeError, ValueError):
+                payload["ask_price"] = 0.0
+            try:
+                payload["bid_qty"] = float(bid_qty) if bid_qty is not None else 0.0
+            except (TypeError, ValueError):
+                payload["bid_qty"] = 0.0
+            try:
+                payload["ask_qty"] = float(ask_qty) if ask_qty is not None else 0.0
+            except (TypeError, ValueError):
+                payload["ask_qty"] = 0.0
+        else:
+            if isinstance(raw, dict):
+                vol = raw.get("q") or raw.get("Q") or raw.get("volume") or raw.get("v")
+            else:
+                vol = None
+            try:
+                payload["volume"] = float(vol) if vol is not None else None
+            except (TypeError, ValueError):
+                payload["volume"] = None
+        return payload

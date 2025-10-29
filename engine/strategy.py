@@ -237,6 +237,41 @@ _symbol_cooldown_until: Dict[str, float] = defaultdict(float)
 _last_trade_price: Dict[str, float] = defaultdict(float)
 _entry_block_until: float = time.time() + float(os.getenv("WARMUP_SEC", "0"))
 
+
+async def _on_market_tick_event(event: Dict[str, Any]) -> None:
+    symbol = str(event.get("symbol") or "")
+    price = event.get("price")
+    if not symbol or price is None:
+        return
+    try:
+        price_f = float(price)
+    except (TypeError, ValueError):
+        return
+    ts_raw = event.get("ts")
+    try:
+        ts_val = float(ts_raw) if ts_raw is not None else time.time()
+    except (TypeError, ValueError):
+        ts_val = time.time()
+    vol_raw = event.get("volume")
+    volume: Optional[float]
+    if vol_raw is None:
+        volume = None
+    else:
+        try:
+            volume = float(vol_raw)
+        except (TypeError, ValueError):
+            volume = None
+    cfg = getattr(S_CFG, "enabled", False)
+    if not cfg:
+        return
+    on_tick(symbol, price_f, ts_val, volume)
+
+
+try:
+    BUS.subscribe("market.tick", _on_market_tick_event)
+except Exception:
+    logging.getLogger(__name__).warning("Failed to subscribe strategy to market.tick", exc_info=True)
+
 class StrategySignal(BaseModel):
     symbol: str = Field(..., description="e.g. BTCUSDT.BINANCE")
     side: str = Field(..., pattern=r"^(BUY|SELL)$")

@@ -143,6 +143,11 @@ strategy_ticks_total = Counter(
     "Price ticks delivered to strategy loop",
     ["symbol", "venue"],
 )
+market_data_events_total = Counter(
+    "market_data_events_total",
+    "Market data events published to event bus",
+    ["source", "type"],
+)
 strategy_tick_to_order_latency_ms = Histogram(
     "strategy_tick_to_order_latency_ms",
     "Latency from mark ingestion to order submission (ms)",
@@ -425,6 +430,7 @@ REGISTRY = {
     "strategy_confidence": strategy_confidence,
     "strategy_orders_total": strategy_orders_total,
     "strategy_ticks_total": strategy_ticks_total,
+    "market_data_events_total": market_data_events_total,
     "strategy_tick_to_order_latency_ms": strategy_tick_to_order_latency_ms,
     "strategy_universe_size": strategy_universe_size,
     "strategy_signal_queue_len": strategy_signal_queue_len,

@@ -52,6 +52,7 @@ from engine.telemetry.publisher import (
     record_realized_total as deck_record_realized_total,
     consume_latency as deck_consume_latency,
 )
+from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
 
 app = FastAPI(title="HMM Engine", version="0.1.0")
 
@@ -66,6 +67,8 @@ DECK_METRICS_INTERVAL_SEC = max(1.0, float(os.getenv("DECK_METRICS_INTERVAL_SEC"
 _deck_metrics_task: Optional[asyncio.Task] = None
 _deck_realized_lock = Lock()
 _deck_last_realized = 0.0
+_market_data_dispatcher: Optional[MarketDataDispatcher] = None
+_market_data_logger: Optional[MarketDataLogger] = None
 try:
     MIN_FUT_BAL_USDT = float(os.getenv("MIN_FUT_BAL_USDT", "300"))
 except (TypeError, ValueError):
@@ -292,7 +295,13 @@ def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
         pass
     # Emit strategy tick + increment strategy_ticks_total via helper
     try:
-        _maybe_emit_strategy_tick(qual, price_f, ts=ts or time.time())
+        _maybe_emit_strategy_tick(
+            qual,
+            price_f,
+            ts=ts or time.time(),
+            source="binance_ws",
+            stream="ws",
+        )
     except Exception:
         pass
 
@@ -761,23 +770,59 @@ def _config_hash() -> str:
     return hashlib.sha1(blob.encode()).hexdigest()[:12]
 
 
-def _maybe_emit_strategy_tick(symbol: str, price: float, *, ts: float | None = None) -> None:
+def _maybe_emit_strategy_tick(
+    symbol: str,
+    price: float,
+    *,
+    ts: float | None = None,
+    source: str | None = None,
+    stream: str | None = None,
+    volume: float | None = None,
+) -> None:
     """Forward mark updates into the strategy loop when enabled."""
     if price is None or price <= 0:
         return
+    event_ts = ts or time.time()
     try:
         qualified = symbol if "." in symbol else f"{symbol}.BINANCE"
+        base = qualified.split(".")[0].upper()
+        venue = qualified.split(".")[1].upper() if "." in qualified else "BINANCE"
         # Always count ticks for observability, even if strategy disabled
         try:
-            base = qualified.split(".")[0].upper()
-            venue = qualified.split(".")[1].lower()
-            metrics.strategy_ticks_total.labels(symbol=base, venue=venue).inc()
+            metrics.strategy_ticks_total.labels(symbol=base, venue=venue.lower()).inc()
         except Exception:
             pass
-        # Only drive strategy loop when enabled
+        payload: dict[str, Any] = {
+            "symbol": qualified,
+            "base": base,
+            "venue": venue,
+            "price": float(price),
+            "ts": event_ts,
+        }
+        if source:
+            payload["source"] = source
+        if stream:
+            payload["stream"] = stream
+        if volume is not None:
+            try:
+                payload["volume"] = float(volume)
+            except (TypeError, ValueError):
+                payload["volume"] = None
+        skip_bus = source == "binance_ws" and _market_data_dispatcher is not None
+        delivered_via_bus = False
+        if not skip_bus:
+            try:
+                BUS.fire("market.tick", payload)
+                delivered_via_bus = bool(getattr(BUS, "_running", False))
+            except Exception:
+                delivered_via_bus = False
+        if skip_bus:
+            return
+        if delivered_via_bus:
+            return
         cfg = getattr(strategy, "S_CFG", None)
         if cfg is not None and getattr(cfg, "enabled", False):
-            strategy.on_tick(qualified, float(price), ts or time.time())
+            strategy.on_tick(qualified, float(price), event_ts, volume)
     except Exception:
         try:
             _refresh_logger.debug("Strategy tick emit failed for %s", symbol, exc_info=True)
@@ -1500,7 +1545,14 @@ except Exception:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _AIRDROP_PROMO
+    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _AIRDROP_PROMO, _market_data_logger
+    if _market_data_logger is not None:
+        try:
+            _market_data_logger.stop()
+            _startup_logger.info("Market data logger stopped")
+        except Exception:
+            _startup_logger.debug("Market data logger shutdown encountered issues", exc_info=True)
+        _market_data_logger = None
     try:
         if _MOMENTUM_BREAKOUT is not None:
             await _MOMENTUM_BREAKOUT.stop()
@@ -2443,7 +2495,7 @@ async def _refresh_binance_futures_snapshot() -> None:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
                 except Exception:
                     pass
-                _maybe_emit_strategy_tick(sym, px, ts=now_ts)
+                _maybe_emit_strategy_tick(sym, px, ts=now_ts, source="rest_snapshot", stream="rest")
             if new_map:
                 _price_map = new_map
     except Exception:
@@ -2608,7 +2660,7 @@ async def _refresh_binance_spot_snapshot() -> None:
                 continue
             if px > 0:
                 new_map[sym] = px
-                _maybe_emit_strategy_tick(sym, px)
+                _maybe_emit_strategy_tick(sym, px, source="rest_snapshot", stream="rest")
         if new_map:
             _price_map = new_map
             for sym, px in new_map.items():
@@ -2938,7 +2990,7 @@ async def _start_binance_ws():
     role = "exporter" if IS_EXPORTER else "trader"
     try:
         from engine import strategy as _strategy_mod
-        on_cb = None if IS_EXPORTER else _strategy_mod.on_tick
+        on_cb = None if IS_EXPORTER else None
         stream_mode = os.getenv("BINANCE_WS_STREAM", "auto").lower()
         scalper_module = getattr(_strategy_mod, "SCALP_MODULE", None)
         if stream_mode == "auto":
@@ -2948,6 +3000,9 @@ async def _start_binance_ws():
                 stream_mode = os.getenv("SCALP_WS_STREAM", "aggtrade").lower()
             else:
                 stream_mode = "miniticker"
+        global _market_data_dispatcher
+        if _market_data_dispatcher is None:
+            _market_data_dispatcher = MarketDataDispatcher(BUS, source="binance_ws", venue="BINANCE")
         ws = BinanceWS(
             symbols=bases,
             url_base=ws_base,
@@ -2956,6 +3011,7 @@ async def _start_binance_ws():
             on_price_cb=on_cb,
             price_hook=_binance_on_mark,
             stream_type=stream_mode,
+            event_callback=_market_data_dispatcher.handle_stream_event,
         )
         asyncio.create_task(ws.run())
         # remember symbols for freshness loop
@@ -2964,6 +3020,25 @@ async def _start_binance_ws():
         _startup_logger.warning("Binance WS started (%s, futures=%s, symbols=%d, ws_base=%s)", role, settings.is_futures, len(bases), ws_base)
     except Exception:
         _startup_logger.warning("Binance WS failed to start", exc_info=True)
+
+
+@app.on_event("startup")
+async def _start_market_data_logger() -> None:
+    if os.getenv("MARKET_DATA_LOGGER", "false").lower() not in {"1", "true", "yes"}:
+        return
+    global _market_data_logger
+    if _market_data_logger is not None:
+        return
+    try:
+        rate = float(os.getenv("MARKET_DATA_LOGGER_RATE", "5.0"))
+    except (TypeError, ValueError):
+        rate = 5.0
+    try:
+        _market_data_logger = MarketDataLogger(BUS, sample_rate_hz=rate)
+        _market_data_logger.start()
+        _startup_logger.info("Market data logger subscribed (rate=%.2f Hz)", rate)
+    except Exception:
+        _startup_logger.warning("Market data logger failed to start", exc_info=True)
 
 
 @app.on_event("startup")
