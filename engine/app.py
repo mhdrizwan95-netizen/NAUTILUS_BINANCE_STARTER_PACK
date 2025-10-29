@@ -30,6 +30,7 @@ from engine.core.order_router import OrderRouterExt, set_exchange_client, _MDAda
 from engine.ops.stop_validator import StopValidator
 from engine.core.portfolio import Portfolio, Position
 from engine.core.event_bus import BUS, initialize_event_bus, publish_order_event, publish_risk_event
+from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
 from engine.core import alert_daemon
 from engine.risk import RiskRails
 from engine import metrics
@@ -760,7 +761,6 @@ _stop_validator: StopValidator | None = None
 _LISTING_SNIPER = None
 _MOMENTUM_BREAKOUT = None
 _MEME_SENTIMENT = None
-_SOCIAL_SENTIMENT = None
 _AIRDROP_PROMO = None
 
 # Attach strategy router only for trading role
@@ -872,6 +872,22 @@ def version():
         "build_at": os.getenv("BUILD_AT", ""),
     }
 
+
+@app.post("/events/external", status_code=202)
+async def enqueue_external_event(evt: ExternalEventRequest):
+    """Expose a lightweight ingress for external (off-tick) strategy signals."""
+
+    try:
+        await _queue_external_event(evt)
+    except Exception as exc:  # noqa: BLE001
+        metrics.external_feed_errors_total.labels(evt.source).inc()
+        _external_event_logger.warning(
+            "Failed to enqueue external event from %s: %s", evt.source, exc, exc_info=True
+        )
+        raise HTTPException(status_code=500, detail="failed to enqueue external event") from exc
+    return {"status": "queued", "topic": "events.external_feed"}
+
+
 _store = SnapshotStore(state_mod.SNAP_PATH)
 _boot_status = {"snapshot_loaded": False, "reconciled": False}
 _last_reconcile_ts = 0.0  # Track reconcile freshness
@@ -884,6 +900,88 @@ _snapshot_counter = 0
 
 _kraken_risk_loop_task: asyncio.Task | None = None
 _kraken_risk_stop_event = asyncio.Event()
+
+
+class ExternalEventRequest(BaseModel):
+    """Schema for enqueuing external feed events via the API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(..., min_length=1, description="Canonical feed identifier")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Arbitrary event payload")
+    asset_hints: list[str] = Field(default_factory=list, description="Optional trading symbols impacted")
+    priority: float = Field(0.5, ge=0.0, le=1.0, description="Queue priority [0.0, 1.0]")
+    expires_at: float | None = Field(
+        default=None, description="Optional epoch timestamp at which the event becomes stale"
+    )
+    ttl_sec: float | None = Field(
+        default=None, ge=0.0, description="Alternative to expires_at: TTL in seconds"
+    )
+
+    @field_validator("source")
+    @classmethod
+    def _normalize_source(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("source must be non-empty")
+        return cleaned
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def _default_payload(cls, value):
+        return value or {}
+
+    @field_validator("asset_hints", mode="before")
+    @classmethod
+    def _coerce_hints(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, (str, bytes)):
+            return [value]
+        return list(value)
+
+    @field_validator("asset_hints", mode="after")
+    @classmethod
+    def _normalize_hints(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if not text:
+                continue
+            normalized.append(text.upper())
+        return normalized
+
+
+_external_event_logger = logging.getLogger("engine.api.external_events")
+
+
+async def _queue_external_event(evt: ExternalEventRequest) -> None:
+    expires_at = evt.expires_at
+    if expires_at is None and evt.ttl_sec is not None:
+        expires_at = time.time() + float(evt.ttl_sec)
+
+    event = {
+        "source": evt.source,
+        "payload": evt.payload,
+        "asset_hints": evt.asset_hints,
+        "priority": float(evt.priority),
+    }
+    if expires_at is not None:
+        event["expires_at"] = float(expires_at)
+
+    await SIGNAL_QUEUE.put(
+        QueuedEvent(
+            topic="events.external_feed",
+            data=event,
+            priority=float(evt.priority),
+            expires_at=float(expires_at) if expires_at is not None else None,
+            source=evt.source,
+        )
+    )
+    metrics.external_feed_events_total.labels(evt.source).inc()
+    metrics.external_feed_last_event_epoch.labels(evt.source).set(time.time())
 
 
 class MarketOrderRequest(BaseModel):
@@ -1165,7 +1263,7 @@ async def _start_guardian_and_feeds():
             # Optional: breakout handler wiring
             if os.getenv("EVENT_BREAKOUT_ENABLED", "").lower() in {"1", "true", "yes"}:
                 from engine.handlers.breakout_handlers import on_binance_listing
-                BUS.subscribe("events.binance_listing", on_binance_listing(router))
+                BUS.subscribe("events.external_feed", on_binance_listing(router))
                 _startup_logger.info("Announcement breakout handler wired")
                 # Trailing watcher (only when not dry-run and enabled)
                 if os.getenv("EVENT_BREAKOUT_DRY_RUN", "").lower() not in {"1", "true", "yes"} and os.getenv("EVENT_BREAKOUT_TRAIL_LOOP_ENABLED", "").lower() in {"1", "true", "yes"}:
@@ -1251,40 +1349,6 @@ async def _start_guardian_and_feeds():
                 _startup_logger.info("Meme sentiment strategy disabled via configuration")
     except Exception:
         _startup_logger.warning("Meme sentiment strategy wiring failed", exc_info=True)
-
-    # Social sentiment strategy wiring
-    try:
-        from engine.strategies.social_sentiment import (
-            SocialSentimentModule,
-            load_social_sentiment_config,
-        )
-
-        social_cfg = load_social_sentiment_config()
-        global _SOCIAL_SENTIMENT
-        if social_cfg.enabled:
-            if _SOCIAL_SENTIMENT is None:
-                _SOCIAL_SENTIMENT = SocialSentimentModule(router, RAILS, rest_client, social_cfg)
-                BUS.subscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-                _startup_logger.info(
-                    "Social sentiment strategy enabled (risk_pct=%.2f%%, min_score=%.2f, coin_cooldown=%.0fs)",
-                    social_cfg.per_trade_risk_pct * 100.0,
-                    social_cfg.min_signal_score,
-                    social_cfg.coin_cooldown_sec,
-                )
-            else:
-                _SOCIAL_SENTIMENT.cfg = social_cfg
-                _SOCIAL_SENTIMENT.rest_client = rest_client
-                _startup_logger.info("Social sentiment strategy configuration refreshed")
-        else:
-            if _SOCIAL_SENTIMENT is not None:
-                try:
-                    BUS.unsubscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-                except Exception:
-                    pass
-                _SOCIAL_SENTIMENT = None
-                _startup_logger.info("Social sentiment strategy disabled via configuration")
-    except Exception:
-        _startup_logger.warning("Social sentiment strategy wiring failed", exc_info=True)
 
     # Listing sniper wiring
     try:
@@ -1601,7 +1665,7 @@ except Exception:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _SOCIAL_SENTIMENT, _AIRDROP_PROMO, _market_data_logger
+    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _AIRDROP_PROMO, _market_data_logger
     if _market_data_logger is not None:
         try:
             _market_data_logger.stop()
@@ -1630,17 +1694,6 @@ async def on_shutdown() -> None:
             _MEME_SENTIMENT = None
     except Exception:
         _startup_logger.warning("Meme sentiment shutdown failed", exc_info=True)
-    try:
-        if _SOCIAL_SENTIMENT is not None:
-            from engine.core.event_bus import BUS
-
-            try:
-                BUS.unsubscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-            except Exception:
-                pass
-            _SOCIAL_SENTIMENT = None
-    except Exception:
-        _startup_logger.warning("Social sentiment shutdown failed", exc_info=True)
     try:
         if _AIRDROP_PROMO is not None:
             from engine.core.event_bus import BUS

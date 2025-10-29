@@ -26,6 +26,7 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 | Adjust strategy weights | `curl -X POST http://localhost:8002/strategy/weights -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" -H "Content-Type: application/json" -d '{"weights":{"ma_v1":0.3,"hmm_v1":0.7}}'` | Updates `ops/strategy_weights.json`; allocator loop reflects on next tick. |
 | Update HMM calibration | Edit `engine/models/hmm_calibration.json` (or `HMM_CALIBRATION_PATH`), wait 60 s or restart engine | Controls confidence gain, quote multiplier, cooldown scale; shared between backtests and live. |
 | Trigger manual reconciliation | `curl -X POST http://localhost:8003/reconcile/manual` | Returns counts of fills applied; safe to run any time. |
+| Inject external signal | `curl -X POST http://localhost:8003/events/external -H "Content-Type: application/json" -d '{"source":"test_harness","payload":{"symbol":"FOOUSDT"}}'` | Publishes an event onto `events.external_feed`; useful for smoke testing Listing Sniper/Meme Sentiment integrations. |
 | Submit a test order | `make order ORDER_SYMBOL=BTCUSDT.BINANCE ORDER_SIDE=BUY ORDER_QUOTE=25` | Use small notional; confirm via metrics/logs. |
 | Fetch portfolio snapshot | `curl http://localhost:8003/state | jq` (if exposed) or inspect `engine/state/portfolio.json` | Use for audits and recovery validation. |
 | View latest orders | `tail -n 20 engine/logs/orders.jsonl | jq` | Real-time audit trail. |
