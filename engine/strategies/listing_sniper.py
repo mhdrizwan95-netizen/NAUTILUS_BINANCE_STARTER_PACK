@@ -5,7 +5,7 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Iterable, Optional, Sequence, Set
 
 import httpx
 
@@ -14,6 +14,7 @@ from engine.core.event_bus import BUS
 from engine.metrics import (
     listing_sniper_announcements_total,
     listing_sniper_cooldown_epoch,
+    listing_sniper_go_live_epoch,
     listing_sniper_last_announce_epoch,
     listing_sniper_orders_total,
     listing_sniper_skips_total,
@@ -57,6 +58,31 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float_list(name: str, default: Sequence[float]) -> tuple[float, ...]:
+    import os
+
+    raw = os.getenv(name)
+    if raw is None:
+        return tuple(default)
+    values: list[float] = []
+    for part in raw.replace(";", ",").split(","):
+        token = part.strip()
+        if not token:
+            continue
+        if token.endswith("%"):
+            token = token[:-1].strip()
+            try:
+                values.append(float(token) / 100.0)
+            except ValueError:
+                continue
+            continue
+        try:
+            values.append(float(token))
+        except ValueError:
+            continue
+    return tuple(values or default)
+
+
 @dataclass(frozen=True)
 class ListingSniperConfig:
     enabled: bool = False
@@ -73,6 +99,7 @@ class ListingSniperConfig:
     max_spread_pct: float = 0.05
     cooldown_sec: float = 900.0
     max_parallel_tasks: int = 3
+    take_profit_levels: tuple[float, ...] = (0.5, 1.0)
     forward_legacy_event: bool = True
     metrics_enabled: bool = True
     dex_bridge_enabled: bool = False
@@ -101,6 +128,7 @@ def load_listing_sniper_config() -> ListingSniperConfig:
         max_spread_pct=_env_float("LISTING_SNIPER_MAX_SPREAD_PCT", 0.05),
         cooldown_sec=_env_float("LISTING_SNIPER_COOLDOWN_SEC", 900.0),
         max_parallel_tasks=_env_int("LISTING_SNIPER_MAX_PARALLEL", 3),
+        take_profit_levels=_env_float_list("LISTING_SNIPER_TP_LEVELS", (0.5, 1.0)),
         forward_legacy_event=_env_bool("LISTING_SNIPER_FORWARD_LEGACY", True),
         metrics_enabled=_env_bool("LISTING_SNIPER_METRICS_ENABLED", True),
         dex_bridge_enabled=_env_bool("LISTING_SNIPER_DEX_BRIDGE_ENABLED", False),
@@ -115,6 +143,7 @@ class ListingOpportunity:
     title: str
     url: Optional[str]
     announced_at: float
+    go_live_at: Optional[float]
     initial_price: Optional[float] = None
     attempts: int = 0
 
@@ -155,6 +184,7 @@ class ListingSniper:
         title = str(payload.get("title") or payload.get("titleText") or "").strip()
         url = payload.get("url") or payload.get("linkUrl")
         announced_at = self._parse_timestamp(payload.get("published") or payload.get("publishTime"))
+        go_live_at = self._extract_go_live_at(payload, title)
         tickers = self._extract_symbols(evt)
         if not tickers:
             return
@@ -168,13 +198,14 @@ class ListingSniper:
                 continue
 
             self._seen_ids.add(key)
-            self._record_announcement(symbol, announced_at)
+            self._record_announcement(symbol, announced_at, go_live_at)
             opportunity = ListingOpportunity(
                 symbol=symbol,
                 article_id=article_id or key,
                 title=title,
                 url=str(url) if url else None,
                 announced_at=announced_at,
+                go_live_at=go_live_at,
             )
             self._opportunities[symbol] = opportunity
             if self.cfg.forward_legacy_event:
@@ -195,10 +226,12 @@ class ListingSniper:
         self._tasks.clear()
 
     # ------------------------------------------------------------------ internals
-    def _record_announcement(self, symbol: str, announced_at: float) -> None:
+    def _record_announcement(self, symbol: str, announced_at: float, go_live_at: Optional[float]) -> None:
         if self.cfg.metrics_enabled:
             listing_sniper_announcements_total.labels(symbol=symbol, action="received").inc()
             listing_sniper_last_announce_epoch.labels(symbol=symbol).set(float(announced_at))
+            if go_live_at:
+                listing_sniper_go_live_epoch.labels(symbol=symbol).set(float(go_live_at))
 
     def _record_skip(self, symbol: str, reason: str) -> None:
         if self.cfg.metrics_enabled:
@@ -224,7 +257,7 @@ class ListingSniper:
         if self._cooldown_active(symbol):
             return
 
-        await asyncio.sleep(max(self.cfg.entry_delay_sec, 0.0))
+        await self._await_go_live(op)
 
         start = time.time()
         baseline: Optional[float] = None
@@ -299,6 +332,7 @@ class ListingSniper:
             )
             if self.cfg.metrics_enabled:
                 listing_sniper_orders_total.labels(symbol=symbol, status=status).inc()
+            await self._deploy_exit_plan(full_symbol, result, last_price, market_choice)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[LISTING] execution failed for %s: %s", symbol, exc)
             self._record_skip(symbol, "execution")
@@ -321,6 +355,61 @@ class ListingSniper:
             notional = risk_budget
         notional = max(float(self.cfg.min_notional_usd), min(float(self.cfg.max_notional_usd), notional))
         return notional
+
+    async def _await_go_live(self, op: ListingOpportunity) -> None:
+        wait_until = max(op.announced_at, time.time())
+        if op.go_live_at:
+            wait_until = max(wait_until, float(op.go_live_at))
+        wait_until += max(self.cfg.entry_delay_sec, 0.0)
+        delay = wait_until - time.time()
+        if delay > 0:
+            logger.info(
+                "[LISTING] %s waiting %.1fs for go-live window", op.symbol, delay
+            )
+            await asyncio.sleep(delay)
+
+    async def _deploy_exit_plan(
+        self,
+        symbol: str,
+        execution: Dict[str, Any],
+        fallback_price: float,
+        _market_choice: Optional[str],
+    ) -> None:
+        qty = float(execution.get("filled_qty_base") or execution.get("executedQty") or 0.0)
+        avg_px = float(execution.get("avg_fill_price") or execution.get("avgPrice") or fallback_price or 0.0)
+        if qty <= 0 or avg_px <= 0:
+            return
+
+        if self.cfg.stop_loss_pct > 0:
+            stop_price = avg_px * max(0.0001, 1.0 - float(self.cfg.stop_loss_pct))
+            try:
+                await self.router.amend_stop_reduce_only(symbol, "SELL", stop_price, abs(qty))
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[LISTING] stop placement failed for %s: %s", symbol, exc)
+
+        levels = [lvl for lvl in self.cfg.take_profit_levels if lvl > 0]
+        if not levels:
+            return
+
+        per_clip = qty / float(len(levels))
+        placed = 0.0
+        rounder = getattr(self.router, "round_tick", None)
+        for idx, level in enumerate(levels):
+            raw_price = avg_px * (1.0 + float(level))
+            price = raw_price
+            if callable(rounder):
+                try:
+                    price = rounder(symbol, raw_price)
+                except Exception:
+                    price = raw_price
+            clip_qty = per_clip if idx < len(levels) - 1 else max(qty - placed, 0.0)
+            placed += clip_qty
+            if clip_qty <= 0:
+                continue
+            try:
+                await self.router.place_reduce_only_limit(symbol, "SELL", clip_qty, price)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("[LISTING] tp placement failed for %s @%.4f: %s", symbol, price, exc)
 
     async def _forward_legacy(self, symbol: str, announced_at: float) -> None:
         key = f"{symbol}:{int(announced_at)}"
@@ -469,6 +558,67 @@ class ListingSniper:
                 continue
             symbols.add(sym)
         return symbols
+
+    def _extract_go_live_at(self, payload: Dict[str, Any], title: str) -> Optional[float]:
+        for key in ("goLiveTime", "go_live_time", "tradingOpenTime", "trading_open_time"):
+            if payload.get(key) is not None:
+                return self._parse_timestamp(payload[key])
+
+        texts: Iterable[str] = []
+        extra = []
+        for field in ("content", "summary", "body", "articleContent", "richText"):
+            value = payload.get(field)
+            if isinstance(value, str):
+                extra.append(value)
+        if isinstance(title, str):
+            extra.append(title)
+        for text in extra:
+            ts = self._parse_go_live_from_text(text)
+            if ts:
+                return ts
+        return None
+
+    def _parse_go_live_from_text(self, text: str) -> Optional[float]:
+        if not text:
+            return None
+        import re
+        from datetime import datetime, timezone
+
+        for line in text.splitlines():
+            lowered = line.lower()
+            if "trading" not in lowered:
+                continue
+            match = re.search(
+                r"(\d{4})[\-/](\d{1,2})[\-/](\d{1,2}).{0,20}?(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(am|pm)?",
+                line,
+                flags=re.IGNORECASE,
+            )
+            if not match:
+                continue
+            year, month, day, hour, minute, second, ampm = match.groups()
+            try:
+                hour_i = int(hour)
+                minute_i = int(minute)
+                second_i = int(second or 0)
+                if ampm:
+                    ampm_lower = ampm.lower()
+                    if ampm_lower == "pm" and hour_i < 12:
+                        hour_i += 12
+                    if ampm_lower == "am" and hour_i == 12:
+                        hour_i = 0
+                dt = datetime(
+                    int(year),
+                    int(month),
+                    int(day),
+                    hour_i,
+                    minute_i,
+                    second_i,
+                    tzinfo=timezone.utc,
+                )
+                return dt.timestamp()
+            except Exception:
+                continue
+        return None
 
     @staticmethod
     def _parse_timestamp(value: Any) -> float:

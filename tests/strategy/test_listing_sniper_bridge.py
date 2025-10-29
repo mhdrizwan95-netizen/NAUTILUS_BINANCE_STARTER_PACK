@@ -5,6 +5,11 @@ from engine.strategies.listing_sniper import ListingSniper, ListingSniperConfig
 from engine.core.event_bus import BUS
 
 
+@pytest.fixture
+def anyio_backend():
+    return "asyncio"
+
+
 class _RouterStub:
     async def market_quote(self, *_, **__):
         return {}
@@ -44,7 +49,7 @@ class _DexClient:
         return _DexResponse(self._payload)
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_listing_sniper_emits_dex_candidate(monkeypatch):
     dex_payload = {
         "pairs": [
@@ -127,7 +132,7 @@ class _RestMetricsStub:
         return {"price": "1.01"}
 
 
-@pytest.mark.asyncio
+@pytest.mark.anyio
 async def test_listing_sniper_metrics_increment(monkeypatch):
     monkeypatch.setattr(BUS, "publish", lambda *_, **__: None)
     router = _RouterMetricsStub()

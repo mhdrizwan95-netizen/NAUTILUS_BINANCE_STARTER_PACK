@@ -369,6 +369,12 @@ listing_sniper_last_announce_epoch = Gauge(
     ["symbol"],
     multiprocess_mode="max",
 )
+listing_sniper_go_live_epoch = Gauge(
+    "listing_sniper_go_live_epoch",
+    "Scheduled go-live timestamp parsed from Binance listing announcements",
+    ["symbol"],
+    multiprocess_mode="max",
+)
 listing_sniper_cooldown_epoch = Gauge(
     "listing_sniper_cooldown_epoch",
     "Epoch timestamp when the listing sniper cooldown expires for a symbol",
@@ -503,6 +509,7 @@ REGISTRY = {
     "listing_sniper_skips_total": listing_sniper_skips_total,
     "listing_sniper_orders_total": listing_sniper_orders_total,
     "listing_sniper_last_announce_epoch": listing_sniper_last_announce_epoch,
+    "listing_sniper_go_live_epoch": listing_sniper_go_live_epoch,
     "listing_sniper_cooldown_epoch": listing_sniper_cooldown_epoch,
     "meme_sentiment_events_total": meme_sentiment_events_total,
     "meme_sentiment_orders_total": meme_sentiment_orders_total,
