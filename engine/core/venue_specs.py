@@ -49,6 +49,9 @@ if not SPECS["BINANCE"]:
     SPECS["BINANCE"] = DEFAULT_SPECS.copy()
     print(f"Using default venue specs: {len(DEFAULT_SPECS)} symbols")
 
+if "BINANCE_MARGIN" not in SPECS:
+    SPECS["BINANCE_MARGIN"] = SPECS["BINANCE"]
+
 if not SPECS["KRAKEN"]:
     SPECS["KRAKEN"] = DEFAULT_KRAKEN_SPECS.copy()
 

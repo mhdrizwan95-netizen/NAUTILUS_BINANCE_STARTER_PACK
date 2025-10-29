@@ -298,6 +298,22 @@ class RiskRails:
                     "error": "MARGIN_LIABILITY_LIMIT",
                     "message": f"Cross-margin liability {margin_liability_val:.2f} exceeds limit {self.cfg.margin_max_liability_usd:.2f}",
                 }
+            equity_val = self._sanitize_float(getattr(portfolio_state, "equity", None)) or 0.0
+            max_leverage = max(self.cfg.margin_max_leverage, 0.0)
+            if max_leverage > 0 and equity_val > 0:
+                current_abs_expo = abs(sym_expo)
+                projected_abs_expo = abs(sym_expo + delta_signed)
+                increment_notional = max(projected_abs_expo - current_abs_expo, 0.0)
+                current_liability = max(margin_liability_val or 0.0, 0.0)
+                projected_liability = current_liability + increment_notional
+                effective_leverage = projected_liability / max(equity_val, 1e-9)
+                if effective_leverage > max_leverage:
+                    return False, {
+                        "error": "MARGIN_LEVERAGE_LIMIT",
+                        "message": (
+                            f"Projected margin leverage {effective_leverage:.2f}x exceeds limit {max_leverage:.2f}x"
+                        ),
+                    }
 
         metrics_state = self.refresh_snapshot_metrics(snap)
         if metrics_state.breaker_active:

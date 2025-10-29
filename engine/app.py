@@ -22,7 +22,7 @@ import httpx as _httpx
 
 import os
 from engine.config import get_settings, load_risk_config, QUOTE_CCY
-from engine.core.binance import BinanceREST
+from engine.core.binance import BinanceREST, BinanceMarginREST
 from engine.core.kraken import KrakenREST
 from engine.core.binance_ws import BinanceWS
 from engine.ops.bracket_governor import BracketGovernor
@@ -55,6 +55,9 @@ from engine.telemetry.publisher import (
 from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
 
 app = FastAPI(title="HMM Engine", version="0.1.0")
+
+def _truthy_env(name: str) -> bool:
+    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 settings = get_settings()
 ROLE = os.getenv("ROLE", "trader").lower()
@@ -202,6 +205,24 @@ elif VENUE == "KRAKEN":
     rest_client = KrakenREST()
 else:
     rest_client = BinanceREST()
+
+margin_rest_client: Optional[BinanceMarginREST]
+if _truthy_env("MARGIN_ENABLED") or _truthy_env("BINANCE_MARGIN_ENABLED"):
+    if settings.api_key and settings.api_secret:
+        try:
+            margin_rest_client = BinanceMarginREST()
+            set_exchange_client("BINANCE_MARGIN", margin_rest_client)
+        except Exception as margin_exc:  # noqa: BLE001
+            logging.getLogger("engine.startup").warning(
+                "[STARTUP] Failed to initialize margin REST client: %s", margin_exc
+            )
+            margin_rest_client = None
+    else:
+        margin_rest_client = None
+else:
+    margin_rest_client = None
+
+MARGIN_REST = margin_rest_client
 
 if VENUE == "KRAKEN":
     KRAKEN_REST: KrakenREST | None = cast(Optional[KrakenREST], rest_client)
@@ -1669,12 +1690,26 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
 
         # Apply immediate fill to internal portfolio state (best-effort)
         try:
-            sym = (result.get("symbol") or req.symbol).split(".")[0]
+            raw_symbol = result.get("symbol") or req.symbol
             qty_base = float(result.get("filled_qty_base") or 0.0)
             px = float(result.get("avg_fill_price") or 0.0)
             fee_usd = float(result.get("fee_usd") or 0.0)
-            if qty_base > 0 and px > 0:
-                portfolio.apply_fill(symbol=sym, side=req.side, quantity=qty_base, price=px, fee_usd=fee_usd)
+            venue_hint = (result.get("venue") or venue).upper()
+            market_hint = (result.get("market") or (req.market.lower() if isinstance(req.market, str) else None))
+            if raw_symbol and "." not in raw_symbol and venue_hint:
+                full_symbol = f"{raw_symbol}.{venue_hint}"
+            else:
+                full_symbol = raw_symbol
+            if qty_base > 0 and px > 0 and full_symbol:
+                portfolio.apply_fill(
+                    symbol=full_symbol,
+                    side=req.side,
+                    quantity=qty_base,
+                    price=px,
+                    fee_usd=fee_usd,
+                    venue=venue_hint,
+                    market=market_hint,
+                )
                 # Update gauges after applying the fill
                 state = portfolio.state
                 metrics.update_portfolio_gauges(state.cash, state.realized, state.unrealized, state.exposure)
@@ -1786,12 +1821,26 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
 
         # Apply immediate fill (best-effort)
         try:
-            sym = (result.get("symbol") or req.symbol).split(".")[0]
+            raw_symbol = result.get("symbol") or req.symbol
             qty_base = float(result.get("filled_qty_base") or 0.0)
             px = float(result.get("avg_fill_price") or 0.0)
             fee_usd = float(result.get("fee_usd") or 0.0)
-            if qty_base > 0 and px > 0:
-                portfolio.apply_fill(symbol=sym, side=req.side, quantity=qty_base, price=px, fee_usd=fee_usd)
+            venue_hint = (result.get("venue") or venue).upper()
+            market_hint = (result.get("market") or (req.market.lower() if isinstance(req.market, str) else None))
+            if raw_symbol and "." not in raw_symbol and venue_hint:
+                full_symbol = f"{raw_symbol}.{venue_hint}"
+            else:
+                full_symbol = raw_symbol
+            if qty_base > 0 and px > 0 and full_symbol:
+                portfolio.apply_fill(
+                    symbol=full_symbol,
+                    side=req.side,
+                    quantity=qty_base,
+                    price=px,
+                    fee_usd=fee_usd,
+                    venue=venue_hint,
+                    market=market_hint,
+                )
                 st = portfolio.state
                 metrics.update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
                 _store.save(st.snapshot())
