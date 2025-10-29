@@ -293,6 +293,36 @@ try:
 except Exception:
     logging.getLogger(__name__).warning("Failed to subscribe strategy to market.tick", exc_info=True)
 
+
+async def _on_market_book_event(event: Dict[str, Any]) -> None:
+    if not SCALP_MODULE or not getattr(SCALP_MODULE, "enabled", False):
+        return
+    symbol = str(event.get("symbol") or "")
+    if not symbol:
+        return
+    try:
+        bid = float(event.get("bid_price") or 0.0)
+        ask = float(event.get("ask_price") or 0.0)
+        bid_qty = float(event.get("bid_qty") or 0.0)
+        ask_qty = float(event.get("ask_qty") or 0.0)
+    except (TypeError, ValueError):
+        return
+    ts_raw = event.get("ts")
+    try:
+        ts_val = float(ts_raw) if ts_raw is not None else time.time()
+    except (TypeError, ValueError):
+        ts_val = time.time()
+    try:
+        SCALP_MODULE.handle_book(symbol, bid, ask, bid_qty, ask_qty, ts_val)
+    except Exception:
+        logging.getLogger(__name__).debug("Failed to process book for %s", symbol, exc_info=True)
+
+
+try:
+    BUS.subscribe("market.book", _on_market_book_event)
+except Exception:
+    logging.getLogger(__name__).warning("Failed to subscribe strategy to market.book", exc_info=True)
+
 class StrategySignal(BaseModel):
     symbol: str = Field(..., description="e.g. BTCUSDT.BINANCE")
     side: str = Field(..., pattern=r"^(BUY|SELL)$")

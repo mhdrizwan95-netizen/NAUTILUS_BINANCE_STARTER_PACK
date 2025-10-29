@@ -123,10 +123,40 @@ scalp_rsi = Gauge(
     ["symbol", "venue"],
     multiprocess_mode="livesum",
 )
+scalp_spread_bp = Gauge(
+    "scalp_spread_bp",
+    "Observed top-of-book spread used by scalping module (basis points)",
+    ["symbol", "venue"],
+    multiprocess_mode="max",
+)
+scalp_orderbook_imbalance = Gauge(
+    "scalp_orderbook_imbalance",
+    "Order book imbalance tracked by scalping module (-1 to 1)",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
 scalp_signals_total = Counter(
     "scalp_signals_total",
     "Scalping strategy signals emitted grouped by reason",
     ["symbol", "venue", "side", "reason"],
+)
+scalp_signal_ttl_sec = Gauge(
+    "scalp_signal_ttl_sec",
+    "Time-to-live applied to scalping signals (seconds)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="max",
+)
+scalp_signal_edge_bp = Gauge(
+    "scalp_signal_edge_bp",
+    "Estimated post-slippage edge of scalping signals (basis points)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="livesum",
+)
+scalp_slippage_estimate_bp = Gauge(
+    "scalp_slippage_estimate_bp",
+    "Estimated slippage for scalping orders (basis points)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="livesum",
 )
 scalp_bracket_exits_total = Counter(
     "scalp_bracket_exits_total",
