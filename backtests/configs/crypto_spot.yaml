@@ -4,6 +4,8 @@ symbols:
   - "ETHUSDT.BINANCE"
 data_parquet: "data/processed/synth_BTCUSDT_ticks.parquet"   # for BTC
 data_parquet_secondary: "data/processed/synth_ETHUSDT_ticks.parquet"  # for ETH
+# Optional CSV for lightweight backtest helpers
+data_csv: "data/processed/synth_BTCUSDT_ticks.csv"
 fees_bps: 1.0
 slippage_bps: 1.5
 use_h2: false  # Enable hierarchical HMM (macro/micro layers)
