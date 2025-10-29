@@ -14,10 +14,11 @@ from threading import Lock
 from pathlib import Path
 from typing import Literal, Optional, Any, Callable, cast
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
-import json
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, ValidationError
+import hmac
+import hashlib
 import httpx as _httpx
 
 import os
@@ -30,10 +31,13 @@ from engine.core.order_router import OrderRouterExt, set_exchange_client, _MDAda
 from engine.ops.stop_validator import StopValidator
 from engine.core.portfolio import Portfolio, Position
 from engine.core.event_bus import BUS, initialize_event_bus, publish_order_event, publish_risk_event
-from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
+from engine.core.signal_queue import SIGNAL_QUEUE
 from engine.core import alert_daemon
 from engine.risk import RiskRails
 from engine import metrics
+from engine.compat import init_external_feed_bridge
+from engine.events.publisher import publish_external_event
+from engine.events.schemas import ExternalEvent
 from engine.idempotency import CACHE, append_jsonl
 from engine.state import SnapshotStore
 import engine.state as state_mod
@@ -68,6 +72,8 @@ risk_cfg = load_risk_config()
 RAILS = RiskRails(risk_cfg)
 DECK_PUSH_DISABLED = os.getenv("DECK_DISABLE_PUSH", "").lower() in {"1", "true", "yes"}
 DECK_METRICS_INTERVAL_SEC = max(1.0, float(os.getenv("DECK_METRICS_INTERVAL_SEC", "2.0")))
+EXTERNAL_EVENTS_SECRET = os.getenv("EXTERNAL_EVENTS_SECRET", "")
+_EXTERNAL_SIGNATURE_HEADER = "X-Events-Signature"
 _deck_metrics_task: Optional[asyncio.Task] = None
 _deck_realized_lock = Lock()
 _deck_last_realized = 0.0
@@ -873,19 +879,45 @@ def version():
     }
 
 
+_external_event_logger = logging.getLogger("engine.api.external_events")
+
+
+def _verify_external_signature(body: bytes, header_value: str) -> bool:
+    if not EXTERNAL_EVENTS_SECRET:
+        return True
+    if not header_value or not header_value.startswith("sha256="):
+        return False
+    expected = hmac.new(EXTERNAL_EVENTS_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    received = header_value.split("=", 1)[1]
+    return hmac.compare_digest(expected, received)
+
+
 @app.post("/events/external", status_code=202)
-async def enqueue_external_event(evt: ExternalEventRequest):
-    """Expose a lightweight ingress for external (off-tick) strategy signals."""
+async def ingest_external_event(
+    request: Request,
+    x_events_signature: str = Header(default="", alias=_EXTERNAL_SIGNATURE_HEADER),
+):
+    """Ingress point for external (off-tick) strategy signals."""
+
+    raw_body = await request.body()
+    if not _verify_external_signature(raw_body, x_events_signature):
+        raise HTTPException(status_code=401, detail="invalid signature")
 
     try:
-        await _queue_external_event(evt)
+        envelope = ExternalEvent.model_validate_json(raw_body).with_default_id()
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    try:
+        event_id = await publish_external_event(envelope)
     except Exception as exc:  # noqa: BLE001
-        metrics.external_feed_errors_total.labels(evt.source).inc()
+        metrics.external_feed_errors_total.labels(envelope.source).inc()
         _external_event_logger.warning(
-            "Failed to enqueue external event from %s: %s", evt.source, exc, exc_info=True
+            "Failed to enqueue external event from %s: %s", envelope.source, exc, exc_info=True
         )
         raise HTTPException(status_code=500, detail="failed to enqueue external event") from exc
-    return {"status": "queued", "topic": "events.external_feed"}
+
+    return {"status": "queued", "id": event_id, "topic": "events.external_feed"}
 
 
 _store = SnapshotStore(state_mod.SNAP_PATH)
@@ -2494,10 +2526,10 @@ async def _start_event_bus():
     try:
         await initialize_event_bus()
         _startup_logger.info("Event bus started")
-        from engine.core.signal_queue import SIGNAL_QUEUE
-
         SIGNAL_QUEUE.start(BUS)
         _startup_logger.info("Signal priority queue dispatcher online")
+        init_external_feed_bridge(BUS)
+        _startup_logger.info("Legacy external event bridge initialized")
         if not DECK_PUSH_DISABLED:
             BUS.subscribe("trade.fill", _deck_fill_handler)
             _deck_logger.info("Deck fill bridge subscribed to trade.fill")

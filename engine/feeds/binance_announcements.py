@@ -17,18 +17,16 @@ import os
 import time
 from typing import Dict, List
 
-from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
+from engine.events.publisher import publish_external_event
+from engine.events.schemas import ExternalEvent
 from engine.metrics import (
-    external_feed_events_total,
     external_feed_errors_total,
     external_feed_latency_seconds,
-    external_feed_last_event_epoch,
 )
 
 
 LOGGER = logging.getLogger("engine.feeds.binance_announcements")
 EVENT_SOURCE = "binance_announcements"
-EVENT_TOPIC = "events.external_feed"
 DEFAULT_PRIORITY = 0.85
 
 
@@ -38,27 +36,17 @@ async def _fetch_announcements() -> List[Dict]:
     return []
 
 
-async def _publish(payload: Dict[str, object], *, priority: float = DEFAULT_PRIORITY) -> None:
-    event = {
-        "source": EVENT_SOURCE,
-        "payload": payload,
-        "asset_hints": [str(payload.get("symbol") or "") or None],
-        "priority": priority,
-    }
-    # Drop empty asset hints (e.g. when symbol missing)
-    hints = [hint for hint in event["asset_hints"] if hint]
-    event["asset_hints"] = hints
-    await SIGNAL_QUEUE.put(
-        QueuedEvent(
-            topic=EVENT_TOPIC,
-            data=event,
-            priority=priority,
-            expires_at=None,
-            source=EVENT_SOURCE,
-        )
+async def _publish(payload: Dict[str, object], *, priority: float = DEFAULT_PRIORITY, ttl_sec: float | None = None) -> None:
+    meta = {"priority": priority}
+    if ttl_sec is not None:
+        meta["ttl_sec"] = ttl_sec
+    event = ExternalEvent(source=EVENT_SOURCE, payload=payload, meta=meta)
+    await publish_external_event(
+        event,
+        priority=priority,
+        expires_at=(time.time() + ttl_sec) if ttl_sec is not None else None,
+        asset_hints=[payload.get("symbol")],
     )
-    external_feed_events_total.labels(EVENT_SOURCE).inc()
-    external_feed_last_event_epoch.labels(EVENT_SOURCE).set(time.time())
 
 
 async def run() -> None:
@@ -116,7 +104,7 @@ async def run() -> None:
                     }
 
                     try:
-                        await _publish(payload)
+                        await _publish(payload, ttl_sec=ttl)
                         seen[key] = now + ttl
                     except Exception as exc:  # noqa: BLE001
                         external_feed_errors_total.labels(EVENT_SOURCE).inc()

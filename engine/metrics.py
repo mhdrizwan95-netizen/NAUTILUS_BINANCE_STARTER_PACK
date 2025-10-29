@@ -347,6 +347,17 @@ external_feed_last_event_epoch = Gauge(
     multiprocess_mode="max",
 )
 
+events_external_feed_published_total = Counter(
+    "events_external_feed_published_total",
+    "External events published onto events.external_feed",
+    ["source"],
+)
+events_external_feed_consumed_total = Counter(
+    "events_external_feed_consumed_total",
+    "External events consumed by subscribers",
+    ["consumer"],
+)
+
 # Listing sniper telemetry
 listing_sniper_announcements_total = Counter(
     "listing_sniper_announcements_total",
@@ -524,6 +535,8 @@ REGISTRY = {
     "external_feed_errors_total": external_feed_errors_total,
     "external_feed_latency_seconds": external_feed_latency_seconds,
     "external_feed_last_event_epoch": external_feed_last_event_epoch,
+    "events_external_feed_published_total": events_external_feed_published_total,
+    "events_external_feed_consumed_total": events_external_feed_consumed_total,
     "venue_exposure_usd": venue_exposure_usd,
     "risk_equity_buffer_usd": risk_equity_buffer_usd,
     "risk_equity_drawdown_pct": risk_equity_drawdown_pct,
