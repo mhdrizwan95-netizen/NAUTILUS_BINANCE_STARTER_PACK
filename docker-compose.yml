@@ -92,6 +92,8 @@ services:
       - BINANCE_RECV_WINDOW=60000    # tolerant to clock skew
       - ENGINE_PORT=8003
       - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
+      - DECK_URL=http://hmm_deck:8002
+      - DECK_TOKEN=${DECK_TOKEN:-}
     volumes:
       - ./engine/state:/app/engine/state:rw
       - ./engine/logs:/app/engine/logs:rw
