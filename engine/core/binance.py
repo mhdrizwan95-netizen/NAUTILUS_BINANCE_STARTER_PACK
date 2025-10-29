@@ -42,6 +42,13 @@ TRANSFER_TYPES: set[str] = {
 }
 
 
+def _margin_isolated_default() -> bool:
+    value = os.getenv("BINANCE_MARGIN_ISOLATED")
+    if value is None:
+        return True
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 class BinanceREST:
     """Minimal async REST client for Binance spot/futures/margin endpoints."""
 
@@ -419,6 +426,8 @@ class BinanceREST:
         if client_order_id:
             base_params["origClientOrderId"] = client_order_id
         market_key, base_url, is_futures = self._resolve_market(market)
+        if market_key == "margin" and _margin_isolated_default():
+            base_params["isIsolated"] = "TRUE"
         for attempt in range(3):
             params = dict(base_params)
             params["timestamp"] = _now_ms()
@@ -589,6 +598,76 @@ class BinanceREST:
         except Exception:
             return {}
 
+    async def margin_borrow(
+        self,
+        asset: str,
+        amount: float,
+        *,
+        symbol: str | None = None,
+        isolated: Optional[bool] = None,
+    ) -> dict[str, Any]:
+        """Borrow asset on cross or isolated margin."""
+        mode_isolated = _margin_isolated_default() if isolated is None else bool(isolated)
+        clean_asset = asset.upper()
+        params: dict[str, Any] = {
+            "asset": clean_asset,
+            "amount": f"{float(amount):.8f}",
+            "timestamp": _now_ms(),
+            "recvWindow": get_settings().recv_window,
+        }
+        if mode_isolated:
+            if not symbol:
+                raise ValueError("margin_borrow requires symbol for isolated margin")
+            params["isIsolated"] = "TRUE"
+            params["symbol"] = self._clean_symbol(symbol)
+        params["signature"] = self._sign(params)
+        _, base_url, _ = self._resolve_market("margin")
+        async with httpx.AsyncClient(
+            base_url=base_url,
+            timeout=self._settings.timeout,
+            headers={"X-MBX-APIKEY": self._settings.api_key},
+        ) as client:
+            path = "/sapi/v1/margin/loan"
+            self._log_request("POST", path, data=params)
+            r = await client.post(path, data=params)
+        r.raise_for_status()
+        return r.json()
+
+    async def margin_repay(
+        self,
+        asset: str,
+        amount: float,
+        *,
+        symbol: str | None = None,
+        isolated: Optional[bool] = None,
+    ) -> dict[str, Any]:
+        """Repay borrowed asset on cross or isolated margin."""
+        mode_isolated = _margin_isolated_default() if isolated is None else bool(isolated)
+        clean_asset = asset.upper()
+        params: dict[str, Any] = {
+            "asset": clean_asset,
+            "amount": f"{float(amount):.8f}",
+            "timestamp": _now_ms(),
+            "recvWindow": get_settings().recv_window,
+        }
+        if mode_isolated:
+            if not symbol:
+                raise ValueError("margin_repay requires symbol for isolated margin")
+            params["isIsolated"] = "TRUE"
+            params["symbol"] = self._clean_symbol(symbol)
+        params["signature"] = self._sign(params)
+        _, base_url, _ = self._resolve_market("margin")
+        async with httpx.AsyncClient(
+            base_url=base_url,
+            timeout=self._settings.timeout,
+            headers={"X-MBX-APIKEY": self._settings.api_key},
+        ) as client:
+            path = "/sapi/v1/margin/repay"
+            self._log_request("POST", path, data=params)
+            r = await client.post(path, data=params)
+        r.raise_for_status()
+        return r.json()
+
     async def klines(self, symbol: str, interval: str = "1m", limit: int = 30) -> list:
         try:
             path = "/fapi/v1/klines" if self._is_futures else "/api/v3/klines"
@@ -636,6 +715,8 @@ class BinanceREST:
         if start_ms and int(start_ms) > 0:
             base_params["startTime"] = int(start_ms)
         market_key, base_url, is_futures = self._resolve_market(market)
+        if market_key == "margin" and _margin_isolated_default():
+            base_params["isIsolated"] = "TRUE"
         for attempt in range(3):
             params = dict(base_params)
             params["timestamp"] = _now_ms()
@@ -693,6 +774,8 @@ class BinanceREST:
             base_params["quantity"] = f"{quantity:.8f}"
             base_params["sideEffectType"] = os.getenv("BINANCE_MARGIN_SIDE_EFFECT", "AUTO_BORROW_REPAY")
             base_params["newOrderRespType"] = self._default_resp_type(market)
+            if _margin_isolated_default():
+                base_params["isIsolated"] = "TRUE"
         else:
             base_params["quantity"] = f"{quantity:.8f}"
             base_params["newOrderRespType"] = self._default_resp_type(market)
@@ -782,6 +865,10 @@ class BinanceREST:
         }
         if market_key == "margin":
             base_params["sideEffectType"] = os.getenv("BINANCE_MARGIN_SIDE_EFFECT", "AUTO_BORROW_REPAY")
+            if _margin_isolated_default():
+                base_params["isIsolated"] = "TRUE"
+            if _margin_isolated_default():
+                base_params["isIsolated"] = "TRUE"
 
         path = "/sapi/v1/margin/order" if market_key == "margin" else "/api/v3/order"
 
@@ -1082,6 +1169,13 @@ class BinanceREST:
             }
         )
         return result
+
+class BinanceMarginREST(BinanceREST):
+    """Convenience subclass using margin endpoints by default."""
+
+    def __init__(self) -> None:
+        super().__init__(market="margin")
+
 
     def _sign(self, params: dict[str, Any]) -> str:
         secret = self._settings.api_secret.encode()
