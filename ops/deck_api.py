@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
+import hashlib
 import json
 import math
 import os
 import time
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlencode
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -52,6 +56,7 @@ STATE: Dict[str, Any] = {
     },
     "pnl_by_strategy": {},
     "top_symbols": [],
+    "transfers": [],
 }
 
 STATE_LOCK = asyncio.Lock()
@@ -63,12 +68,88 @@ DECK_TOKEN = os.environ.get("DECK_TOKEN", "")
 
 DECK_TOKEN = os.environ.get("DECK_TOKEN", "")
 
+BINANCE_SAPI_BASE = os.getenv("BINANCE_SAPI_BASE", "https://api.binance.com").rstrip("/")
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+ALLOWED_WALLETS = {
+    entry.strip().upper()
+    for entry in os.getenv("DECK_TRANSFER_ALLOW", "FUNDING,MAIN,UMFUTURE").split(",")
+    if entry.strip()
+}
+
+VALID_TRANSFER_TYPES: set[str] = {
+    "FUNDING_MAIN",
+    "MAIN_FUNDING",
+    "FUNDING_UMFUTURE",
+    "UMFUTURE_FUNDING",
+    "MAIN_UMFUTURE",
+    "UMFUTURE_MAIN",
+    "MAIN_CMFUTURE",
+    "CMFUTURE_MAIN",
+    "FUNDING_CMFUTURE",
+    "CMFUTURE_FUNDING",
+    "MAIN_MARGIN",
+    "MARGIN_MAIN",
+    "FUNDING_MARGIN",
+    "MARGIN_FUNDING",
+    "MAIN_ISOLATEDMARGIN",
+    "ISOLATEDMARGIN_MAIN",
+}
+
 _METRIC_ALIASES = {
     "tick_p50_ms": "tick_to_order_ms_p50",
     "tick_p95_ms": "tick_to_order_ms_p95",
     "error_rate_pct": "venue_error_rate_pct",
 }
 _INT_METRICS = {"open_positions"}
+
+
+def _resolve_transfer_type(from_wallet: str, to_wallet: str) -> str:
+    source = (from_wallet or "").upper()
+    target = (to_wallet or "").upper()
+    transfer_key = f"{source}_{target}"
+    if transfer_key not in VALID_TRANSFER_TYPES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"unsupported transfer path: {transfer_key}",
+        )
+    if source not in ALLOWED_WALLETS or target not in ALLOWED_WALLETS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="wallet not allowed by DECK_TRANSFER_ALLOW",
+        )
+    return transfer_key
+
+
+async def _sapi_signed_post(path: str, payload: Dict[str, Any]) -> Any:
+    if not BINANCE_API_KEY or not BINANCE_API_SECRET:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="SAPI credentials not configured on Deck",
+        )
+    params = dict(payload or {})
+    params.setdefault("timestamp", int(time.time() * 1000))
+    query = urlencode(params, doseq=True)
+    signature = hmac.new(BINANCE_API_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+    headers = {
+        "X-MBX-APIKEY": BINANCE_API_KEY,
+        "Content-Type": "application/x-www-form-urlencoded",
+    }
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.post(
+                f"{BINANCE_SAPI_BASE}{path}",
+                data=f"{query}&signature={signature}",
+                headers=headers,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"SAPI request failed: {exc}",
+        ) from exc
+    if response.status_code >= 400:
+        raise HTTPException(response.status_code, response.text)
+    return response.json()
 
 
 class ModeIn(BaseModel):
@@ -135,6 +216,17 @@ class TradeIn(BaseModel):
     pnl_usd: Optional[float] = None
     latency_ms: Optional[float] = None
     info: Optional[Dict[str, Any]] = None
+
+
+class TransferIn(BaseModel):
+    from_wallet: str = Field(..., description="Source wallet (e.g., FUNDING, MAIN, UMFUTURE)")
+    to_wallet: str = Field(..., description="Destination wallet")
+    asset: str = Field(default="USDT", description="Asset to transfer")
+    amount: float = Field(..., gt=0.0, description="Amount to transfer")
+    symbol: Optional[str] = Field(
+        default=None,
+        description="Required when transferring to or from isolated margin",
+    )
 
 
 def require_token(req: Request) -> None:
@@ -353,6 +445,58 @@ async def update_top_symbols(body: TopSymbolsIn, request: Request) -> Dict[str, 
         payload = {"type": "top", "symbols": list(STATE["top_symbols"])}
     await broadcast(payload)
     return {"ok": True, "count": len(body.symbols)}
+
+
+@app.get("/transfer/types")
+async def transfer_types() -> Dict[str, Any]:
+    allowed = []
+    for entry in sorted(VALID_TRANSFER_TYPES):
+        source, target = entry.split("_", 1)
+        if source in ALLOWED_WALLETS and target in ALLOWED_WALLETS:
+            allowed.append(entry)
+    return {
+        "allowed": allowed,
+        "wallets": sorted(ALLOWED_WALLETS),
+    }
+
+
+@app.post("/transfer")
+async def submit_transfer(body: TransferIn, request: Request) -> Dict[str, Any]:
+    require_token(request)
+    transfer_type = _resolve_transfer_type(body.from_wallet, body.to_wallet)
+    amount = float(body.amount)
+    formatted_amount = f"{amount:.8f}".rstrip("0").rstrip(".")
+    if not formatted_amount:
+        formatted_amount = "0"
+    payload: Dict[str, Any] = {
+        "type": transfer_type,
+        "asset": body.asset.upper(),
+        "amount": formatted_amount,
+    }
+    if "ISOLATEDMARGIN" in transfer_type:
+        if not body.symbol:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="symbol required for isolated margin transfers",
+            )
+        payload["symbol"] = body.symbol.upper()
+
+    result = await _sapi_signed_post("/sapi/v1/asset/transfer", payload)
+    entry = {
+        "ts": time.time(),
+        "type": transfer_type,
+        "asset": payload["asset"],
+        "amount": amount,
+        "symbol": payload.get("symbol"),
+        "result": result,
+    }
+    async with STATE_LOCK:
+        transfers = STATE.setdefault("transfers", [])
+        transfers.insert(0, entry)
+        if len(transfers) > 20:
+            del transfers[20:]
+    await broadcast({"type": "transfer", "transfer": entry})
+    return {"ok": True, "result": result}
 
 
 @app.post("/trades")

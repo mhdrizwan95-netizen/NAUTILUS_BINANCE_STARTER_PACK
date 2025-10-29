@@ -15,3 +15,6 @@ select{background:#0b0f14;color:#e6edf3;border:1px solid #2a3b56;border-radius:6
 .badge.ok{background:#12361f;color:#7ad48a}
 .badge.warn{background:#3a2612;color:#f3cb7a}
 .badge.err{background:#3a1212;color:#f07c7c}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button.mini{padding:4px 8px;margin-right:6px;font-size:12px}
+#xfer_log td{font-size:11px;word-break:break-all}

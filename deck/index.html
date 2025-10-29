@@ -50,6 +50,48 @@
       <h3>Strategy Weights</h3>
       <div id="weights"></div>
     </section>
+
+    <section>
+      <h3>Transfers (Manual)</h3>
+      <div class="row">
+        <label for="xfer_from">From</label>
+        <select id="xfer_from"></select>
+        <label for="xfer_to">To</label>
+        <select id="xfer_to"></select>
+      </div>
+      <div class="row" style="margin-top: 6px;">
+        <label for="xfer_asset">Asset</label>
+        <input id="xfer_asset" value="USDT" style="width: 70px" />
+        <label for="xfer_amt">Amount</label>
+        <input id="xfer_amt" type="number" step="0.01" placeholder="0.00" style="width: 100px" />
+        <label id="lbl_sym" for="xfer_symbol" style="display: none;">Symbol</label>
+        <input id="xfer_symbol" placeholder="BTCUSDT" style="display: none; width: 120px" />
+        <button id="xfer_go">Transfer</button>
+      </div>
+      <div style="margin-top: 8px;">
+        Quick:
+        <button class="mini" data-quick="FUNDING->UMFUTURE">Funding→Futures</button>
+        <button class="mini" data-quick="UMFUTURE->FUNDING">Futures→Funding</button>
+        <button class="mini" data-quick="FUNDING->MAIN">Funding→Spot</button>
+        <button class="mini" data-quick="MAIN->UMFUTURE">Spot→Futures</button>
+        <button class="mini" data-quick="UMFUTURE->MAIN">Futures→Spot</button>
+        <button class="mini" data-quick="MAIN->FUNDING">Spot→Funding</button>
+      </div>
+      <h4 style="margin-top: 10px;">Recent</h4>
+      <table id="xfer_log">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Type</th>
+            <th>Asset</th>
+            <th>Amt</th>
+            <th>Symbol</th>
+            <th>Result</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
   </div>
 
   <script src="/app.js"></script>

@@ -34,6 +34,30 @@ Behavior:
 - `DECK_TOKEN` unset or empty → token auth disabled (open POSTs).
 - `DECK_TOKEN` set → all POSTs require the header; GET/WS remain open.
 
+## Manual Binance Transfers (Universal)
+
+The Deck can initiate Binance universal transfers for Funding ⇄ Spot ⇄ USDⓈ-M (and optional Margin/COIN-M legs).
+
+1. Provide SAPI credentials on the Deck container:
+   - `BINANCE_API_KEY`
+   - `BINANCE_API_SECRET`
+   - Optional `BINANCE_SAPI_BASE` (defaults to `https://api.binance.com`)
+2. Control which wallets are exposed via `DECK_TRANSFER_ALLOW` (comma separated). Default: `FUNDING,MAIN,UMFUTURE`. Add `MARGIN`, `ISOLATEDMARGIN`, `CMFUTURE` only if you intend to use them.
+3. The UI renders a **Transfers (Manual)** panel with quick buttons and a recent activity log.
+4. API surface:
+   - `GET /transfer/types` → returns currently allowed wallet pairs.
+   - `POST /transfer` (token‑guarded) with body:
+     ```json
+     {
+       "from_wallet": "FUNDING",
+       "to_wallet": "UMFUTURE",
+       "asset": "USDT",
+       "amount": 25,
+       "symbol": "BTCUSDT" // only required for isolated margin flows
+     }
+     ```
+   Successful calls broadcast on the WebSocket and appear in the UI log (last 20 transfers).
+
 ## Optional Allocator Service (off by default)
 
 We ship an allocator daemon that tilts strategy `risk_share` by rolling PnL. Enable it on demand with Compose profiles:

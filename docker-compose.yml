@@ -473,13 +473,17 @@ services:
     volumes:
       - ./:/app
     command: >
-      sh -c "pip install --no-cache-dir fastapi uvicorn[standard] &&
+      sh -c "pip install --no-cache-dir fastapi uvicorn[standard] httpx &&
              uvicorn ops.deck_api:app --host 0.0.0.0 --port 8002"
     ports:
       - "${DECK_PORT:-8012}:8002"
     environment:
       - DECK_STATIC_DIR=./deck
       - DECK_TOKEN=${DECK_TOKEN:-}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - BINANCE_SAPI_BASE=${BINANCE_SAPI_BASE:-https://api.binance.com}
+      - DECK_TRANSFER_ALLOW=${DECK_TRANSFER_ALLOW:-FUNDING,MAIN,UMFUTURE}
 
   hmm_allocator:
     build:
