@@ -123,10 +123,40 @@ scalp_rsi = Gauge(
     ["symbol", "venue"],
     multiprocess_mode="livesum",
 )
+scalp_spread_bp = Gauge(
+    "scalp_spread_bp",
+    "Observed top-of-book spread used by scalping module (basis points)",
+    ["symbol", "venue"],
+    multiprocess_mode="max",
+)
+scalp_orderbook_imbalance = Gauge(
+    "scalp_orderbook_imbalance",
+    "Order book imbalance tracked by scalping module (-1 to 1)",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
 scalp_signals_total = Counter(
     "scalp_signals_total",
     "Scalping strategy signals emitted grouped by reason",
     ["symbol", "venue", "side", "reason"],
+)
+scalp_signal_ttl_sec = Gauge(
+    "scalp_signal_ttl_sec",
+    "Time-to-live applied to scalping signals (seconds)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="max",
+)
+scalp_signal_edge_bp = Gauge(
+    "scalp_signal_edge_bp",
+    "Estimated post-slippage edge of scalping signals (basis points)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="livesum",
+)
+scalp_slippage_estimate_bp = Gauge(
+    "scalp_slippage_estimate_bp",
+    "Estimated slippage for scalping orders (basis points)",
+    ["symbol", "venue", "side"],
+    multiprocess_mode="livesum",
 )
 scalp_bracket_exits_total = Counter(
     "scalp_bracket_exits_total",
@@ -142,6 +172,11 @@ strategy_ticks_total = Counter(
     "strategy_ticks_total",
     "Price ticks delivered to strategy loop",
     ["symbol", "venue"],
+)
+market_data_events_total = Counter(
+    "market_data_events_total",
+    "Market data events published to event bus",
+    ["source", "type"],
 )
 strategy_tick_to_order_latency_ms = Histogram(
     "strategy_tick_to_order_latency_ms",
@@ -260,6 +295,31 @@ momentum_breakout_cooldown_epoch = Gauge(
     "momentum_breakout_cooldown_epoch",
     "Unix epoch when momentum breakout cooldown expires",
     ["symbol"],
+    multiprocess_mode="max",
+)
+
+# Real-time momentum module telemetry
+momentum_rt_breakouts_total = Counter(
+    "momentum_rt_breakouts_total",
+    "Real-time momentum breakout signals emitted",
+    ["symbol", "venue", "side", "reason"],
+)
+momentum_rt_window_return_pct = Gauge(
+    "momentum_rt_window_return_pct",
+    "Recent percentage move observed within the momentum window (pct)",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
+momentum_rt_volume_ratio = Gauge(
+    "momentum_rt_volume_ratio",
+    "Ratio of recent volume vs. baseline window for momentum module",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
+momentum_rt_cooldown_epoch = Gauge(
+    "momentum_rt_cooldown_epoch",
+    "Epoch timestamp when the real-time momentum module can trigger again",
+    ["symbol", "venue"],
     multiprocess_mode="max",
 )
 
@@ -425,6 +485,7 @@ REGISTRY = {
     "strategy_confidence": strategy_confidence,
     "strategy_orders_total": strategy_orders_total,
     "strategy_ticks_total": strategy_ticks_total,
+    "market_data_events_total": market_data_events_total,
     "strategy_tick_to_order_latency_ms": strategy_tick_to_order_latency_ms,
     "strategy_universe_size": strategy_universe_size,
     "strategy_signal_queue_len": strategy_signal_queue_len,
