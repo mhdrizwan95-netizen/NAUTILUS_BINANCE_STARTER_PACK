@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import os
+import time
+
 from fastapi import FastAPI, Response
-import os, asyncio, time, random
 from prometheus_client import CollectorRegistry, Gauge, generate_latest, CONTENT_TYPE_LATEST
 import time
 import httpx
@@ -9,6 +12,7 @@ import httpx
 from .data import klines_1m, orderbook
 from .features import compute_feats
 from .alpha import score_long_short
+from .strategies import evaluate_strategies
 
 APP = FastAPI(title="screener")
 REG = CollectorRegistry()
@@ -28,10 +32,13 @@ def get_universe():
         return {}
 
 
+_LAST_SCAN: dict[str, object] = {}
+
+
 @APP.get("/scan")
 def scan():
     uni = get_universe()
-    out = {"ts": int(time.time()), "long": [], "short": []}
+    out = {"ts": int(time.time()), "long": [], "short": [], "strategies": {}}
     # Optional: symbol cap + rotation to stay under API quotas
     items = list(uni.items())
     cap = int(os.getenv("SCREENER_SYMBOL_CAP", "100"))
@@ -69,11 +76,25 @@ def scan():
                 pass
             out["long"].append({"symbol": sym, "score": long})
             out["short"].append({"symbol": sym, "score": short})
+            strategy_hits = evaluate_strategies(sym, meta, kl, ob, f)
+            for strategy, candidate in strategy_hits.items():
+                entry = candidate.as_dict()
+                entry["symbol"] = sym
+                out["strategies"].setdefault(strategy, []).append(entry)
         except Exception:
             errors += 1
             continue
     out["long"] = sorted(out["long"], key=lambda x: x["score"], reverse=True)[:5]
     out["short"] = sorted(out["short"], key=lambda x: x["score"], reverse=True)[:5]
+    for hits in out["strategies"].values():
+        hits.sort(key=lambda x: x.get("score", 0.0), reverse=True)
+        cap = int(os.getenv("SCREENER_STRATEGY_TOP_N", "5") or "5")
+        if cap > 0:
+            del hits[cap:]
+
+    global _LAST_SCAN
+    _LAST_SCAN = out
+
     try:
         elapsed_ms = (time.time() - t0) * 1000.0
         SCAN_LATENCY.set(elapsed_ms)
@@ -92,25 +113,46 @@ def health():
 
 
 @APP.get("/candidates")
-def candidates(limit: int = 20):
+def candidates(limit: int = 20, strategy: str | None = None):
     """
     Return candidate symbols for trading. Currently uses universe or fallbacks.
     Future: integrate scoring to return top candidates based on alpha signals.
     """
+    if strategy:
+        snapshot = _LAST_SCAN or scan()
+        strat_key = strategy.strip().lower()
+        strategy_hits = snapshot.get("strategies", {}) if isinstance(snapshot, dict) else {}
+        if isinstance(strategy_hits, dict):
+            for key, values in strategy_hits.items():
+                if key.lower() == strat_key:
+                    ordered = list(values)
+                    if limit > 0:
+                        ordered = ordered[:limit]
+                    return ordered
+        return []
+
     # Try to get universe
     uni = get_universe()
     symbols = list(uni.keys()) if uni else []
 
     # Fallback to basic universe if universe service is down
     if not symbols:
-        symbols = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "ADAUSDT", "DOTUSDT",
-                  "LINKUSDT", "XRPUSDT", "LTCUSDT", "BCHUSDT", "ETCUSDT"]
+        symbols = [
+            "BTCUSDT",
+            "ETHUSDT",
+            "BNBUSDT",
+            "ADAUSDT",
+            "DOTUSDT",
+            "LINKUSDT",
+            "XRPUSDT",
+            "LTCUSDT",
+            "BCHUSDT",
+            "ETCUSDT",
+        ]
 
     # Limit to requested amount
     symbols = symbols[:limit] if limit > 0 else symbols
 
-    # For now, return simple list of symbols
-    # TODO: In future, rank by alpha scores from scan results
     return symbols
 
 
