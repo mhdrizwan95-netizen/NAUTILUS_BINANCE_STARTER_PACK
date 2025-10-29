@@ -1,6 +1,9 @@
 import pytest
 
 from screener import service
+from screener.features import compute_feats
+from screener.strategies.base import rsi
+from screener.strategies.trend import TrendFollowingScreener
 
 
 def _make_klines(prices, volumes):
@@ -132,3 +135,27 @@ def test_candidates_endpoint_returns_per_strategy(monkeypatch):
     assert default == list(universe.keys())[:3]
 
     assert service.candidates(strategy="unknown") == []
+
+
+def test_rsi_flat_series_returns_neutral():
+    flat_prices = [100.0] * 60
+    value = rsi(flat_prices, 14)
+    assert value is not None
+    assert value == pytest.approx(50.0, abs=1e-6)
+
+
+def test_trend_screener_rejects_neutral_rsi(monkeypatch):
+    klines, books, universe = _build_test_data()
+
+    monkeypatch.setattr(service, "klines_1m", lambda sym, n=60: klines[sym])
+    monkeypatch.setattr(service, "orderbook", lambda sym, limit=10: books[sym])
+    monkeypatch.setattr(service, "get_universe", lambda: universe)
+
+    symbol = "TRENDUSDT"
+    features = compute_feats(klines[symbol], books[symbol])
+    assert features["rsi_14"] > 52.0
+    features["rsi_14"] = 50.0
+
+    screener = TrendFollowingScreener()
+    candidate = screener.evaluate(symbol, universe[symbol], klines[symbol], books[symbol], features)
+    assert candidate is None

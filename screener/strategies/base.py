@@ -90,6 +90,43 @@ def sma(values: Sequence[float], length: int) -> Optional[float]:
     return sum(values[-length:]) / float(length)
 
 
+def rsi(values: Sequence[float], length: int = 14) -> Optional[float]:
+    if length <= 0:
+        return None
+    closes = [float(v) for v in values]
+    if len(closes) <= length:
+        return None
+    gains: list[float] = []
+    losses: list[float] = []
+    for prev, curr in zip(closes, closes[1:]):
+        delta = curr - prev
+        if delta >= 0:
+            gains.append(delta)
+            losses.append(0.0)
+        else:
+            gains.append(0.0)
+            losses.append(-delta)
+    if len(gains) < length:
+        return None
+    avg_gain = sum(gains[:length]) / length
+    avg_loss = sum(losses[:length]) / length
+
+    def _compute(avg_g: float, avg_l: float) -> float:
+        if avg_l == 0.0:
+            if avg_g == 0.0:
+                return 50.0
+            return 100.0
+        rs = avg_g / avg_l
+        return 100.0 - (100.0 / (1.0 + rs))
+
+    rsi_value = _compute(avg_gain, avg_loss)
+    for gain, loss in zip(gains[length:], losses[length:]):
+        avg_gain = ((avg_gain * (length - 1)) + gain) / length
+        avg_loss = ((avg_loss * (length - 1)) + loss) / length
+        rsi_value = _compute(avg_gain, avg_loss)
+    return rsi_value
+
+
 def atr(klines: Sequence[Sequence[Any]], length: int = 14) -> Optional[float]:
     if length <= 0 or len(klines) <= length:
         return None
@@ -163,6 +200,7 @@ __all__ = [
     "StrategyScreener",
     "freeze_mapping",
     "sma",
+    "rsi",
     "atr",
     "swing_low",
     "swing_high",

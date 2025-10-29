@@ -1,12 +1,15 @@
 import numpy as np
 
+from screener.strategies.base import rsi
+
 
 def compute_feats(klines, book):
     closes = [float(k[4]) for k in klines[-60:]]
     vols = [float(k[5]) for k in klines[-60:]]
     last = closes[-1]
     vwap = np.average(closes, weights=vols) if sum(vols) > 0 else last
-    rsi = 50.0 if len(closes) < 15 else _rsi(closes, 14)
+    rsi_val = rsi(closes, 14)
+    rsi_metric = 50.0 if rsi_val is None else rsi_val
     vwap_dev = (last - vwap) / vwap if vwap else 0.0
     r15 = (last - closes[-16]) / closes[-16] if len(closes) > 16 else 0.0
     r60 = (last - closes[0]) / closes[0] if closes else 0.0
@@ -26,7 +29,7 @@ def compute_feats(klines, book):
     return dict(
         last=last,
         vwap_dev=vwap_dev,
-        rsi_14=rsi,
+        rsi_14=rsi_metric,
         r15=r15,
         r60=r60,
         vol_accel_5m_over_30m=vol_accel_5m_over_30m,
@@ -34,20 +37,6 @@ def compute_feats(klines, book):
         spread_over_atr=spread_over_atr,
         depth_usd=depth_usd,
     )
-
-
-def _rsi(closes, period):
-    deltas = np.diff(closes)
-    up = deltas.clip(min=0)
-    down = (-deltas).clip(min=0)
-    ru = up[-period:].mean() if len(up) >= period else up.mean() if len(up) > 0 else 0
-    rd = (
-        down[-period:].mean() if len(down) >= period else down.mean() if len(down) > 0 else 1e-9
-    )
-    rs = ru / max(rd, 1e-9)
-    return 100 - 100 / (1 + rs)
-
-
 def _atr(kl):
     trs = []
     for i in range(1, len(kl)):
