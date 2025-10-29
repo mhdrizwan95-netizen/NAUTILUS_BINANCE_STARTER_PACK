@@ -23,7 +23,8 @@ import asyncio
 import aiohttp
 from typing import List, Callable, Dict, Any
 from datetime import datetime
-from strategies.hmm_policy import telemetry
+
+from ops.telemetry_metrics import inc_guardian_incident
 
 logger = logging.getLogger(__name__)
 
@@ -94,9 +95,12 @@ def reset_guardrails() -> bool:
 
     actions = [
         ("Archive logs", "python ops/rotate_logs.py 2>/dev/null || true"),
-        ("Stop live trading", "pkill -TERM -f run_live.py || true"),
+        ("Stop live trading", "pkill -TERM -f 'engine.app:app' || true"),
         ("Brief pause", "sleep 3"),
-        ("Restart trading", "python ops/run_live.py --symbol BTCUSDT.BINANCE --dry-run true"),
+        (
+            "Restart trading",
+            "TRADING_ENABLED=true nohup uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info >data/processed/m20/engine_restart.log 2>&1 &",
+        ),
     ]
 
     success = True
@@ -150,12 +154,18 @@ def reduce_risk() -> bool:
     duration_minutes = 30
 
     actions = [
-        (f"Set risk multiplier to {risk_multiplier}",
-         f"echo 'GLOBAL_RISK_MULTIPLIER={risk_multiplier}' >> .env"),
-        ("Restart trading with reduced risk",
-         "pkill -TERM -f run_live.py || true && sleep 2"),
-        ("Launch reduced-risk trading",
-         f"GLOBAL_RISK_MULTIPLIER={risk_multiplier} python ops/run_live.py --symbol BTCUSDT.BINANCE"),
+        (
+            f"Set risk multiplier to {risk_multiplier}",
+            f"echo 'GLOBAL_RISK_MULTIPLIER={risk_multiplier}' >> .env",
+        ),
+        (
+            "Restart trading with reduced risk",
+            "pkill -TERM -f 'engine.app:app' || true && sleep 2",
+        ),
+        (
+            "Launch reduced-risk trading",
+            "GLOBAL_RISK_MULTIPLIER={risk_multiplier} TRADING_ENABLED=true nohup uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info >data/processed/m20/engine_risk_relaunch.log 2>&1 &",
+        ),
     ]
 
     success = True
@@ -181,12 +191,18 @@ def conservative_mode() -> bool:
     print("🐢 Playbook: Activate conservative trading mode")
 
     actions = [
-        ("Enable conservative settings",
-         "echo 'CONSERVATIVE_MODE=true' >> .env && echo 'MAX_POSITION_PCT=0.1' >> .env"),
-        ("Restart with conservative params",
-         "pkill -TERM -f run_live.py || true && sleep 2"),
-        ("Launch conservative trading",
-         "CONSERVATIVE_MODE=true MAX_POSITION_PCT=0.1 python ops/run_live.py --symbol BTCUSDT.BINANCE"),
+        (
+            "Enable conservative settings",
+            "echo 'CONSERVATIVE_MODE=true' >> .env && echo 'MAX_POSITION_PCT=0.1' >> .env",
+        ),
+        (
+            "Restart with conservative params",
+            "pkill -TERM -f 'engine.app:app' || true && sleep 2",
+        ),
+        (
+            "Launch conservative trading",
+            "CONSERVATIVE_MODE=true MAX_POSITION_PCT=0.1 TRADING_ENABLED=true nohup uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info >data/processed/m20/engine_conservative.log 2>&1 &",
+        ),
     ]
 
     success = True
@@ -307,7 +323,7 @@ def execute(incidents: List[str]) -> Dict[str, Any]:
 
                 # --- new: record guardian incident for successful exec ---
                 if success:
-                    telemetry.inc_guardian_incident(incident_type)
+                    inc_guardian_incident(incident_type)
                     payload = {
                         "incident": incident_type,
                         "reason": f"playbook_{action_name}",

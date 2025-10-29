@@ -400,30 +400,6 @@ meme_sentiment_cooldown_epoch = Gauge(
     multiprocess_mode="max",
 )
 
-# Social sentiment module metrics
-social_sentiment_events_total = Counter(
-    "social_sentiment_events_total",
-    "Social sentiment evaluations grouped by decision outcome",
-    ["symbol", "decision"],
-)
-social_sentiment_orders_total = Counter(
-    "social_sentiment_orders_total",
-    "Orders initiated by the social sentiment module grouped by status",
-    ["symbol", "status"],
-)
-social_sentiment_cooldown_epoch = Gauge(
-    "social_sentiment_cooldown_epoch",
-    "Epoch timestamp when social sentiment cooldown expires for a symbol",
-    ["symbol"],
-    multiprocess_mode="max",
-)
-social_sentiment_signal_score = Gauge(
-    "social_sentiment_signal_score",
-    "Most recent social sentiment signal score per symbol",
-    ["symbol"],
-    multiprocess_mode="max",
-)
-
 # Airdrop / promo watcher metrics
 airdrop_events_total = Counter(
     "airdrop_promo_events_total",
@@ -538,10 +514,6 @@ REGISTRY = {
     "meme_sentiment_events_total": meme_sentiment_events_total,
     "meme_sentiment_orders_total": meme_sentiment_orders_total,
     "meme_sentiment_cooldown_epoch": meme_sentiment_cooldown_epoch,
-    "social_sentiment_events_total": social_sentiment_events_total,
-    "social_sentiment_orders_total": social_sentiment_orders_total,
-    "social_sentiment_cooldown_epoch": social_sentiment_cooldown_epoch,
-    "social_sentiment_signal_score": social_sentiment_signal_score,
     "airdrop_promo_events_total": airdrop_events_total,
     "airdrop_promo_orders_total": airdrop_orders_total,
     "airdrop_promo_cooldown_epoch": airdrop_cooldown_epoch,

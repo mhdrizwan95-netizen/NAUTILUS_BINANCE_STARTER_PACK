@@ -760,7 +760,6 @@ _stop_validator: StopValidator | None = None
 _LISTING_SNIPER = None
 _MOMENTUM_BREAKOUT = None
 _MEME_SENTIMENT = None
-_SOCIAL_SENTIMENT = None
 _AIRDROP_PROMO = None
 
 # Attach strategy router only for trading role
@@ -1252,40 +1251,6 @@ async def _start_guardian_and_feeds():
     except Exception:
         _startup_logger.warning("Meme sentiment strategy wiring failed", exc_info=True)
 
-    # Social sentiment strategy wiring
-    try:
-        from engine.strategies.social_sentiment import (
-            SocialSentimentModule,
-            load_social_sentiment_config,
-        )
-
-        social_cfg = load_social_sentiment_config()
-        global _SOCIAL_SENTIMENT
-        if social_cfg.enabled:
-            if _SOCIAL_SENTIMENT is None:
-                _SOCIAL_SENTIMENT = SocialSentimentModule(router, RAILS, rest_client, social_cfg)
-                BUS.subscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-                _startup_logger.info(
-                    "Social sentiment strategy enabled (risk_pct=%.2f%%, min_score=%.2f, coin_cooldown=%.0fs)",
-                    social_cfg.per_trade_risk_pct * 100.0,
-                    social_cfg.min_signal_score,
-                    social_cfg.coin_cooldown_sec,
-                )
-            else:
-                _SOCIAL_SENTIMENT.cfg = social_cfg
-                _SOCIAL_SENTIMENT.rest_client = rest_client
-                _startup_logger.info("Social sentiment strategy configuration refreshed")
-        else:
-            if _SOCIAL_SENTIMENT is not None:
-                try:
-                    BUS.unsubscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-                except Exception:
-                    pass
-                _SOCIAL_SENTIMENT = None
-                _startup_logger.info("Social sentiment strategy disabled via configuration")
-    except Exception:
-        _startup_logger.warning("Social sentiment strategy wiring failed", exc_info=True)
-
     # Listing sniper wiring
     try:
         from engine.strategies.listing_sniper import ListingSniper, load_listing_sniper_config
@@ -1601,7 +1566,7 @@ except Exception:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _SOCIAL_SENTIMENT, _AIRDROP_PROMO, _market_data_logger
+    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _AIRDROP_PROMO, _market_data_logger
     if _market_data_logger is not None:
         try:
             _market_data_logger.stop()
@@ -1630,17 +1595,6 @@ async def on_shutdown() -> None:
             _MEME_SENTIMENT = None
     except Exception:
         _startup_logger.warning("Meme sentiment shutdown failed", exc_info=True)
-    try:
-        if _SOCIAL_SENTIMENT is not None:
-            from engine.core.event_bus import BUS
-
-            try:
-                BUS.unsubscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-            except Exception:
-                pass
-            _SOCIAL_SENTIMENT = None
-    except Exception:
-        _startup_logger.warning("Social sentiment shutdown failed", exc_info=True)
     try:
         if _AIRDROP_PROMO is not None:
             from engine.core.event_bus import BUS
