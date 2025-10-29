@@ -82,8 +82,27 @@ try:
 except (TypeError, ValueError):
     AUTO_TOPUP_PERIOD_SEC = 45.0
 AUTO_TOPUP_PERIOD_SEC = max(5.0, AUTO_TOPUP_PERIOD_SEC)
+try:
+    WALLET_REFRESH_PERIOD_SEC = float(os.getenv("WALLET_REFRESH_PERIOD_SEC", "30"))
+except (TypeError, ValueError):
+    WALLET_REFRESH_PERIOD_SEC = 30.0
+WALLET_REFRESH_PERIOD_SEC = max(5.0, WALLET_REFRESH_PERIOD_SEC)
 AUTO_TOPUP_ENABLED = os.getenv("AUTO_TOPUP_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
 _AUTO_TOPUP_LOG = logging.getLogger("engine.auto_topup")
+_WALLET_LOG = logging.getLogger("engine.wallet_balance")
+_wallet_state_lock = Lock()
+_wallet_state: dict[str, float] = {}
+
+
+def _update_wallet_state(snapshot: dict[str, float]) -> None:
+    with _wallet_state_lock:
+        _wallet_state.clear()
+        _wallet_state.update(snapshot)
+
+
+def _wallet_state_copy() -> dict[str, float]:
+    with _wallet_state_lock:
+        return dict(_wallet_state)
 
 
 class _DummyBinanceREST:
@@ -374,6 +393,83 @@ async def auto_topup_worker() -> None:
         await asyncio.sleep(period)
 
 
+async def wallet_balance_worker() -> None:
+    """Continuously refresh futures, spot, and funding balances for Deck metrics."""
+    if VENUE != "BINANCE":
+        _WALLET_LOG.info("wallet monitor: skipping (venue=%s)", VENUE)
+        return
+    if IS_EXPORTER:
+        _WALLET_LOG.info("wallet monitor: disabled for exporter role")
+        return
+    if not (settings.api_key and settings.api_secret):
+        _WALLET_LOG.info("wallet monitor: missing Binance credentials; disabled")
+        return
+    rest = BinanceREST(market="futures")
+    period = WALLET_REFRESH_PERIOD_SEC
+    _WALLET_LOG.info("wallet monitor: started (period=%.1fs)", period)
+
+    def _as_float(value: Any) -> float:
+        try:
+            return float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    while True:
+        try:
+            timestamp = time.time()
+            futures_total = futures_available = 0.0
+            try:
+                futures_snapshot = await rest.account_snapshot(market="futures")
+                futures_total = _as_float(futures_snapshot.get("totalWalletBalance"))
+                futures_available = _as_float(futures_snapshot.get("availableBalance"))
+            except Exception as fut_exc:
+                _WALLET_LOG.debug("wallet monitor: futures snapshot failed (%s)", fut_exc)
+
+            spot_free = spot_locked = 0.0
+            try:
+                spot_snapshot = await rest.account_snapshot(market="spot")
+                for balance in spot_snapshot.get("balances", []) or []:
+                    if str(balance.get("asset", "")).upper() == "USDT":
+                        spot_free = _as_float(balance.get("free"))
+                        spot_locked = _as_float(balance.get("locked"))
+                        break
+            except Exception as spot_exc:
+                _WALLET_LOG.debug("wallet monitor: spot snapshot failed (%s)", spot_exc)
+
+            funding_free = 0.0
+            try:
+                funding_free = _as_float(await rest.funding_balance("USDT"))
+            except Exception as fund_exc:
+                _WALLET_LOG.debug("wallet monitor: funding balance failed (%s)", fund_exc)
+
+            spot_total = spot_free + spot_locked
+            total_equity = futures_total + funding_free + spot_total
+            snapshot = {
+                "timestamp": timestamp,
+                "futures_wallet_usdt": futures_total,
+                "futures_available_usdt": futures_available,
+                "funding_free_usdt": funding_free,
+                "spot_free_usdt": spot_free,
+                "spot_locked_usdt": spot_locked,
+                "spot_total_usdt": spot_total,
+                "total_equity_usdt": total_equity,
+            }
+            _update_wallet_state(snapshot)
+            try:
+                state = portfolio.state
+                state.equity = total_equity
+                state.cash = funding_free + spot_total + futures_available
+                setattr(state, "wallet_breakdown", snapshot)
+            except Exception:
+                pass
+        except asyncio.CancelledError:
+            _WALLET_LOG.info("wallet monitor: cancelled")
+            raise
+        except Exception as exc:
+            _WALLET_LOG.warning("wallet monitor: error: %s", exc)
+        await asyncio.sleep(period)
+
+
 portfolio = Portfolio()
 try:
     _deck_last_realized = float(getattr(portfolio.state, "realized", 0.0) or 0.0)
@@ -531,6 +627,10 @@ def _queue_deck_metrics(pnl_by_strategy: dict[str, float] | None = None) -> None
         return
 
     equity = float(getattr(state, "equity", 0.0) or 0.0)
+    wallet_snapshot = _wallet_state_copy()
+    wallet_equity = _safe_float(wallet_snapshot.get("total_equity_usdt")) if wallet_snapshot else None
+    if wallet_equity is not None:
+        equity = wallet_equity
     now = time.time()
     pnl_24h, drawdown_pct = record_equity(equity, now=now)
     positions_count = len(getattr(state, "positions", {}) or {})
@@ -561,6 +661,21 @@ def _queue_deck_metrics(pnl_by_strategy: dict[str, float] | None = None) -> None
         "breaker": {"equity": breaker_equity, "venue": breaker_venue},
         "pnl_by_strategy": pnl_by_strategy,
     }
+    if wallet_snapshot:
+        wallet_fields = {
+            "wallet_timestamp": wallet_snapshot.get("timestamp"),
+            "funding_free_usdt": wallet_snapshot.get("funding_free_usdt"),
+            "spot_free_usdt": wallet_snapshot.get("spot_free_usdt"),
+            "spot_locked_usdt": wallet_snapshot.get("spot_locked_usdt"),
+            "spot_total_usdt": wallet_snapshot.get("spot_total_usdt"),
+            "futures_wallet_usdt": wallet_snapshot.get("futures_wallet_usdt"),
+            "futures_available_usdt": wallet_snapshot.get("futures_available_usdt"),
+            "total_equity_usdt": wallet_snapshot.get("total_equity_usdt"),
+        }
+        for key, value in wallet_fields.items():
+            if value is None:
+                continue
+            metrics_kwargs[key] = value
 
     try:
         snapshot = dict(portfolio.snapshot())
@@ -824,6 +939,16 @@ async def _start_auto_topup_loop():
         _AUTO_TOPUP_LOG.info("auto_topup: disabled; worker not started")
         return
     asyncio.create_task(auto_topup_worker(), name="auto-topup")
+
+
+@app.on_event("startup")
+async def _start_wallet_monitor() -> None:
+    if IS_EXPORTER or VENUE != "BINANCE":
+        return
+    if not (settings.api_key and settings.api_secret):
+        _WALLET_LOG.info("wallet monitor: credentials missing; not starting")
+        return
+    asyncio.create_task(wallet_balance_worker(), name="wallet-balance")
 
 
 @app.on_event("startup")

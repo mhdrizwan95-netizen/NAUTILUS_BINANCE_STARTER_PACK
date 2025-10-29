@@ -58,6 +58,10 @@ The Deck can initiate Binance universal transfers for Funding ⇄ Spot ⇄ USD�
      ```
    Successful calls broadcast on the WebSocket and appear in the UI log (last 20 transfers).
 
+The capital panel now surfaces Funding / Spot / Futures balances when the engine posts metrics.
+- Engine poll cadence is controlled via `WALLET_REFRESH_PERIOD_SEC` (default 30s).
+- Ensure the trading engine runs with `DECK_URL` (and optional `DECK_TOKEN`) so live balances stream into Deck.
+
 ## Optional Allocator Service (off by default)
 
 We ship an allocator daemon that tilts strategy `risk_share` by rolling PnL. Enable it on demand with Compose profiles:

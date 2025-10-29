@@ -129,17 +129,44 @@
   }
 
   function render(){
+    const metrics = state.metrics || {};
+    const format = (value, digits = 2)=>{
+      const num = Number(value);
+      return Number.isFinite(num) ? num.toFixed(digits) : '-';
+    };
+    const totalEquity = metrics.total_equity_usdt ?? metrics.equity_usd;
+    const walletTs = Number(metrics.wallet_timestamp);
+    const walletUpdated = Number.isFinite(walletTs)
+      ? new Date(walletTs * 1000).toLocaleTimeString()
+      : '-';
+
     $("#mode").value = state.mode || 'yellow';
     setKill(!!state.kill);
-    $("#equity").textContent = 'Equity: $' + (state.metrics?.equity_usd?.toFixed?.(2) ?? '-');
-    $("#pnl24").textContent = 'PnL 24h: $' + (state.metrics?.pnl_24h?.toFixed?.(2) ?? '-');
-    $("#dd").textContent = 'Drawdown: ' + ((state.metrics?.drawdown_pct??0)*100).toFixed(2) + '%';
-    $("#riskuse").textContent = 'Open Risk: ' + ((state.metrics?.open_risk_sum_pct??0)*100).toFixed(2) + '%';
-    $("#positions").textContent = 'Positions: ' + (state.metrics?.open_positions ?? '-');
-    $("#lat50").textContent = (state.metrics?.tick_to_order_ms_p50 ?? '-') ;
-    $("#lat95").textContent = (state.metrics?.tick_to_order_ms_p95 ?? '-') ;
-    $("#err").textContent = (state.metrics?.venue_error_rate_pct ?? 0).toFixed(2);
-    const brk = state.metrics?.breaker || {};
+    const equityDisplay = format(totalEquity);
+    $("#equity").textContent = `Total Equity (USDT): ${equityDisplay}`;
+    $("#fundingBalance").textContent = `Funding (USDT): ${format(metrics.funding_free_usdt)}`;
+    const spotFreeDisplay = format(metrics.spot_free_usdt);
+    const spotLockedDisplay = format(metrics.spot_locked_usdt);
+    const spotTotalDisplay = format(metrics.spot_total_usdt);
+    $("#spotBalance").textContent = `Spot Free (USDT): ${spotFreeDisplay} (total ${spotTotalDisplay})`;
+    $("#spotLocked").textContent = `Spot Locked (USDT): ${spotLockedDisplay}`;
+    $("#futuresWallet").textContent = `Futures Wallet (USDT): ${format(metrics.futures_wallet_usdt)}`;
+    $("#futuresAvailable").textContent = `Futures Available (USDT): ${format(metrics.futures_available_usdt)}`;
+    $("#pnl24").textContent = `PnL 24h (USDT): ${format(metrics.pnl_24h)}`;
+    const drawdownVal = Number(metrics.drawdown_pct);
+    $("#dd").textContent = 'Drawdown: ' + (Number.isFinite(drawdownVal) ? drawdownVal.toFixed(2) + '%' : '0.00%');
+    const riskRaw = Number(metrics.open_risk_sum_pct);
+    const riskDisplay = Number.isFinite(riskRaw) ? (riskRaw * 100).toFixed(2) + '%' : '0.00%';
+    $("#riskuse").textContent = 'Open Risk: ' + riskDisplay;
+    $("#positions").textContent = 'Positions: ' + (metrics.open_positions ?? '-');
+    $("#walletUpdated").textContent = `Wallet Updated: ${walletUpdated}`;
+    const lat50Val = Number(metrics.tick_to_order_ms_p50);
+    const lat95Val = Number(metrics.tick_to_order_ms_p95);
+    $("#lat50").textContent = Number.isFinite(lat50Val) ? lat50Val.toFixed(2) : '-';
+    $("#lat95").textContent = Number.isFinite(lat95Val) ? lat95Val.toFixed(2) : '-';
+    const errVal = Number(metrics.venue_error_rate_pct);
+    $("#err").textContent = Number.isFinite(errVal) ? errVal.toFixed(2) : '0.00';
+    const brk = metrics.breaker || {};
     const breakerStatus = (brk.equity||brk.venue)?'<span class="badge err">TRIPPED</span>':'<span class="badge ok">OK</span>';
     $("#brk").innerHTML = breakerStatus;
 
