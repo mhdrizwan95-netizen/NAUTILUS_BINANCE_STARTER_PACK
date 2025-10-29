@@ -62,6 +62,11 @@ The capital panel now surfaces Funding / Spot / Futures balances when the engine
 - Engine poll cadence is controlled via `WALLET_REFRESH_PERIOD_SEC` (default 30s).
 - Ensure the trading engine runs with `DECK_URL` (and optional `DECK_TOKEN`) so live balances stream into Deck.
 
+## Command Center UI (Next.js export)
+- The `deck/` static bundle now ships the Nautilus Command Center (Next 14 export) with `/index.html` landing and `/dashboard.html` cockpit.
+- Source lives under `nautilus-ui-deck/examples/nautilus-dashboard` (Next.js + Tailwind + Zustand); run `npm install && npm run build` there to regenerate the static bundle and copy the output to `deck/`.
+- When developing locally, you can run `npm run dev` in that folder to iterate on the cockpit before exporting.
+
 ## Optional Allocator Service (off by default)
 
 We ship an allocator daemon that tilts strategy `risk_share` by rolling PnL. Enable it on demand with Compose profiles:
