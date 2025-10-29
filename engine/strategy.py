@@ -20,6 +20,11 @@ from .strategies.trend_follow import TrendStrategyModule, load_trend_config
 from .strategies.scalping import ScalpStrategyModule, load_scalp_config
 from .telemetry.publisher import record_latency
 try:
+    from .strategies.momentum_realtime import MomentumStrategyModule, load_momentum_rt_config
+except Exception:  # pragma: no cover - optional component
+    MomentumStrategyModule = None  # type: ignore
+    load_momentum_rt_config = None  # type: ignore
+try:
     from .strategies.symbol_scanner import SymbolScanner, load_symbol_scanner_config
 except Exception:  # pragma: no cover - optional component
     SymbolScanner = None  # type: ignore
@@ -56,6 +61,22 @@ try:
         SCALP_MODULE = ScalpStrategyModule(SCALP_CFG)
 except Exception:
     SCALP_MODULE = None
+
+MOMENTUM_RT_CFG = None
+MOMENTUM_RT_MODULE: Optional[MomentumStrategyModule] = None
+if 'MomentumStrategyModule' in globals() and MomentumStrategyModule and load_momentum_rt_config:
+    try:
+        MOMENTUM_RT_CFG = load_momentum_rt_config()
+        if MOMENTUM_RT_CFG.enabled:
+            MOMENTUM_RT_MODULE = MomentumStrategyModule(MOMENTUM_RT_CFG)
+            logging.getLogger(__name__).info(
+                "Momentum RT module enabled (window=%.1fs, move>=%.2f%%, vol>=%.2fx)",
+                MOMENTUM_RT_CFG.window_sec,
+                MOMENTUM_RT_CFG.pct_move_threshold * 100.0,
+                MOMENTUM_RT_CFG.volume_spike_ratio,
+            )
+    except Exception:
+        MOMENTUM_RT_MODULE = None
 
 _SCALP_BUS_WIRED = False
 _SCALP_WATCH_LOCK = threading.Lock()
@@ -459,6 +480,45 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
                 try:
                     metrics.strategy_orders_total.labels(
                         symbol=scalp_base, venue=scalp_venue, side=scalp_side, source=scalp_tag
+                    ).inc()
+                except Exception:
+                    pass
+            return
+
+    if MOMENTUM_RT_MODULE and getattr(MOMENTUM_RT_MODULE, "enabled", False):
+        momentum_decision = None
+        try:
+            momentum_decision = MOMENTUM_RT_MODULE.handle_tick(qualified, price, ts_val, volume)
+        except Exception:
+            momentum_decision = None
+        if momentum_decision:
+            momentum_symbol = str(momentum_decision.get("symbol") or qualified)
+            momentum_side = str(momentum_decision.get("side") or "BUY")
+            momentum_quote = float(momentum_decision.get("quote") or S_CFG.quote_usdt)
+            momentum_tag = str(momentum_decision.get("tag") or "momentum_rt")
+            momentum_meta = momentum_decision.get("meta")
+            default_market = momentum_decision.get("market") or (
+                "futures" if getattr(MOMENTUM_RT_CFG, "prefer_futures", True) or momentum_side == "SELL" else "spot"
+            )
+            resolved_market = resolve_market_choice(momentum_symbol, default_market)
+            sig = StrategySignal(
+                symbol=momentum_symbol,
+                side=momentum_side,
+                quote=momentum_quote,
+                quantity=None,
+                dry_run=None,
+                tag=momentum_tag,
+                meta=momentum_meta,
+                market=resolved_market,
+            )
+            result = _execute_strategy_signal(sig)
+            if result.get("status") == "submitted":
+                try:
+                    metrics.strategy_orders_total.labels(
+                        symbol=momentum_symbol.split(".")[0],
+                        venue=momentum_symbol.split(".")[1] if "." in momentum_symbol else "BINANCE",
+                        side=momentum_side,
+                        source=momentum_tag,
                     ).inc()
                 except Exception:
                     pass

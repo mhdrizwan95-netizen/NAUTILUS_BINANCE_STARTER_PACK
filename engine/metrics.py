@@ -268,6 +268,31 @@ momentum_breakout_cooldown_epoch = Gauge(
     multiprocess_mode="max",
 )
 
+# Real-time momentum module telemetry
+momentum_rt_breakouts_total = Counter(
+    "momentum_rt_breakouts_total",
+    "Real-time momentum breakout signals emitted",
+    ["symbol", "venue", "side", "reason"],
+)
+momentum_rt_window_return_pct = Gauge(
+    "momentum_rt_window_return_pct",
+    "Recent percentage move observed within the momentum window (pct)",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
+momentum_rt_volume_ratio = Gauge(
+    "momentum_rt_volume_ratio",
+    "Ratio of recent volume vs. baseline window for momentum module",
+    ["symbol", "venue"],
+    multiprocess_mode="livesum",
+)
+momentum_rt_cooldown_epoch = Gauge(
+    "momentum_rt_cooldown_epoch",
+    "Epoch timestamp when the real-time momentum module can trigger again",
+    ["symbol", "venue"],
+    multiprocess_mode="max",
+)
+
 # External feed telemetry
 external_feed_events_total = Counter(
     "external_feed_events_total",
