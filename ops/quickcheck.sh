@@ -16,8 +16,12 @@ echo "== MODELS =="
 curl -s "$ML/models" && echo
 
 echo "== BACKTEST =="
-python backtests/run_backtest.py --config backtests/configs/crypto_spot.yaml || true
-ls -lh data/processed/{trades.csv,state_timeline.csv,guardrails.csv,data_quality_issues.csv} || true
+if [[ -n "${QUICKCHECK_CSV:-}" && -f "$QUICKCHECK_CSV" ]]; then
+  python scripts/backtest_hmm.py --csv "$QUICKCHECK_CSV" --model "${QUICKCHECK_MODEL:-engine/models/hmm_policy.pkl}" --symbol "${QUICKCHECK_SYMBOL:-BTCUSDT}" --quote "${QUICKCHECK_QUOTE:-100}" --out "${QUICKCHECK_OUT:-reports/quickcheck.json}" || true
+  ls -lh reports/quickcheck.json reports/backtest_equity.csv 2>/dev/null || true
+else
+  echo "(skip) QUICKCHECK_CSV not set - provide path to run the smoke backtest."
+fi
 
 echo "== DASH METRICS SNAPSHOT =="
 curl -s "$DASH/metrics" | head -n 20

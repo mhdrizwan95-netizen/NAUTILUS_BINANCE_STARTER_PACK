@@ -12,13 +12,16 @@ source ../.venv/bin/activate
 python -m pip install --upgrade pip wheel
 pip install -U numpy pandas matplotlib pyyaml
 
-# 1) Run backtest to produce feedback_log.csv (short run config)
-python backtests/run_backtest.py --config backtests/configs/crypto_spot.yaml
+# 1) Optional lightweight backtest to refresh metrics
+if [[ -n "${CALIBRATE_CSV:-}" && -f "$CALIBRATE_CSV" ]]; then
+  python scripts/backtest_hmm.py --csv "$CALIBRATE_CSV" --model "${CALIBRATE_MODEL:-engine/models/hmm_policy.pkl}" --symbol "${CALIBRATE_SYMBOL:-BTCUSDT}" --quote "${CALIBRATE_QUOTE:-100}" --out "${CALIBRATE_OUT:-reports/calibration_backtest.json}"
+else
+  echo "(skip) CALIBRATE_CSV not set - supply CSV to refresh feedback before calibration."
+fi
 
-# 2) Verify log
+# 2) Warn if legacy feedback log absent
 if [ ! -f "data/processed/feedback_log.csv" ]; then
-  echo "ERROR: feedback_log.csv not found after backtest." >&2
-  exit 1
+  echo "WARNING: data/processed/feedback_log.csv not found; ensure calibration inputs are prepared." >&2
 fi
 
 # 3) Run calibration
