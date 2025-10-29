@@ -1,55 +1,56 @@
 from __future__ import annotations
 
-<<<<<<< HEAD
-import math
-import time
-from collections import deque
-from threading import Lock
-from typing import Dict, Optional
-
-from ops.deck_metrics import push_fill, push_metrics, push_strategy_pnl
-
-# Shared buffers for latency and realized PnL windows
-_LAT_LOCK = Lock()
-_LAT_SAMPLES = deque(maxlen=400)
-_LAST_LATENCY_BY_SYMBOL: Dict[str, float] = {}
-
-_PNL_LOCK = Lock()
-_PNL_WINDOW = deque()  # (ts, realized_total)
-=======
 import logging
 import math
 import threading
 import time
 from collections import deque
-from typing import Deque, Dict, Tuple, Optional
+from threading import Lock
+from typing import Deque, Dict, Optional, Tuple
 
-from ops.deck_metrics import push_metrics, push_strategy_pnl, push_fill
+from ops.deck_metrics import push_fill, push_metrics, push_strategy_pnl
 
 log = logging.getLogger(__name__)
 
 _LAT_SAMPLES: Deque[float] = deque(maxlen=512)
 _LAT_LOCK = threading.Lock()
+_LAST_LATENCY_BY_SYMBOL: Dict[str, float] = {}
 
 _EQUITY_HISTORY: Deque[Tuple[float, float]] = deque()
 _EQUITY_LOCK = threading.Lock()
 _EQUITY_PEAK: float = 0.0
 
+_PNL_LOCK = Lock()
+_PNL_WINDOW: Deque[Tuple[float, float]] = deque()
+
+
+def _quantile(values: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    if len(values) == 1:
+        return float(values[0])
+    ordered = sorted(values)
+    pos = (len(ordered) - 1) * q
+    lower = int(math.floor(pos))
+    upper = int(math.ceil(pos))
+    if lower == upper:
+        return float(ordered[lower])
+    frac = pos - lower
+    return float(ordered[lower] + (ordered[upper] - ordered[lower]) * frac)
+
 
 def record_latency(latency_ms: float) -> None:
-    """Track strategy tick→order latency samples for Deck quantiles."""
     try:
         value = float(latency_ms)
     except (TypeError, ValueError):
         return
-    if not math.isfinite(value) or value < 0:
+    if value < 0 or not math.isfinite(value):
         return
     with _LAT_LOCK:
         _LAT_SAMPLES.append(value)
 
 
 def latency_quantiles() -> Tuple[float, float]:
-    """Return (p50_ms, p95_ms) for recorded latencies."""
     with _LAT_LOCK:
         samples = list(_LAT_SAMPLES)
     if not samples:
@@ -58,13 +59,39 @@ def latency_quantiles() -> Tuple[float, float]:
     return _quantile(samples, 0.5), _quantile(samples, 0.95)
 
 
-def record_equity(equity_usd: float, *, now: Optional[float] = None) -> Tuple[float, float]:
-    """
-    Record equity samples for 24h delta + drawdown tracking.
+def latency_percentiles() -> Tuple[float, float]:
+    return latency_quantiles()
 
-    Returns:
-        tuple[pnl_24h, drawdown_pct]
-    """
+
+def record_tick_latency(symbol: str, latency_ms: float) -> None:
+    try:
+        value = float(latency_ms)
+    except (TypeError, ValueError):
+        return
+    if value < 0 or not math.isfinite(value):
+        return
+    canonical_keys = {symbol.upper()}
+    if "." in symbol:
+        canonical_keys.add(symbol.split(".")[0].upper())
+    with _LAT_LOCK:
+        _LAT_SAMPLES.append(value)
+        for key in canonical_keys:
+            _LAST_LATENCY_BY_SYMBOL[key] = value
+
+
+def consume_latency(symbol: str) -> Optional[float]:
+    keys = [symbol.upper()]
+    if "." not in symbol:
+        keys.append(f"{symbol.upper()}.BINANCE")
+    with _LAT_LOCK:
+        for key in keys:
+            value = _LAST_LATENCY_BY_SYMBOL.pop(key, None)
+            if value is not None:
+                return value
+    return None
+
+
+def record_equity(equity_usd: float, *, now: Optional[float] = None) -> Tuple[float, float]:
     global _EQUITY_PEAK
     try:
         equity = float(equity_usd)
@@ -86,86 +113,9 @@ def record_equity(equity_usd: float, *, now: Optional[float] = None) -> Tuple[fl
         if peak > 0:
             drawdown_pct = max(0.0, (peak - equity) / peak * 100.0)
     return pnl_24h, drawdown_pct
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
-
-
-def publish_metrics(
-    *,
-    equity_usd: float,
-    pnl_24h: float,
-    drawdown_pct: float,
-    positions: int,
-    tick_p50_ms: float,
-    tick_p95_ms: float,
-    error_rate_pct: float,
-<<<<<<< HEAD
-    breaker: Dict[str, bool],
-    pnl_by_strategy: Optional[Dict[str, float]] = None,
-) -> None:
-    """Push core engine metrics and optional strategy PnL snapshot to the Deck."""
-    push_metrics(
-        equity_usd=equity_usd,
-        pnl_24h=pnl_24h,
-        drawdown_pct=drawdown_pct,
-        tick_p50_ms=tick_p50_ms,
-        tick_p95_ms=tick_p95_ms,
-        error_rate_pct=error_rate_pct,
-        positions=positions,
-        breaker=breaker,
-    )
-    if pnl_by_strategy:
-        push_strategy_pnl(pnl_by_strategy)
-
-
-def publish_fill(fill: Dict) -> None:
-    """Forward a fill/trade event to the Deck."""
-    push_fill(fill)
-
-
-def record_tick_latency(symbol: str, latency_ms: float) -> None:
-    """Store tick→order latency samples for percentile reporting."""
-    if latency_ms is None:
-        return
-    try:
-        latency_val = float(latency_ms)
-        if latency_val < 0:
-            return
-    except (TypeError, ValueError):
-        return
-    canonical_keys = {symbol.upper()}
-    if "." in symbol:
-        canonical_keys.add(symbol.split(".")[0].upper())
-    with _LAT_LOCK:
-        _LAT_SAMPLES.append(latency_val)
-        for key in canonical_keys:
-            _LAST_LATENCY_BY_SYMBOL[key] = latency_val
-
-
-def consume_latency(symbol: str) -> Optional[float]:
-    """Fetch and clear the most recent latency recorded for a symbol (best-effort)."""
-    keys = [symbol.upper()]
-    if "." not in symbol:
-        keys.append(f"{symbol.upper()}.BINANCE")  # common default
-    with _LAT_LOCK:
-        for key in keys:
-            val = _LAST_LATENCY_BY_SYMBOL.pop(key, None)
-            if val is not None:
-                return val
-    return None
-
-
-def latency_percentiles() -> tuple[float, float]:
-    """Return (p50, p95) latency in milliseconds from recent samples."""
-    with _LAT_LOCK:
-        samples = list(_LAT_SAMPLES)
-    if not samples:
-        return 0.0, 0.0
-    samples.sort()
-    return _quantile(samples, 0.5), _quantile(samples, 0.95)
 
 
 def record_realized_total(realized_total_usd: float) -> float:
-    """Track realized PnL history and return trailing 24h delta."""
     try:
         total = float(realized_total_usd)
     except (TypeError, ValueError):
@@ -178,12 +128,31 @@ def record_realized_total(realized_total_usd: float) -> float:
             _PNL_WINDOW.popleft()
         anchor = _PNL_WINDOW[0][1] if _PNL_WINDOW else total
     return total - anchor
-=======
+
+
+def _safe_push(func, *args, **kwargs) -> bool:
+    try:
+        func(*args, **kwargs)
+        return True
+    except Exception as exc:  # pragma: no cover - best effort
+        log.debug("Deck push failed for %s: %s", getattr(func, "__name__", func), exc)
+        return False
+
+
+def publish_metrics(
+    *,
+    equity_usd: float,
+    pnl_24h: float,
+    drawdown_pct: float,
+    positions: int,
+    tick_p50_ms: float,
+    tick_p95_ms: float,
+    error_rate_pct: float,
     breaker: Dict[str, object],
     pnl_by_strategy: Optional[Dict[str, float]] = None,
-) -> bool:
-    """Push metrics to the Deck, optionally including per-strategy PnL."""
-    metrics_payload = {
+    **extra_metrics,
+) -> None:
+    payload: Dict[str, object] = {
         "equity_usd": float(equity_usd),
         "pnl_24h": float(pnl_24h),
         "drawdown_pct": float(drawdown_pct),
@@ -193,48 +162,12 @@ def record_realized_total(realized_total_usd: float) -> float:
         "error_rate_pct": float(error_rate_pct),
         "breaker": breaker,
     }
-    ok = _safe_push(push_metrics, **metrics_payload)
+    for key, value in extra_metrics.items():
+        payload[key] = value
+    _safe_push(push_metrics, **payload)
     if pnl_by_strategy:
         _safe_push(push_strategy_pnl, pnl_by_strategy)
-    return ok
 
 
-def publish_fill(fill: Dict) -> bool:
-    """Forward a fill payload to the Deck."""
-    return _safe_push(push_fill, fill)
-
-
-def _safe_push(func, *args, **kwargs) -> bool:
-    try:
-        func(*args, **kwargs)
-        return True
-    except Exception as exc:  # noqa: broad-except — Deck is optional
-        log.debug("Deck push failed: %s", exc)
-        return False
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
-
-
-def _quantile(values: list[float], q: float) -> float:
-    if not values:
-        return 0.0
-    if len(values) == 1:
-        return float(values[0])
-<<<<<<< HEAD
-    pos = (len(values) - 1) * q
-    lower = math.floor(pos)
-    upper = math.ceil(pos)
-    lower_val = values[int(lower)]
-    upper_val = values[int(upper)]
-    if lower == upper:
-        return float(lower_val)
-    fraction = pos - lower
-    return float(lower_val + (upper_val - lower_val) * fraction)
-=======
-    idx = (len(values) - 1) * q
-    lower = math.floor(idx)
-    upper = math.ceil(idx)
-    if lower == upper:
-        return float(values[lower])
-    frac = idx - lower
-    return float(values[lower] + (values[upper] - values[lower]) * frac)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
+def publish_fill(fill: Dict) -> None:
+    _safe_push(push_fill, fill)

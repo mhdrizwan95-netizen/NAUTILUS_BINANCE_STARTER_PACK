@@ -486,6 +486,8 @@ services:
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
       - BINANCE_SAPI_BASE=${BINANCE_SAPI_BASE:-https://api.binance.com}
       - DECK_TRANSFER_ALLOW=${DECK_TRANSFER_ALLOW:-FUNDING,MAIN,UMFUTURE}
+    networks:
+      - trading_net
 
   hmm_allocator:
     build:

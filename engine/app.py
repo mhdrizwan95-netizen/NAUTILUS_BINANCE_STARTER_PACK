@@ -393,17 +393,17 @@ async def auto_topup_worker() -> None:
 async def wallet_balance_worker() -> None:
     """Poll Binance for wallet balances and expose them via Deck metrics."""
     if VENUE != "BINANCE":
-        _WALLET_LOG.info("wallet monitor: skipping (venue=%s)", VENUE)
+        _WALLET_LOG.warning("wallet monitor: skipping (venue=%s)", VENUE)
         return
     if IS_EXPORTER:
-        _WALLET_LOG.info("wallet monitor: disabled for exporter role")
+        _WALLET_LOG.warning("wallet monitor: disabled for exporter role")
         return
     if not (settings.api_key and settings.api_secret):
-        _WALLET_LOG.info("wallet monitor: missing Binance credentials; disabled")
+        _WALLET_LOG.warning("wallet monitor: missing Binance credentials; disabled")
         return
     rest = BinanceREST(market="futures")
     period = WALLET_REFRESH_PERIOD_SEC
-    _WALLET_LOG.info("wallet monitor: started (period=%.1fs)", period)
+    _WALLET_LOG.warning("wallet monitor: started (period=%.1fs)", period)
 
     def _as_float(value: Any) -> float:
         try:
@@ -460,7 +460,7 @@ async def wallet_balance_worker() -> None:
             except Exception:
                 pass
         except asyncio.CancelledError:
-            _WALLET_LOG.info("wallet monitor: cancelled")
+            _WALLET_LOG.warning("wallet monitor: cancelled")
             raise
         except Exception as exc:
             _WALLET_LOG.warning("wallet monitor: error: %s", exc)

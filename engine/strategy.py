@@ -558,11 +558,7 @@ def _record_tick_latency(symbol: str) -> None:
     except Exception:
         pass
     try:
-<<<<<<< HEAD
         record_tick_latency(symbol, latency_ms)
-=======
-        record_latency(latency_ms)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
     except Exception:
         pass
 
