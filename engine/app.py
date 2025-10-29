@@ -7,13 +7,10 @@ import json
 import logging
 import math
 import random
-<<<<<<< HEAD
+import threading
 from contextlib import suppress
 from functools import partial
 from threading import Lock
-=======
-import threading
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
 from pathlib import Path
 from typing import Literal, Optional, Any, Callable, cast
 
@@ -394,7 +391,7 @@ async def auto_topup_worker() -> None:
 
 
 async def wallet_balance_worker() -> None:
-    """Continuously refresh futures, spot, and funding balances for Deck metrics."""
+    """Poll Binance for wallet balances and expose them via Deck metrics."""
     if VENUE != "BINANCE":
         _WALLET_LOG.info("wallet monitor: skipping (venue=%s)", VENUE)
         return
@@ -487,7 +484,6 @@ _refresh_logger = logging.getLogger("engine.refresh")
 _startup_logger = logging.getLogger("engine.startup")
 _persist_logger = logging.getLogger("engine.persistence")
 _kraken_risk_logger = logging.getLogger("engine.kraken.telemetry")
-<<<<<<< HEAD
 _deck_logger = logging.getLogger("engine.deck")
 
 
@@ -596,7 +592,6 @@ async def _deck_metrics_loop() -> None:
         except Exception as exc:  # pragma: no cover - telemetry best effort
             _deck_logger.debug("Deck metrics publish failed: %s", exc)
 
-=======
 _DECK_BRIDGE_ENABLED = os.getenv("DECK_BRIDGE_DISABLED", "false").lower() not in {"1", "true", "yes"}
 
 
@@ -661,6 +656,7 @@ def _queue_deck_metrics(pnl_by_strategy: dict[str, float] | None = None) -> None
         "breaker": {"equity": breaker_equity, "venue": breaker_venue},
         "pnl_by_strategy": pnl_by_strategy,
     }
+
     if wallet_snapshot:
         wallet_fields = {
             "wallet_timestamp": wallet_snapshot.get("timestamp"),
@@ -686,7 +682,6 @@ def _queue_deck_metrics(pnl_by_strategy: dict[str, float] | None = None) -> None
         pass
 
     _queue_deck_call(deck_publish_metrics, **metrics_kwargs)
->>>>>>> 9592ab512c66859522d85d5c2e48df7282809b0d
 
 store = None
 try:
@@ -942,7 +937,7 @@ async def _start_auto_topup_loop():
 
 
 @app.on_event("startup")
-async def _start_wallet_monitor() -> None:
+async def _start_wallet_monitor():
     if IS_EXPORTER or VENUE != "BINANCE":
         return
     if not (settings.api_key and settings.api_secret):
