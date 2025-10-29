@@ -12,6 +12,7 @@ from .base import (
     confidence_from_score,
     freeze_mapping,
     listing_age,
+    rsi,
     sma,
     swing_low,
 )
@@ -62,20 +63,26 @@ class TrendFollowingScreener(StrategyScreener):
         closes = [float(row[4]) for row in klines if len(row) > 4]
         if len(closes) < 50:
             return None
+        volumes = [float(row[5]) for row in klines if len(row) > 5]
+        if len(volumes) != len(closes):
+            volumes = volumes[-len(closes) :]
         fast = sma(closes, 20)
         slow = sma(closes, 50)
         if not fast or not slow or slow <= 0:
             return None
         if fast <= slow:
             return None
-        rsi = features.get("rsi_14")
-        if rsi is None:
+        rsi_val = rsi(closes, length=14)
+        if rsi_val is None:
             return None
-        try:
-            rsi_val = float(rsi)
-        except (TypeError, ValueError):
-            return None
+        prev_rsi = None
+        if len(closes) - 1 > 14:
+            prev_rsi = rsi(closes[:-1], length=14)
         if rsi_val < 52.0:
+            return None
+        if rsi_val >= 72.0:
+            return None
+        if prev_rsi is not None and rsi_val <= prev_rsi:
             return None
         if meta:
             age = listing_age(meta)
@@ -98,7 +105,23 @@ class TrendFollowingScreener(StrategyScreener):
         slope = (fast - slow) / slow
         momentum = float(features.get("r60", 0.0))
         vol_boost = float(features.get("vol_accel_5m_over_30m", 0.0))
-        score = slope * 120.0 + max(0.0, momentum * 110.0) + max(0.0, (rsi_val - 50.0) / 4.0)
+        if volumes:
+            lookback = min(20, len(volumes))
+            recent_avg = sum(volumes[-lookback:]) / float(lookback)
+            last_volume = volumes[-1]
+            volume_ratio = (last_volume / recent_avg) if recent_avg else 0.0
+        else:
+            recent_avg = 0.0
+            last_volume = 0.0
+            volume_ratio = 0.0
+        if volume_ratio < 1.2:
+            return None
+        score = (
+            slope * 120.0
+            + max(0.0, momentum * 110.0)
+            + max(0.0, (rsi_val - 50.0) / 4.0)
+            + max(0.0, (volume_ratio - 1.0) * 20.0)
+        )
         avg_true_range = atr(klines, length=14) or 0.0
         last_px = closes[-1]
         swing = swing_low(klines, lookback=8) or (
@@ -111,6 +134,10 @@ class TrendFollowingScreener(StrategyScreener):
             "fast_sma": round(fast, 6),
             "slow_sma": round(slow, 6),
             "rsi": round(rsi_val, 3),
+            "rsi_prev": round(prev_rsi, 3) if prev_rsi is not None else None,
+            "volume_ratio": round(volume_ratio, 3),
+            "volume_avg": round(recent_avg, 3) if recent_avg else None,
+            "last_volume": round(last_volume, 3) if last_volume else None,
             "vol_accel": round(vol_boost, 3),
             "vwap_dev": round(vwap_dev, 4),
             "atr": round(avg_true_range, 6) if avg_true_range else None,
@@ -118,7 +145,11 @@ class TrendFollowingScreener(StrategyScreener):
         }
         if ctx_payload.get("atr") is None:
             ctx_payload.pop("atr")
-        if vol_boost >= 1.5:
+        if ctx_payload.get("volume_avg") is None:
+            ctx_payload.pop("volume_avg")
+        if ctx_payload.get("last_volume") is None:
+            ctx_payload.pop("last_volume")
+        if volume_ratio >= 1.2 or vol_boost >= 1.5:
             ctx_payload["volume_confirmed"] = True
         context = freeze_mapping(ctx_payload)
         signal = StrategySignal(

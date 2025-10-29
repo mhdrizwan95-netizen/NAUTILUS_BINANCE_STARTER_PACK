@@ -1,3 +1,5 @@
+import math
+
 import pytest
 
 from screener import service
@@ -25,11 +27,18 @@ def _build_test_data():
     trend_prices = []
     trend_price = 100.0
     for i in range(60):
-        trend_price += 0.18
-        if i % 7 == 0:
-            trend_price -= 0.12
+        delta = 0.22 + 0.08 * math.sin(i / 4.0)
+        if i % 10 == 7:
+            delta -= 0.48
+        if i % 18 == 11:
+            delta -= 0.38
+        if i % 12 == 9:
+            delta -= 0.52
+        trend_price += delta
         trend_prices.append(trend_price)
     trend_vols = [900 + i * 12 for i in range(60)]
+    for j in range(55, 60):
+        trend_vols[j] += 900
     scalp_prices = [50 + ((-1) ** i) * 0.03 for i in range(60)]
     scalp_vols = [1500] * 60
     momentum_prices = [30 + 0.05 * i for i in range(40)] + [32 + 0.9 * i for i in range(20)]
@@ -106,6 +115,7 @@ def test_scan_produces_strategy_buckets(monkeypatch):
     trend_signal = _top_entry("trend_follow")["signal"]
     assert trend_signal["strategy_id"] == "trend_follow"
     assert trend_signal["suggested_stop"] < trend_signal["suggested_tp"]
+    assert trend_signal["metadata"]["volume_confirmed"] is True
 
     meme_signal = _top_entry("meme_coin")["signal"]
     assert meme_signal["strategy_id"] == "meme_coin_sentiment"
