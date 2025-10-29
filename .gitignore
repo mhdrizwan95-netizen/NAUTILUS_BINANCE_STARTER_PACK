@@ -15,3 +15,10 @@ ml_service/model_store/
 **/*.onnx
 **/*.h5
 .DS_Store
+
+# Frontend build artifacts
+node_modules/
+nautilus-ui/node_modules/
+nautilus-ui/.next/
+nautilus-ui/out/
+nautilus-ui/build/

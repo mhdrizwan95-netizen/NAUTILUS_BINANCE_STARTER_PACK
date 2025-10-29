@@ -423,8 +423,24 @@ async def wallet_balance_worker() -> None:
                 _WALLET_LOG.debug("wallet monitor: futures snapshot failed (%s)", fut_exc)
 
             spot_free = spot_locked = 0.0
+            spot_snapshot: dict[str, Any] = {}
+            margin_level = 0.0
+            margin_liability_usd = 0.0
             try:
-                spot_snapshot = await rest.account_snapshot(market="spot")
+                margin_snapshot = await rest.margin_account()
+                margin_level = _as_float(margin_snapshot.get("marginLevel"))
+                liability_btc = _as_float(margin_snapshot.get("totalLiabilityOfBtc"))
+                if liability_btc > 0:
+                    try:
+                        btc_px = await rest.ticker_price("BTCUSDT", market="spot")
+                    except Exception:
+                        btc_px = spot_snapshot.get("lastPrice") if spot_snapshot else 0.0
+                    margin_liability_usd = liability_btc * _as_float(btc_px)
+            except Exception as margin_exc:
+                _WALLET_LOG.debug("wallet monitor: margin snapshot failed (%s)", margin_exc)
+
+            try:
+                spot_snapshot = await rest.account_snapshot(market="spot") or {}
                 for balance in spot_snapshot.get("balances", []) or []:
                     if str(balance.get("asset", "")).upper() == "USDT":
                         spot_free = _as_float(balance.get("free"))
@@ -449,6 +465,8 @@ async def wallet_balance_worker() -> None:
                 "spot_free_usdt": spot_free,
                 "spot_locked_usdt": spot_locked,
                 "spot_total_usdt": spot_total,
+                "margin_level": margin_level,
+                "margin_liability_usd": margin_liability_usd,
                 "total_equity_usdt": total_equity,
             }
             _update_wallet_state(snapshot)
@@ -456,7 +474,14 @@ async def wallet_balance_worker() -> None:
                 state = portfolio.state
                 state.equity = total_equity
                 state.cash = funding_free + spot_total + futures_available
+                state.margin_level = margin_level
+                state.margin_liability_usd = margin_liability_usd
                 setattr(state, "wallet_breakdown", snapshot)
+            except Exception:
+                pass
+            try:
+                metrics.margin_level.set(float(margin_level))
+                metrics.margin_liability_usd.set(float(margin_liability_usd))
             except Exception:
                 pass
         except asyncio.CancelledError:
@@ -804,7 +829,6 @@ class MarketOrderRequest(BaseModel):
     quantity: Optional[float] = Field(None, gt=0, description="Base asset quantity.")
     market: Optional[str] = Field(None, description="Preferred market within venue (spot/futures/margin).")
     venue: Optional[str] = Field(None, description="Trading venue. Defaults to VENUE env var.")
-    market: Optional[str] = Field(None, description="Preferred market within venue (spot/futures/margin).")
 
     @field_validator("venue")
     @classmethod
@@ -827,6 +851,7 @@ class LimitOrderRequest(BaseModel):
     timeInForce: Literal["IOC", "FOK", "GTC"] = Field("IOC")
     quote: Optional[float] = Field(None, gt=0, description="Quote currency amount (USDT).")
     quantity: Optional[float] = Field(None, gt=0, description="Base asset quantity.")
+    market: Optional[str] = Field(None, description="Preferred market within venue (spot/futures/margin).")
 
     @model_validator(mode="after")
     def validate_exclusive(self):
@@ -1534,6 +1559,7 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
         side=req.side,  # type: ignore
         quote=req.quote,
         quantity=req.quantity,
+        market=(req.market.lower() if isinstance(req.market, str) else req.market),
     )
     if not ok:
         metrics.orders_rejected.inc()
@@ -1644,6 +1670,7 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
         side=req.side,  # type: ignore
         quote=req.quote,
         quantity=req.quantity,
+        market=(req.market.lower() if isinstance(req.market, str) else req.market),
     )
     if not ok:
         metrics.orders_rejected.inc()
@@ -1663,10 +1690,25 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
         req.symbol = f"{req.symbol}.{venue}"
 
     try:
+        market_hint = req.market.lower() if isinstance(req.market, str) else None
         if req.quote is not None:
-            result = await router.limit_quote(req.symbol, req.side, req.quote, req.price, req.timeInForce)
+            result = await router.limit_quote(
+                req.symbol,
+                req.side,
+                req.quote,
+                req.price,
+                req.timeInForce,
+                market=market_hint,
+            )
         else:
-            result = await router.limit_quantity(req.symbol, req.side, req.quantity or 0.0, req.price, req.timeInForce)
+            result = await router.limit_quantity(
+                req.symbol,
+                req.side,
+                req.quantity or 0.0,
+                req.price,
+                req.timeInForce,
+                market=market_hint,
+            )
 
         # Store order persistently
         order_id = result.get("id") or str(int(time.time() * 1000))
@@ -2897,6 +2939,15 @@ async def _start_binance_ws():
     try:
         from engine import strategy as _strategy_mod
         on_cb = None if IS_EXPORTER else _strategy_mod.on_tick
+        stream_mode = os.getenv("BINANCE_WS_STREAM", "auto").lower()
+        scalper_module = getattr(_strategy_mod, "SCALP_MODULE", None)
+        if stream_mode == "auto":
+            if settings.is_futures:
+                stream_mode = "mark"
+            elif scalper_module and getattr(scalper_module, "enabled", False):
+                stream_mode = os.getenv("SCALP_WS_STREAM", "aggtrade").lower()
+            else:
+                stream_mode = "miniticker"
         ws = BinanceWS(
             symbols=bases,
             url_base=ws_base,
@@ -2904,6 +2955,7 @@ async def _start_binance_ws():
             role=role,
             on_price_cb=on_cb,
             price_hook=_binance_on_mark,
+            stream_type=stream_mode,
         )
         asyncio.create_task(ws.run())
         # remember symbols for freshness loop

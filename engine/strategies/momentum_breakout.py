@@ -14,6 +14,7 @@ from engine.metrics import (
     momentum_breakout_cooldown_epoch,
     momentum_breakout_orders_total,
 )
+from engine.core.market_resolver import resolve_market_choice
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -82,11 +83,17 @@ class MomentumConfig:
     leverage_default: int
     max_signals_per_cycle: int
     min_quote_volume_usd: float
+    default_market: str
 
 
 def load_momentum_config() -> MomentumConfig:
     symbols = _env_list("MOMENTUM_SYMBOLS")
     lookback_min = max(3, _env_int("MOMENTUM_LOOKBACK_MINUTES", 15))
+    prefer_futures = _env_bool("MOMENTUM_PREFER_FUTURES", True)
+    default_market_raw = os.getenv("MOMENTUM_DEFAULT_MARKET", "").strip().lower()
+    default_market = default_market_raw or ("futures" if prefer_futures else "spot")
+    if default_market not in {"spot", "margin", "futures", "options"}:
+        default_market = "futures" if prefer_futures else "spot"
     return MomentumConfig(
         enabled=_env_bool("MOMENTUM_ENABLED", False),
         dry_run=_env_bool("MOMENTUM_DRY_RUN", True),
@@ -107,11 +114,12 @@ def load_momentum_config() -> MomentumConfig:
         cooldown_sec=max(30.0, _env_float("MOMENTUM_COOLDOWN_SEC", 600.0)),
         notional_usd=max(25.0, _env_float("MOMENTUM_NOTIONAL_USD", 150.0)),
         max_extension_pct=_env_float("MOMENTUM_MAX_EXTENSION_PCT", 12.0) / 100.0,
-        prefer_futures=_env_bool("MOMENTUM_PREFER_FUTURES", True),
+        prefer_futures=prefer_futures,
         leverage_major=max(1, _env_int("MOMENTUM_LEVERAGE_MAJOR", 2)),
         leverage_default=max(1, _env_int("MOMENTUM_LEVERAGE_DEFAULT", 2)),
         max_signals_per_cycle=max(1, _env_int("MOMENTUM_MAX_SIGNALS_PER_CYCLE", 3)),
         min_quote_volume_usd=max(50_000.0, _env_float("MOMENTUM_MIN_QUOTE_VOL_USD", 250_000.0)),
+        default_market=default_market,
     )
 
 
@@ -126,6 +134,7 @@ class MomentumPlan:
     leverage: int
     price: float
     half_size: bool = False
+    market: str = "spot"
 
 
 class MomentumBreakout:
@@ -267,8 +276,10 @@ class MomentumBreakout:
         trail_distance = atr * self.cfg.trail_atr_mult
         take_profit = price * (1.0 + self.cfg.take_profit_pct)
         lev = self.cfg.leverage_major if symbol.startswith(("BTC", "ETH")) else self.cfg.leverage_default
+        qualified = f"{symbol}.BINANCE"
+        market_choice = resolve_market_choice(qualified, self.cfg.default_market)
         plan = MomentumPlan(
-            symbol=f"{symbol}.BINANCE",
+            symbol=qualified,
             venue="BINANCE",
             notional_usd=self.cfg.notional_usd,
             stop_price=float(stop_price),
@@ -277,6 +288,7 @@ class MomentumBreakout:
             leverage=lev,
             price=float(price),
             half_size=False,
+            market=market_choice,
         )
         momentum_breakout_candidates_total.labels(symbol, "BINANCE", "trigger").inc()
         return plan
@@ -285,30 +297,39 @@ class MomentumBreakout:
         symbol = plan.symbol
         clean = symbol.split(".")[0]
         now = float(self.clock.time())
-        ok, err = self.risk.check_order(symbol=symbol, side="BUY", quote=plan.notional_usd, quantity=None)
+        ok, err = self.risk.check_order(symbol=symbol, side="BUY", quote=plan.notional_usd, quantity=None, market=plan.market)
         if not ok:
             reason = (err or {}).get("error", "risk")
             momentum_breakout_orders_total.labels(clean, plan.venue, reason).inc()
             self._arm_cooldown(clean, now)
             return
         if self.cfg.dry_run:
-            self.log.info("[MOMO:DRY] %s breakout @%.4f notional=$%.0f stop=%.4f tp=%.4f", symbol, plan.price, plan.notional_usd, plan.stop_price, plan.take_profit)
+            self.log.info(
+                "[MOMO:DRY] %s breakout @%.4f notional=$%.0f stop=%.4f tp=%.4f market=%s",
+                symbol,
+                plan.price,
+                plan.notional_usd,
+                plan.stop_price,
+                plan.take_profit,
+                plan.market,
+            )
             momentum_breakout_orders_total.labels(clean, plan.venue, "simulated").inc()
             self._arm_cooldown(clean, now)
             return
         qty = 0.0
         try:
-            result = await self.router.market_quote(symbol, "BUY", plan.notional_usd, market="futures")
+            result = await self.router.market_quote(symbol, "BUY", plan.notional_usd, market=plan.market)
             avg = float(result.get("avg_fill_price") or plan.price)
             qty = float(result.get("filled_qty_base") or result.get("executedQty") or 0.0)
             self.log.info(
-                "[MOMO] LIVE %s qty=%.6f avg=%.4f stop=%.4f tp=%.4f trail≈%.4f",
+                "[MOMO] LIVE %s qty=%.6f avg=%.4f stop=%.4f tp=%.4f trail≈%.4f market=%s",
                 symbol,
                 qty,
                 avg,
                 plan.stop_price,
                 plan.take_profit,
                 plan.trail_distance,
+                plan.market,
             )
             momentum_breakout_orders_total.labels(clean, plan.venue, "submitted").inc()
             self._arm_cooldown(clean, now)

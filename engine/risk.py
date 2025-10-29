@@ -8,6 +8,7 @@ from collections import deque, defaultdict
 from typing import Any, Callable, Deque, Dict, Literal, Optional
 
 from .config import RiskConfig, load_risk_config
+from .core.market_resolver import resolve_market_choice
 from .metrics import (
     breaker_rejections,
     venue_error_rate_pct,
@@ -67,6 +68,7 @@ class RiskRails:
         side: Side,
         quote: float | None,
         quantity: float | None,
+        market: str | None = None,
     ) -> tuple[bool, dict]:
         """
         Validate an order request. Returns (ok, error_json).
@@ -144,6 +146,7 @@ class RiskRails:
 
         # Exposure breakers (symbol & total)
         snap: Dict[str, Any] = {}
+        portfolio_state: Any = None
         prices: Callable[[str], float]
         try:
             router_mod = order_router
@@ -151,6 +154,10 @@ class RiskRails:
             raw_snap = snap_fn() if callable(snap_fn) else {}
             if isinstance(raw_snap, dict):
                 snap = raw_snap
+            svc_fn = getattr(router_mod, "portfolio_service", None)
+            if callable(svc_fn):
+                portfolio = svc_fn()
+                portfolio_state = getattr(portfolio, "state", None)
 
             client = None
             exch_fn = getattr(router_mod, "exchange_client", None)
@@ -179,6 +186,23 @@ class RiskRails:
 
         symbol_base = symbol.split(".")[0]
         venue = symbol.split(".")[1].upper() if "." in symbol else "BINANCE"
+        requested_market = (market or "").lower() if isinstance(market, str) else None
+        resolved_market = resolve_market_choice(symbol, default="spot")
+        if requested_market:
+            resolved_market = requested_market
+
+        if resolved_market == "margin" and not self.cfg.margin_enabled:
+            return False, {
+                "error": "MARGIN_DISABLED",
+                "message": "Margin trading disabled by configuration.",
+                "hint": "Set MARGIN_ENABLED=true to allow margin orders.",
+            }
+        if resolved_market == "options" and not self.cfg.options_enabled:
+            return False, {
+                "error": "OPTIONS_DISABLED",
+                "message": "Options trading disabled by configuration.",
+                "hint": "Set OPTIONS_ENABLED=true to allow options orders.",
+            }
 
         def _resolve_price(sym: str) -> float:
             try:
@@ -256,6 +280,24 @@ class RiskRails:
                 "error": "EXPOSURE_VENUE_CAP",
                 "message": f"Venue exposure cap exceeded for {venue}: {venue_after:.2f} > {self.cfg.exposure_cap_venue_usd}",
             }
+
+        if resolved_market == "margin" and self.cfg.margin_enabled:
+            margin_level_val = self._sanitize_float(getattr(portfolio_state, "margin_level", None))
+            if margin_level_val is not None and margin_level_val > 0 and margin_level_val < self.cfg.margin_min_level:
+                return False, {
+                    "error": "MARGIN_LEVEL_LOW",
+                    "message": f"Margin level {margin_level_val:.2f} below configured floor {self.cfg.margin_min_level:.2f}",
+                }
+            margin_liability_val = self._sanitize_float(getattr(portfolio_state, "margin_liability_usd", None))
+            if (
+                self.cfg.margin_max_liability_usd > 0
+                and margin_liability_val is not None
+                and margin_liability_val > self.cfg.margin_max_liability_usd
+            ):
+                return False, {
+                    "error": "MARGIN_LIABILITY_LIMIT",
+                    "message": f"Cross-margin liability {margin_liability_val:.2f} exceeds limit {self.cfg.margin_max_liability_usd:.2f}",
+                }
 
         metrics_state = self.refresh_snapshot_metrics(snap)
         if metrics_state.breaker_active:

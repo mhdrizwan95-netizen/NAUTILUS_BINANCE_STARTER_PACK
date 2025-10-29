@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import httpx
 
 from engine.config import get_settings
-from engine.core.market_resolver import resolve_market
+from engine.core.market_resolver import resolve_market_choice
 from .trend_params import TrendParams, TrendAutoTuner
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -295,7 +295,7 @@ class TrendStrategyModule:
                 stop_bps = self._stop_distance_bps(price, float(stop))
                 self._observe_stop_distance(base, stop_bps)
                 self._record_signal(base, "BUY", "entry")
-                market_choice = resolve_market(self._qualify(base), self._default_market)
+                market_choice = resolve_market_choice(self._qualify(base), self._default_market)
                 action = {
                     "symbol": self._qualify(base),
                     "side": "BUY",
@@ -328,7 +328,7 @@ class TrendStrategyModule:
                 self._entry_quote.pop(base, None)
                 self._stop_levels.pop(base, None)
                 self._targets.pop(base, None)
-                market_choice = resolve_market(self._qualify(base), self._default_market)
+                market_choice = resolve_market_choice(self._qualify(base), self._default_market)
                 action = {
                     "symbol": self._qualify(base),
                     "side": "SELL",

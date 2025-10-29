@@ -11,7 +11,7 @@ from .risk import RiskRails, Side
 from .idempotency import CACHE, append_jsonl
 from . import metrics
 from .core import order_router
-from .core.market_resolver import resolve_market
+from .core.market_resolver import resolve_market_choice
 from .core.event_bus import BUS
 from .telemetry.publisher import record_tick_latency
 from .strategies import policy_hmm, ensemble_policy
@@ -255,7 +255,13 @@ def post_strategy_signal(sig: StrategySignal, request: Request):
 
 def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict:
     side_literal = cast(Side, sig.side)
-    ok, err = RAILS.check_order(symbol=sig.symbol, side=side_literal, quote=sig.quote, quantity=sig.quantity)
+    ok, err = RAILS.check_order(
+        symbol=sig.symbol,
+        side=side_literal,
+        quote=sig.quote,
+        quantity=sig.quantity,
+        market=(sig.market.lower() if isinstance(sig.market, str) else sig.market),
+    )
     if not ok:
         metrics.orders_rejected.inc()
         return {"status": "rejected", **err, "source": "strategy"}
@@ -400,7 +406,7 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
             scalp_quote = float(scalp_decision.get("quote") or S_CFG.quote_usdt)
             scalp_tag = str(scalp_decision.get("tag") or "scalp")
             default_market = scalp_decision.get("market") or ("futures" if getattr(SCALP_CFG, "allow_shorts", True) else "spot")
-            resolved_market = resolve_market(scalp_symbol, default_market)
+            resolved_market = resolve_market_choice(scalp_symbol, default_market)
             sig = StrategySignal(
                 symbol=scalp_symbol,
                 side=scalp_side,
@@ -437,7 +443,7 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
             default_market = trend_decision.get("market") if isinstance(trend_decision, dict) else None
             if not default_market:
                 default_market = "futures" if getattr(TREND_CFG, "allow_shorts", False) else "spot"
-            resolved_market = resolve_market(trend_symbol, default_market)
+            resolved_market = resolve_market_choice(trend_symbol, default_market)
             sig = StrategySignal(
                 symbol=trend_symbol,
                 side=trend_side,
@@ -521,7 +527,7 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
         if not _cooldown_ready(qualified, price, max(conf_to_emit, 0.0), venue):
             return
         source_tag = signal_meta.get("exp", "ensemble_v1" if fused else "ma_v1")
-        market_choice = resolve_market(qualified, S_CFG.default_market)
+        market_choice = resolve_market_choice(qualified, S_CFG.default_market)
         sig = StrategySignal(
             symbol=qualified,
             side=signal_side,

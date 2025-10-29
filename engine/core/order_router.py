@@ -896,10 +896,30 @@ class OrderRouterExt(OrderRouter):
         return res
 
     # ---- Shadow maker path for scalps (logs only; still executes taker) ----
-    async def place_entry(self, symbol: str, side: Side, qty: float, *, venue: str, intent: str = ""):
+    async def place_entry(
+        self,
+        symbol: str,
+        side: Side,
+        qty: float,
+        *,
+        venue: str,
+        intent: str = "",
+        market: str | None = None,
+    ):
         import os, logging
+        market_hint = market.lower() if isinstance(market, str) and market else None
+        resolved_venue = symbol.split(".")[1] if "." in symbol else venue
+        base_symbol = symbol.split(".")[0].upper()
         # Resolve best reference prices; fall back to last
         last_px = await self.get_last_price(symbol)
+        if market_hint:
+            try:
+                client = _CLIENTS.get(resolved_venue) or self.exchange_client()
+                market_px = await _resolve_last_price(client, resolved_venue, base_symbol, symbol, market=market_hint) if client else None
+                if market_px and market_px > 0:
+                    last_px = market_px
+            except Exception:
+                pass
         if last_px is None or last_px <= 0:
             last_px = 0.0
         # Optional risk-parity sizing override (when qty <= 0 or explicitly enabled)
@@ -955,7 +975,7 @@ class OrderRouterExt(OrderRouter):
                 return {"status": "blocked", "reason": "MIN_NOTIONAL_BLOCK", "symbol": symbol}
         except Exception:
             pass
-        res = await self._place_market_order_async(symbol=symbol, side=side, quote=None, quantity=qty)
+        res = await self._place_market_order_async(symbol=symbol, side=side, quote=None, quantity=qty, market=market_hint)
         # Emit trade.fill for synchronous fills
         try:
             self._emit_fill(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)

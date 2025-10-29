@@ -42,6 +42,7 @@ class BinanceWS:
         role: str = "trader",
         on_price_cb: Optional[Callable[[str, float, float], object]] = None,
         price_hook: Optional[Callable[[str, str, float, float], None]] = None,
+        stream_type: str = "auto",
     ) -> None:
         # Symbols must be upper for reporting; WS expects lowercase in stream names
         self.symbols = [s.upper() for s in symbols if s]
@@ -50,6 +51,7 @@ class BinanceWS:
         self.role = (role or os.getenv("ROLE") or "trader").lower()
         self._on_price_cb = on_price_cb
         self._price_hook = price_hook
+        self.stream_type = (stream_type or "auto").lower()
         self._tasks: list[asyncio.Task] = []
 
     async def run(self) -> None:
@@ -63,8 +65,13 @@ class BinanceWS:
     async def _run_group(self, group: List[str]) -> None:
         streams = []
         for sym in group:
-            if self.is_futures:
+            stype = self._resolve_stream_type()
+            if stype == "mark":
                 streams.append(f"{sym.lower()}@markPrice@1s")
+            elif stype == "bookticker":
+                streams.append(f"{sym.lower()}@bookTicker")
+            elif stype == "aggtrade":
+                streams.append(f"{sym.lower()}@aggTrade")
             else:
                 streams.append(f"{sym.lower()}@miniTicker")
         url = f"{self.url_base}?streams={'/'.join(streams)}"
@@ -94,17 +101,31 @@ class BinanceWS:
                         if not sym:
                             continue
                         price = None
-                        # Futures mark price
-                        if data.get("e") == "markPriceUpdate" or "markPrice" in msg.get("stream", ""):
-                            # 'p' is mark price
+                        stype = self._resolve_stream_type()
+                        if stype == "mark":
+                            try:
+                                price = float(data.get("p") or data.get("markPrice") or 0.0)
+                            except Exception:
+                                price = None
+                        elif stype == "bookticker":
+                            try:
+                                ask = float(data.get("a") or data.get("bestAskPrice") or 0.0)
+                                bid = float(data.get("b") or data.get("bestBidPrice") or 0.0)
+                                if ask > 0 and bid > 0:
+                                    price = (ask + bid) / 2.0
+                                else:
+                                    price = float(data.get("c") or 0.0)
+                            except Exception:
+                                price = None
+                        elif stype == "aggtrade":
                             try:
                                 price = float(data.get("p") or 0.0)
                             except Exception:
                                 price = None
                         else:
-                            # Spot mini-ticker: last price in 'c'
+                            # Spot mini-ticker fallback: last price in 'c'
                             try:
-                                price = float(data.get("c") or 0.0)
+                                price = float(data.get("c") or data.get("lastPrice") or 0.0)
                             except Exception:
                                 price = None
                         if not price or price <= 0:
@@ -144,3 +165,14 @@ class BinanceWS:
                     pass
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2.0, 30.0)
+
+    def _resolve_stream_type(self) -> str:
+        if self.stream_type == "auto":
+            return "mark" if self.is_futures else "miniticker"
+        if self.stream_type in {"mark", "markprice"}:
+            return "mark"
+        if self.stream_type in {"book", "bookticker"}:
+            return "bookticker"
+        if self.stream_type in {"aggtrade", "trade", "trades"}:
+            return "aggtrade"
+        return "miniticker"

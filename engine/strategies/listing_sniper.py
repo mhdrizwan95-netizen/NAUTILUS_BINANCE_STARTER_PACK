@@ -19,6 +19,7 @@ from engine.metrics import (
     listing_sniper_skips_total,
 )
 from engine.risk import RiskRails
+from engine.core.market_resolver import resolve_market_choice
 
 logger = logging.getLogger("engine.strategies.listing_sniper")
 
@@ -75,9 +76,16 @@ class ListingSniperConfig:
     forward_legacy_event: bool = True
     metrics_enabled: bool = True
     dex_bridge_enabled: bool = False
+    default_market: str = "spot"
 
 
 def load_listing_sniper_config() -> ListingSniperConfig:
+    import os
+
+    default_market_raw = os.getenv("LISTING_SNIPER_DEFAULT_MARKET", "").strip().lower()
+    default_market = default_market_raw or "spot"
+    if default_market not in {"spot", "margin", "futures", "options"}:
+        default_market = "spot"
     return ListingSniperConfig(
         enabled=_env_bool("LISTING_SNIPER_ENABLED", False),
         dry_run=_env_bool("LISTING_SNIPER_DRY_RUN", True),
@@ -96,6 +104,7 @@ def load_listing_sniper_config() -> ListingSniperConfig:
         forward_legacy_event=_env_bool("LISTING_SNIPER_FORWARD_LEGACY", True),
         metrics_enabled=_env_bool("LISTING_SNIPER_METRICS_ENABLED", True),
         dex_bridge_enabled=_env_bool("LISTING_SNIPER_DEX_BRIDGE_ENABLED", False),
+        default_market=default_market,
     )
 
 
@@ -256,7 +265,8 @@ class ListingSniper:
             return
 
         full_symbol = f"{symbol}.BINANCE"
-        ok, err = self.risk.check_order(symbol=full_symbol, side="BUY", quote=notional, quantity=None)
+        market_choice = resolve_market_choice(full_symbol, self.cfg.default_market)
+        ok, err = self.risk.check_order(symbol=full_symbol, side="BUY", quote=notional, quantity=None, market=market_choice)
         if not ok:
             self._record_skip(symbol, err.get("error", "risk"))
             self._set_cooldown(symbol)
@@ -264,20 +274,28 @@ class ListingSniper:
 
         status = "simulated" if self.cfg.dry_run else "submitted"
         if self.cfg.dry_run:
-            logger.info("[LISTING] dry-run %s BUY %.2f USD baseline=%.4f spread=%.4f", symbol, notional, last_price, last_spread)
+            logger.info(
+                "[LISTING] dry-run %s BUY %.2f USD baseline=%.4f spread=%.4f market=%s",
+                symbol,
+                notional,
+                last_price,
+                last_spread,
+                market_choice,
+            )
             if self.cfg.metrics_enabled:
                 listing_sniper_orders_total.labels(symbol=symbol, status=status).inc()
             self._set_cooldown(symbol)
             return
 
         try:
-            result = await self.router.market_quote(full_symbol, "BUY", notional, market="spot")
+            result = await self.router.market_quote(full_symbol, "BUY", notional, market=market_choice)
             logger.info(
-                "[LISTING] executed %s BUY %.2f USD -> avg=%.4f qty=%.6f",
+                "[LISTING] executed %s BUY %.2f USD -> avg=%.4f qty=%.6f market=%s",
                 symbol,
                 notional,
                 float(result.get("avg_fill_price") or last_price),
                 float(result.get("filled_qty_base") or 0.0),
+                market_choice,
             )
             if self.cfg.metrics_enabled:
                 listing_sniper_orders_total.labels(symbol=symbol, status=status).inc()

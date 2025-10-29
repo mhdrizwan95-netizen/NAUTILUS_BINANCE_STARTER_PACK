@@ -42,7 +42,7 @@ class _RouterStub:
 
 
 class _RiskStub:
-    def check_order(self, **_):
+    def check_order(self, *, symbol, side, quote, quantity=None, market=None):
         return True, {}
 
 
@@ -86,6 +86,7 @@ async def test_momentum_breakout_triggers_live_trade():
         leverage_default=2,
         max_signals_per_cycle=3,
         min_quote_volume_usd=1000.0,
+        default_market="futures",
     )
     momentum = MomentumBreakout(router, _RiskStub(), cfg=cfg, scanner=None)
     plan = await momentum._evaluate_symbol("ABCUSDT")

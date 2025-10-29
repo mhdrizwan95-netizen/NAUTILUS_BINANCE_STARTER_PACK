@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 from engine.core.order_router import OrderRouter
+from engine.core.market_resolver import resolve_market_choice
 from engine.risk import RiskRails
 
 try:  # Metrics are optional in some test contexts
@@ -87,9 +88,14 @@ class MemeCoinConfig:
     quote_priority: Tuple[str, ...] = ("USDT", "USDC", "BUSD")
     metrics_enabled: bool = True
     publish_topic: str = "strategy.meme_sentiment_trade"
+    default_market: str = "spot"
 
 
 def load_meme_coin_config() -> MemeCoinConfig:
+    default_market_raw = os.getenv("MEME_SENTIMENT_DEFAULT_MARKET", "").strip().lower()
+    default_market = default_market_raw or "spot"
+    if default_market not in {"spot", "margin", "futures", "options"}:
+        default_market = "spot"
     return MemeCoinConfig(
         enabled=_env_bool("MEME_SENTIMENT_ENABLED", False),
         dry_run=_env_bool("MEME_SENTIMENT_DRY_RUN", True),
@@ -113,6 +119,7 @@ def load_meme_coin_config() -> MemeCoinConfig:
         quote_priority=_env_list("MEME_SENTIMENT_QUOTES", ("USDT", "USDC", "BUSD")),
         metrics_enabled=_env_bool("MEME_SENTIMENT_METRICS_ENABLED", True),
         publish_topic=os.getenv("MEME_SENTIMENT_PUBLISH_TOPIC", "strategy.meme_sentiment_trade"),
+        default_market=default_market,
     )
 
 
@@ -221,7 +228,8 @@ class MemeCoinSentiment:
             return
 
         full_symbol = f"{symbol}.BINANCE"
-        ok, err = self.risk.check_order(symbol=full_symbol, side="BUY", quote=notional, quantity=None)
+        market_choice = resolve_market_choice(full_symbol, self.cfg.default_market)
+        ok, err = self.risk.check_order(symbol=full_symbol, side="BUY", quote=notional, quantity=None, market=market_choice)
         if not ok:
             reason = str(err.get("error") or "risk")
             self._record_event(symbol, f"risk_{reason.lower()}")
@@ -232,13 +240,14 @@ class MemeCoinSentiment:
 
         if self.cfg.dry_run:
             _LOG.info(
-                "[MEME] dry-run BUY %s notional=%.2f score=%.2f priority=%.2f mentions=%.1f velocity=%.2f",
+                "[MEME] dry-run BUY %s notional=%.2f score=%.2f priority=%.2f mentions=%.1f velocity=%.2f market=%s",
                 symbol,
                 notional,
                 score_meta.score,
                 score_meta.priority,
                 score_meta.mentions,
                 score_meta.velocity,
+                market_choice,
             )
             self._record_order(symbol, "simulated")
             self._set_cooldown(symbol, now)
@@ -246,7 +255,7 @@ class MemeCoinSentiment:
             return
 
         try:
-            result = await self.router.market_quote(full_symbol, "BUY", notional, market="spot")
+            result = await self.router.market_quote(full_symbol, "BUY", notional, market=market_choice)
         except Exception as exc:  # noqa: BLE001
             _LOG.warning("[MEME] execution failed for %s: %s", symbol, exc)
             self._record_order(symbol, "failed")
@@ -257,20 +266,21 @@ class MemeCoinSentiment:
         avg_px = self._as_float(result.get("avg_fill_price")) or price
         qty = self._as_float(result.get("filled_qty_base")) or (notional / max(avg_px, 1e-9))
         _LOG.info(
-            "[MEME] executed BUY %s notional=%.2f qty=%.6f avg=%.6f score=%.2f",
+            "[MEME] executed BUY %s notional=%.2f qty=%.6f avg=%.6f score=%.2f market=%s",
             symbol,
             notional,
             qty,
             avg_px,
             score_meta.score,
+            market_choice,
         )
         self._record_order(symbol, "filled")
-        await self._publish_trade(symbol, qty, avg_px, score_meta)
+        await self._publish_trade(symbol, qty, avg_px, score_meta, market_choice)
 
         stop_px = avg_px * max(0.0001, 1.0 - self.cfg.stop_loss_pct)
         tp_px = avg_px * (1.0 + self.cfg.take_profit_pct)
         trail_px = avg_px * max(0.0001, 1.0 - self.cfg.trail_stop_pct)
-        await self._publish_bracket(symbol, qty, avg_px, stop_px, tp_px, trail_px, score_meta)
+        await self._publish_bracket(symbol, qty, avg_px, stop_px, tp_px, trail_px, score_meta, market_choice)
 
         self._set_cooldown(symbol, now)
         self._arm_global_lock(now)
@@ -398,7 +408,14 @@ class MemeCoinSentiment:
                 price = self._extract_price(res)
         return (price, spread) if price > 0 else None
 
-    async def _publish_trade(self, symbol: str, qty: float, avg_px: float, score: _ScoreMeta) -> None:
+    async def _publish_trade(
+        self,
+        symbol: str,
+        qty: float,
+        avg_px: float,
+        score: _ScoreMeta,
+        market: str = "spot",
+    ) -> None:
         topic = self.cfg.publish_topic
         if not topic:
             return
@@ -414,6 +431,7 @@ class MemeCoinSentiment:
             "price_change": score.price_change,
             "priority": score.priority,
             "ts": int(self.clock.time() * 1000),
+            "market": market,
         }
         try:
             from engine.core.event_bus import BUS
@@ -432,6 +450,7 @@ class MemeCoinSentiment:
         tp_px: float,
         trail_px: float,
         score: _ScoreMeta,
+        market: str = "spot",
     ) -> None:
         meta = {
             "symbol": symbol,
@@ -441,6 +460,7 @@ class MemeCoinSentiment:
             "take_profit": tp_px,
             "trail_price": trail_px,
             "score": score.score,
+            "market": market,
         }
         try:
             from engine.core.event_bus import BUS

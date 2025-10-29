@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 from engine.core.order_router import OrderRouter
+from engine.core.market_resolver import resolve_market_choice
 from engine.risk import RiskRails
 
 try:  # Optional when metrics are disabled in certain test contexts
@@ -97,9 +98,14 @@ class AirdropPromoConfig:
     allowed_sources: Tuple[str, ...] = ()
     metrics_enabled: bool = True
     publish_topic: str = "strategy.airdrop_promo_participation"
+    default_market: str = "spot"
 
 
 def load_airdrop_promo_config() -> AirdropPromoConfig:
+    default_market_raw = os.getenv("AIRDROP_PROMO_DEFAULT_MARKET", "").strip().lower()
+    default_market = default_market_raw or "spot"
+    if default_market not in {"spot", "margin", "futures", "options"}:
+        default_market = "spot"
     return AirdropPromoConfig(
         enabled=_env_bool("AIRDROP_PROMO_ENABLED", False),
         dry_run=_env_bool("AIRDROP_PROMO_DRY_RUN", True),
@@ -129,6 +135,7 @@ def load_airdrop_promo_config() -> AirdropPromoConfig:
         allowed_sources=_env_list("AIRDROP_PROMO_ALLOWED_SOURCES", ()),
         metrics_enabled=_env_bool("AIRDROP_PROMO_METRICS_ENABLED", True),
         publish_topic=os.getenv("AIRDROP_PROMO_PUBLISH_TOPIC", "strategy.airdrop_promo_participation"),
+        default_market=default_market,
     )
 
 
@@ -225,7 +232,8 @@ class AirdropPromoWatcher:
             return
 
         qualified_symbol = f"{symbol}.BINANCE" if "." not in symbol else symbol
-        ok, reason = self.risk.check_order(symbol=qualified_symbol, side="BUY", quote=notional, quantity=None)
+        market_choice = resolve_market_choice(qualified_symbol, self.cfg.default_market)
+        ok, reason = self.risk.check_order(symbol=qualified_symbol, side="BUY", quote=notional, quantity=None, market=market_choice)
         if not ok:
             detail = str(reason.get("error") or "risk")
             self._record_event(symbol, f"risk_{detail.lower()}")
@@ -244,11 +252,12 @@ class AirdropPromoWatcher:
 
         if self.cfg.dry_run:
             _LOG.info(
-                "[AIRDROP] dry-run: promo=%s symbol=%s quote=%.2f reward=%.2f",
+                "[AIRDROP] dry-run: promo=%s symbol=%s quote=%.2f reward=%.2f market=%s",
                 promo_id,
                 symbol,
                 notional,
                 expected_reward or 0.0,
+                market_choice,
             )
             self._record_order(symbol, "simulated")
             self._set_cooldown(symbol, now)
@@ -260,11 +269,12 @@ class AirdropPromoWatcher:
                 promo_id,
                 payload,
                 dry_run=True,
+                market=market_choice,
             )
             return
 
         try:
-            result = await self.router.market_quote(qualified_symbol, "BUY", notional, market="spot")
+            result = await self.router.market_quote(qualified_symbol, "BUY", notional, market=market_choice)
         except Exception as exc:  # noqa: BLE001
             _LOG.warning("[AIRDROP] execution failed for %s: %s", symbol, exc)
             self._record_order(symbol, "failed")
@@ -274,13 +284,14 @@ class AirdropPromoWatcher:
         avg_px = self._safe_float(result.get("avg_fill_price"), default=price)
         qty = self._safe_float(result.get("filled_qty_base"), default=notional / max(avg_px, 1e-9))
         _LOG.info(
-            "[AIRDROP] participated promo=%s symbol=%s qty=%.6f avg=%.6f notional=%.2f reward=%.2f",
+            "[AIRDROP] participated promo=%s symbol=%s qty=%.6f avg=%.6f notional=%.2f reward=%.2f market=%s",
             promo_id,
             symbol,
             qty,
             avg_px,
             notional,
             expected_reward or 0.0,
+            market_choice,
         )
         self._record_order(symbol, "filled")
         self._set_cooldown(symbol, now)
@@ -292,6 +303,7 @@ class AirdropPromoWatcher:
             promo_id,
             payload,
             dry_run=False,
+            market=market_choice,
         )
 
     async def shutdown(self) -> None:
@@ -484,6 +496,7 @@ class AirdropPromoWatcher:
         payload: Dict[str, Any],
         *,
         dry_run: bool,
+        market: str = "spot",
     ) -> None:
         topic = self.cfg.publish_topic
         if not topic:
@@ -497,6 +510,7 @@ class AirdropPromoWatcher:
             "dry_run": dry_run,
             "ts": int(self.clock.time() * 1000),
             "source_payload": payload,
+            "market": market,
         }
         try:
             from engine.core.event_bus import BUS

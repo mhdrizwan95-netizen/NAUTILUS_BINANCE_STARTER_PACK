@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Deque, Dict, Optional
 
 from engine import metrics
+from engine.core.market_resolver import resolve_market_choice
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -194,6 +195,8 @@ class ScalpStrategyModule:
         except Exception:
             pass
 
+        default_market = "futures" if self.cfg.allow_shorts else "spot"
+        market_choice = resolve_market_choice(symbol, default_market)
         return {
             "symbol": symbol,
             "side": side,
@@ -206,5 +209,5 @@ class ScalpStrategyModule:
                 "stop_price": stop_price,
                 "take_profit": target_price,
             },
-            "market": "futures" if self.cfg.allow_shorts else "spot",
+            "market": market_choice,
         }

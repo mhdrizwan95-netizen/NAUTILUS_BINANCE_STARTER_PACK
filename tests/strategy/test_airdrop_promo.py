@@ -24,10 +24,10 @@ class _Router:
 
 class _Risk:
     def __init__(self) -> None:
-        self.calls: list[tuple[str, str, float]] = []
+        self.calls: list[tuple[str, str, float, str | None]] = []
 
-    def check_order(self, *, symbol: str, side: str, quote: float, quantity) -> tuple[bool, dict]:
-        self.calls.append((symbol, side, quote))
+    def check_order(self, *, symbol: str, side: str, quote: float, quantity, market: str | None = None) -> tuple[bool, dict]:
+        self.calls.append((symbol, side, quote, market))
         return True, {}
 
 

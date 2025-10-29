@@ -6,6 +6,8 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from engine.core.market_resolver import resolve_market_choice
+
 
 @dataclass
 class BreakoutConfig:
@@ -15,6 +17,7 @@ class BreakoutConfig:
     base_risk_usd: float = 40.0
     size_usd: float = 120.0
     prefer_futures: bool = True
+    default_market: str = "futures"
     leverage_major: int = 3
     leverage_default: int = 2
     sl_method: str = "min3low_or_atr"
@@ -42,13 +45,19 @@ def _env_bool(name: str, default: bool) -> bool:
 
 
 def load_breakout_config() -> BreakoutConfig:
+    prefer_futures = _env_bool("EVENT_BREAKOUT_PREFER_FUTURES", True)
+    default_market_raw = os.getenv("EVENT_BREAKOUT_DEFAULT_MARKET", "").strip().lower()
+    default_market = default_market_raw or ("futures" if prefer_futures else "spot")
+    if default_market not in {"spot", "margin", "futures", "options"}:
+        default_market = "futures" if prefer_futures else "spot"
     return BreakoutConfig(
         enabled=_env_bool("EVENT_BREAKOUT_ENABLED", False),
         dry_run=_env_bool("EVENT_BREAKOUT_DRY_RUN", True),
         half_size_minutes=int(float(os.getenv("EVENT_BREAKOUT_HALF_SIZE_MINUTES", "5"))),
         base_risk_usd=float(os.getenv("EVENT_BREAKOUT_BASE_RISK_USD", "40")),
         size_usd=float(os.getenv("EVENT_BREAKOUT_SIZE_USD", "120")),
-        prefer_futures=_env_bool("EVENT_BREAKOUT_PREFER_FUTURES", True),
+        prefer_futures=prefer_futures,
+        default_market=default_market,
         leverage_major=int(float(os.getenv("EVENT_BREAKOUT_LEV_MAJOR", "3"))),
         leverage_default=int(float(os.getenv("EVENT_BREAKOUT_LEV_DEFAULT", "2"))),
         atr_tf=os.getenv("EVENT_BREAKOUT_ATR_TF", "1m"),
@@ -80,6 +89,7 @@ class BreakoutPlan:
     tp2_price: float
     trail_atr_usd: float
     half_applied: bool = False
+    market: str = "futures"
 
 
 class EventBreakout:
@@ -141,7 +151,10 @@ class EventBreakout:
             # Publish plan event for rollups
             try:
                 from engine.core.event_bus import BUS
-                await BUS.publish("event_bo.plan_dry", {"symbol": plan.symbol, "venue": plan.venue})
+                await BUS.publish(
+                    "event_bo.plan_dry",
+                    {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
+                )
             except Exception:
                 pass
             self._arm_cooldown(sym)
@@ -150,7 +163,7 @@ class EventBreakout:
         # Live execution (kept minimal; uses router wrappers; reduce-only setup optional)
         qty = await self._qty_from_notional(plan.symbol, plan.notional_usd)
         try:
-            await self.router.place_entry(plan.symbol, "BUY", qty, venue=plan.venue, intent="EVENT")
+            await self.router.place_entry(plan.symbol, "BUY", qty, venue=plan.venue, intent="EVENT", market=plan.market)
             await self.router.amend_stop_reduce_only(plan.symbol, "SELL", plan.sl_price, qty)
             tp1_qty = max(0.0, qty * float(self.cfg.tp1_portion))
             tp2_qty = max(0.0, qty * float(self.cfg.tp2_portion))
@@ -168,9 +181,15 @@ class EventBreakout:
                     pass
             try:
                 from engine.core.event_bus import BUS
-                await BUS.publish("strategy.event_breakout_open", {"symbol": plan.symbol})
-                await BUS.publish("event_bo.trade", {"symbol": plan.symbol, "venue": plan.venue})
-                await BUS.publish("event_bo.plan_live", {"symbol": plan.symbol, "venue": plan.venue})
+                await BUS.publish("strategy.event_breakout_open", {"symbol": plan.symbol, "market": plan.market})
+                await BUS.publish(
+                    "event_bo.trade",
+                    {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
+                )
+                await BUS.publish(
+                    "event_bo.plan_live",
+                    {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
+                )
             except Exception:
                 pass
         except Exception as e:
@@ -204,8 +223,21 @@ class EventBreakout:
             tp2 = self.router.round_tick(sym, tp2)  # type: ignore[attr-defined]
         except Exception:
             pass
-        plan = BreakoutPlan(symbol=sym, venue=venue, side="BUY", notional_usd=notional, leverage=lev,
-                            sl_price=sl, tp1_price=tp1, tp2_price=tp2, trail_atr_usd=trail_usd, half_applied=half)
+        qualified = f"{sym}.BINANCE"
+        market_choice = resolve_market_choice(qualified, self.cfg.default_market)
+        plan = BreakoutPlan(
+            symbol=sym,
+            venue=venue,
+            side="BUY",
+            notional_usd=notional,
+            leverage=lev,
+            sl_price=sl,
+            tp1_price=tp1,
+            tp2_price=tp2,
+            trail_atr_usd=trail_usd,
+            half_applied=half,
+            market=market_choice,
+        )
         if half:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
@@ -321,9 +353,17 @@ class EventBreakout:
         tag = "DRY" if dry else "LIVE"
         try:
             self.log.info(
-                "[EVENT-BO:%s] %s %s notional=$%d lev=%s SL=%.8f TP1=%.8f TP2=%.8f trail≈$%.6f",
-                tag, plan.symbol, plan.venue, int(round(plan.notional_usd)), plan.leverage,
-                float(plan.sl_price), float(plan.tp1_price), float(plan.tp2_price), float(plan.trail_atr_usd)
+                "[EVENT-BO:%s] %s %s/%s notional=$%d lev=%s SL=%.8f TP1=%.8f TP2=%.8f trail≈$%.6f",
+                tag,
+                plan.symbol,
+                plan.venue,
+                plan.market,
+                int(round(plan.notional_usd)),
+                plan.leverage,
+                float(plan.sl_price),
+                float(plan.tp1_price),
+                float(plan.tp2_price),
+                float(plan.trail_atr_usd),
             )
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
@@ -333,7 +373,10 @@ class EventBreakout:
             # Emit rollup events (fire-and-forget)
             try:
                 from engine.core.event_bus import BUS
-                BUS.fire("event_bo.plan_dry" if dry else "event_bo.plan_live", {"symbol": plan.symbol, "venue": plan.venue})
+                BUS.fire(
+                    "event_bo.plan_dry" if dry else "event_bo.plan_live",
+                    {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
+                )
             except Exception:
                 pass
         except Exception:

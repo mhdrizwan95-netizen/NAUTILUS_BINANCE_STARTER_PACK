@@ -11,7 +11,7 @@ class _RouterStub:
 
 
 class _RiskStub:
-    def check_order(self, **_):
+    def check_order(self, *, symbol: str, side: str, quote, quantity=None, market=None):
         return True, {}
 
 

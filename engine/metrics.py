@@ -357,6 +357,16 @@ airdrop_expected_value_usd = Gauge(
     ["symbol"],
     multiprocess_mode="max",
 )
+margin_level = Gauge(
+    "margin_level",
+    "Cross-margin maintenance level reported by venue",
+    multiprocess_mode="max",
+)
+margin_liability_usd = Gauge(
+    "margin_liability_usd",
+    "Outstanding cross-margin liability converted to USD",
+    multiprocess_mode="max",
+)
 
 # Metrics self-check heartbeat
 metrics_heartbeat = Gauge("metrics_heartbeat", "Timestamp of last metrics system update", multiprocess_mode="max")
@@ -440,6 +450,8 @@ REGISTRY = {
     "airdrop_promo_orders_total": airdrop_orders_total,
     "airdrop_promo_cooldown_epoch": airdrop_cooldown_epoch,
     "airdrop_expected_value_usd": airdrop_expected_value_usd,
+    "margin_level": margin_level,
+    "margin_liability_usd": margin_liability_usd,
     "external_feed_events_total": external_feed_events_total,
     "external_feed_errors_total": external_feed_errors_total,
     "external_feed_latency_seconds": external_feed_latency_seconds,

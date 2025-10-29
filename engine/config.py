@@ -180,6 +180,10 @@ class RiskConfig:
     equity_floor_usd: float
     equity_drawdown_limit_pct: float
     equity_cooldown_sec: int
+    margin_enabled: bool
+    margin_min_level: float
+    margin_max_liability_usd: float
+    options_enabled: bool
 
 
 DEFAULT_TRADE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
@@ -212,6 +216,10 @@ def load_risk_config() -> RiskConfig:
         equity_floor_usd=_as_float(os.getenv("EQUITY_FLOOR_USD"), 500.0),
         equity_drawdown_limit_pct=_as_float(os.getenv("EQUITY_DRAWDOWN_LIMIT_PCT"), 35.0),
         equity_cooldown_sec=_as_int(os.getenv("EQUITY_COOLDOWN_SEC"), 300),
+        margin_enabled=_as_bool(os.getenv("MARGIN_ENABLED"), _as_bool(os.getenv("BINANCE_MARGIN_ENABLED"), False)),
+        margin_min_level=_as_float(os.getenv("MARGIN_MIN_LEVEL"), 1.2),
+        margin_max_liability_usd=_as_float(os.getenv("MARGIN_MAX_LIABILITY_USD"), 25_000.0),
+        options_enabled=_as_bool(os.getenv("OPTIONS_ENABLED"), _as_bool(os.getenv("BINANCE_OPTIONS_ENABLED"), False)),
     )
 
 # ---- Quote currency + universe helpers ----

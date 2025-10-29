@@ -81,3 +81,56 @@ groups:
     annotations:
       summary: "Exposure cap breached"
       description: "Exposure exceeds cap for 30s"
+
+- name: event-modules
+  interval: 30s
+  rules:
+  - alert: MarginLevelLow
+    expr: margin_level > 0 and margin_level < 1.15
+    for: 45s
+    labels:
+      severity: warning
+      venue: binance
+    annotations:
+      summary: "Cross-margin level degrading"
+      description: "Margin level {{ $value | humanize }} < 1.15"
+
+  - alert: MarginLevelCritical
+    expr: margin_level > 0 and margin_level < 1.05
+    for: 30s
+    labels:
+      severity: critical
+      venue: binance
+    annotations:
+      summary: "Cross-margin level below safety floor"
+      description: "Margin level {{ $value | humanize }} < 1.05"
+
+  - alert: MarginLiabilityHigh
+    expr: margin_liability_usd > 20000
+    for: 5m
+    labels:
+      severity: warning
+      venue: binance
+    annotations:
+      summary: "Cross-margin liabilities elevated"
+      description: "Liability {{ $value | humanize }} USD > 20k"
+
+  - alert: ExternalFeedStale
+    expr: (time() - external_feed_last_event_epoch) > 180
+    for: 2m
+    labels:
+      severity: warning
+      team: strategy
+    annotations:
+      summary: "External feed idle"
+      description: "{{ $labels.source }} feed has been idle for {{ $value | humanizeDuration }}"
+
+  - alert: PromoOrderBudgetSpike
+    expr: increase(airdrop_promo_orders_total{status="submitted"}[15m]) > 3
+    for: 1m
+    labels:
+      severity: warning
+      team: strategy
+    annotations:
+      summary: "Airdrop promo orders burst"
+      description: ">3 promo orders submitted within 15m"

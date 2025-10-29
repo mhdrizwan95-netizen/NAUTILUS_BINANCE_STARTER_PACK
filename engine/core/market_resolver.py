@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 from functools import lru_cache
-from typing import Dict
+from typing import Dict, Iterable, Optional
+
+_ALLOWED_MARKETS = ("spot", "margin", "futures", "options")
 
 
 def _parse_inline_map(raw: str) -> Dict[str, str]:
@@ -78,3 +80,31 @@ def resolve_market(symbol: str, default: str | None) -> str | None:
     if "*" in mapping:
         return mapping["*"]
     return default
+
+
+def resolve_market_choice(
+    symbol: str,
+    default: Optional[str] = None,
+    allowed: Optional[Iterable[str]] = None,
+) -> str:
+    """
+    Resolve the market preference for ``symbol`` while enforcing an allowed set.
+
+    Parameters
+    ----------
+    symbol:
+        Symbol in either ``BASE`` or ``BASE.VENUE`` form.
+    default:
+        Fallback market when no explicit mapping exists; defaults to ``"spot"``.
+    allowed:
+        Optional iterable restricting the acceptable market names.
+    """
+    allowed_set = {m.lower() for m in (allowed or _ALLOWED_MARKETS)}
+    fallback = (default or "spot").lower()
+    resolved = resolve_market(symbol, fallback)
+    candidate = (resolved or fallback or "spot").lower()
+    if candidate not in allowed_set:
+        candidate = fallback if fallback in allowed_set else "spot"
+    if candidate not in allowed_set:
+        candidate = next(iter(allowed_set)) if allowed_set else "spot"
+    return candidate

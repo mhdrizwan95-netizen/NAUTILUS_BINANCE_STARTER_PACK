@@ -36,6 +36,8 @@ class PortfolioState:
     fees: float = 0.0
     positions: Dict[str, Position] = field(default_factory=dict)
     ts: float = field(default_factory=time.time)
+    margin_level: float = 0.0
+    margin_liability_usd: float = 0.0
 
     def snapshot(self) -> dict:
         return {
@@ -49,6 +51,10 @@ class PortfolioState:
             },
             "positions": [pos.to_dict() for pos in self.positions.values()],
             "ts": self.ts,
+            "margin": {
+                "level": self.margin_level,
+                "liability_usd": self.margin_liability_usd,
+            },
         }
 
 
