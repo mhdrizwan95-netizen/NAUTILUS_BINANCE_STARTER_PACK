@@ -1,8 +1,7 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from pathlib import Path
 from pathlib import Path as Path2
@@ -20,6 +19,27 @@ from ops.portfolio_collector import (
     PORTFOLIO_PREV,
     PORTFOLIO_LAST,
 )
+from ops.ui_api import (
+    router as ui_router,
+    ws_account,
+    ws_events,
+    ws_orders,
+    ws_price,
+    ws_trades,
+    broadcast_account,
+)
+from ops.ui_services import (
+    ConfigService,
+    FeedsGovernanceService,
+    OpsGovernanceService,
+    OrdersService,
+    PortfolioService,
+    RiskGuardService,
+    ScannerService,
+    StrategyGovernanceService,
+)
+from ops import ui_state
+from ops.background import account_broadcaster, default_symbols, price_stream
 
 # Risk monitoring configuration
 RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
@@ -34,7 +54,6 @@ def _parse_endpoints(env_val: str | None):
 
 ENGINE_ENDPOINTS = _parse_endpoints(os.getenv("ENGINE_ENDPOINTS")) or [
     "http://engine_binance:8003",
-    "http://engine_bybit:8004",
 ]
 
 # --- metrics snapshot surface -----------------------------------------------
@@ -62,6 +81,7 @@ APP.include_router(orders_router)
 APP.include_router(strategy_router)
 APP.include_router(pnl_router)
 APP.include_router(situations_router)
+APP.include_router(ui_router)
 
 @APP.get("/metrics")
 def metrics_endpoint():
@@ -277,6 +297,28 @@ ACCOUNT_CACHE: dict = {
     "source": "engine",
 }
 
+
+# Command Center service wiring -------------------------------------------------
+PORTFOLIO_SERVICE = PortfolioService()
+ORDERS_SERVICE = OrdersService()
+STRATEGY_SERVICE = StrategyGovernanceService(Path("ops/strategy_weights.json"))
+SCANNER_SERVICE = ScannerService(Path("ops/universe_state.json"))
+CONFIG_SERVICE = ConfigService(Path("config/runtime.yaml"), Path("ops/runtime_overrides.json"))
+RISK_SERVICE = RiskGuardService()
+FEEDS_SERVICE = FeedsGovernanceService()
+OPS_SERVICE = OpsGovernanceService(STATE_FILE, engine_health, PORTFOLIO_SERVICE)
+
+ui_state.configure(
+    portfolio=PORTFOLIO_SERVICE,
+    orders=ORDERS_SERVICE,
+    strategy=STRATEGY_SERVICE,
+    scanner=SCANNER_SERVICE,
+    config=CONFIG_SERVICE,
+    risk=RISK_SERVICE,
+    feeds=FEEDS_SERVICE,
+    ops=OPS_SERVICE,
+)
+
 def _update_metrics_account_fields(equity: float, cash: float, exposure: float, realized_pnl: float, unrealized_pnl: float) -> None:
     try:
         snap = _load_snap()
@@ -310,6 +352,22 @@ def _publish_account_snapshot(state: dict) -> None:
     ACCOUNT_CACHE["positions"] = state.get("positions", [])
     ACCOUNT_CACHE["ts"] = state.get("ts", time.time())
     ACCOUNT_CACHE["source"] = state.get("source", "engine")
+    PORTFOLIO_SERVICE.update_snapshot(ACCOUNT_CACHE)
+    account_payload = {
+        "type": "account",
+        "equity": ACCOUNT_CACHE["equity"],
+        "cash": ACCOUNT_CACHE["cash"],
+        "exposure": ACCOUNT_CACHE["exposure"],
+        "pnl": ACCOUNT_CACHE.get("pnl", {}),
+        "positions": ACCOUNT_CACHE.get("positions", []),
+        "ts": ACCOUNT_CACHE.get("ts"),
+    }
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and not loop.is_closed():
+        loop.create_task(broadcast_account(account_payload))
     _update_metrics_account_fields(
         ACCOUNT_CACHE["equity"],
         ACCOUNT_CACHE["cash"],
@@ -318,8 +376,6 @@ def _publish_account_snapshot(state: dict) -> None:
         ACCOUNT_CACHE["pnl"]["unrealized"]
     )
 
-INC = []
-INC_MAX = 200
 
 # engine-driven polling loop
 async def _engine_poll_loop():
@@ -452,6 +508,14 @@ async def _start_poll():
         print(f"[StrategyTracker] started in PID {_os.getpid()} (leader)")
     else:
         print(f"[StrategyTracker] skipped in PID {_os.getpid()} (follower)")
+
+
+@APP.on_event("startup")
+async def _start_ui_streams():
+    asyncio.create_task(account_broadcaster(PORTFOLIO_SERVICE))
+    symbols = default_symbols()
+    if symbols:
+        asyncio.create_task(price_stream(symbols))
 
 @APP.on_event("startup")
 async def _start_canary_manager():
@@ -681,38 +745,37 @@ def manual_promote_strategy(req: dict, request: Request):
     except Exception as e:
         return {"error": str(e)}
 
-# ---------- Legacy Incident Endpoints ----------
-@APP.post("/incidents")
-def create_incident(item: dict):
-    item.setdefault("ts", time.time())
-    INC.append(item)
-    del INC[:-INC_MAX]  # keep only last INC_MAX
-    # broadcast to WebSocket clients
-    for ws in list(WSS):
-        try:
-            ws.send_json(item)
-        except Exception:
-            pass
-    return {"ok": True}
+# WebSocket proxies for the Command Center UI
 
-@APP.get("/incidents")
-def list_incidents():
-    return {"items": INC[-50:]}
 
-WSS = set()
+@APP.websocket("/ws/price")
+async def _ws_price(websocket: WebSocket):
+    await ws_price(websocket)
 
-@APP.websocket("/ws/incidents")
-async def ws_incidents(websocket: WebSocket):
-    await websocket.accept()
-    WSS.add(websocket)
-    try:
-        while True:
-            await asyncio.sleep(3600)
-    finally:
-        WSS.discard(websocket)
 
-# Mount static files for dashboard
-APP.mount("/", StaticFiles(directory="ops/static", html=True), name="static")
+@APP.websocket("/ws/account")
+async def _ws_account(websocket: WebSocket):
+    await ws_account(websocket)
+
+
+@APP.websocket("/ws/orders")
+async def _ws_orders(websocket: WebSocket):
+    await ws_orders(websocket)
+
+
+@APP.websocket("/ws/trades")
+async def _ws_trades(websocket: WebSocket):
+    await ws_trades(websocket)
+
+
+@APP.websocket("/ws/events")
+async def _ws_events(websocket: WebSocket):
+    await ws_events(websocket)
+
+
+# Mount the new Command Center single-page app
+APP.mount("/", StaticFiles(directory="ops/static_ui", html=True), name="ui")
+
 
 # ---- Situations SSE consumer (shadow mode) ----
 SSE_COUNTER = get_or_create_counter(

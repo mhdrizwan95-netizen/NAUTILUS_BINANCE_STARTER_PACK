@@ -98,7 +98,7 @@ async def portfolio_collector_loop(interval_sec: int = 10):
 
     endpoints = [e.strip() for e in os.getenv(
         "ENGINE_ENDPOINTS",
-        "http://engine_binance:8003,http://engine_ibkr:8005"
+        "http://engine_binance:8003"
     ).split(",") if e.strip()]
 
     while True:
