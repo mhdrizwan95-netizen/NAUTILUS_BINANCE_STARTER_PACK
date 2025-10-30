@@ -1,22 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-import importlib.util
-import sys
+import runpy
 from typing import Dict, Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS_PATH = ROOT / "engine" / "config" / "defaults.py"
 
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
-
-spec = importlib.util.spec_from_file_location("engine.config.defaults", DEFAULTS_PATH)
-if spec is None or spec.loader is None:
-    raise RuntimeError(f"Unable to load defaults module from {DEFAULTS_PATH}")
-defaults_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(defaults_module)
-ALL_DEFAULTS = defaults_module.ALL_DEFAULTS
+defaults_namespace = runpy.run_path(str(DEFAULTS_PATH))
+try:
+    ALL_DEFAULTS = defaults_namespace["ALL_DEFAULTS"]
+except KeyError as exc:
+    available = ", ".join(sorted(defaults_namespace))
+    raise RuntimeError(
+        f"defaults file at {DEFAULTS_PATH} did not define ALL_DEFAULTS; found keys: {available or '<none>'}"
+    ) from exc
 
 SECTIONS: Dict[str, Iterable[str]] = {
     "Engine": ["EVENTBUS_MAX_WORKERS"],
