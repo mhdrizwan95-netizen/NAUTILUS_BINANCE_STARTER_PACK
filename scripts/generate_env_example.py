@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-import sys
-from typing import Dict, Iterable
+import runpy
+from typing import Dict, Iterable, Set
 
 ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+DEFAULTS_PATH = ROOT / "engine" / "config" / "defaults.py"
 
-from engine.config.defaults import ALL_DEFAULTS
+defaults_namespace = runpy.run_path(str(DEFAULTS_PATH))
+try:
+    ALL_DEFAULTS = defaults_namespace["ALL_DEFAULTS"]
+except KeyError as exc:
+    available = ", ".join(sorted(defaults_namespace))
+    raise RuntimeError(
+        f"defaults file at {DEFAULTS_PATH} did not define ALL_DEFAULTS; found keys: {available or '<none>'}"
+    ) from exc
 
 SECTIONS: Dict[str, Iterable[str]] = {
     "Engine": ["EVENTBUS_MAX_WORKERS"],
@@ -32,10 +38,17 @@ SECTIONS: Dict[str, Iterable[str]] = {
         "MARGIN_MAX_LIABILITY_USD",
         "MARGIN_MAX_LEVERAGE",
         "OPTIONS_ENABLED",
+        "SOFT_BREACH_ENABLED",
+        "SOFT_BREACH_TIGHTEN_SL_PCT",
+        "SOFT_BREACH_BREAKEVEN_OK",
+        "SOFT_BREACH_CANCEL_ENTRIES",
+        "SOFT_BREACH_LOG_ORDERS",
     ],
+    "Broker": ["IBKR_ENABLED"],
     "Trend Strategy": [
         "TREND_ENABLED",
         "TREND_DRY_RUN",
+        "TREND_SYMBOLS",
         "TREND_FETCH_LIMIT",
         "TREND_REFRESH_SEC",
         "TREND_ATR_LENGTH",
@@ -75,6 +88,7 @@ SECTIONS: Dict[str, Iterable[str]] = {
     "Scalping": [
         "SCALP_ENABLED",
         "SCALP_DRY_RUN",
+        "SCALP_SYMBOLS",
         "SCALP_WINDOW_SEC",
         "SCALP_MIN_TICKS",
         "SCALP_MIN_RANGE_BPS",
@@ -101,6 +115,7 @@ SECTIONS: Dict[str, Iterable[str]] = {
     "Momentum (Real-Time)": [
         "MOMENTUM_RT_ENABLED",
         "MOMENTUM_RT_DRY_RUN",
+        "MOMENTUM_RT_SYMBOLS",
         "MOMENTUM_RT_WINDOW_SEC",
         "MOMENTUM_RT_BASELINE_SEC",
         "MOMENTUM_RT_MOVE_THRESHOLD_PCT",
@@ -160,6 +175,21 @@ SECTIONS: Dict[str, Iterable[str]] = {
     ],
 }
 
+SECTION_KEYS: Set[str] = {key for keys in SECTIONS.values() for key in keys}
+
+missing_defaults = sorted(key for key in ALL_DEFAULTS if key not in SECTION_KEYS)
+if missing_defaults:
+    raise RuntimeError(
+        "Missing keys in .env example generator; add them to SECTIONS: "
+        + ", ".join(missing_defaults)
+    )
+
+unknown_keys = sorted(key for key in SECTION_KEYS if key not in ALL_DEFAULTS)
+if unknown_keys:
+    raise RuntimeError(
+        "Generator references keys not present in ALL_DEFAULTS: " + ", ".join(unknown_keys)
+    )
+
 COMMENTS = {
     "EVENTBUS_MAX_WORKERS": "Thread pool size for sync EventBus handlers.",
     "TRADE_SYMBOLS": "Comma list of BASEQUOTE symbols (e.g., BTCUSDT,ETHUSDT) or '*' for allow-all.",
@@ -178,6 +208,15 @@ COMMENTS = {
     "EQUITY_COOLDOWN_SEC": "Cooldown duration after hitting drawdown limit.",
     "MARGIN_ENABLED": "Allow submitting margin orders.",
     "OPTIONS_ENABLED": "Allow submitting options orders.",
+    "SOFT_BREACH_ENABLED": "Enable soft risk-breach mitigations.",
+    "SOFT_BREACH_TIGHTEN_SL_PCT": "Tighten stop-loss to this pct when a soft breach triggers.",
+    "SOFT_BREACH_BREAKEVEN_OK": "Allow tightening stops to breakeven even if above target pct.",
+    "SOFT_BREACH_CANCEL_ENTRIES": "Cancel open entry orders when a soft breach occurs.",
+    "SOFT_BREACH_LOG_ORDERS": "Log order details when soft breach protection activates.",
+    "IBKR_ENABLED": "Enable Interactive Brokers integration.",
+    "TREND_SYMBOLS": "Optional override; empty or '*' falls back to TRADE_SYMBOLS.",
+    "SCALP_SYMBOLS": "Optional override for scalping universe.",
+    "MOMENTUM_RT_SYMBOLS": "Optional override for momentum universe.",
     "MEME_SENTIMENT_SOURCES": "CSV of event sources to react to (twitter_firehose,dex_whale,binance_listings).",
     "MEME_SENTIMENT_DENY_KEYWORDS": "Comma-separated keywords to ignore.",
     "MEME_SENTIMENT_QUOTES": "Preferred quote assets when selecting trading pairs.",

@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `engine/strategies` implementations.
 - Obsolete `ops/run_live.py` launcher now superseded by `engine/app.py` and
   the scheduler service.
+- Dead `scripts/simulate_venue_errors.py` helper flagged by the dead code guard.
 
 ## [1.0.0] - 2025-10-11
 

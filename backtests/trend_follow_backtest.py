@@ -1,125 +1,87 @@
 #!/usr/bin/env python3
-"""Offline backtest harness for the TrendStrategyModule.
-
-It fetches recent Binance klines (spot) for the configured timeframes,
-replays them sequentially through TrendStrategyModule, and records the
-resulting trades/PnL profile so we can validate parameter defaults
-before going live.
-"""
+"""Offline backtest harness for the TrendStrategyModule using local data."""
 
 from __future__ import annotations
 
 import argparse
 import json
-from bisect import bisect_right
 from dataclasses import replace
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict
 
-ROOT = Path(__file__).resolve().parents[1]
-import sys
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+from backtests.engine import BacktestEngine, FeedConfig
 
-import httpx
-
-from engine.strategies.trend_follow import (
-    TrendStrategyModule,
-    load_trend_config,
-)
+from engine.strategies.trend_follow import TrendStrategyModule, load_trend_config
 
 
-API_BASE = "https://api.binance.com"
+def _parse_data_map(pairs: list[str]) -> Dict[str, Path]:
+    mapping: Dict[str, Path] = {}
+    for item in pairs:
+        if "=" not in item:
+            raise ValueError(f"Data mapping must be '<interval>=<path>', got '{item}'")
+        interval, path = item.split("=", 1)
+        interval = interval.strip()
+        if not interval:
+            raise ValueError(f"Invalid interval for mapping '{item}'")
+        mapping[interval] = Path(path.strip())
+    return mapping
 
 
-def fetch_klines(symbol: str, interval: str, limit: int) -> List[List[float]]:
-    resp = httpx.get(
-        f"{API_BASE}/api/v3/klines",
-        params={"symbol": symbol.upper(), "interval": interval, "limit": limit},
-        timeout=10.0,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    if not isinstance(data, list):
-        raise RuntimeError(f"Unexpected kline payload for {symbol} {interval}")
-    return data
-
-
-class SimClock:
-    def __init__(self) -> None:
-        self._now = 0.0
-
-    def set(self, ts: float) -> None:
-        self._now = float(ts)
-
-    def time(self) -> float:
-        return self._now
-
-
-class OfflineKlineClient:
-    def __init__(self, data: Dict[Tuple[str, str], List[List[float]]]):
-        self._data = data
-        self._closes = {
-            key: [int(row[6]) for row in rows]
-            for key, rows in data.items()
-        }
-        self._current_close: Dict[Tuple[str, str], int] = {}
-
-    def set_close_time(self, symbol: str, interval: str, close_ms: int) -> None:
-        self._current_close[(symbol, interval)] = close_ms
-
-    def klines(self, symbol: str, interval: str, limit: int) -> List[List[float]]:
-        key = (symbol, interval)
-        rows = self._data.get(key, [])
-        closes = self._closes.get(key) or []
-        cursor = self._current_close.get(key)
-        if cursor is None:
-            subset = rows
-        else:
-            idx = bisect_right(closes, cursor)
-            subset = rows[:idx]
-        if len(subset) > limit:
-            return subset[-limit:]
-        return subset
-
-
-def run_backtest(symbol: str, limit: int, output: Path) -> Dict:
+def run_backtest(
+    *,
+    symbol: str,
+    data_map: Dict[str, Path],
+    warmup: int,
+    output: Path,
+) -> Dict:
     cfg = replace(
         load_trend_config(),
         enabled=True,
         dry_run=True,
         symbols=[symbol],
-        fetch_limit=limit,
+        fetch_limit=0,
         refresh_sec=0,
     )
-    tf_set = {cfg.primary.interval, cfg.secondary.interval, cfg.regime.interval}
-    data: Dict[Tuple[str, str], List[List[float]]] = {}
-    for interval in tf_set:
-        data[(symbol, interval)] = fetch_klines(symbol, interval, limit)
 
-    client = OfflineKlineClient(data)
-    clock = SimClock()
-    module = TrendStrategyModule(cfg, client=client, clock=clock)
+    required = {cfg.primary.interval, cfg.secondary.interval, cfg.regime.interval}
+    missing = required.difference(data_map)
+    if missing:
+        raise SystemExit(
+            "Missing dataset for timeframes: " + ", ".join(sorted(missing))
+        )
 
-    primary = data[(symbol, cfg.primary.interval)]
-    min_idx = max(cfg.primary.slow + 5, cfg.secondary.slow + 5, cfg.regime.slow + 5)
+    feeds = [
+        FeedConfig(
+            symbol=symbol,
+            timeframe=interval,
+            path=data_map[interval],
+            driver=(interval == cfg.primary.interval),
+            warmup_bars=warmup,
+        )
+        for interval in sorted(required)
+    ]
+
+    engine = BacktestEngine(
+        feeds=feeds,
+        strategy_factory=lambda client, clock: TrendStrategyModule(cfg, client=client, clock=clock),
+    )
+
     trades = []
     position = None
     equity = float(cfg.fallback_equity_usd)
     peak_equity = equity
     trough = equity
 
-    for i in range(min_idx, len(primary)):
-        close_time = int(primary[i][6])
-        price = float(primary[i][4])
-        for interval in tf_set:
-            client.set_close_time(symbol, interval, close_time)
-        clock.set(close_time / 1000.0)
-        action = module.handle_tick(f"{symbol}.BINANCE", price, close_time / 1000.0)
+    for step in engine.run():
+        event = step.event
+        action = step.response
         if not action:
             continue
-        side = action["side"]
+        side = action.get("side")
         quote = float(action.get("quote") or cfg.min_quote_usd)
+        price = float(event.price)
+        close_time = event.timestamp_ms
+
         if side == "BUY" and position is None:
             position = {
                 "entry_px": price,
@@ -132,15 +94,17 @@ def run_backtest(symbol: str, limit: int, output: Path) -> Dict:
             equity += pnl_quote
             peak_equity = max(peak_equity, equity)
             trough = min(trough, equity)
-            trades.append({
-                "entry_ts": position["entry_ts"],
-                "exit_ts": close_time,
-                "entry_px": position["entry_px"],
-                "exit_px": price,
-                "quote": quote,
-                "pnl_pct": pnl_pct,
-                "pnl_quote": pnl_quote,
-            })
+            trades.append(
+                {
+                    "entry_ts": position["entry_ts"],
+                    "exit_ts": close_time,
+                    "entry_px": position["entry_px"],
+                    "exit_px": price,
+                    "quote": quote,
+                    "pnl_pct": pnl_pct,
+                    "pnl_quote": pnl_quote,
+                }
+            )
             position = None
 
     wins = [t for t in trades if t["pnl_pct"] > 0]
@@ -166,13 +130,30 @@ def run_backtest(symbol: str, limit: int, output: Path) -> Dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Backtest TrendStrategyModule")
     parser.add_argument("--symbol", default="BTCUSDT")
-    parser.add_argument("--limit", type=int, default=1000)
-    parser.add_argument("--output", type=Path, default=Path("backtests/results/trend_backtest.json"))
+    parser.add_argument(
+        "--data",
+        action="append",
+        required=True,
+        help="Mapping of interval=path to CSV/Parquet klines",
+    )
+    parser.add_argument("--warmup", type=int, default=200, help="Bars to skip before trading")
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=Path("backtests/results/trend_backtest.json"),
+    )
     args = parser.parse_args()
 
-    summary = run_backtest(args.symbol.upper(), args.limit, args.output)
+    data_map = _parse_data_map(args.data)
+    summary = run_backtest(
+        symbol=args.symbol.upper(),
+        data_map=data_map,
+        warmup=max(0, args.warmup),
+        output=args.output,
+    )
     print(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":
     main()
+

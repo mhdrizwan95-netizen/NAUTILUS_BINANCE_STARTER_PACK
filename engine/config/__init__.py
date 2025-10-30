@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import List
 import asyncio
-import httpx
 import logging
 
 from engine.config.defaults import GLOBAL_DEFAULTS, RISK_DEFAULTS
@@ -254,6 +253,13 @@ def norm_symbol(sym: str) -> str:
 
 async def list_all_testnet_pairs() -> List[str]:
     """Fetch all tradeable spot pairs from Binance testnet."""
+    try:
+        import httpx  # type: ignore
+    except ModuleNotFoundError:
+        # httpx is an optional dependency; fall back to a static list when it is
+        # unavailable (e.g., in light-weight tooling environments).
+        return ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+
     base_url = "https://testnet.binance.vision"
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
