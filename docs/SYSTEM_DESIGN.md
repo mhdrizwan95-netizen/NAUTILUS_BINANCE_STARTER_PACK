@@ -6,7 +6,7 @@ Nautilus HMM is organised as a layered trading stack: a lean execution engine, a
                  ┌────────────────────────────┐
                  │  Strategy / ML Layer       │
 Signals & alpha  │  engine/strategy.py        │
-  ─────────────▶ │  strategies/policy_hmm.py  │
+  ─────────────▶ │  engine/strategies/*       │
                  └────────────┬───────────────┘
                               │ POST /orders
                               ▼
@@ -70,9 +70,10 @@ Signals & alpha  │  engine/strategy.py        │
 - For each configured symbol (`STRATEGY_SYMBOLS` or risk config), it:
   - Fetches a latest price via Binance public endpoints.
   - Updates the moving-average crossover model (`_MACross`).
-  - Streams ticks into the HMM policy ingestion (`strategies/policy_hmm.py`).
+  - Streams ticks into the HMM policy ingestion (`engine/strategies/policy_hmm.py`).
   - Optionally evaluates the HMM model (lazy-loaded pickle under `engine/models/active_hmm_policy.pkl`).
-  - Combines MA and HMM signals via `strategies/ensemble_policy.py` with confidence thresholds.
+  - Combines MA and HMM signals via `engine/strategies/ensemble_policy.py` with confidence thresholds.
+  - Runs additional systematic modules (trend/scalp/momentum) under `engine/strategies/` when their feature flags are enabled.
   - Emits orders through `post_strategy_signal`, which reuses the REST router path with risk checks and idempotency.
 - A lightweight bracket watcher can place TP/SL follow-up orders while the HMM mode is enabled.
 
@@ -147,7 +148,7 @@ Signals & alpha  │  engine/strategy.py        │
 |----------|----------|-------|
 | Environment | `.env`, `ops/env.*` | Venue credentials, risk knobs, compose wiring. |
 | Risk & policies | `engine/policies.yaml`, env vars | Exposure caps, trading toggle, symbol allowlist, min/max notional, breaker thresholds. |
-| Strategy defaults | `strategies/policy_hmm/config.py`, env | HMM window, cooldown, TP/SL basis points, ensemble weights. |
+| Strategy defaults | `engine/strategies/*.py` loaders, `engine/config/defaults.py`, env | HMM window, trend/scalp/momentum knobs, ensemble weights. |
 | Governance | `ops/capital_policy.json`, `ops/strategy_weights.json`, `ops/capital_allocations.json`, `ops/policies.yaml` | Capital allocation, model weighting, governance rules. |
 | Observability | `ops/observability/prometheus/prometheus.yml`, `ops/observability/prometheus/rules/`, `ops/observability/grafana/dashboards/` | Scrape/job targets, alert thresholds, dashboard layouts. |
 | Data services | `config/universe.yaml`, `config/screener.yaml`, `config/situations.json` | Universe buckets, screener settings, situation definitions. |

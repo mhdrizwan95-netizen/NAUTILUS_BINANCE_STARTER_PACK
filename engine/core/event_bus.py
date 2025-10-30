@@ -4,10 +4,29 @@ Real-time Event Bus - The Nervous System of Our Trading Organism.
 Provides async pub/sub messaging for instantaneous inter-module communication,
 turning reactive components into a coordinated trading intelligence.
 """
+from __future__ import annotations
+
 import asyncio
+import inspect
 import logging
-import json
-from typing import Dict, List, Callable, Any, Optional
+import os
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Dict, List, Optional
+
+from engine import metrics
+
+
+def _is_async_callable(obj: Callable[[Dict[str, Any]], Any]) -> bool:
+    """Return True when the callable is async, including async __call__ objects."""
+    if inspect.iscoroutinefunction(obj):
+        return True
+    call = getattr(obj, "__call__", None)
+    return bool(call and inspect.iscoroutinefunction(call))
+
+
+def _call_sync(handler: Callable[[Dict[str, Any]], Any], payload: Dict[str, Any]) -> Any:
+    """Execute the synchronous handler. Runs inside the thread pool."""
+    return handler(payload)
 
 
 class EventBus:
@@ -21,7 +40,7 @@ class EventBus:
     - Fault-tolerant with error isolation
     """
 
-    def __init__(self):
+    def __init__(self, max_workers: Optional[int] = None):
         self._subscribers: Dict[str, List[Callable[[Dict[str, Any]], Any]]] = {}
         self._queue: asyncio.Queue = asyncio.Queue()
         self._running = False
@@ -31,6 +50,9 @@ class EventBus:
             "failed": 0,
             "topics": set()
         }
+        if max_workers is None:
+            max_workers = int(os.getenv("EVENTBUS_MAX_WORKERS", "8"))
+        self._executor = ThreadPoolExecutor(max_workers=max_workers)
 
     async def start(self) -> None:
         """Start the event processing loop."""
@@ -47,6 +69,10 @@ class EventBus:
         # Allow pending events to be processed
         await asyncio.sleep(0.1)
         logging.info(f"[BUS] Stopped. Stats: {self._stats}")
+
+    def shutdown(self, wait: bool = False) -> None:
+        """Tear down the executor. Useful for tests or process shutdown."""
+        self._executor.shutdown(wait=wait)
 
     def subscribe(self, topic: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         """Subscribe to events on a topic."""
@@ -78,6 +104,7 @@ class EventBus:
             urgent: If True, process immediately rather than queue
         """
         if not self._running:
+            logging.getLogger(__name__).debug("EventBus publish skipped; bus not running (topic=%s)", topic)
             return  # No-op if not started
 
         event = {
@@ -116,23 +143,35 @@ class EventBus:
         data = event["data"]
 
         if topic not in self._subscribers:
+            logging.getLogger(__name__).debug("EventBus: no subscribers for topic %s", topic)
             return  # No subscribers for this topic
 
         delivered = 0
         failed = 0
+        handlers = list(self._subscribers[topic])
+        loop = asyncio.get_running_loop()
+        pending = [
+            self._dispatch_handler(handler, data, loop)
+            for handler in handlers
+        ]
+        results = await asyncio.gather(*pending, return_exceptions=True)
 
-        for handler in self._subscribers[topic]:
-            try:
-                if asyncio.iscoroutinefunction(handler):
-                    await handler(data)
-                else:
-                    # Run sync handlers in thread pool
-                    await asyncio.get_event_loop().run_in_executor(None, handler, data)
-
-                delivered += 1
-            except Exception as e:
+        for handler, result in zip(handlers, results):
+            if isinstance(result, Exception):
                 failed += 1
-                logging.error(f"[BUS] Handler error on '{topic}': {e}")
+                logging.error("[BUS] Handler error on '%s': %s", topic, result)
+                continue
+
+            delivered += 1
+            if topic == "events.external_feed":
+                try:
+                    consumer = getattr(handler, "__qualname__", None) or getattr(handler, "__name__", None)
+                    if not consumer and hasattr(handler, "__self__"):
+                        consumer = handler.__self__.__class__.__name__
+                    consumer = consumer or handler.__class__.__name__
+                    metrics.events_external_feed_consumed_total.labels(consumer=consumer).inc()
+                except Exception:  # noqa: BLE001
+                    logging.getLogger(__name__).debug("EventBus metrics update failed", exc_info=True)
 
         self._stats["delivered"] += delivered
         self._stats["failed"] += failed
@@ -173,6 +212,18 @@ class EventBus:
             except RuntimeError:
                 # Nested loop not allowed; drop silently
                 pass
+
+    async def _dispatch_handler(
+        self,
+        handler: Callable[[Dict[str, Any]], Any],
+        payload: Dict[str, Any],
+        loop: asyncio.AbstractEventLoop,
+    ) -> Any:
+        """Dispatch handler execution via async/await or executor offloading."""
+        if _is_async_callable(handler):
+            return await handler(payload)
+
+        return await loop.run_in_executor(self._executor, _call_sync, handler, payload)
 
 
 # Global event bus instance - the central nervous system

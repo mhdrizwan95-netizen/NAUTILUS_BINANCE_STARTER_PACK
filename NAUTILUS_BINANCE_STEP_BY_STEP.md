@@ -51,15 +51,17 @@ PY
 
 ```
 nautilus_hmm/
-  strategies/
-    hmm_policy/
-      __init__.py
-      config.py
-      strategy.py
-      features.py
-      policy.py
-      guardrails.py
-      telemetry.py
+  engine/
+    strategies/
+      policy_hmm.py
+      ensemble_policy.py
+      trend_follow.py
+      scalping.py
+      momentum_realtime.py
+      listing_sniper.py
+      meme_coin_sentiment.py
+      airdrop_promo.py
+      symbol_scanner.py
   ml_service/
     app.py                # FastAPI: /infer /partial_fit /train
     model_store/
@@ -67,21 +69,21 @@ nautilus_hmm/
     raw/                  # downloaded parquet or csv
     processed/
   backtests/
-    run_backtest.py
     configs/crypto_spot.yaml
-  ops/
-    run_paper.py
-    run_live.py
-    env.example
-    runbook.md
+  scripts/
+    backtest_hmm.py
+    train_hmm_policy.py
+  docs/
+    FEATURE_FLAGS.md
+    SYSTEM_DESIGN.md
 ```
 
-> Keep your **feature schema versioned** (e.g., `FEATURES_V1`). If you change features, bump and retrain.
+> Keep your **feature schema versioned** (e.g., `FEATURES_V1`). If you change features, bump and retrain. The runtime loads all strategies from `engine/strategies/`, so add new modules there to inherit the engine wiring and EventBus subscriptions.
 
 
 ## 3) Keys & environment
 
-Create `.env` from `ops/env.example` and fill with your keys:
+Create `.env` from the repository root template and fill with your keys:
 
 ```
 # Venue selection
@@ -92,9 +94,11 @@ BINANCE_IS_TESTNET=true        # false for live
 BINANCE_API_KEY=fill_me
 BINANCE_API_SECRET=fill_me
 
-# Strategy
-SYMBOL=BTCUSDT.BINANCE         # spot
-# or: SYMBOL=BTCUSDT-PERP.BINANCE  # perps
+# Strategy defaults
+TRADE_SYMBOLS=BTCUSDT,ETHUSDT  # or keep `*` to allow every discovered symbol
+STRATEGY_ENABLED=false         # enable MA+HMM scheduler when ready
+TREND_ENABLED=true             # toggle systematic modules individually
+SCALP_ENABLED=false
 ```
 
 **Get Testnet keys:**
@@ -187,13 +191,13 @@ pip install -U "nautilus_trader[binance]" fastapi uvicorn pandas numpy scikit-le
 uvicorn ml_service.app:app --host 0.0.0.0 --port 8010 --workers=1
 
 # Backtest
-python backtests/run_backtest.py --config backtests/configs/crypto_spot.yaml
+python scripts/backtest_hmm.py --csv data/BTCUSDT_1m.csv --model engine/models/hmm_policy.pkl --symbol BTCUSDT --quote 100
 
 # Paper trade (Binance testnet)
-python ops/run_paper.py --symbol ${SYMBOL}
+BINANCE_IS_TESTNET=true TRADING_ENABLED=false uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info
 
 # Live tiny size
-BINANCE_IS_TESTNET=false python ops/run_live.py --symbol ${SYMBOL}
+BINANCE_IS_TESTNET=false TRADING_ENABLED=true uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info
 ```
 
 ---

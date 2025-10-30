@@ -63,10 +63,33 @@ def on_binance_listing(router):
     MIN_NOTIONAL_1M = _as_float(os.getenv("MIN_NOTIONAL_1M_USD", "500000"), 500000.0)
     HALF_MIN = int(_as_float(os.getenv("EVENT_BREAKOUT_HALF_SIZE_MINUTES", "5"), 5))
 
+    allowed_sources = {"binance_announcements", "binance_listings", "listing_sniper_bridge"}
+
     async def handler(evt: Dict[str, Any]):
-        sym = (evt.get("symbol") or "").upper()
+        if not isinstance(evt, dict):
+            return
+
+        source = str(evt.get("source") or "").strip().lower()
+        if source and allowed_sources and source not in allowed_sources:
+            return
+
+        payload = evt.get("payload") if isinstance(evt.get("payload"), dict) else {}
+        hints = evt.get("asset_hints")
+        if isinstance(hints, (str, bytes)):
+            hint_list = [hints]
+        elif isinstance(hints, (list, tuple, set)):
+            hint_list = [str(item) for item in hints if item is not None]
+        else:
+            hint_list = []
+        sym = str(
+            payload.get("symbol")
+            or (hint_list[0] if hint_list else None)
+            or evt.get("symbol")
+            or ""
+        ).upper()
         if not sym.endswith("USDT"):
             return
+
         base = sym
         metrics = await _binance_metrics(router, base)
         if not metrics:
@@ -101,11 +124,19 @@ def on_binance_listing(router):
 
         # Half-size window since listing
         half = False
+        evt_time = (
+            payload.get("time")
+            or payload.get("announced_at")
+            or evt.get("time")
+            or evt.get("announced_at")
+        )
         try:
-            ts = evt.get("time")
-            if ts:
+            if evt_time is not None:
+                ts_val = float(evt_time)
+                if ts_val < 10_000:  # assume seconds -> convert to ms
+                    ts_val *= 1000.0
                 now = time.time() * 1000.0
-                age_min = (float(now) - float(ts)) / 60000.0
+                age_min = (float(now) - ts_val) / 60000.0
                 half = age_min <= HALF_MIN
         except Exception:
             half = False

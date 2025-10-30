@@ -72,7 +72,7 @@ Set `PYTHONPATH=.` when running modules directly so relative imports resolve.
 |------|------------|
 | `engine/` | FastAPI app, order router, risk rails, metrics, storage, state management. |
 | `engine/core/` | Venue adapters, portfolio accounting, reconciliation daemon, event bus, strategy scheduler. |
-| `strategies/` | HMM policy code, ensemble fusion, replay tools, venue-specific strategies. |
+| `engine/strategies/` | Unified strategy implementations (HMM policy, ensemble fusion, trend, scalping, momentum, listing sniper, meme sentiment, airdrop promo, symbol scanner). |
 | `ml_service/` | Model training/inference API, hierarchical HMM implementation, model store. |
 | `ops/` | Ops API, capital allocator, governance daemons, executor, observability plumbing. |
 | `ops/observability/` | Prometheus/Grafana configs, alerting rules, validation scripts. |

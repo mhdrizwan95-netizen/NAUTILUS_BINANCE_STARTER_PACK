@@ -9,6 +9,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Optional, Tuple
 
+from engine.config.defaults import MEME_SENTIMENT_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str, env_csv
 from engine.core.order_router import OrderRouter
 from engine.core.market_resolver import resolve_market_choice
 from engine.risk import RiskRails
@@ -25,45 +27,6 @@ except Exception:  # pragma: no cover - metrics disabled
     meme_sentiment_cooldown_epoch = None  # type: ignore[assignment]
 
 _LOG = logging.getLogger("engine.strategies.meme_sentiment")
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(float(raw))
-    except ValueError:
-        return default
-
-
-def _env_list(name: str, default: Iterable[str]) -> Tuple[str, ...]:
-    raw = os.getenv(name)
-    if raw is None:
-        return tuple(default)
-    items = [item.strip() for item in raw.split(",") if item.strip()]
-    if not items:
-        return tuple(default)
-    return tuple(items)
-
-
 @dataclass(frozen=True)
 class MemeCoinConfig:
     enabled: bool = False
@@ -92,33 +55,43 @@ class MemeCoinConfig:
 
 
 def load_meme_coin_config() -> MemeCoinConfig:
-    default_market_raw = os.getenv("MEME_SENTIMENT_DEFAULT_MARKET", "").strip().lower()
+    if os.environ.get("SOCIAL_SENTIMENT_ENABLED") and not os.environ.get("MEME_SENTIMENT_ENABLED"):
+        os.environ["MEME_SENTIMENT_ENABLED"] = os.environ["SOCIAL_SENTIMENT_ENABLED"]
+        _LOG.warning("SOCIAL_SENTIMENT_ENABLED is deprecated; use MEME_SENTIMENT_ENABLED instead")
+    if os.environ.get("SOCIAL_SENTIMENT_SOURCES") and not os.environ.get("MEME_SENTIMENT_SOURCES"):
+        os.environ["MEME_SENTIMENT_SOURCES"] = os.environ["SOCIAL_SENTIMENT_SOURCES"]
+        _LOG.warning("SOCIAL_SENTIMENT_SOURCES is deprecated; use MEME_SENTIMENT_SOURCES instead")
+
+    default_market_raw = env_str(
+        "MEME_SENTIMENT_DEFAULT_MARKET",
+        MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DEFAULT_MARKET"],
+    ).strip().lower()
     default_market = default_market_raw or "spot"
     if default_market not in {"spot", "margin", "futures", "options"}:
         default_market = "spot"
     return MemeCoinConfig(
-        enabled=_env_bool("MEME_SENTIMENT_ENABLED", False),
-        dry_run=_env_bool("MEME_SENTIMENT_DRY_RUN", True),
-        per_trade_risk_pct=_env_float("MEME_SENTIMENT_RISK_PCT", 0.0075),
-        stop_loss_pct=_env_float("MEME_SENTIMENT_STOP_PCT", 0.10),
-        take_profit_pct=_env_float("MEME_SENTIMENT_TP_PCT", 0.25),
-        trail_stop_pct=_env_float("MEME_SENTIMENT_TRAIL_PCT", 0.12),
-        fallback_equity_usd=_env_float("MEME_SENTIMENT_FALLBACK_EQUITY", 2_000.0),
-        notional_min_usd=_env_float("MEME_SENTIMENT_NOTIONAL_MIN", 25.0),
-        notional_max_usd=_env_float("MEME_SENTIMENT_NOTIONAL_MAX", 200.0),
-        min_priority=_env_float("MEME_SENTIMENT_MIN_PRIORITY", 0.82),
-        min_social_score=_env_float("MEME_SENTIMENT_MIN_SCORE", 2.2),
-        min_mentions=_env_int("MEME_SENTIMENT_MIN_MENTIONS", 18),
-        min_velocity_score=_env_float("MEME_SENTIMENT_MIN_VELOCITY", 1.0),
-        max_chase_pct=_env_float("MEME_SENTIMENT_MAX_CHASE_PCT", 0.55),
-        max_spread_pct=_env_float("MEME_SENTIMENT_MAX_SPREAD_PCT", 0.035),
-        cooldown_sec=_env_float("MEME_SENTIMENT_COOLDOWN_SEC", 1_200.0),
-        trade_lock_sec=_env_float("MEME_SENTIMENT_LOCK_SEC", 600.0),
-        deny_keywords=_env_list("MEME_SENTIMENT_DENY_KEYWORDS", ("rug", "rugpull", "scam", "honeypot")),
-        allow_sources=_env_list("MEME_SENTIMENT_SOURCES", ()),
-        quote_priority=_env_list("MEME_SENTIMENT_QUOTES", ("USDT", "USDC", "BUSD")),
-        metrics_enabled=_env_bool("MEME_SENTIMENT_METRICS_ENABLED", True),
-        publish_topic=os.getenv("MEME_SENTIMENT_PUBLISH_TOPIC", "strategy.meme_sentiment_trade"),
+        enabled=env_bool("MEME_SENTIMENT_ENABLED", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_ENABLED"]),
+        dry_run=env_bool("MEME_SENTIMENT_DRY_RUN", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DRY_RUN"]),
+        per_trade_risk_pct=env_float("MEME_SENTIMENT_RISK_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_RISK_PCT"]),
+        stop_loss_pct=env_float("MEME_SENTIMENT_STOP_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_STOP_PCT"]),
+        take_profit_pct=env_float("MEME_SENTIMENT_TP_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_TP_PCT"]),
+        trail_stop_pct=env_float("MEME_SENTIMENT_TRAIL_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_TRAIL_PCT"]),
+        fallback_equity_usd=env_float("MEME_SENTIMENT_FALLBACK_EQUITY", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_FALLBACK_EQUITY"]),
+        notional_min_usd=env_float("MEME_SENTIMENT_NOTIONAL_MIN", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_NOTIONAL_MIN"]),
+        notional_max_usd=env_float("MEME_SENTIMENT_NOTIONAL_MAX", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_NOTIONAL_MAX"]),
+        min_priority=env_float("MEME_SENTIMENT_MIN_PRIORITY", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_PRIORITY"]),
+        min_social_score=env_float("MEME_SENTIMENT_MIN_SCORE", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_SCORE"]),
+        min_mentions=env_int("MEME_SENTIMENT_MIN_MENTIONS", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_MENTIONS"]),
+        min_velocity_score=env_float("MEME_SENTIMENT_MIN_VELOCITY", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_VELOCITY"]),
+        max_chase_pct=env_float("MEME_SENTIMENT_MAX_CHASE_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MAX_CHASE_PCT"]),
+        max_spread_pct=env_float("MEME_SENTIMENT_MAX_SPREAD_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MAX_SPREAD_PCT"]),
+        cooldown_sec=env_float("MEME_SENTIMENT_COOLDOWN_SEC", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_COOLDOWN_SEC"]),
+        trade_lock_sec=env_float("MEME_SENTIMENT_LOCK_SEC", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_LOCK_SEC"]),
+        deny_keywords=tuple(env_csv("MEME_SENTIMENT_DENY_KEYWORDS", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DENY_KEYWORDS"])),
+        allow_sources=tuple(env_csv("MEME_SENTIMENT_SOURCES", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_SOURCES"])),
+        quote_priority=tuple(env_csv("MEME_SENTIMENT_QUOTES", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_QUOTES"])),
+        metrics_enabled=env_bool("MEME_SENTIMENT_METRICS_ENABLED", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_METRICS_ENABLED"]),
+        publish_topic=env_str("MEME_SENTIMENT_PUBLISH_TOPIC", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_PUBLISH_TOPIC"]),
         default_market=default_market,
     )
 
