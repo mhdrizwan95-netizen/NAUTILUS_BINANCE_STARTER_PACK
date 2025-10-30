@@ -10,9 +10,10 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import httpx
 
 from engine.config import get_settings
-from engine.config.defaults import GLOBAL_DEFAULTS, TREND_DEFAULTS
-from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
+from engine.config.defaults import TREND_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str
 from engine.core.market_resolver import resolve_market_choice
+from engine.universe.effective import StrategyUniverse
 from .trend_params import TrendParams, TrendAutoTuner
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -67,10 +68,8 @@ class TrendStrategyConfig:
     regime: TrendTF
 
 
-def load_trend_config() -> TrendStrategyConfig:
-    override_symbols = split_symbols(env_str("TREND_SYMBOLS", str(TREND_DEFAULTS["TREND_SYMBOLS"])) or None)
-    global_symbols = split_symbols(env_str("TRADE_SYMBOLS", str(GLOBAL_DEFAULTS["TRADE_SYMBOLS"])) or None)
-    symbols = override_symbols if override_symbols is not None else (global_symbols or [])
+def load_trend_config(scanner: "SymbolScanner" | None = None) -> TrendStrategyConfig:
+    universe = StrategyUniverse(scanner).get("trend") or []
     primary = TrendTF(
         interval=env_str("TREND_PRIMARY_INTERVAL", TREND_DEFAULTS["TREND_PRIMARY_INTERVAL"]),
         fast=env_int("TREND_PRIMARY_FAST", TREND_DEFAULTS["TREND_PRIMARY_FAST"]),
@@ -92,7 +91,7 @@ def load_trend_config() -> TrendStrategyConfig:
     return TrendStrategyConfig(
         enabled=env_bool("TREND_ENABLED", TREND_DEFAULTS["TREND_ENABLED"]),
         dry_run=env_bool("TREND_DRY_RUN", TREND_DEFAULTS["TREND_DRY_RUN"]),
-        symbols=symbols,
+        symbols=list(universe),
         fetch_limit=env_int("TREND_FETCH_LIMIT", TREND_DEFAULTS["TREND_FETCH_LIMIT"]),
         refresh_sec=env_int("TREND_REFRESH_SEC", TREND_DEFAULTS["TREND_REFRESH_SEC"]),
         atr_length=env_int("TREND_ATR_LENGTH", TREND_DEFAULTS["TREND_ATR_LENGTH"]),
@@ -191,7 +190,7 @@ class TrendStrategyModule:
         self._client = client or _SyncKlinesClient()
         self._clock = clock
         self._log = logger or logging.getLogger("engine.trend")
-        self._scanner = scanner
+        self._universe = StrategyUniverse(scanner)
         self._params = TrendParams.from_config(cfg)
         self._auto_tuner = TrendAutoTuner(cfg, self._params, logger=self._log)
         self._venue = "BINANCE"
@@ -220,9 +219,8 @@ class TrendStrategyModule:
         if not self.enabled:
             return None
         base = symbol.split(".")[0].upper()
-        if self.cfg.symbols and base not in self.cfg.symbols:
-            return None
-        if self._scanner and not self._scanner.is_selected(base):
+        allowed = self._universe.get("trend")
+        if allowed is not None and base not in allowed:
             return None
 
         now = float(ts)

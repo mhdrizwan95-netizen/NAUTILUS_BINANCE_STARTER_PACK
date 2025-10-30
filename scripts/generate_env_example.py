@@ -36,7 +36,6 @@ SECTIONS: Dict[str, Iterable[str]] = {
     "Trend Strategy": [
         "TREND_ENABLED",
         "TREND_DRY_RUN",
-        "TREND_SYMBOLS",
         "TREND_FETCH_LIMIT",
         "TREND_REFRESH_SEC",
         "TREND_ATR_LENGTH",
@@ -76,7 +75,6 @@ SECTIONS: Dict[str, Iterable[str]] = {
     "Scalping": [
         "SCALP_ENABLED",
         "SCALP_DRY_RUN",
-        "SCALP_SYMBOLS",
         "SCALP_WINDOW_SEC",
         "SCALP_MIN_TICKS",
         "SCALP_MIN_RANGE_BPS",
@@ -103,7 +101,6 @@ SECTIONS: Dict[str, Iterable[str]] = {
     "Momentum (Real-Time)": [
         "MOMENTUM_RT_ENABLED",
         "MOMENTUM_RT_DRY_RUN",
-        "MOMENTUM_RT_SYMBOLS",
         "MOMENTUM_RT_WINDOW_SEC",
         "MOMENTUM_RT_BASELINE_SEC",
         "MOMENTUM_RT_MOVE_THRESHOLD_PCT",
@@ -181,13 +178,11 @@ COMMENTS = {
     "EQUITY_COOLDOWN_SEC": "Cooldown duration after hitting drawdown limit.",
     "MARGIN_ENABLED": "Allow submitting margin orders.",
     "OPTIONS_ENABLED": "Allow submitting options orders.",
-    "TREND_SYMBOLS": "Optional override; empty or '*' falls back to TRADE_SYMBOLS.",
-    "SCALP_SYMBOLS": "Optional override for scalping universe.",
-    "MOMENTUM_RT_SYMBOLS": "Optional override for momentum universe.",
     "MEME_SENTIMENT_SOURCES": "CSV of event sources to react to (twitter_firehose,dex_whale,binance_listings).",
     "MEME_SENTIMENT_DENY_KEYWORDS": "Comma-separated keywords to ignore.",
     "MEME_SENTIMENT_QUOTES": "Preferred quote assets when selecting trading pairs.",
     "SYMBOL_SCANNER_UNIVERSE": "Universe preset or CSV list; '*' falls back to TRADE_SYMBOLS.",
+    "SYMBOL_SCANNER_ENABLED": "Enable the dynamic symbol scanner; authoritative universe when true.",
     "SYMBOL_SCANNER_STATE_PATH": "State file for scanner selections.",
     "SOCIAL_SENTIMENT_ENABLED": "DEPRECATED: use MEME_SENTIMENT_ENABLED.",
     "SOCIAL_SENTIMENT_SOURCES": "DEPRECATED: use MEME_SENTIMENT_SOURCES.",

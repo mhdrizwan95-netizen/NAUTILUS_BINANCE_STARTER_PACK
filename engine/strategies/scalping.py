@@ -6,17 +6,22 @@ import math
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable, Deque, Dict, Optional
+from typing import Callable, Deque, Dict, Optional, TYPE_CHECKING
 
 from engine import metrics
-from engine.config.defaults import GLOBAL_DEFAULTS, SCALP_DEFAULTS
-from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
+from engine.config.defaults import SCALP_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str
 from engine.core.market_resolver import resolve_market_choice
+from engine.universe.effective import StrategyUniverse
+from engine.state.cooldown import Cooldowns
 
 try:  # Optional dependency used for realistic slippage estimation
     from ops import slip_model as _slip_module  # type: ignore
 except Exception:  # pragma: no cover - optional runtime dependency
     _slip_module = None  # type: ignore
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .symbol_scanner import SymbolScanner
 
 
 @dataclass(frozen=True)
@@ -48,11 +53,9 @@ class ScalpConfig:
     book_stale_sec: float
 
 
-def load_scalp_config() -> ScalpConfig:
-    override_symbols = split_symbols(env_str("SCALP_SYMBOLS", SCALP_DEFAULTS["SCALP_SYMBOLS"]) or None)
-    global_symbols = split_symbols(env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]) or None)
-    symbols_list = override_symbols if override_symbols is not None else (global_symbols or [])
-    symbols = tuple(symbols_list)
+def load_scalp_config(scanner: "SymbolScanner" | None = None) -> ScalpConfig:
+    universe = StrategyUniverse(scanner).get("scalp") or []
+    symbols = tuple(universe)
     window = max(5.0, env_float("SCALP_WINDOW_SEC", SCALP_DEFAULTS["SCALP_WINDOW_SEC"]))
     return ScalpConfig(
         enabled=env_bool("SCALP_ENABLED", SCALP_DEFAULTS["SCALP_ENABLED"]),
@@ -149,15 +152,18 @@ class ScalpStrategyModule:
         *,
         clock=time,
         slip_predictor: Optional[Callable[[Dict[str, float]], float]] = None,
+        scanner: "SymbolScanner" | None = None,
     ) -> None:
-        self.cfg = cfg or load_scalp_config()
+        base_cfg = cfg or load_scalp_config(scanner)
+        self.cfg = base_cfg
         self.enabled = self.cfg.enabled
         self._clock = clock
         self._windows: Dict[str, Deque[tuple[float, float]]] = defaultdict(deque)
         self._books: Dict[str, _BookState] = {}
-        self._cooldown_until: Dict[str, float] = defaultdict(float)
+        self._cooldowns = Cooldowns(default_ttl=self.cfg.cooldown_sec)
         self._signal_history: Dict[str, Deque[float]] = defaultdict(deque)
         self._slip_predictor = slip_predictor or self._load_slip_predictor()
+        self._universe = StrategyUniverse(scanner)
 
     def _load_slip_predictor(self) -> Optional[Callable[[Dict[str, float]], float]]:
         if not _slip_module:
@@ -199,7 +205,8 @@ class ScalpStrategyModule:
         if not symbol:
             return
         base = symbol.split(".")[0].upper()
-        if self.cfg.symbols and base not in self.cfg.symbols:
+        allowed = self._universe.get("scalp")
+        if allowed is not None and base not in allowed:
             return
         now = ts if ts is not None else self._clock.time()
         book = _BookState(
@@ -266,7 +273,8 @@ class ScalpStrategyModule:
 
         base = symbol.split(".")[0].upper()
         venue = symbol.split(".")[1].lower() if "." in symbol else "binance"
-        if self.cfg.symbols and base not in self.cfg.symbols:
+        allowed = self._universe.get("scalp")
+        if allowed is not None and base not in allowed:
             return None
 
         now = ts if ts is not None else self._clock.time()
@@ -316,7 +324,7 @@ class ScalpStrategyModule:
         if len(history) >= self.cfg.max_signals_per_min:
             return None
 
-        if now < self._cooldown_until.get(base, 0.0):
+        if not self._cooldowns.allow(base, now=now):
             return None
 
         side: Optional[str] = None
@@ -363,7 +371,7 @@ class ScalpStrategyModule:
         ttl = self.cfg.signal_ttl_sec
         expires_at = now + ttl
 
-        self._cooldown_until[base] = now + self.cfg.cooldown_sec
+        self._cooldowns.hit(base, now=now)
         history.append(now)
 
         self._record_signal_metrics(

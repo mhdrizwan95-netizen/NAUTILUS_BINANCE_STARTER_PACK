@@ -1,0 +1,36 @@
+name: Async Discipline
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Forbid bare threads and sleeps in engine/
+        run: |
+          set -e
+          allow_threads='engine/strategy.py|engine/app.py|engine/storage/sqlite.py|engine/strategies/symbol_scanner.py'
+          allow_sleep='engine/strategy.py|engine/telemetry/metrics_hook_example.py'
+          thread_hits=$(rg -n 'threading\.Thread\(' engine || true)
+          if [ -n "$thread_hits" ]; then
+            filtered=$(echo "$thread_hits" | grep -Ev "$allow_threads" || true)
+            if [ -n "$filtered" ]; then
+              echo "::error::Detected threading.Thread usage outside allowlist"
+              echo "$filtered"
+              exit 1
+            fi
+          fi
+          sleep_hits=$(rg -n 'time\.sleep\(' engine || true)
+          if [ -n "$sleep_hits" ]; then
+            filtered=$(echo "$sleep_hits" | grep -Ev "$allow_sleep" || true)
+            if [ -n "$filtered" ]; then
+              echo "::error::Detected time.sleep usage outside allowlist"
+              echo "$filtered"
+              exit 1
+            fi
+          fi
+          echo "✅ Async discipline guard passed"

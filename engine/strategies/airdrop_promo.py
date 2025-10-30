@@ -11,6 +11,7 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 from engine.core.order_router import OrderRouter
 from engine.core.market_resolver import resolve_market_choice
 from engine.risk import RiskRails
+from engine.execution.execute import StrategyExecutor
 
 try:  # Optional when metrics are disabled in certain test contexts
     from engine.metrics import (
@@ -167,6 +168,12 @@ class AirdropPromoWatcher:
         self._cooldowns: Dict[str, float] = {}
         self._seen_promos: set[str] = set()
         self._allow_sources = {src.lower() for src in self.cfg.allowed_sources if src}
+        self._executor = StrategyExecutor(
+            risk=risk,
+            router=router,
+            default_dry_run=self.cfg.dry_run,
+            source="airdrop_promo",
+        )
 
     # ------------------------------------------------------------------ public API
     async def on_external_event(self, evt: Dict[str, Any]) -> None:
@@ -233,9 +240,31 @@ class AirdropPromoWatcher:
 
         qualified_symbol = f"{symbol}.BINANCE" if "." not in symbol else symbol
         market_choice = resolve_market_choice(qualified_symbol, self.cfg.default_market)
-        ok, reason = self.risk.check_order(symbol=qualified_symbol, side="BUY", quote=notional, quantity=None, market=market_choice)
-        if not ok:
-            detail = str(reason.get("error") or "risk")
+        try:
+            execution = await self._executor.execute(
+                {
+                    "strategy": "airdrop_promo",
+                    "symbol": qualified_symbol,
+                    "side": "BUY",
+                    "quote": notional,
+                    "market": market_choice,
+                    "meta": {
+                        "promo_id": promo_id,
+                        "expected_reward": expected_reward,
+                    },
+                    "tag": "airdrop_entry",
+                    "ts": now,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("[AIRDROP] execution failed for %s: %s", symbol, exc)
+            self._record_order(symbol, "failed")
+            self._set_cooldown(symbol, now)
+            return
+
+        status = str(execution.get("status") or "unknown")
+        if status == "rejected":
+            detail = str(execution.get("error") or execution.get("reason") or "risk")
             self._record_event(symbol, f"risk_{detail.lower()}")
             self._seen_promos.add(promo_id)
             self._set_cooldown(symbol, now)
@@ -250,7 +279,7 @@ class AirdropPromoWatcher:
 
         self._seen_promos.add(promo_id)
 
-        if self.cfg.dry_run:
+        if status == "dry_run":
             _LOG.info(
                 "[AIRDROP] dry-run: promo=%s symbol=%s quote=%.2f reward=%.2f market=%s",
                 promo_id,
@@ -273,16 +302,10 @@ class AirdropPromoWatcher:
             )
             return
 
-        try:
-            result = await self.router.market_quote(qualified_symbol, "BUY", notional, market=market_choice)
-        except Exception as exc:  # noqa: BLE001
-            _LOG.warning("[AIRDROP] execution failed for %s: %s", symbol, exc)
-            self._record_order(symbol, "failed")
-            self._set_cooldown(symbol, now)
-            return
-
-        avg_px = self._safe_float(result.get("avg_fill_price"), default=price)
-        qty = self._safe_float(result.get("filled_qty_base"), default=notional / max(avg_px, 1e-9))
+        order_payload = execution.get("order", {})
+        router_result = order_payload.get("result", {})
+        avg_px = self._safe_float(router_result.get("avg_fill_price"), default=price)
+        qty = self._safe_float(router_result.get("filled_qty_base"), default=notional / max(avg_px, 1e-9))
         _LOG.info(
             "[AIRDROP] participated promo=%s symbol=%s qty=%.6f avg=%.6f notional=%.2f reward=%.2f market=%s",
             promo_id,

@@ -26,7 +26,7 @@ class TestStrategyOnTick:
 
     @patch('engine.strategy._MACross.push')
     @patch('engine.strategy.metrics')
-    @patch('engine.strategy._execute_strategy_signal', return_value={"status": "simulated"})
+    @patch('engine.strategy._execute_strategy_signal', return_value={"status": "dry_run"})
     def test_ma_cross_buy_signal(self, mock_execute, mock_metrics, mock_ma_push):
         """Test MA crossover generates BUY signal."""
         mock_ma_push.return_value = "BUY"
@@ -46,7 +46,7 @@ class TestStrategyOnTick:
 
     @patch('engine.strategy._MACross.push')
     @patch('engine.strategy.metrics')
-    @patch('engine.strategy._execute_strategy_signal', return_value={"status": "simulated"})
+    @patch('engine.strategy._execute_strategy_signal', return_value={"status": "dry_run"})
     def test_ma_cross_sell_signal(self, mock_execute, mock_metrics, mock_ma_push):
         """Test MA crossover generates SELL signal."""
         mock_ma_push.return_value = "SELL"
@@ -60,7 +60,7 @@ class TestStrategyOnTick:
 
     @patch('engine.strategy._MACross.push')
     @patch('engine.strategy.metrics')
-    @patch('engine.strategy._execute_strategy_signal', return_value={"status": "simulated"})
+    @patch('engine.strategy._execute_strategy_signal', return_value={"status": "dry_run"})
     def test_no_signal_when_no_crossover(self, mock_execute, mock_metrics, mock_ma_push):
         """Test no signal when MA doesn't cross."""
         mock_ma_push.return_value = None  # No signal
@@ -117,7 +117,7 @@ class TestStrategyOnTick:
         strat._tick_listeners.clear()
 
     @patch('engine.strategy._MACross.push')
-    @patch('engine.strategy._execute_strategy_signal', return_value={"status": "simulated"})
+    @patch('engine.strategy._execute_strategy_signal', return_value={"status": "dry_run"})
     @patch('engine.strategy.metrics')
     def test_btc_base_extraction(self, mock_metrics, mock_execute, mock_ma_push):
         """Test BTC base extraction from various symbol formats."""
