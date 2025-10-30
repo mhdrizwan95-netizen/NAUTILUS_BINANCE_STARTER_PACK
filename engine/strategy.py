@@ -19,6 +19,8 @@ from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
 from .strategies.trend_follow import TrendStrategyModule, load_trend_config
 from .strategies.scalping import ScalpStrategyModule, load_scalp_config
 from .telemetry.publisher import record_latency
+from .state.cooldown import Cooldowns
+from .strategies.scalp.brackets import ScalpBracketManager
 try:
     from .strategies.momentum_realtime import MomentumStrategyModule, load_momentum_rt_config
 except Exception:  # pragma: no cover - optional component
@@ -79,8 +81,7 @@ if 'MomentumStrategyModule' in globals() and MomentumStrategyModule and load_mom
         MOMENTUM_RT_MODULE = None
 
 _SCALP_BUS_WIRED = False
-_SCALP_WATCH_LOCK = threading.Lock()
-_ACTIVE_SCALP_WATCHES: Dict[str, threading.Thread] = {}
+_SCALP_BRACKET_MANAGER: Optional[ScalpBracketManager] = None
 
 
 def _wire_scalp_fill_handler() -> None:
@@ -95,7 +96,7 @@ def _wire_scalp_fill_handler() -> None:
         logging.getLogger(__name__).warning("Scalping fill handler wiring failed", exc_info=True)
 
 
-def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
+async def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
     if not SCALP_MODULE or not getattr(SCALP_MODULE, "enabled", False):
         return
     meta = evt.get("strategy_meta")
@@ -117,14 +118,17 @@ def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
     if stop_px <= 0.0 or target_px <= 0.0:
         return
     order_id = str(evt.get("order_id") or "") or f"{symbol}:{evt.get('ts', time.time())}"
+    qualified = symbol if "." in symbol else f"{symbol}.{venue}"
+    tag_prefix = tag or "scalp"
     _start_scalp_bracket_watch(
         order_id=order_id,
-        symbol=symbol,
+        symbol=qualified,
         venue=venue,
-        side=side,
-        qty=qty,
+        entry_side=side,
+        quantity=qty,
         stop_px=stop_px,
         target_px=target_px,
+        tag_prefix=tag_prefix,
     )
 
 
@@ -133,10 +137,11 @@ def _start_scalp_bracket_watch(
     order_id: str,
     symbol: str,
     venue: str,
-    side: str,
-    qty: float,
+    entry_side: str,
+    quantity: float,
     stop_px: float,
     target_px: float,
+    tag_prefix: str,
 ) -> None:
     poll = 1.0
     ttl = 180.0
@@ -148,78 +153,22 @@ def _start_scalp_bracket_watch(
             poll = max(poll, 1.0)
             ttl = max(ttl, 180.0)
 
-    key = order_id or f"{symbol}:{side}:{int(time.time() * 1000)}"
-
-    def _watch() -> None:
-        logger = logging.getLogger(__name__)
-        qualified = symbol if "." in symbol else f"{symbol}.{venue}"
-        end_time = time.time() + ttl
-        exit_side = "SELL" if side == "BUY" else "BUY"
-        triggered: Optional[str] = None
-
-        def _submit_exit(exit_tag: str) -> None:
-            try:
-                sig = StrategySignal(
-                    symbol=qualified,
-                    side=exit_side,
-                    quote=None,
-                    quantity=qty,
-                    dry_run=None,
-                    tag=exit_tag,
-                    meta=None,
-                )
-                _execute_strategy_signal(sig)
-                try:
-                    metrics.scalp_bracket_exits_total.labels(
-                        symbol=symbol, venue=venue.lower(), mode=exit_tag
-                    ).inc()
-                except Exception:
-                    pass
-            except Exception:
-                logger.warning("[SCALP] exit submission failed for %s", qualified, exc_info=True)
-
-        while time.time() < end_time:
-            px = _latest_price(qualified)
-            if px is None or px <= 0.0:
-                time.sleep(poll)
-                continue
-            if side == "BUY":
-                if px >= target_px:
-                    triggered = "scalp_tp"
-                    _submit_exit(triggered)
-                    break
-                if px <= stop_px:
-                    triggered = "scalp_sl"
-                    _submit_exit(triggered)
-                    break
-            else:
-                if px <= target_px:
-                    triggered = "scalp_tp"
-                    _submit_exit(triggered)
-                    break
-                if px >= stop_px:
-                    triggered = "scalp_sl"
-                    _submit_exit(triggered)
-                    break
-            time.sleep(poll)
-        if triggered is None:
-            logger.info(
-                "[SCALP] bracket timeout for %s side=%s qty=%.6f (stop=%.6f tp=%.6f)",
-                qualified,
-                side,
-                qty,
-                stop_px,
-                target_px,
-            )
-        with _SCALP_WATCH_LOCK:
-            _ACTIVE_SCALP_WATCHES.pop(key, None)
-
-    with _SCALP_WATCH_LOCK:
-        if key in _ACTIVE_SCALP_WATCHES:
-            return
-        thread = threading.Thread(target=_watch, name=f"scalp-bracket-{symbol}", daemon=True)
-        _ACTIVE_SCALP_WATCHES[key] = thread
-    thread.start()
+    exit_side = "SELL" if entry_side == "BUY" else "BUY"
+    key = order_id or f"{symbol}:{entry_side}:{int(time.time() * 1000)}"
+    manager = _ensure_scalp_bracket_manager()
+    manager.watch(
+        key=key,
+        symbol=symbol,
+        venue=venue,
+        entry_side=entry_side,
+        exit_side=exit_side,
+        quantity=quantity,
+        stop_price=stop_px,
+        take_profit_price=target_px,
+        poll_interval=poll,
+        ttl=ttl,
+        tag_prefix=tag_prefix,
+    )
 
 
 if SCALP_MODULE and getattr(SCALP_MODULE, "enabled", False):
@@ -254,7 +203,7 @@ _stop_flag: threading.Event = threading.Event()
 _mac = _MACross(S_CFG.fast, S_CFG.slow)
 _tick_listeners: List[Callable[[str, float, float], object]] = []
 _last_tick_ts: Dict[str, float] = defaultdict(float)
-_symbol_cooldown_until: Dict[str, float] = defaultdict(float)
+_SYMBOL_COOLDOWNS = Cooldowns(default_ttl=getattr(S_CFG, "cooldown_sec", 0.0))
 _last_trade_price: Dict[str, float] = defaultdict(float)
 _entry_block_until: float = time.time() + float(os.getenv("WARMUP_SEC", "0"))
 
@@ -363,9 +312,8 @@ def _get_executor() -> StrategyExecutor:
     return _EXECUTOR
 
 
-def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict:
-    executor = _get_executor()
-    payload = {
+def _signal_payload(sig: StrategySignal) -> Dict[str, Any]:
+    return {
         "strategy": sig.tag or "strategy",
         "symbol": sig.symbol,
         "side": sig.side,
@@ -377,7 +325,19 @@ def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = N
         "tag": sig.tag or "strategy",
         "ts": time.time(),
     }
-    result = executor.execute_sync(payload, idem_key=idem_key)
+
+
+async def _execute_strategy_signal_async(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict[str, Any]:
+    executor = _get_executor()
+    result = await executor.execute(_signal_payload(sig), idem_key=idem_key)
+    if result.get("status") == "submitted":
+        _record_tick_latency(sig.symbol)
+    return result
+
+
+def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict[str, Any]:
+    executor = _get_executor()
+    result = executor.execute_sync(_signal_payload(sig), idem_key=idem_key)
     if result.get("status") == "submitted":
         _record_tick_latency(sig.symbol)
     return result
@@ -653,14 +613,15 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
         move_bp = abs(price - prev_price) / max(prev_price, 1e-9) * 10_000
         px_factor = min(2.0, max(0.5, 1.0 - min(move_bp, 50.0) / 100.0))
     dynamic_window = max(1.0, base_window * conf_factor * px_factor)
-    resume_at = _symbol_cooldown_until.get(symbol, 0.0)
-    if now < resume_at:
+    if not _SYMBOL_COOLDOWNS.allow(symbol, now=now):
         try:
-            metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(resume_at - now)
+            remaining = _SYMBOL_COOLDOWNS.remaining(symbol, now=now)
+            metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(remaining)
         except Exception:
             pass
         return False
-    _symbol_cooldown_until[symbol] = now + dynamic_window
+
+    _SYMBOL_COOLDOWNS.hit(symbol, ttl=dynamic_window, now=now)
     _last_trade_price[symbol] = price
     try:
         metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(dynamic_window)
@@ -763,3 +724,50 @@ def stop_scheduler():
 def block_entries_for(seconds: float) -> None:
     global _entry_block_until
     _entry_block_until = max(_entry_block_until, time.time() + float(seconds))
+def _ensure_scalp_bracket_manager() -> ScalpBracketManager:
+    global _SCALP_BRACKET_MANAGER
+    if _SCALP_BRACKET_MANAGER is None:
+        _SCALP_BRACKET_MANAGER = ScalpBracketManager(
+            price_fetcher=_latest_price,
+            submit_exit=_submit_scalp_exit,
+            logger=logging.getLogger(__name__),
+        )
+    return _SCALP_BRACKET_MANAGER
+
+
+async def _submit_scalp_exit(payload: Dict[str, Any]) -> None:
+    symbol = str(payload.get("symbol") or "").upper()
+    if not symbol:
+        return
+    venue = str(payload.get("venue") or "BINANCE").lower()
+    side = str(payload.get("side") or "SELL").upper()
+    quantity_raw = payload.get("quantity")
+    try:
+        quantity = float(quantity_raw)
+    except (TypeError, ValueError):
+        return
+    if quantity <= 0.0:
+        return
+    tag = str(payload.get("tag") or "scalp_exit")
+    meta = payload.get("meta")
+
+    sig = StrategySignal(
+        symbol=symbol,
+        side=side,
+        quote=None,
+        quantity=quantity,
+        dry_run=None,
+        tag=tag,
+        meta=meta,
+        market=None,
+    )
+    result = await _execute_strategy_signal_async(sig)
+    if result.get("status") != "submitted":
+        return
+
+    base = symbol.split(".")[0]
+    try:
+        metrics.scalp_bracket_exits_total.labels(symbol=base, venue=venue, mode=tag).inc()
+    except Exception:
+        pass
+

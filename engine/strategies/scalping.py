@@ -13,6 +13,7 @@ from engine.config.defaults import SCALP_DEFAULTS
 from engine.config.env import env_bool, env_float, env_int, env_str
 from engine.core.market_resolver import resolve_market_choice
 from engine.universe.effective import StrategyUniverse
+from engine.state.cooldown import Cooldowns
 
 try:  # Optional dependency used for realistic slippage estimation
     from ops import slip_model as _slip_module  # type: ignore
@@ -159,7 +160,7 @@ class ScalpStrategyModule:
         self._clock = clock
         self._windows: Dict[str, Deque[tuple[float, float]]] = defaultdict(deque)
         self._books: Dict[str, _BookState] = {}
-        self._cooldown_until: Dict[str, float] = defaultdict(float)
+        self._cooldowns = Cooldowns(default_ttl=self.cfg.cooldown_sec)
         self._signal_history: Dict[str, Deque[float]] = defaultdict(deque)
         self._slip_predictor = slip_predictor or self._load_slip_predictor()
         self._universe = StrategyUniverse(scanner)
@@ -323,7 +324,7 @@ class ScalpStrategyModule:
         if len(history) >= self.cfg.max_signals_per_min:
             return None
 
-        if now < self._cooldown_until.get(base, 0.0):
+        if not self._cooldowns.allow(base, now=now):
             return None
 
         side: Optional[str] = None
@@ -370,7 +371,7 @@ class ScalpStrategyModule:
         ttl = self.cfg.signal_ttl_sec
         expires_at = now + ttl
 
-        self._cooldown_until[base] = now + self.cfg.cooldown_sec
+        self._cooldowns.hit(base, now=now)
         history.append(now)
 
         self._record_signal_metrics(

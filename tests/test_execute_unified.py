@@ -1,7 +1,11 @@
 import asyncio
 import pytest
 
+import contextlib
+import os
+
 from engine.execution.execute import StrategyExecutor
+from engine.idempotency import CACHE, CACHE_PATH
 
 
 class DummyRisk:
@@ -76,3 +80,8 @@ def test_executor_rejects_via_risk():
     }))
     assert result["status"] == "rejected"
     assert not router.calls
+def setup_function() -> None:
+    CACHE.cache.clear()
+    with contextlib.suppress(FileNotFoundError):
+        os.remove(CACHE_PATH)
+

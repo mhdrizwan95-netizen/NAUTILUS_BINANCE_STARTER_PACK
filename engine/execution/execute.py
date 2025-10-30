@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
+from functools import partial
 import time
 from typing import Any, Callable, Dict, Optional
 
@@ -38,6 +40,18 @@ def _idempotency_key(signal: Dict[str, Any], hint: Optional[str] = None) -> str:
     except Exception:  # noqa: BLE001 - fallback to now
         ts_part = int(time.time())
     return f"sig:{strategy}:{symbol}:{side}:{ts_part}"
+
+
+def _is_async_callable(fn: Any) -> bool:
+    if inspect.iscoroutinefunction(fn):
+        return True
+    call = getattr(fn, "__call__", None)
+    if call and inspect.iscoroutinefunction(call):
+        return True
+    func = getattr(fn, "__func__", None)
+    if func and inspect.iscoroutinefunction(func):
+        return True
+    return False
 
 
 class StrategyExecutor:
@@ -211,10 +225,10 @@ class StrategyExecutor:
             cleanup = False
 
         try:
-            if asyncio.iscoroutinefunction(submit_callable):
+            if _is_async_callable(submit_callable):
                 result = await submit_callable(**call_kwargs)
             else:
-                result = await loop.run_in_executor(None, lambda: submit_callable(**call_kwargs))
+                result = await loop.run_in_executor(None, partial(submit_callable, **call_kwargs))
         finally:
             if cleanup:
                 try:
