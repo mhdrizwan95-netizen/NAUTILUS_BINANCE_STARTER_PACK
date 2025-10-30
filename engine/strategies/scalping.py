@@ -3,59 +3,20 @@ from __future__ import annotations
 """High-frequency scalping module driven by streaming market data."""
 
 import math
-import os
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Callable, Deque, Dict, Optional
 
 from engine import metrics
+from engine.config.defaults import GLOBAL_DEFAULTS, SCALP_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
 from engine.core.market_resolver import resolve_market_choice
 
 try:  # Optional dependency used for realistic slippage estimation
     from ops import slip_model as _slip_module  # type: ignore
 except Exception:  # pragma: no cover - optional runtime dependency
     _slip_module = None  # type: ignore
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(float(raw))
-    except ValueError:
-        return default
-
-
-def _env_list(name: str) -> tuple[str, ...]:
-    raw = os.getenv(name)
-    if not raw:
-        return ()
-    out: list[str] = []
-    for token in raw.split(","):
-        symbol = token.strip().upper()
-        if not symbol:
-            continue
-        out.append(symbol.replace(".BINANCE", ""))
-    return tuple(sorted(set(out)))
 
 
 @dataclass(frozen=True)
@@ -88,34 +49,37 @@ class ScalpConfig:
 
 
 def load_scalp_config() -> ScalpConfig:
-    symbols = _env_list("SCALP_SYMBOLS") or ("BTCUSDT", "ETHUSDT", "BNBUSDT")
-    window = max(5.0, _env_float("SCALP_WINDOW_SEC", 30.0))
+    override_symbols = split_symbols(env_str("SCALP_SYMBOLS", SCALP_DEFAULTS["SCALP_SYMBOLS"]) or None)
+    global_symbols = split_symbols(env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]) or None)
+    symbols_list = override_symbols if override_symbols is not None else (global_symbols or [])
+    symbols = tuple(symbols_list)
+    window = max(5.0, env_float("SCALP_WINDOW_SEC", SCALP_DEFAULTS["SCALP_WINDOW_SEC"]))
     return ScalpConfig(
-        enabled=_env_bool("SCALP_ENABLED", False),
-        dry_run=_env_bool("SCALP_DRY_RUN", True),
+        enabled=env_bool("SCALP_ENABLED", SCALP_DEFAULTS["SCALP_ENABLED"]),
+        dry_run=env_bool("SCALP_DRY_RUN", SCALP_DEFAULTS["SCALP_DRY_RUN"]),
         symbols=symbols,
         window_sec=window,
-        min_ticks=max(3, _env_int("SCALP_MIN_TICKS", 8)),
-        min_range_bps=max(3.0, _env_float("SCALP_MIN_RANGE_BPS", 6.0)),
-        lower_threshold=min(0.45, max(0.0, _env_float("SCALP_LOWER_THRESHOLD", 0.22))),
-        upper_threshold=max(0.55, min(1.0, _env_float("SCALP_UPPER_THRESHOLD", 0.78))),
-        rsi_length=max(2, _env_int("SCALP_RSI_LENGTH", 2)),
-        rsi_buy=max(0.0, _env_float("SCALP_RSI_BUY", 20.0)),
-        rsi_sell=min(100.0, _env_float("SCALP_RSI_SELL", 80.0)),
-        stop_bps=max(4.0, _env_float("SCALP_STOP_BPS", 12.0)),
-        take_profit_bps=max(4.0, _env_float("SCALP_TP_BPS", 18.0)),
-        quote_usd=max(10.0, _env_float("SCALP_QUOTE_USD", 125.0)),
-        cooldown_sec=max(0.0, _env_float("SCALP_COOLDOWN_SEC", 15.0)),
-        allow_shorts=_env_bool("SCALP_ALLOW_SHORTS", True),
-        prefer_futures=_env_bool("SCALP_PREFER_FUTURES", True),
-        signal_ttl_sec=max(5.0, _env_float("SCALP_SIGNAL_TTL_SEC", 30.0)),
-        max_signals_per_min=max(1, _env_int("SCALP_MAX_SIGNALS_PER_MIN", 6)),
-        imbalance_threshold=max(0.0, min(1.0, _env_float("SCALP_IMBALANCE_THRESHOLD", 0.18))),
-        max_spread_bps=max(1.0, _env_float("SCALP_MAX_SPREAD_BPS", 6.0)),
-        min_depth_usd=max(1000.0, _env_float("SCALP_MIN_DEPTH_USD", 20000.0)),
-        momentum_ticks=max(1, _env_int("SCALP_MOMENTUM_TICKS", 3)),
-        fee_bps=max(0.0, _env_float("SCALP_FEE_BPS", 7.5)),
-        book_stale_sec=max(1.0, _env_float("SCALP_BOOK_STALE_SEC", 5.0)),
+        min_ticks=max(3, env_int("SCALP_MIN_TICKS", SCALP_DEFAULTS["SCALP_MIN_TICKS"])),
+        min_range_bps=max(3.0, env_float("SCALP_MIN_RANGE_BPS", SCALP_DEFAULTS["SCALP_MIN_RANGE_BPS"])),
+        lower_threshold=min(0.45, max(0.0, env_float("SCALP_LOWER_THRESHOLD", SCALP_DEFAULTS["SCALP_LOWER_THRESHOLD"]))),
+        upper_threshold=max(0.55, min(1.0, env_float("SCALP_UPPER_THRESHOLD", SCALP_DEFAULTS["SCALP_UPPER_THRESHOLD"]))),
+        rsi_length=max(2, env_int("SCALP_RSI_LENGTH", SCALP_DEFAULTS["SCALP_RSI_LENGTH"])),
+        rsi_buy=max(0.0, env_float("SCALP_RSI_BUY", SCALP_DEFAULTS["SCALP_RSI_BUY"])),
+        rsi_sell=min(100.0, env_float("SCALP_RSI_SELL", SCALP_DEFAULTS["SCALP_RSI_SELL"])),
+        stop_bps=max(4.0, env_float("SCALP_STOP_BPS", SCALP_DEFAULTS["SCALP_STOP_BPS"])),
+        take_profit_bps=max(4.0, env_float("SCALP_TP_BPS", SCALP_DEFAULTS["SCALP_TP_BPS"])),
+        quote_usd=max(10.0, env_float("SCALP_QUOTE_USD", SCALP_DEFAULTS["SCALP_QUOTE_USD"])),
+        cooldown_sec=max(0.0, env_float("SCALP_COOLDOWN_SEC", SCALP_DEFAULTS["SCALP_COOLDOWN_SEC"])),
+        allow_shorts=env_bool("SCALP_ALLOW_SHORTS", SCALP_DEFAULTS["SCALP_ALLOW_SHORTS"]),
+        prefer_futures=env_bool("SCALP_PREFER_FUTURES", SCALP_DEFAULTS["SCALP_PREFER_FUTURES"]),
+        signal_ttl_sec=max(5.0, env_float("SCALP_SIGNAL_TTL_SEC", SCALP_DEFAULTS["SCALP_SIGNAL_TTL_SEC"])),
+        max_signals_per_min=max(1, env_int("SCALP_MAX_SIGNALS_PER_MIN", SCALP_DEFAULTS["SCALP_MAX_SIGNALS_PER_MIN"])),
+        imbalance_threshold=max(0.0, min(1.0, env_float("SCALP_IMBALANCE_THRESHOLD", SCALP_DEFAULTS["SCALP_IMBALANCE_THRESHOLD"]))),
+        max_spread_bps=max(1.0, env_float("SCALP_MAX_SPREAD_BPS", SCALP_DEFAULTS["SCALP_MAX_SPREAD_BPS"])),
+        min_depth_usd=max(1000.0, env_float("SCALP_MIN_DEPTH_USD", SCALP_DEFAULTS["SCALP_MIN_DEPTH_USD"])),
+        momentum_ticks=max(1, env_int("SCALP_MOMENTUM_TICKS", SCALP_DEFAULTS["SCALP_MOMENTUM_TICKS"])),
+        fee_bps=max(0.0, env_float("SCALP_FEE_BPS", SCALP_DEFAULTS["SCALP_FEE_BPS"])),
+        book_stale_sec=max(1.0, env_float("SCALP_BOOK_STALE_SEC", SCALP_DEFAULTS["SCALP_BOOK_STALE_SEC"])),
     )
 
 

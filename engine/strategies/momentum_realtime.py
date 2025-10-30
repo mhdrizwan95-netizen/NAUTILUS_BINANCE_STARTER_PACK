@@ -4,59 +4,17 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
 from typing import Deque, Dict, Iterable, Optional
 
 from engine import metrics
+from engine.config.defaults import GLOBAL_DEFAULTS, MOMENTUM_RT_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
 from engine.core.market_resolver import resolve_market_choice
 
 logger = logging.getLogger("engine.momentum.realtime")
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _env_float(name: str, default: float) -> float:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
-def _env_int(name: str, default: int) -> int:
-    raw = os.getenv(name)
-    if raw is None:
-        return default
-    try:
-        return int(float(raw))
-    except ValueError:
-        return default
-
-
-def _env_list(name: str) -> tuple[str, ...]:
-    raw = os.getenv(name)
-    if not raw:
-        return ()
-    out: list[str] = []
-    for token in raw.split(","):
-        symbol = token.strip().upper()
-        if not symbol:
-            continue
-        symbol = symbol.replace(".BINANCE", "")
-        out.append(symbol)
-    return tuple(sorted(set(out)))
-
-
 @dataclass(frozen=True)
 class MomentumRealtimeConfig:
     enabled: bool
@@ -77,30 +35,33 @@ class MomentumRealtimeConfig:
 
 
 def load_momentum_rt_config() -> MomentumRealtimeConfig:
-    symbols = _env_list("MOMENTUM_RT_SYMBOLS")
-    window_sec = max(10.0, _env_float("MOMENTUM_RT_WINDOW_SEC", 45.0))
-    baseline_sec = max(window_sec, _env_float("MOMENTUM_RT_BASELINE_SEC", 6 * 60.0))
-    pct_move = _env_float("MOMENTUM_RT_MOVE_THRESHOLD_PCT", 1.8) / 100.0
-    volume_ratio = max(1.0, _env_float("MOMENTUM_RT_VOLUME_SPIKE_RATIO", 2.0))
-    stop_loss_pct = max(0.001, _env_float("MOMENTUM_RT_STOP_PCT", 0.8) / 100.0)
-    trail_pct = max(0.001, _env_float("MOMENTUM_RT_TRAIL_PCT", 1.2) / 100.0)
-    take_profit_pct = max(0.0, _env_float("MOMENTUM_RT_TP_PCT", 3.5) / 100.0)
-    prefer_futures = _env_bool("MOMENTUM_RT_PREFER_FUTURES", True)
+    override_symbols = split_symbols(env_str("MOMENTUM_RT_SYMBOLS", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_SYMBOLS"]) or None)
+    global_symbols = split_symbols(env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]) or None)
+    symbols_list = override_symbols if override_symbols is not None else (global_symbols or [])
+    symbols = tuple(symbols_list)
+    window_sec = max(10.0, env_float("MOMENTUM_RT_WINDOW_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_WINDOW_SEC"]))
+    baseline_sec = max(window_sec, env_float("MOMENTUM_RT_BASELINE_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_BASELINE_SEC"]))
+    pct_move = env_float("MOMENTUM_RT_MOVE_THRESHOLD_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_MOVE_THRESHOLD_PCT"]) / 100.0
+    volume_ratio = max(1.0, env_float("MOMENTUM_RT_VOLUME_SPIKE_RATIO", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_VOLUME_SPIKE_RATIO"]))
+    stop_loss_pct = max(0.001, env_float("MOMENTUM_RT_STOP_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_STOP_PCT"]) / 100.0)
+    trail_pct = max(0.001, env_float("MOMENTUM_RT_TRAIL_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_TRAIL_PCT"]) / 100.0)
+    take_profit_pct = max(0.0, env_float("MOMENTUM_RT_TP_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_TP_PCT"]) / 100.0)
+    prefer_futures = env_bool("MOMENTUM_RT_PREFER_FUTURES", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_PREFER_FUTURES"])
     return MomentumRealtimeConfig(
-        enabled=_env_bool("MOMENTUM_RT_ENABLED", False),
-        dry_run=_env_bool("MOMENTUM_RT_DRY_RUN", True),
+        enabled=env_bool("MOMENTUM_RT_ENABLED", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_ENABLED"]),
+        dry_run=env_bool("MOMENTUM_RT_DRY_RUN", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_DRY_RUN"]),
         symbols=symbols,
         window_sec=window_sec,
         baseline_sec=baseline_sec,
-        min_ticks=max(2, _env_int("MOMENTUM_RT_MIN_TICKS", 3)),
+        min_ticks=max(2, env_int("MOMENTUM_RT_MIN_TICKS", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_MIN_TICKS"])),
         pct_move_threshold=pct_move,
         volume_spike_ratio=volume_ratio,
-        cooldown_sec=max(15.0, _env_float("MOMENTUM_RT_COOLDOWN_SEC", 180.0)),
-        quote_usd=max(25.0, _env_float("MOMENTUM_RT_QUOTE_USD", 150.0)),
+        cooldown_sec=max(15.0, env_float("MOMENTUM_RT_COOLDOWN_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_COOLDOWN_SEC"])),
+        quote_usd=max(25.0, env_float("MOMENTUM_RT_QUOTE_USD", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_QUOTE_USD"])),
         stop_loss_pct=stop_loss_pct,
         trail_pct=trail_pct,
         take_profit_pct=take_profit_pct,
-        allow_shorts=_env_bool("MOMENTUM_RT_ALLOW_SHORTS", False),
+        allow_shorts=env_bool("MOMENTUM_RT_ALLOW_SHORTS", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_ALLOW_SHORTS"]),
         prefer_futures=prefer_futures,
     )
 

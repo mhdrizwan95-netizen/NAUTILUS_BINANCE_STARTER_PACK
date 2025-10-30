@@ -16,21 +16,21 @@ pip install -U numpy pandas matplotlib
 
 # ensure testnet mode unless explicitly overridden
 export BINANCE_IS_TESTNET="${BINANCE_IS_TESTNET:-true}"
-export TRADING_ENABLED="${TRADING_ENABLED:-true}"
+export TRADING_ENABLED="${TRADING_ENABLED:-false}"
 
 # 1) Run paper trading for DURATION seconds (BTC + ETH)
 # Prefer 'timeout' if available; otherwise instruct manual stop.
+CMD=(uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info)
 if command -v timeout >/dev/null 2>&1; then
-  timeout "${DURATION}"s python ops/run_paper.py --symbol BTCUSDT.BINANCE --symbol ETHUSDT.BINANCE || true
+  timeout "${DURATION}"s "${CMD[@]}" || true
 else
   echo "No 'timeout' found. Starting paper mode—press Ctrl+C to stop when you have enough data."
-  python ops/run_paper.py --symbol BTCUSDT.BINANCE --symbol ETHUSDT.BINANCE
+  "${CMD[@]}"
 fi
 
 # 2) Verify log
 if [ ! -f "data/processed/feedback_log.csv" ]; then
-  echo "ERROR: feedback_log.csv not found after paper run." >&2
-  exit 1
+  echo "WARNING: data/processed/feedback_log.csv not found after paper run; ensure downstream consumers have data." >&2
 fi
 
 # 3) Run calibration

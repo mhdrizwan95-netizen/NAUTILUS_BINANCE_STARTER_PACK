@@ -42,6 +42,38 @@ Prometheus metrics → Ops API dashboards → Grafana/alerts
 
 Universe, situations, and screener services produce symbol lists and pattern hits that the strategy loop or executor can consume. `engine/core/event_bus.py` coordinates async notifications across subsystems.
 
+### Unified data flow
+
+```mermaid
+flowchart LR
+    subgraph Market Data
+        WS[WebSocket / REST feeds]
+    end
+    subgraph Engine
+        BUS(EventBus)
+        Ticks[market.tick]
+        Sys[Systematic Strategies\n(HMM, Trend, Scalp, Momentum)]
+        Events[Event-driven Strategies\n(Listing Sniper, Meme Sentiment, Airdrop)]
+        Risk[RiskRails]
+        Router[OrderRouter]
+        Port[Portfolio + Persistence]
+    end
+    subgraph External Signals
+        External[External services\n(universe, screener, webhooks)]
+    end
+
+    WS -->|tick events| Ticks
+    Ticks --> Sys
+    External -->|POST /events/external| BUS
+    BUS --> Events
+    Sys --> Risk
+    Events --> Risk
+    Risk --> Router --> Exchange[(Venue)] -->|fills| Port
+    Port --> Grafana[(Prometheus/Grafana)]
+```
+
+Tick data drives the systematic stack, while external services publish structured payloads to `events.external_feed`. Every strategy funnels through `RiskRails` before orders leave the engine.
+
 ## Getting Started
 
 ```bash
@@ -70,17 +102,31 @@ Enable the built‑in MA+HMM scheduler by setting `STRATEGY_ENABLED=true` (and f
 
 See docs/FEATURE_FLAGS.md for the one‑page index of important environment flags.
 
+### Configuration overview
+
+The `.env.example` file is now generated from `engine/config/defaults.py`, so every knob surfaced in the codebase appears in a single, well-documented template. Regenerate it with:
+
+```bash
+python scripts/generate_env_example.py
+```
+
+Key tips:
+
+* `TRADE_SYMBOLS` is the global allowlist. Leave it as `*` to permit every discovered symbol, or provide a comma-separated list (e.g., `BTCUSDT,ETHUSDT`).
+* Each strategy (`TREND_*`, `SCALP_*`, `MOMENTUM_RT_*`, `MEME_SENTIMENT_*`) has its own section with defaults that match the loader logic. Setting a per-strategy `*_SYMBOLS` value overrides `TRADE_SYMBOLS` for that module; blank or `*` falls back to the global list.
+* Risk rails (`MIN_NOTIONAL_USDT`, `EXPOSURE_CAP_*`, etc.) align with the defaults enforced by `engine.config.load_risk_config()` and `RiskRails`. Lower the limits to stay in “paper-safe” territory; raise them only once you have live liquidity to support it.
+* Deprecated aliases (`SOCIAL_SENTIMENT_*`) remain as commented entries so legacy deployments can copy/paste the correct replacements without guesswork.
+
 ## Key Directories
 
 | Path | Purpose |
 |------|---------|
 | `engine/` | Execution service: FastAPI app, order router, risk rails, metrics, persistence, reconciliation. |
 | `engine/core/` | Venue adapters (`binance.py`, `kraken.py`, `ibkr_client.py`), portfolio accounting, strategy scheduler, alert daemon. |
+| `engine/strategies/` | Unified strategy implementations (MA+HMM policy, ensemble fusion, trend, scalping, momentum, listing sniper, meme sentiment, airdrop promo, symbol scanner). |
 | `engine/guards/` | Depeg & Funding guards (halt/trim/hedge on adverse conditions). |
 | `engine/execution/` | Per‑symbol execution overrides (auto size‑cutback & mute). |
 | `engine/storage/` | SQLite facade (`sqlite.py`) and schema for orders, fills, positions, equity snapshots. |
-| `strategies/` | HMM policy implementation (`policy_hmm.py`), ensemble fusion (`ensemble_policy.py`), replay helpers, venue‑specific strategies. |
-| `engine/strategies/` | Event Breakout consumer + trailing watcher. |
 | `ml_service/` | Optional FastAPI microservice for training/inference, model registry, hierarchical HMM tooling. |
 | `ops/` | Ops API, governance daemons, capital allocator, exposure collector, alerting scripts, executor logic. |
 | `ops/observability/` | Prometheus & Grafana configuration, alert rules, helper scripts (`validate_obs.sh`). |
@@ -111,6 +157,20 @@ curl -sG --data-urlencode 'query=histogram_quantile(0.95, rate(strategy_tick_to_
 
 ## Strategy & Modules
 
+### Systematic stack (tick-driven)
+- **MA + HMM ensemble** — `engine/strategies/policy_hmm.py`, `engine/strategies/ensemble_policy.py`. Uses `engine/models/hmm_calibration.json` (or `HMM_CALIBRATION_PATH`) for per-symbol confidence tuning.
+- **Trend follower** — `engine/strategies/trend_follow.py`. Toggle with `TREND_ENABLED`; optional auto-tune knobs (`TREND_AUTO_TUNE_*`) adjust RSI/ATR windows on the fly.
+- **Scalper** — `engine/strategies/scalping.py`. Controlled by `SCALP_ENABLED`; respects spread/latency guardrails and per-symbol cooldowns.
+- **Momentum (real-time)** — `engine/strategies/momentum_realtime.py`. Watches fast moves using configurable volume/momentum thresholds.
+
+### Event-driven modules (`events.external_feed`)
+- **Listing Sniper** — `engine/strategies/listing_sniper.py`. Reacts to Binance listing announcements and can trade the new pair instantly. Flags: `LISTING_SNIPER_ENABLED`, `LISTING_SNIPER_DRY_RUN`, `LISTING_SNIPER_MAX_NOTIONAL_USD`, `LISTING_SNIPER_COOLDOWN_SEC`.
+- **Meme Coin Sentiment** — `engine/strategies/meme_coin_sentiment.py`. Listens to social feeds (e.g., `twitter_firehose`, `dex_whale`) and sizes positions based on sentiment score. Flags: `MEME_SENTIMENT_ENABLED`, `MEME_SENTIMENT_SOURCES`, `MEME_SENTIMENT_MIN_SIGNAL`.
+- **Airdrop & Promotion Watcher** — `engine/strategies/airdrop_promo.py`. Captures exchange promo events and opportunistic rebates. Flags: `AIRDROP_PROMO_ENABLED`, `AIRDROP_PROMO_SOURCES`, `AIRDROP_PROMO_MAX_NOTIONAL_USD`.
+- **Symbol Scanner** — `engine/strategies/symbol_scanner.py`. Maintains a rolling shortlist of eligible symbols; controlled via `SYMBOL_SCANNER_*`.
+
+All strategies respect the global allowlist (`TRADE_SYMBOLS`) unless a module-specific `*_SYMBOLS` override is provided. The EventBus handles fan-out; synchronous handlers run in a thread pool sized by `EVENTBUS_MAX_WORKERS` so blocking operations cannot freeze the loop.
+
 The MA+HMM ensemble uses a shared calibration profile so backtests and live trading stay aligned. Create/adjust `engine/models/hmm_calibration.json` (or `HMM_CALIBRATION_PATH`) with per-symbol overrides:
 
 ```json
@@ -122,13 +182,13 @@ The MA+HMM ensemble uses a shared calibration profile so backtests and live trad
 
 `policy_hmm.py` and the ensemble apply these factors live; the file reloads every ~60s.
 
-Event‑driven modules (enable with flags):
+Supporting modules (enable with flags):
 
-- Event Breakout: `engine/strategies/event_breakout.py` (start dry‑run; trailing via `event_breakout_trail.py`)
-- Guards: Depeg (`engine/guards/depeg_guard.py`), Funding (`engine/guards/funding_guard.py`)
-- Stop Validator: `engine/ops/stop_validator.py` (repairs missing SLs; optional Telegram ping)
-- Execution overrides: `engine/execution/venue_overrides.py` (size cutback & mute)
-- Risk‑parity sizing: `engine/risk/sizer.py`
+- Event Breakout: `engine/strategies/event_breakout.py` (start dry‑run; trailing via `event_breakout_trail.py`).
+- Protective guards: Depeg (`engine/guards/depeg_guard.py`), Funding (`engine/guards/funding_guard.py`).
+- Stop Validator: `engine/ops/stop_validator.py` repairs missing SLs and can ping Telegram.
+- Execution overrides: `engine/execution/venue_overrides.py` handles size cutback & mute.
+- Risk‑parity sizing: `engine/risk/sizer.py` adjusts per-symbol allocations.
 
 To profile end‑to‑end: target median `strategy_tick_to_order_latency_ms` < 100 ms; watch cooldown and order/ tick ratios to validate expected firing.
 

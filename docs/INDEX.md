@@ -12,7 +12,7 @@
 | Area | Scope | Notable entry points |
 |------|-------|----------------------|
 | Execution engine | FastAPI order API, risk rails, persistence, reconciliation, metrics | `engine/app.py`, `engine/core/order_router.py`, `engine/risk.py`, `engine/metrics.py`, `engine/storage/sqlite.py` |
-| Strategy runtime | Built-in MA + HMM ensemble, policy wiring, scheduler loop | `engine/strategy.py`, `strategies/policy_hmm.py`, `strategies/ensemble_policy.py` |
+| Strategy runtime | Built-in MA + HMM ensemble, tick strategies, event-driven modules | `engine/strategy.py`, `engine/strategies/policy_hmm.py`, `engine/strategies/trend_follow.py`, `engine/strategies/listing_sniper.py` |
 | Machine learning & research | Model registry, hierarchical HMM training, replay/backtests, notebooks | `ml_service/app.py`, `scripts/train_hmm_policy.py`, `pipeline/*`, `notebooks/*` |
 | Ops & governance | Ops API, capital allocator, exposure collectors, governance daemons | `ops/ops_api.py`, `ops/strategy_router.py`, `ops/capital_allocator.py`, `ops/exposure_collector.py` |
 | Observability | Prometheus registry, dashboards, alert rules, validation tooling | `ops/observability/docker-compose.observability.yml`, `ops/observability/prometheus/rules/*.yml`, `ops/observability/validate_obs.sh` |

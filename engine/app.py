@@ -14,10 +14,11 @@ from threading import Lock
 from pathlib import Path
 from typing import Literal, Optional, Any, Callable, cast
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
-import json
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, ValidationError
+import hmac
+import hashlib
 import httpx as _httpx
 
 import os
@@ -30,9 +31,13 @@ from engine.core.order_router import OrderRouterExt, set_exchange_client, _MDAda
 from engine.ops.stop_validator import StopValidator
 from engine.core.portfolio import Portfolio, Position
 from engine.core.event_bus import BUS, initialize_event_bus, publish_order_event, publish_risk_event
+from engine.core.signal_queue import SIGNAL_QUEUE
 from engine.core import alert_daemon
 from engine.risk import RiskRails
 from engine import metrics
+from engine.compat import init_external_feed_bridge
+from engine.events.publisher import publish_external_event
+from engine.events.schemas import ExternalEvent
 from engine.idempotency import CACHE, append_jsonl
 from engine.state import SnapshotStore
 import engine.state as state_mod
@@ -67,6 +72,8 @@ risk_cfg = load_risk_config()
 RAILS = RiskRails(risk_cfg)
 DECK_PUSH_DISABLED = os.getenv("DECK_DISABLE_PUSH", "").lower() in {"1", "true", "yes"}
 DECK_METRICS_INTERVAL_SEC = max(1.0, float(os.getenv("DECK_METRICS_INTERVAL_SEC", "2.0")))
+EXTERNAL_EVENTS_SECRET = os.getenv("EXTERNAL_EVENTS_SECRET", "")
+_EXTERNAL_SIGNATURE_HEADER = "X-Events-Signature"
 _deck_metrics_task: Optional[asyncio.Task] = None
 _deck_realized_lock = Lock()
 _deck_last_realized = 0.0
@@ -760,7 +767,6 @@ _stop_validator: StopValidator | None = None
 _LISTING_SNIPER = None
 _MOMENTUM_BREAKOUT = None
 _MEME_SENTIMENT = None
-_SOCIAL_SENTIMENT = None
 _AIRDROP_PROMO = None
 
 # Attach strategy router only for trading role
@@ -871,6 +877,48 @@ def version():
         "config_hash": _config_hash(),
         "build_at": os.getenv("BUILD_AT", ""),
     }
+
+
+_external_event_logger = logging.getLogger("engine.api.external_events")
+
+
+def _verify_external_signature(body: bytes, header_value: str) -> bool:
+    if not EXTERNAL_EVENTS_SECRET:
+        return True
+    if not header_value or not header_value.startswith("sha256="):
+        return False
+    expected = hmac.new(EXTERNAL_EVENTS_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    received = header_value.split("=", 1)[1]
+    return hmac.compare_digest(expected, received)
+
+
+@app.post("/events/external", status_code=202)
+async def ingest_external_event(
+    request: Request,
+    x_events_signature: str = Header(default="", alias=_EXTERNAL_SIGNATURE_HEADER),
+):
+    """Ingress point for external (off-tick) strategy signals."""
+
+    raw_body = await request.body()
+    if not _verify_external_signature(raw_body, x_events_signature):
+        raise HTTPException(status_code=401, detail="invalid signature")
+
+    try:
+        envelope = ExternalEvent.model_validate_json(raw_body).with_default_id()
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+
+    try:
+        event_id = await publish_external_event(envelope)
+    except Exception as exc:  # noqa: BLE001
+        metrics.external_feed_errors_total.labels(envelope.source).inc()
+        _external_event_logger.warning(
+            "Failed to enqueue external event from %s: %s", envelope.source, exc, exc_info=True
+        )
+        raise HTTPException(status_code=500, detail="failed to enqueue external event") from exc
+
+    return {"status": "queued", "id": event_id, "topic": "events.external_feed"}
+
 
 _store = SnapshotStore(state_mod.SNAP_PATH)
 _boot_status = {"snapshot_loaded": False, "reconciled": False}
@@ -1165,7 +1213,7 @@ async def _start_guardian_and_feeds():
             # Optional: breakout handler wiring
             if os.getenv("EVENT_BREAKOUT_ENABLED", "").lower() in {"1", "true", "yes"}:
                 from engine.handlers.breakout_handlers import on_binance_listing
-                BUS.subscribe("events.binance_listing", on_binance_listing(router))
+                BUS.subscribe("events.external_feed", on_binance_listing(router))
                 _startup_logger.info("Announcement breakout handler wired")
                 # Trailing watcher (only when not dry-run and enabled)
                 if os.getenv("EVENT_BREAKOUT_DRY_RUN", "").lower() not in {"1", "true", "yes"} and os.getenv("EVENT_BREAKOUT_TRAIL_LOOP_ENABLED", "").lower() in {"1", "true", "yes"}:
@@ -1251,40 +1299,6 @@ async def _start_guardian_and_feeds():
                 _startup_logger.info("Meme sentiment strategy disabled via configuration")
     except Exception:
         _startup_logger.warning("Meme sentiment strategy wiring failed", exc_info=True)
-
-    # Social sentiment strategy wiring
-    try:
-        from engine.strategies.social_sentiment import (
-            SocialSentimentModule,
-            load_social_sentiment_config,
-        )
-
-        social_cfg = load_social_sentiment_config()
-        global _SOCIAL_SENTIMENT
-        if social_cfg.enabled:
-            if _SOCIAL_SENTIMENT is None:
-                _SOCIAL_SENTIMENT = SocialSentimentModule(router, RAILS, rest_client, social_cfg)
-                BUS.subscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-                _startup_logger.info(
-                    "Social sentiment strategy enabled (risk_pct=%.2f%%, min_score=%.2f, coin_cooldown=%.0fs)",
-                    social_cfg.per_trade_risk_pct * 100.0,
-                    social_cfg.min_signal_score,
-                    social_cfg.coin_cooldown_sec,
-                )
-            else:
-                _SOCIAL_SENTIMENT.cfg = social_cfg
-                _SOCIAL_SENTIMENT.rest_client = rest_client
-                _startup_logger.info("Social sentiment strategy configuration refreshed")
-        else:
-            if _SOCIAL_SENTIMENT is not None:
-                try:
-                    BUS.unsubscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-                except Exception:
-                    pass
-                _SOCIAL_SENTIMENT = None
-                _startup_logger.info("Social sentiment strategy disabled via configuration")
-    except Exception:
-        _startup_logger.warning("Social sentiment strategy wiring failed", exc_info=True)
 
     # Listing sniper wiring
     try:
@@ -1601,7 +1615,7 @@ except Exception:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
-    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _SOCIAL_SENTIMENT, _AIRDROP_PROMO, _market_data_logger
+    global _MOMENTUM_BREAKOUT, _LISTING_SNIPER, _MEME_SENTIMENT, _AIRDROP_PROMO, _market_data_logger
     if _market_data_logger is not None:
         try:
             _market_data_logger.stop()
@@ -1630,17 +1644,6 @@ async def on_shutdown() -> None:
             _MEME_SENTIMENT = None
     except Exception:
         _startup_logger.warning("Meme sentiment shutdown failed", exc_info=True)
-    try:
-        if _SOCIAL_SENTIMENT is not None:
-            from engine.core.event_bus import BUS
-
-            try:
-                BUS.unsubscribe("events.external_feed", _SOCIAL_SENTIMENT.on_external_event)
-            except Exception:
-                pass
-            _SOCIAL_SENTIMENT = None
-    except Exception:
-        _startup_logger.warning("Social sentiment shutdown failed", exc_info=True)
     try:
         if _AIRDROP_PROMO is not None:
             from engine.core.event_bus import BUS
@@ -2308,7 +2311,7 @@ async def health():
     from engine.config import load_risk_config
     risk_cfg = load_risk_config()
     symbols = None
-    if risk_cfg.trade_symbols is None:
+    if not risk_cfg.trade_symbols:
         try:
             from engine.universe import configured_universe
             symbols = configured_universe()
@@ -2441,10 +2444,10 @@ async def _start_event_bus():
     try:
         await initialize_event_bus()
         _startup_logger.info("Event bus started")
-        from engine.core.signal_queue import SIGNAL_QUEUE
-
         SIGNAL_QUEUE.start(BUS)
         _startup_logger.info("Signal priority queue dispatcher online")
+        init_external_feed_bridge(BUS)
+        _startup_logger.info("Legacy external event bridge initialized")
         if not DECK_PUSH_DISABLED:
             BUS.subscribe("trade.fill", _deck_fill_handler)
             _deck_logger.info("Deck fill bridge subscribed to trade.fill")

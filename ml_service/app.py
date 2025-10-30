@@ -455,7 +455,7 @@ def _decide_h2_policy(M: int, S: int, conf: float, micro_vec, policy):
     # simple gating example: macro 0=risk-off,1=neutral,2=risk-on
     macro_bias = {0: 0.5, 1: 1.0, 2: 1.5}.get(M, 1.0)
     # direction from micro state prior (reuse your STATE_EDGE or learned mapping)
-    from strategies.hmm_policy.policy import STATE_EDGE
+    from engine.strategies.policy_hmm import STATE_EDGE
     prior = STATE_EDGE.get(S, 0.0)
     edge = prior * (2*conf - 1.0) * macro_bias
     if edge > 0: side = "BUY"

@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Import smoke tests to guard the canonical `engine.strategies.policy_hmm`
+  and `engine.strategies.ensemble_policy` entry points.
+
+### Removed
+- Legacy `strategies/hmm_policy/` skeleton in favour of the unified
+  `engine/strategies` implementations.
+- Obsolete `ops/run_live.py` launcher now superseded by `engine/app.py` and
+  the scheduler service.
+
 ## [1.0.0] - 2025-10-11
 
 🧠 Nautilus HMM v1.0.0
