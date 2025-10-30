@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from functools import partial
 import time
-from typing import Any, Callable, Dict, Optional
+from dataclasses import dataclass
+from functools import partial
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from engine import metrics
 from engine.idempotency import CACHE, append_jsonl
@@ -54,6 +55,25 @@ def _is_async_callable(fn: Any) -> bool:
     return False
 
 
+@dataclass(frozen=True)
+class RecordedOrder:
+    """Captured order metadata when running in dry run or backtest mode."""
+
+    timestamp: float
+    symbol: str
+    side: str
+    tag: str
+    status: str
+    quote: Optional[float]
+    quantity: Optional[float]
+    market: Optional[str]
+    meta: Any
+    idempotency_key: str
+    size: Optional[float]
+    size_type: Optional[str]
+    signal: Dict[str, Any]
+
+
 class StrategyExecutor:
     """Unified execution path for strategy signals."""
 
@@ -65,12 +85,21 @@ class StrategyExecutor:
         default_dry_run: bool,
         config_hash_getter: Optional[Callable[[], str]] = None,
         source: str = "strategy",
+        backtest_mode: bool = False,
+        order_recorder: Optional[Callable[[RecordedOrder], None]] = None,
     ) -> None:
         self._risk = risk
         self._router = router
         self._default_dry_run = bool(default_dry_run)
         self._config_hash_getter = config_hash_getter
         self._source = source
+        self._backtest_mode = bool(backtest_mode)
+        self._order_recorder = order_recorder
+        self._recorded_orders: List[RecordedOrder] = []
+
+    @property
+    def recorded_orders(self) -> Sequence[RecordedOrder]:
+        return tuple(self._recorded_orders)
 
     async def execute(
         self,
@@ -131,12 +160,22 @@ class StrategyExecutor:
             "idempotency_key": key,
         }
 
-        if eff_dry:
-            payload = {"status": "dry_run", "order": order_ctx, "signal": signal, "timestamp": ts}
+        should_record_only = bool(eff_dry or self._backtest_mode)
+
+        if should_record_only:
+            status = "dry_run" if eff_dry and not self._backtest_mode else "backtest"
+            payload = {"status": status, "order": order_ctx, "signal": signal, "timestamp": ts}
             cfg_hash = self._safe_config_hash()
             if cfg_hash:
                 payload["cfg_hash"] = cfg_hash
             append_jsonl("orders.jsonl", payload)
+            self._record_order(
+                timestamp=ts,
+                status=status,
+                order_ctx=order_ctx,
+                signal=signal,
+                idem_key=key,
+            )
             CACHE.set(key, payload)
             return payload
 
@@ -155,6 +194,57 @@ class StrategyExecutor:
         append_jsonl("orders.jsonl", payload)
         CACHE.set(key, payload)
         return payload
+
+    def _record_order(
+        self,
+        *,
+        timestamp: float,
+        status: str,
+        order_ctx: Dict[str, Any],
+        signal: Dict[str, Any],
+        idem_key: str,
+    ) -> None:
+        size: Optional[float]
+        size_type: Optional[str]
+        quantity = order_ctx.get("quantity")
+        quote = order_ctx.get("quote")
+        if quantity is not None:
+            try:
+                size = float(quantity)
+            except Exception:  # noqa: BLE001 - defensive conversion
+                size = None
+            size_type = "quantity"
+        elif quote is not None:
+            try:
+                size = float(quote)
+            except Exception:  # noqa: BLE001 - defensive conversion
+                size = None
+            size_type = "quote"
+        else:
+            size = None
+            size_type = None
+
+        recorded = RecordedOrder(
+            timestamp=float(timestamp),
+            symbol=str(order_ctx.get("symbol") or ""),
+            side=str(order_ctx.get("side") or ""),
+            tag=str(order_ctx.get("tag") or self._source),
+            status=status,
+            quote=None if quote is None else float(quote),
+            quantity=None if quantity is None else float(quantity),
+            market=order_ctx.get("market"),
+            meta=order_ctx.get("meta"),
+            idempotency_key=idem_key,
+            size=size,
+            size_type=size_type,
+            signal=dict(signal),
+        )
+        self._recorded_orders.append(recorded)
+        if self._order_recorder:
+            try:
+                self._order_recorder(recorded)
+            except Exception:  # noqa: BLE001 - recorder must not break execution
+                pass
 
     def execute_sync(
         self,
@@ -247,4 +337,4 @@ class StrategyExecutor:
             return None
 
 
-__all__ = ["StrategyExecutor"]
+__all__ = ["StrategyExecutor", "RecordedOrder"]
