@@ -394,9 +394,13 @@ class ListingSniper:
         return notional
 
     async def _await_go_live(self, op: ListingOpportunity) -> None:
-        wait_until = max(op.announced_at, time.time())
-        if op.go_live_at:
-            wait_until = max(wait_until, float(op.go_live_at))
+        now = time.time()
+        wait_until = max(op.announced_at, now)
+        if op.go_live_at is not None:
+            go_live_at = float(op.go_live_at)
+            if go_live_at < now and (now - go_live_at) < 1.0:
+                go_live_at = go_live_at + 1.0
+            wait_until = max(wait_until, go_live_at)
         wait_until += max(self.cfg.entry_delay_sec, 0.0)
         delay = wait_until - time.time()
         if delay > 0:
