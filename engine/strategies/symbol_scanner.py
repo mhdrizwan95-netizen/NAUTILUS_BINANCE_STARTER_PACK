@@ -11,32 +11,8 @@ from typing import Dict, List, Optional, Sequence
 import httpx
 
 from engine.config import get_settings
-
-
-def _as_list(value: Optional[str]) -> List[str]:
-    if not value:
-        return []
-    return [p.strip().upper() for p in value.split(",") if p.strip()]
-
-
-def _as_bool(value: Optional[str], default: bool = False) -> bool:
-    if value is None:
-        return default
-    return value.lower() in {"1", "true", "yes", "on"}
-
-
-def _as_float(value: Optional[str], default: float) -> float:
-    try:
-        return float(value) if value is not None else default
-    except ValueError:
-        return default
-
-
-def _as_int(value: Optional[str], default: int) -> int:
-    try:
-        return int(float(value)) if value is not None else default
-    except ValueError:
-        return default
+from engine.config.defaults import GLOBAL_DEFAULTS, SYMBOL_SCANNER_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
 
 
 @dataclass
@@ -57,23 +33,32 @@ class SymbolScannerConfig:
 
 
 def load_symbol_scanner_config() -> SymbolScannerConfig:
-    universe = _as_list(os.getenv("SYMBOL_SCANNER_UNIVERSE")) or _as_list(os.getenv("TRADE_SYMBOLS"))
-    if not universe:
-        universe = ["BTCUSDT", "ETHUSDT"]
+    universe_raw = env_str("SYMBOL_SCANNER_UNIVERSE", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_UNIVERSE"]).strip()
+    if universe_raw in {"", "*"}:
+        fallback = split_symbols(env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]) or None) or []
+        universe = fallback or ["BTCUSDT", "ETHUSDT"]
+    elif "," in universe_raw:
+        parsed = split_symbols(universe_raw)
+        universe = parsed or ["BTCUSDT", "ETHUSDT"]
+    else:
+        universe = [universe_raw.upper()]
     return SymbolScannerConfig(
-        enabled=_as_bool(os.getenv("SYMBOL_SCANNER_ENABLED"), False),
+        enabled=env_bool("SYMBOL_SCANNER_ENABLED", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_ENABLED"]),
         universe=universe,
-        interval_sec=_as_int(os.getenv("SYMBOL_SCANNER_INTERVAL_SEC"), 300),
-        interval=os.getenv("SYMBOL_SCANNER_INTERVAL", "1h"),
-        lookback=_as_int(os.getenv("SYMBOL_SCANNER_LOOKBACK"), 60),
-        top_n=_as_int(os.getenv("SYMBOL_SCANNER_TOP_N"), 3),
-        min_volume_usd=_as_float(os.getenv("SYMBOL_SCANNER_MIN_VOLUME_USD"), 250_000.0),
-        min_atr_pct=_as_float(os.getenv("SYMBOL_SCANNER_MIN_ATR_PCT"), 0.5),
-        weight_return=_as_float(os.getenv("SYMBOL_SCANNER_WEIGHT_RET"), 0.5),
-        weight_trend=_as_float(os.getenv("SYMBOL_SCANNER_WEIGHT_TREND"), 0.3),
-        weight_vol=_as_float(os.getenv("SYMBOL_SCANNER_WEIGHT_VOL"), 0.2),
-        min_minutes_between_select=_as_int(os.getenv("SYMBOL_SCANNER_MIN_MINUTES_BETWEEN_RESELECT"), 30),
-        state_path=os.getenv("SYMBOL_SCANNER_STATE_PATH", "data/runtime/symbol_scanner_state.json"),
+        interval_sec=env_int("SYMBOL_SCANNER_INTERVAL_SEC", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_INTERVAL_SEC"]),
+        interval=env_str("SYMBOL_SCANNER_INTERVAL", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_INTERVAL"]),
+        lookback=env_int("SYMBOL_SCANNER_LOOKBACK", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_LOOKBACK"]),
+        top_n=env_int("SYMBOL_SCANNER_TOP_N", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_TOP_N"]),
+        min_volume_usd=env_float("SYMBOL_SCANNER_MIN_VOLUME_USD", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_MIN_VOLUME_USD"]),
+        min_atr_pct=env_float("SYMBOL_SCANNER_MIN_ATR_PCT", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_MIN_ATR_PCT"]),
+        weight_return=env_float("SYMBOL_SCANNER_WEIGHT_RET", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_WEIGHT_RET"]),
+        weight_trend=env_float("SYMBOL_SCANNER_WEIGHT_TREND", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_WEIGHT_TREND"]),
+        weight_vol=env_float("SYMBOL_SCANNER_WEIGHT_VOL", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_WEIGHT_VOL"]),
+        min_minutes_between_select=env_int(
+            "SYMBOL_SCANNER_MIN_MINUTES_BETWEEN_RESELECT",
+            SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_MIN_MINUTES_BETWEEN_RESELECT"],
+        ),
+        state_path=env_str("SYMBOL_SCANNER_STATE_PATH", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_STATE_PATH"]),
     )
 
 

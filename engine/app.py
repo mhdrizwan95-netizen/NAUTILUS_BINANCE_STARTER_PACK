@@ -2393,7 +2393,7 @@ async def health():
     from engine.config import load_risk_config
     risk_cfg = load_risk_config()
     symbols = None
-    if risk_cfg.trade_symbols is None:
+    if not risk_cfg.trade_symbols:
         try:
             from engine.universe import configured_universe
             symbols = configured_universe()

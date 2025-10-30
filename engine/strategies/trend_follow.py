@@ -10,6 +10,8 @@ from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 import httpx
 
 from engine.config import get_settings
+from engine.config.defaults import GLOBAL_DEFAULTS, TREND_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
 from engine.core.market_resolver import resolve_market_choice
 from .trend_params import TrendParams, TrendAutoTuner
 
@@ -22,39 +24,6 @@ _TIMEFRAME_SECONDS = {
     "4h": 4 * 60 * 60,
     "1d": 24 * 60 * 60,
 }
-
-
-def _as_bool(value: Optional[str], default: bool) -> bool:
-    if value is None:
-        return default
-    return value.strip().lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _as_float(value: Optional[str], default: float) -> float:
-    try:
-        return float(value) if value is not None else default
-    except ValueError:
-        return default
-
-
-def _as_int(value: Optional[str], default: int) -> int:
-    try:
-        return int(float(value)) if value is not None else default
-    except ValueError:
-        return default
-
-
-def _split_symbols(value: Optional[str]) -> List[str]:
-    if not value:
-        return []
-    out = []
-    for token in value.split(","):
-        token = token.strip().upper()
-        if not token:
-            continue
-        base = token.split(".")[0]
-        out.append(base)
-    return sorted(set(out))
 
 
 @dataclass(frozen=True)
@@ -99,54 +68,54 @@ class TrendStrategyConfig:
 
 
 def load_trend_config() -> TrendStrategyConfig:
-    symbols = _split_symbols(os.getenv("TREND_SYMBOLS") or os.getenv("TRADE_SYMBOLS"))
-    if not symbols:
-        symbols = ["BTCUSDT"]
+    override_symbols = split_symbols(env_str("TREND_SYMBOLS", str(TREND_DEFAULTS["TREND_SYMBOLS"])) or None)
+    global_symbols = split_symbols(env_str("TRADE_SYMBOLS", str(GLOBAL_DEFAULTS["TRADE_SYMBOLS"])) or None)
+    symbols = override_symbols if override_symbols is not None else (global_symbols or [])
     primary = TrendTF(
-        interval=os.getenv("TREND_PRIMARY_INTERVAL", "4h"),
-        fast=_as_int(os.getenv("TREND_PRIMARY_FAST"), 50),
-        slow=_as_int(os.getenv("TREND_PRIMARY_SLOW"), 200),
-        rsi_length=_as_int(os.getenv("TREND_PRIMARY_RSI"), 14),
+        interval=env_str("TREND_PRIMARY_INTERVAL", TREND_DEFAULTS["TREND_PRIMARY_INTERVAL"]),
+        fast=env_int("TREND_PRIMARY_FAST", TREND_DEFAULTS["TREND_PRIMARY_FAST"]),
+        slow=env_int("TREND_PRIMARY_SLOW", TREND_DEFAULTS["TREND_PRIMARY_SLOW"]),
+        rsi_length=env_int("TREND_PRIMARY_RSI", TREND_DEFAULTS["TREND_PRIMARY_RSI"]),
     )
     secondary = TrendTF(
-        interval=os.getenv("TREND_SECONDARY_INTERVAL", "1h"),
-        fast=_as_int(os.getenv("TREND_SECONDARY_FAST"), 100),
-        slow=_as_int(os.getenv("TREND_SECONDARY_SLOW"), 400),
-        rsi_length=_as_int(os.getenv("TREND_SECONDARY_RSI"), 14),
+        interval=env_str("TREND_SECONDARY_INTERVAL", TREND_DEFAULTS["TREND_SECONDARY_INTERVAL"]),
+        fast=env_int("TREND_SECONDARY_FAST", TREND_DEFAULTS["TREND_SECONDARY_FAST"]),
+        slow=env_int("TREND_SECONDARY_SLOW", TREND_DEFAULTS["TREND_SECONDARY_SLOW"]),
+        rsi_length=env_int("TREND_SECONDARY_RSI", TREND_DEFAULTS["TREND_SECONDARY_RSI"]),
     )
     regime = TrendTF(
-        interval=os.getenv("TREND_REGIME_INTERVAL", "1d"),
-        fast=_as_int(os.getenv("TREND_REGIME_FAST"), 50),
-        slow=_as_int(os.getenv("TREND_REGIME_SLOW"), 200),
-        rsi_length=_as_int(os.getenv("TREND_REGIME_RSI"), 14),
+        interval=env_str("TREND_REGIME_INTERVAL", TREND_DEFAULTS["TREND_REGIME_INTERVAL"]),
+        fast=env_int("TREND_REGIME_FAST", TREND_DEFAULTS["TREND_REGIME_FAST"]),
+        slow=env_int("TREND_REGIME_SLOW", TREND_DEFAULTS["TREND_REGIME_SLOW"]),
+        rsi_length=env_int("TREND_REGIME_RSI", TREND_DEFAULTS["TREND_REGIME_RSI"]),
     )
     return TrendStrategyConfig(
-        enabled=_as_bool(os.getenv("TREND_ENABLED"), False),
-        dry_run=_as_bool(os.getenv("TREND_DRY_RUN"), True),
+        enabled=env_bool("TREND_ENABLED", TREND_DEFAULTS["TREND_ENABLED"]),
+        dry_run=env_bool("TREND_DRY_RUN", TREND_DEFAULTS["TREND_DRY_RUN"]),
         symbols=symbols,
-        fetch_limit=_as_int(os.getenv("TREND_FETCH_LIMIT"), 720),
-        refresh_sec=_as_int(os.getenv("TREND_REFRESH_SEC"), 15 * 60),
-        atr_length=_as_int(os.getenv("TREND_ATR_LENGTH"), 14),
-        atr_stop_mult=_as_float(os.getenv("TREND_ATR_STOP_MULT"), 1.2),
-        atr_target_mult=_as_float(os.getenv("TREND_ATR_TARGET_MULT"), 2.0),
-        swing_lookback=_as_int(os.getenv("TREND_SWING_LOOKBACK"), 3),
-        rsi_long_min=_as_float(os.getenv("TREND_RSI_LONG_MIN"), 52.0),
-        rsi_long_max=_as_float(os.getenv("TREND_RSI_LONG_MAX"), 72.0),
-        rsi_exit=_as_float(os.getenv("TREND_RSI_EXIT"), 80.0),
-        risk_pct=_as_float(os.getenv("TREND_RISK_PCT"), 0.015),
-        min_quote_usd=_as_float(os.getenv("TREND_MIN_QUOTE_USD"), 75.0),
-        fallback_equity_usd=_as_float(os.getenv("TREND_FALLBACK_EQUITY"), 2_000.0),
-        cooldown_bars=_as_int(os.getenv("TREND_COOLDOWN_BARS"), 3),
-        allow_shorts=_as_bool(os.getenv("TREND_ALLOW_SHORTS"), False),
-        auto_tune_enabled=_as_bool(os.getenv("TREND_AUTO_TUNE_ENABLED"), False),
-        auto_tune_min_trades=_as_int(os.getenv("TREND_AUTO_TUNE_MIN_TRADES"), 30),
-        auto_tune_interval=_as_int(os.getenv("TREND_AUTO_TUNE_INTERVAL"), 15),
-        auto_tune_history=_as_int(os.getenv("TREND_AUTO_TUNE_HISTORY"), 200),
-        auto_tune_win_low=_as_float(os.getenv("TREND_AUTO_TUNE_WIN_LOW"), 0.4),
-        auto_tune_win_high=_as_float(os.getenv("TREND_AUTO_TUNE_WIN_HIGH"), 0.65),
-        auto_tune_stop_min=_as_float(os.getenv("TREND_AUTO_TUNE_STOP_MIN"), 0.5),
-        auto_tune_stop_max=_as_float(os.getenv("TREND_AUTO_TUNE_STOP_MAX"), 2.5),
-        auto_tune_state_path=os.getenv("TREND_AUTO_TUNE_STATE_PATH", "data/runtime/trend_auto_tune.json"),
+        fetch_limit=env_int("TREND_FETCH_LIMIT", TREND_DEFAULTS["TREND_FETCH_LIMIT"]),
+        refresh_sec=env_int("TREND_REFRESH_SEC", TREND_DEFAULTS["TREND_REFRESH_SEC"]),
+        atr_length=env_int("TREND_ATR_LENGTH", TREND_DEFAULTS["TREND_ATR_LENGTH"]),
+        atr_stop_mult=env_float("TREND_ATR_STOP_MULT", TREND_DEFAULTS["TREND_ATR_STOP_MULT"]),
+        atr_target_mult=env_float("TREND_ATR_TARGET_MULT", TREND_DEFAULTS["TREND_ATR_TARGET_MULT"]),
+        swing_lookback=env_int("TREND_SWING_LOOKBACK", TREND_DEFAULTS["TREND_SWING_LOOKBACK"]),
+        rsi_long_min=env_float("TREND_RSI_LONG_MIN", TREND_DEFAULTS["TREND_RSI_LONG_MIN"]),
+        rsi_long_max=env_float("TREND_RSI_LONG_MAX", TREND_DEFAULTS["TREND_RSI_LONG_MAX"]),
+        rsi_exit=env_float("TREND_RSI_EXIT", TREND_DEFAULTS["TREND_RSI_EXIT"]),
+        risk_pct=env_float("TREND_RISK_PCT", TREND_DEFAULTS["TREND_RISK_PCT"]),
+        min_quote_usd=env_float("TREND_MIN_QUOTE_USD", TREND_DEFAULTS["TREND_MIN_QUOTE_USD"]),
+        fallback_equity_usd=env_float("TREND_FALLBACK_EQUITY", TREND_DEFAULTS["TREND_FALLBACK_EQUITY"]),
+        cooldown_bars=env_int("TREND_COOLDOWN_BARS", TREND_DEFAULTS["TREND_COOLDOWN_BARS"]),
+        allow_shorts=env_bool("TREND_ALLOW_SHORTS", TREND_DEFAULTS["TREND_ALLOW_SHORTS"]),
+        auto_tune_enabled=env_bool("TREND_AUTO_TUNE_ENABLED", TREND_DEFAULTS["TREND_AUTO_TUNE_ENABLED"]),
+        auto_tune_min_trades=env_int("TREND_AUTO_TUNE_MIN_TRADES", TREND_DEFAULTS["TREND_AUTO_TUNE_MIN_TRADES"]),
+        auto_tune_interval=env_int("TREND_AUTO_TUNE_INTERVAL", TREND_DEFAULTS["TREND_AUTO_TUNE_INTERVAL"]),
+        auto_tune_history=env_int("TREND_AUTO_TUNE_HISTORY", TREND_DEFAULTS["TREND_AUTO_TUNE_HISTORY"]),
+        auto_tune_win_low=env_float("TREND_AUTO_TUNE_WIN_LOW", TREND_DEFAULTS["TREND_AUTO_TUNE_WIN_LOW"]),
+        auto_tune_win_high=env_float("TREND_AUTO_TUNE_WIN_HIGH", TREND_DEFAULTS["TREND_AUTO_TUNE_WIN_HIGH"]),
+        auto_tune_stop_min=env_float("TREND_AUTO_TUNE_STOP_MIN", TREND_DEFAULTS["TREND_AUTO_TUNE_STOP_MIN"]),
+        auto_tune_stop_max=env_float("TREND_AUTO_TUNE_STOP_MAX", TREND_DEFAULTS["TREND_AUTO_TUNE_STOP_MAX"]),
+        auto_tune_state_path=env_str("TREND_AUTO_TUNE_STATE_PATH", TREND_DEFAULTS["TREND_AUTO_TUNE_STATE_PATH"]),
         primary=primary,
         secondary=secondary,
         regime=regime,

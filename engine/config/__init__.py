@@ -6,6 +6,10 @@ from functools import lru_cache
 from typing import List
 import asyncio
 import httpx
+import logging
+
+from engine.config.defaults import GLOBAL_DEFAULTS, RISK_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
 
 
 class Settings:
@@ -117,7 +121,14 @@ class Settings:
         default_symbols = "BTCUSDT.BINANCE"
         if venue == "KRAKEN":
             default_symbols = "PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN"
-        self.allowed_symbols = _split_symbols(os.getenv("TRADE_SYMBOLS", default_symbols))
+        trade_symbols_raw = env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS.get("TRADE_SYMBOLS", default_symbols))
+        normalized = trade_symbols_raw.strip().lower()
+        if not trade_symbols_raw.strip():
+            self.allowed_symbols = _split_symbols(default_symbols)
+        elif normalized in {"*", "all"}:
+            self.allowed_symbols = []
+        else:
+            self.allowed_symbols = _split_symbols(trade_symbols_raw)
         self.min_notional = float(os.getenv("MIN_NOTIONAL_USDT", "10"))
         self.max_notional = float(os.getenv("MAX_NOTIONAL_USDT", "10000"))
 
@@ -192,36 +203,43 @@ DEFAULT_TRADE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
 
 def load_risk_config() -> RiskConfig:
     settings = get_settings()
-    TRADE_SYMBOLS_ENV = os.getenv("TRADE_SYMBOLS", "").strip()
-    if TRADE_SYMBOLS_ENV.strip() == "*" or TRADE_SYMBOLS_ENV.lower().strip() == "all":
-        # Set to None for dynamic loading in the app startup
-        trade_symbols = None
+    trade_symbols_env = env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]).strip()
+    if not trade_symbols_env:
+        trade_symbols = DEFAULT_TRADE_SYMBOLS.copy()
+    elif trade_symbols_env.lower() in {"*", "all"}:
+        trade_symbols = []
     else:
-        parsed = [s.strip() for s in TRADE_SYMBOLS_ENV.split(",") if s.strip()]
+        parsed = split_symbols(trade_symbols_env) or []
         trade_symbols = parsed or DEFAULT_TRADE_SYMBOLS.copy()
     # Futures venues typically have higher min notional (e.g., 100 USDT on testnet).
     # If MIN_NOTIONAL_USDT not explicitly set, choose a sensible per-mode default.
     default_min_notional = 100.0 if getattr(settings, "is_futures", False) else 5.0
     return RiskConfig(
-        trading_enabled=_as_bool(os.getenv("TRADING_ENABLED"), True),
-        min_notional_usdt=_as_float(os.getenv("MIN_NOTIONAL_USDT"), default_min_notional),
-        max_notional_usdt=_as_float(os.getenv("MAX_NOTIONAL_USDT"), 400.0),
-        max_orders_per_min=_as_int(os.getenv("MAX_ORDERS_PER_MIN"), 30),
+        trading_enabled=env_bool("TRADING_ENABLED", RISK_DEFAULTS["TRADING_ENABLED"]),
+        min_notional_usdt=env_float("MIN_NOTIONAL_USDT", default_min_notional),
+        max_notional_usdt=env_float("MAX_NOTIONAL_USDT", RISK_DEFAULTS["MAX_NOTIONAL_USDT"]),
+        max_orders_per_min=env_int("MAX_ORDERS_PER_MIN", RISK_DEFAULTS["MAX_ORDERS_PER_MIN"]),
         trade_symbols=trade_symbols,
-        dust_threshold_usd=_as_float(os.getenv("DUST_THRESHOLD_USD"), 2.0),
-        exposure_cap_symbol_usd=_as_float(os.getenv("EXPOSURE_CAP_SYMBOL_USD"), 2_000.0),
-        exposure_cap_total_usd=_as_float(os.getenv("EXPOSURE_CAP_TOTAL_USD"), 10_000.0),
-        venue_error_breaker_pct=_as_float(os.getenv("VENUE_ERROR_BREAKER_PCT"), 50.0),
-        venue_error_window_sec=_as_int(os.getenv("VENUE_ERROR_WINDOW_SEC"), 60),
-        exposure_cap_venue_usd=_as_float(os.getenv("EXPOSURE_CAP_VENUE_USD"), 10_000.0),
-        equity_floor_usd=_as_float(os.getenv("EQUITY_FLOOR_USD"), 500.0),
-        equity_drawdown_limit_pct=_as_float(os.getenv("EQUITY_DRAWDOWN_LIMIT_PCT"), 35.0),
-        equity_cooldown_sec=_as_int(os.getenv("EQUITY_COOLDOWN_SEC"), 300),
-        margin_enabled=_as_bool(os.getenv("MARGIN_ENABLED"), _as_bool(os.getenv("BINANCE_MARGIN_ENABLED"), False)),
-        margin_min_level=_as_float(os.getenv("MARGIN_MIN_LEVEL"), 1.2),
-        margin_max_liability_usd=_as_float(os.getenv("MARGIN_MAX_LIABILITY_USD"), 25_000.0),
-        margin_max_leverage=_as_float(os.getenv("MARGIN_MAX_LEVERAGE"), 3.0),
-        options_enabled=_as_bool(os.getenv("OPTIONS_ENABLED"), _as_bool(os.getenv("BINANCE_OPTIONS_ENABLED"), False)),
+        dust_threshold_usd=env_float("DUST_THRESHOLD_USD", RISK_DEFAULTS["DUST_THRESHOLD_USD"]),
+        exposure_cap_symbol_usd=env_float("EXPOSURE_CAP_SYMBOL_USD", RISK_DEFAULTS["EXPOSURE_CAP_SYMBOL_USD"]),
+        exposure_cap_total_usd=env_float("EXPOSURE_CAP_TOTAL_USD", RISK_DEFAULTS["EXPOSURE_CAP_TOTAL_USD"]),
+        venue_error_breaker_pct=env_float("VENUE_ERROR_BREAKER_PCT", RISK_DEFAULTS["VENUE_ERROR_BREAKER_PCT"]),
+        venue_error_window_sec=env_int("VENUE_ERROR_WINDOW_SEC", RISK_DEFAULTS["VENUE_ERROR_WINDOW_SEC"]),
+        exposure_cap_venue_usd=env_float("EXPOSURE_CAP_VENUE_USD", RISK_DEFAULTS["EXPOSURE_CAP_VENUE_USD"]),
+        equity_floor_usd=env_float("EQUITY_FLOOR_USD", RISK_DEFAULTS["EQUITY_FLOOR_USD"]),
+        equity_drawdown_limit_pct=env_float("EQUITY_DRAWDOWN_LIMIT_PCT", RISK_DEFAULTS["EQUITY_DRAWDOWN_LIMIT_PCT"]),
+        equity_cooldown_sec=env_int("EQUITY_COOLDOWN_SEC", RISK_DEFAULTS["EQUITY_COOLDOWN_SEC"]),
+        margin_enabled=env_bool(
+            "MARGIN_ENABLED",
+            env_bool("BINANCE_MARGIN_ENABLED", RISK_DEFAULTS["MARGIN_ENABLED"]),
+        ),
+        margin_min_level=env_float("MARGIN_MIN_LEVEL", RISK_DEFAULTS["MARGIN_MIN_LEVEL"]),
+        margin_max_liability_usd=env_float("MARGIN_MAX_LIABILITY_USD", RISK_DEFAULTS["MARGIN_MAX_LIABILITY_USD"]),
+        margin_max_leverage=env_float("MARGIN_MAX_LEVERAGE", RISK_DEFAULTS["MARGIN_MAX_LEVERAGE"]),
+        options_enabled=env_bool(
+            "OPTIONS_ENABLED",
+            env_bool("BINANCE_OPTIONS_ENABLED", RISK_DEFAULTS["OPTIONS_ENABLED"]),
+        ),
     )
 
 # ---- Quote currency + universe helpers ----
@@ -307,7 +325,18 @@ class StrategyConfig:
 
 def load_strategy_config() -> StrategyConfig:
     # Defaults: safe and conservative
-    symbols = _as_list(os.getenv("STRATEGY_SYMBOLS")) or _as_list(os.getenv("TRADE_SYMBOLS"))
+    symbols_env = os.getenv("STRATEGY_SYMBOLS")
+    if symbols_env:
+        logging.getLogger(__name__).warning(
+            "STRATEGY_SYMBOLS is deprecated; use TRADE_SYMBOLS or per-strategy overrides."
+        )
+        symbols = _as_list(symbols_env)
+    else:
+        trade_symbols_raw = env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"])
+        if trade_symbols_raw.strip().lower() in {"*", "all", ""}:
+            symbols = []
+        else:
+            symbols = _as_list(trade_symbols_raw)
     try:
         settings = get_settings()
         default_market = os.getenv("STRATEGY_DEFAULT_MARKET") or ("futures" if getattr(settings, "is_futures", False) else "spot")
