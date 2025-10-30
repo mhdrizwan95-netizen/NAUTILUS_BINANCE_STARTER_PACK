@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Dict
 
@@ -64,6 +64,7 @@ def run_backtest(
     engine = BacktestEngine(
         feeds=feeds,
         strategy_factory=lambda client, clock: TrendStrategyModule(cfg, client=client, clock=clock),
+        patch_executor=True,
     )
 
     trades = []
@@ -111,6 +112,8 @@ def run_backtest(
     losses = [t for t in trades if t["pnl_pct"] <= 0]
     dd = ((trough - peak_equity) / peak_equity) if peak_equity else 0.0
 
+    orders = [asdict(order) for order in engine.recorded_orders]
+
     summary = {
         "symbol": symbol,
         "trades": len(trades),
@@ -120,10 +123,11 @@ def run_backtest(
         "equity_end": equity,
         "equity_start": cfg.fallback_equity_usd,
         "max_drawdown_pct": dd * 100,
+        "orders_recorded": len(orders),
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps({"summary": summary, "trades": trades}, indent=2))
+    output.write_text(json.dumps({"summary": summary, "trades": trades, "orders": orders}, indent=2))
     return summary
 
 

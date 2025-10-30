@@ -289,10 +289,13 @@ def post_strategy_signal(sig: StrategySignal, request: Request):
 
 
 _EXECUTOR: Optional[StrategyExecutor] = None
+_EXECUTOR_OVERRIDE: Optional[StrategyExecutor] = None
 
 
 def _get_executor() -> StrategyExecutor:
     global _EXECUTOR
+    if _EXECUTOR_OVERRIDE is not None:
+        return _EXECUTOR_OVERRIDE
     if _EXECUTOR is None:
         try:
             from .app import router as order_router_instance
@@ -310,6 +313,20 @@ def _get_executor() -> StrategyExecutor:
             source="strategy",
         )
     return _EXECUTOR
+
+
+def set_executor_override(executor: Optional[StrategyExecutor]) -> None:
+    global _EXECUTOR_OVERRIDE
+    _EXECUTOR_OVERRIDE = executor
+
+
+def get_executor_override() -> Optional[StrategyExecutor]:
+    return _EXECUTOR_OVERRIDE
+
+
+def reset_executor_cache() -> None:
+    global _EXECUTOR
+    _EXECUTOR = None
 
 
 def _signal_payload(sig: StrategySignal) -> Dict[str, Any]:

@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Dict, List
 
@@ -64,6 +64,7 @@ def main() -> None:
     engine = BacktestEngine(
         feeds=[feed],
         strategy_factory=lambda client, clock: adapter,
+        patch_executor=True,
     )
 
     signals: List[Dict] = []
@@ -75,16 +76,19 @@ def main() -> None:
         payload["price"] = step.event.price
         signals.append(payload)
 
+    orders = [asdict(order) for order in engine.recorded_orders]
+
     summary = {
         "symbol": args.symbol.upper(),
         "signals": len(signals),
         "buys": sum(1 for s in signals if s.get("side") == "BUY"),
         "sells": sum(1 for s in signals if s.get("side") == "SELL"),
+        "orders_recorded": len(orders),
     }
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps({"summary": summary, "signals": signals}, indent=2))
+    out_path.write_text(json.dumps({"summary": summary, "signals": signals, "orders": orders}, indent=2))
     print(json.dumps(summary, indent=2))
 
 

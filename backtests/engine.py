@@ -13,6 +13,8 @@ code expects.
 
 from __future__ import annotations
 
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence
@@ -21,6 +23,9 @@ import math
 from bisect import bisect_right
 
 import pandas as pd
+
+from engine.execution.execute import RecordedOrder, StrategyExecutor
+from engine.strategy import get_executor_override, reset_executor_cache, set_executor_override
 
 
 # ---------------------------------------------------------------------------
@@ -122,17 +127,22 @@ class BacktestEngine:
         *,
         strategy_factory: Callable[[OfflineKlineClient, SimClock], Any],
         symbol_formatter: Optional[Callable[[str, str, str], str]] = None,
+        patch_executor: Optional[bool] = None,
+        executor_factory: Optional[Callable[[Callable[[RecordedOrder], None]], StrategyExecutor]] = None,
     ) -> None:
         if not feeds:
             raise ValueError("At least one feed configuration is required")
         self._feeds = list(feeds)
         self._symbol_formatter = symbol_formatter or (lambda sym, tf, venue: f"{sym}.{venue}")
         self._strategy_factory = strategy_factory
+        self._patch_executor = self._resolve_patch_flag(patch_executor)
+        self._executor_factory = executor_factory
 
         self._clock = SimClock()
         self._data: Dict[tuple[str, str], List[List[float]]] = {}
         self._feed_states: List[_FeedState] = []
         self._events: List[BacktestEvent] = []
+        self._recorded_orders: List[RecordedOrder] = []
 
         self._load_feeds()
         self._client = OfflineKlineClient(self._data)
@@ -145,20 +155,89 @@ class BacktestEngine:
     def client(self) -> OfflineKlineClient:
         return self._client
 
+    @property
+    def recorded_orders(self) -> Sequence[RecordedOrder]:
+        return tuple(self._recorded_orders)
+
     def run(self) -> Iterator[BacktestStep]:
         self._prime_cursors()
-        strategy = self._strategy_factory(self._client, self._clock)
-        dispatch = self._resolve_dispatch(strategy)
+        with self._maybe_patched_executor():
+            strategy = self._strategy_factory(self._client, self._clock)
+            dispatch = self._resolve_dispatch(strategy)
 
-        for event in self._events:
-            self._advance_to(event.timestamp_ms)
-            self._clock.set(event.timestamp_seconds)
-            symbol = self._symbol_formatter(event.symbol, event.timeframe, event.venue)
-            response = dispatch(symbol, event.price, event.timestamp_seconds, event.volume)
-            yield BacktestStep(event=event, response=response)
+            for event in self._events:
+                self._advance_to(event.timestamp_ms)
+                self._clock.set(event.timestamp_seconds)
+                symbol = self._symbol_formatter(event.symbol, event.timeframe, event.venue)
+                response = dispatch(symbol, event.price, event.timestamp_seconds, event.volume)
+                yield BacktestStep(event=event, response=response)
 
     # ------------------------------------------------------------------
     # Internals
+
+    @staticmethod
+    def _env_flag(name: str, default: bool = False) -> bool:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        return raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    def _resolve_patch_flag(self, patch_executor: Optional[bool]) -> bool:
+        if patch_executor is not None:
+            return bool(patch_executor)
+        env_default = self._env_flag("BACKTEST_PATCH_EXECUTOR", False)
+        env_fallback = self._env_flag("NAUTILUS_BACKTEST_EXECUTOR", env_default)
+        return env_fallback
+
+    def _maybe_patched_executor(self):
+        @contextmanager
+        def _noop():
+            yield
+
+        if not self._patch_executor:
+            return _noop()
+
+        return self._executor_context()
+
+    def _executor_context(self):
+        @contextmanager
+        def _ctx():
+            previous = get_executor_override()
+            executor = self._build_executor()
+            set_executor_override(executor)
+            reset_executor_cache()
+            try:
+                yield
+            finally:
+                set_executor_override(previous)
+                reset_executor_cache()
+
+        return _ctx()
+
+    def _build_executor(self) -> StrategyExecutor:
+        factory = self._executor_factory or self._default_executor_factory
+        return factory(self._record_order)
+
+    def _record_order(self, order: RecordedOrder) -> None:
+        self._recorded_orders.append(order)
+
+    @staticmethod
+    def _default_executor_factory(recorder: Callable[[RecordedOrder], None]) -> StrategyExecutor:
+        class _PassthroughRisk:
+            def check_order(self, **_: Any) -> tuple[bool, Dict[str, Any]]:  # type: ignore[override]
+                return True, {}
+
+        class _NullRouter:
+            pass
+
+        return StrategyExecutor(
+            risk=_PassthroughRisk(),
+            router=_NullRouter(),
+            default_dry_run=True,
+            source="backtest",
+            backtest_mode=True,
+            order_recorder=recorder,
+        )
 
     def _load_feeds(self) -> None:
         for cfg in self._feeds:

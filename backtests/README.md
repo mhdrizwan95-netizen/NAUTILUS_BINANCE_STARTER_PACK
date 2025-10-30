@@ -82,11 +82,20 @@ feed = FeedConfig(symbol="BTCUSDT", timeframe="1h", path=Path("data/BTCUSDT_1h.c
 engine = BacktestEngine(
     feeds=[feed],
     strategy_factory=lambda client, clock: TrendStrategyModule(cfg, client=client, clock=clock),
+    patch_executor=True,
 )
 
 for step in engine.run():
     print(step.event.timestamp_ms, step.response)
+
+orders = [order for order in engine.recorded_orders]
 ```
+
+Setting `patch_executor=True` (or exporting `BACKTEST_PATCH_EXECUTOR=1`) swaps in a
+recording executor that captures every strategy submission attempt instead of
+touching the live router. Recorded orders include symbol, side, market, size,
+metadata, and the original signal payload so downstream PnL/cooldown analysis
+can replay the decisions offline.
 
 `FeedConfig` supports custom timestamp/price/volume column names and automatically
 converts second-based timestamps to milliseconds for compatibility with the live

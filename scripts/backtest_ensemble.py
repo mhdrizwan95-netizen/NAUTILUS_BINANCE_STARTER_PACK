@@ -7,7 +7,7 @@ import argparse
 import json
 import math
 import pickle
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -171,6 +171,7 @@ def run_backtest(cfg: BacktestConfig, out_path: Path) -> Dict:
     engine = BacktestEngine(
         feeds=[feed],
         strategy_factory=lambda client, clock: EnsembleSignalGenerator(cfg, metrics),
+        patch_executor=True,
     )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -251,6 +252,8 @@ def run_backtest(cfg: BacktestConfig, out_path: Path) -> Dict:
     sharpe = (mean / (std + 1e-9)) * math.sqrt(252 * 24 * 60) if std else 0.0
     drawdown = (eq_df["equity_usd"].cummax() - eq_df["equity_usd"]).max()
 
+    orders = [asdict(order) for order in engine.recorded_orders]
+
     summary = dict(
         symbol=cfg.symbol,
         quote=cfg.quote,
@@ -272,9 +275,11 @@ def run_backtest(cfg: BacktestConfig, out_path: Path) -> Dict:
             cooldown=cfg.cooldown,
             slippage_bps=cfg.slippage_bps,
         ),
+        orders_recorded=len(orders),
     )
 
-    out_path.write_text(json.dumps(summary, indent=2))
+    payload = {"summary": summary, "orders": orders}
+    out_path.write_text(json.dumps(payload, indent=2))
     print(json.dumps(summary, indent=2))
     print(f"\nEquity curve saved to: {csv_out}")
     return summary
