@@ -14,7 +14,7 @@ def test_split_symbols_allows_wildcard():
 
 
 def test_trend_config_falls_back_to_global_symbols(monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.delenv("TREND_SYMBOLS", raising=False)
+    monkeypatch.setenv("TREND_SYMBOLS", "SHOULD_BE_IGNORED")
     monkeypatch.setenv("TRADE_SYMBOLS", "*")
     cfg = load_trend_config()
     assert cfg.symbols == []

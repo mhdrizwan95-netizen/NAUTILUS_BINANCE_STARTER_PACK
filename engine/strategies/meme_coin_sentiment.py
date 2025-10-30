@@ -14,6 +14,7 @@ from engine.config.env import env_bool, env_float, env_int, env_str, env_csv
 from engine.core.order_router import OrderRouter
 from engine.core.market_resolver import resolve_market_choice
 from engine.risk import RiskRails
+from engine.execution.execute import StrategyExecutor
 
 try:  # Metrics are optional in some test contexts
     from engine.metrics import (
@@ -138,6 +139,12 @@ class MemeCoinSentiment:
         self._cooldowns: Dict[str, float] = {}
         self._global_lock_until: float = 0.0
         self._allow_sources = {src.lower() for src in self.cfg.allow_sources}
+        self._executor = StrategyExecutor(
+            risk=risk,
+            router=router,
+            default_dry_run=self.cfg.dry_run,
+            source="meme_coin_sentiment",
+        )
 
     # ------------------------------------------------------------------ public
     async def on_external_event(self, evt: Dict[str, Any]) -> None:
@@ -202,16 +209,42 @@ class MemeCoinSentiment:
 
         full_symbol = f"{symbol}.BINANCE"
         market_choice = resolve_market_choice(full_symbol, self.cfg.default_market)
-        ok, err = self.risk.check_order(symbol=full_symbol, side="BUY", quote=notional, quantity=None, market=market_choice)
-        if not ok:
-            reason = str(err.get("error") or "risk")
+
+        try:
+            execution = await self._executor.execute(
+                {
+                    "strategy": "meme_coin_sentiment",
+                    "symbol": full_symbol,
+                    "side": "BUY",
+                    "quote": notional,
+                    "market": market_choice,
+                    "meta": {
+                        "score": score_meta.score,
+                        "priority": score_meta.priority,
+                        "mentions": score_meta.mentions,
+                        "velocity": score_meta.velocity,
+                    },
+                    "tag": "meme_entry",
+                    "ts": now,
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            _LOG.warning("[MEME] execution failed for %s: %s", symbol, exc)
+            self._record_order(symbol, "failed")
+            self._set_cooldown(symbol, now)
+            self._arm_global_lock(now)
+            return
+
+        status = str(execution.get("status") or "unknown")
+        if status == "rejected":
+            reason = str(execution.get("error") or execution.get("reason") or "risk")
             self._record_event(symbol, f"risk_{reason.lower()}")
             self._set_cooldown(symbol, now)
             return
 
         self._record_event(symbol, "accepted")
 
-        if self.cfg.dry_run:
+        if status == "dry_run":
             _LOG.info(
                 "[MEME] dry-run BUY %s notional=%.2f score=%.2f priority=%.2f mentions=%.1f velocity=%.2f market=%s",
                 symbol,
@@ -227,17 +260,10 @@ class MemeCoinSentiment:
             self._arm_global_lock(now)
             return
 
-        try:
-            result = await self.router.market_quote(full_symbol, "BUY", notional, market=market_choice)
-        except Exception as exc:  # noqa: BLE001
-            _LOG.warning("[MEME] execution failed for %s: %s", symbol, exc)
-            self._record_order(symbol, "failed")
-            self._set_cooldown(symbol, now)
-            self._arm_global_lock(now)
-            return
-
-        avg_px = self._as_float(result.get("avg_fill_price")) or price
-        qty = self._as_float(result.get("filled_qty_base")) or (notional / max(avg_px, 1e-9))
+        order_payload = execution.get("order", {})
+        router_result = order_payload.get("result", {})
+        avg_px = self._as_float(router_result.get("avg_fill_price")) or price
+        qty = self._as_float(router_result.get("filled_qty_base")) or (notional / max(avg_px, 1e-9))
         _LOG.info(
             "[MEME] executed BUY %s notional=%.2f qty=%.6f avg=%.6f score=%.2f market=%s",
             symbol,

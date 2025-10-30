@@ -96,6 +96,18 @@ class SymbolScanner:
         with self._lock:
             return list(self._selected)
 
+    # ------------------------------------------------------------------ compatibility helpers
+    def current_universe(self, strategy: str | None = None) -> List[str]:
+        """Return the currently selected universe for ``strategy``.
+
+        The current implementation does not differentiate by strategy and simply
+        returns the global shortlist. The ``strategy`` parameter is accepted to
+        support the ``StrategyUniverse`` adapter which may request per-strategy
+        universes in the future.
+        """
+
+        return self.get_selected()
+
     def is_selected(self, symbol: str) -> bool:
         base = symbol.split(".")[0].upper()
         with self._lock:
