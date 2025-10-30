@@ -7,12 +7,16 @@ import math
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Deque, Dict, Iterable, Optional
+from typing import Deque, Dict, Iterable, Optional, TYPE_CHECKING
 
 from engine import metrics
-from engine.config.defaults import GLOBAL_DEFAULTS, MOMENTUM_RT_DEFAULTS
-from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
+from engine.config.defaults import MOMENTUM_RT_DEFAULTS
+from engine.config.env import env_bool, env_float, env_int, env_str
 from engine.core.market_resolver import resolve_market_choice
+from engine.universe.effective import StrategyUniverse
+
+if TYPE_CHECKING:  # pragma: no cover
+    from .symbol_scanner import SymbolScanner
 
 logger = logging.getLogger("engine.momentum.realtime")
 @dataclass(frozen=True)
@@ -34,11 +38,9 @@ class MomentumRealtimeConfig:
     prefer_futures: bool
 
 
-def load_momentum_rt_config() -> MomentumRealtimeConfig:
-    override_symbols = split_symbols(env_str("MOMENTUM_RT_SYMBOLS", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_SYMBOLS"]) or None)
-    global_symbols = split_symbols(env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]) or None)
-    symbols_list = override_symbols if override_symbols is not None else (global_symbols or [])
-    symbols = tuple(symbols_list)
+def load_momentum_rt_config(scanner: "SymbolScanner" | None = None) -> MomentumRealtimeConfig:
+    universe = StrategyUniverse(scanner).get("momentum_rt") or []
+    symbols = tuple(universe)
     window_sec = max(10.0, env_float("MOMENTUM_RT_WINDOW_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_WINDOW_SEC"]))
     baseline_sec = max(window_sec, env_float("MOMENTUM_RT_BASELINE_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_BASELINE_SEC"]))
     pct_move = env_float("MOMENTUM_RT_MOVE_THRESHOLD_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_MOVE_THRESHOLD_PCT"]) / 100.0
@@ -80,12 +82,15 @@ class MomentumStrategyModule:
         cfg: Optional[MomentumRealtimeConfig] = None,
         *,
         clock=time,
+        scanner: "SymbolScanner" | None = None,
     ) -> None:
-        self.cfg = cfg or load_momentum_rt_config()
+        base_cfg = cfg or load_momentum_rt_config(scanner)
+        self.cfg = base_cfg
         self.enabled = self.cfg.enabled
         self._clock = clock
         self._windows: Dict[str, Deque[tuple[float, float, float]]] = defaultdict(deque)
         self._cooldown_until: Dict[str, float] = defaultdict(float)
+        self._universe = StrategyUniverse(scanner)
 
     def handle_tick(
         self,
@@ -103,7 +108,8 @@ class MomentumStrategyModule:
 
         base = symbol.split(".")[0].upper()
         venue = symbol.split(".")[1].upper() if "." in symbol else "BINANCE"
-        if self.cfg.symbols and base not in self.cfg.symbols:
+        allowed = self._universe.get("momentum_rt")
+        if allowed is not None and base not in allowed:
             return None
 
         now = ts if ts is not None else self._clock.time()

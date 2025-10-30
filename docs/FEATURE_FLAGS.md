@@ -20,16 +20,14 @@ Start new modules in dry-run mode, watch Prometheus/telemetry, then flip them li
 
 ## Systematic Tick Strategies
 - `TREND_ENABLED`, `TREND_DRY_RUN` — adaptive SMA/RSI/ATR trend follower (`engine/strategies/trend_follow.py`).
-- `TREND_SYMBOLS` — optional comma list; blank or `*` falls back to `TRADE_SYMBOLS`.
+- **Universe** — when `SYMBOL_SCANNER_ENABLED=true` the dynamic scanner output is authoritative for *all* systematic strategies. When disabled they fall back to the global `TRADE_SYMBOLS` allowlist (or allow-all `*`).
 - `TREND_TIMEFRAME`, `TREND_FETCH_LIMIT`, `TREND_MA_FAST`, `TREND_MA_SLOW`, `TREND_RSI_LEN`, `TREND_RSI_ENTRY_MIN`, `TREND_RSI_EXIT_MAX`, `TREND_ATR_LEN`, `TREND_ATR_STOP_MULT`, `TREND_RISK_PER_TRADE_PCT` — shape the indicator windows, stop multiplier, and sizing.
 - `TREND_AUTO_TUNE_ENABLED`, `TREND_AUTO_TUNE_MIN_TRADES`, `TREND_AUTO_TUNE_INTERVAL`, `TREND_AUTO_TUNE_STOP_MIN`, `TREND_AUTO_TUNE_STOP_MAX`, `TREND_AUTO_TUNE_WIN_LOW`, `TREND_AUTO_TUNE_WIN_HIGH` — optional closed-loop tuner that nudges RSI and ATR parameters based on win rate.
 
 - `SCALP_ENABLED`, `SCALP_DRY_RUN` — fast mean-reversion scalper that operates on aggregated ticks (`engine/strategies/scalping.py`).
-- `SCALP_SYMBOLS` — optional override (otherwise uses `TRADE_SYMBOLS`).
 - `SCALP_WINDOW_SEC`, `SCALP_MIN_TICKS`, `SCALP_TAKE_PROFIT_PCT`, `SCALP_STOP_LOSS_PCT`, `SCALP_ORDER_SIZE_USD`, `SCALP_MAX_CONCURRENT`, `SCALP_COOLDOWN_SEC`, `SCALP_MAX_SPREAD_BPS` — tune the scalper window, exit targets, and concurrency.
 
 - `MOMENTUM_RT_ENABLED`, `MOMENTUM_RT_DRY_RUN` — breakout/momentum monitor that reacts to fast moves (`engine/strategies/momentum_realtime.py`).
-- `MOMENTUM_RT_SYMBOLS` — optional per-strategy list; blank/`*` uses the global allowlist.
 - `MOMENTUM_RT_WINDOW_SEC`, `MOMENTUM_RT_MOVE_PCT`, `MOMENTUM_RT_VOLUME_MULT`, `MOMENTUM_RT_TP_PCT`, `MOMENTUM_RT_SL_PCT`, `MOMENTUM_RT_TRAILING_PCT`, `MOMENTUM_RT_RISK_PER_TRADE_PCT`, `MOMENTUM_RT_COOLDOWN_SEC` — set the detection window, move threshold, and trailing stops.
 
 ## Event-Driven Strategies (EventBus `events.external_feed`)

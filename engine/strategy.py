@@ -2,18 +2,18 @@ from __future__ import annotations
 import asyncio, inspect, logging, os
 import threading, time, uuid
 from collections import deque, defaultdict
-from typing import Any, Callable, Deque, Dict, List, Optional, cast
+from typing import Any, Callable, Deque, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from .config import load_strategy_config, load_risk_config
-from .risk import RiskRails, Side
-from .idempotency import CACHE, append_jsonl
+from .risk import RiskRails
 from . import metrics
 from .core import order_router
 from .core.market_resolver import resolve_market_choice
 from .core.event_bus import BUS
 from .telemetry.publisher import record_tick_latency
+from .execution.execute import StrategyExecutor
 from .strategies import policy_hmm, ensemble_policy
 from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
 from .strategies.trend_follow import TrendStrategyModule, load_trend_config
@@ -47,7 +47,7 @@ if SymbolScanner and load_symbol_scanner_config:
 TREND_CFG = None
 TREND_MODULE: Optional[TrendStrategyModule] = None
 try:
-    TREND_CFG = load_trend_config()
+    TREND_CFG = load_trend_config(SYMBOL_SCANNER)
     if TREND_CFG.enabled:
         TREND_MODULE = TrendStrategyModule(TREND_CFG, scanner=SYMBOL_SCANNER)
 except Exception:
@@ -56,9 +56,9 @@ except Exception:
 SCALP_CFG = None
 SCALP_MODULE: Optional[ScalpStrategyModule] = None
 try:
-    SCALP_CFG = load_scalp_config()
+    SCALP_CFG = load_scalp_config(SYMBOL_SCANNER)
     if SCALP_CFG.enabled:
-        SCALP_MODULE = ScalpStrategyModule(SCALP_CFG)
+        SCALP_MODULE = ScalpStrategyModule(SCALP_CFG, scanner=SYMBOL_SCANNER)
 except Exception:
     SCALP_MODULE = None
 
@@ -66,9 +66,9 @@ MOMENTUM_RT_CFG = None
 MOMENTUM_RT_MODULE: Optional[MomentumStrategyModule] = None
 if 'MomentumStrategyModule' in globals() and MomentumStrategyModule and load_momentum_rt_config:
     try:
-        MOMENTUM_RT_CFG = load_momentum_rt_config()
+        MOMENTUM_RT_CFG = load_momentum_rt_config(SYMBOL_SCANNER)
         if MOMENTUM_RT_CFG.enabled:
-            MOMENTUM_RT_MODULE = MomentumStrategyModule(MOMENTUM_RT_CFG)
+            MOMENTUM_RT_MODULE = MomentumStrategyModule(MOMENTUM_RT_CFG, scanner=SYMBOL_SCANNER)
             logging.getLogger(__name__).info(
                 "Momentum RT module enabled (window=%.1fs, move>=%.2f%%, vol>=%.2fx)",
                 MOMENTUM_RT_CFG.window_sec,
@@ -339,106 +339,48 @@ def post_strategy_signal(sig: StrategySignal, request: Request):
     return _execute_strategy_signal(sig, idem_key=idem)
 
 
-def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict:
-    side_literal = cast(Side, sig.side)
-    ok, err = RAILS.check_order(
-        symbol=sig.symbol,
-        side=side_literal,
-        quote=sig.quote,
-        quantity=sig.quantity,
-        market=(sig.market.lower() if isinstance(sig.market, str) else sig.market),
-    )
-    if not ok:
-        metrics.orders_rejected.inc()
-        return {"status": "rejected", **err, "source": "strategy"}
+_EXECUTOR: Optional[StrategyExecutor] = None
 
-    dry = S_CFG.dry_run if sig.dry_run is None else sig.dry_run
-    key = idem_key or f"strategy:{sig.symbol}:{sig.side}:{int(time.time())}"
-    cached = CACHE.get(key)
-    if cached:
-        return cached
 
-    if dry:
-        payload = {
-            "status": "simulated",
-            "symbol": sig.symbol,
-            "side": sig.side,
-            "quote": sig.quote,
-            "quantity": sig.quantity,
-            "tag": sig.tag or "strategy",
-            "meta": sig.meta,
-            "idempotency_key": key,
-            "timestamp": time.time(),
-        }
+def _get_executor() -> StrategyExecutor:
+    global _EXECUTOR
+    if _EXECUTOR is None:
         try:
-            from .app import _config_hash as _cfg_hash
-            payload["cfg_hash"] = _cfg_hash()
+            from .app import router as order_router_instance
+        except Exception as exc:  # pragma: no cover - import guard
+            raise RuntimeError("order router unavailable") from exc
+        try:
+            from .app import _config_hash as _cfg_hash  # type: ignore[attr-defined]
         except Exception:
-            pass
-        append_jsonl("orders.jsonl", payload)
-        CACHE.set(key, payload)
-        return payload
+            _cfg_hash = None
+        _EXECUTOR = StrategyExecutor(
+            risk=RAILS,
+            router=order_router_instance,
+            default_dry_run=S_CFG.dry_run,
+            config_hash_getter=_cfg_hash,
+            source="strategy",
+        )
+    return _EXECUTOR
 
-    from .app import router as order_router_instance
 
-    router_ctx = {
-        "meta": sig.meta,
-        "tag": sig.tag or "strategy",
+def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict:
+    executor = _get_executor()
+    payload = {
+        "strategy": sig.tag or "strategy",
         "symbol": sig.symbol,
         "side": sig.side,
-        "market": (sig.market.lower() if isinstance(sig.market, str) else sig.market),
-    }
-    try:
-        setattr(order_router_instance, "_strategy_pending_meta", router_ctx)
-    except Exception:
-        router_ctx = None
-
-    try:
-        # Use synchronous wrapper to avoid un-awaited coroutine warnings
-        res = order_router_instance.place_market_order(
-            symbol=sig.symbol,
-            side=side_literal,
-            quote=(None if sig.quantity is not None else (sig.quote or 0.0)),
-            quantity=(sig.quantity if sig.quantity is not None else None),
-            market=(sig.market.lower() if isinstance(sig.market, str) else sig.market),
-        )
-    finally:
-        if router_ctx is not None:
-            try:
-                if getattr(order_router_instance, "_strategy_pending_meta", None) is router_ctx:
-                    delattr(order_router_instance, "_strategy_pending_meta")
-            except AttributeError:
-                pass
-            except Exception:
-                try:
-                    setattr(order_router_instance, "_strategy_pending_meta", None)
-                except Exception:
-                    pass
-
-    _record_tick_latency(sig.symbol)
-
-    metrics.orders_submitted.inc()
-    resp = {
-        "status": "submitted",
-        "order": res,
-        "tag": sig.tag or "strategy",
+        "quote": sig.quote,
+        "quantity": sig.quantity,
+        "dry_run": sig.dry_run,
         "meta": sig.meta,
-        "idempotency_key": key,
-        "timestamp": time.time(),
+        "market": sig.market,
+        "tag": sig.tag or "strategy",
+        "ts": time.time(),
     }
-    try:
-        from .app import _config_hash as _cfg_hash
-        resp["cfg_hash"] = _cfg_hash()
-    except Exception:
-        pass
-    append_jsonl("orders.jsonl", resp)
-    CACHE.set(key, resp)
-    try:
-        from .state import SnapshotStore
-        SnapshotStore().save(order_router_instance.portfolio_snapshot())
-    except Exception:
-        pass
-    return resp
+    result = executor.execute_sync(payload, idem_key=idem_key)
+    if result.get("status") == "submitted":
+        _record_tick_latency(sig.symbol)
+    return result
 
 
 def register_tick_listener(cb: Callable[[str, float, float], object]) -> None:
