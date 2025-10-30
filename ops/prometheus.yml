@@ -17,10 +17,6 @@ scrape_configs:
         labels:
           role: trader
 
-  - job_name: 'hmm_engine_bybit'
-    static_configs:
-      - targets: ['hmm_engine_bybit:9104']
-
   - job_name: 'hmm_ops'
     static_configs:
       - targets: ['hmm_ops:8002']
