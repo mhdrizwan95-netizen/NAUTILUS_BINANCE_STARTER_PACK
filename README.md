@@ -117,6 +117,10 @@ Key tips:
 * Risk rails (`MIN_NOTIONAL_USDT`, `EXPOSURE_CAP_*`, etc.) align with the defaults enforced by `engine.config.load_risk_config()` and `RiskRails`. Lower the limits to stay in “paper-safe” territory; raise them only once you have live liquidity to support it.
 * Deprecated aliases (`SOCIAL_SENTIMENT_*`) remain as commented entries so legacy deployments can copy/paste the correct replacements without guesswork.
 
+### Backtesting
+
+The starter pack does **not** ship a production-grade backtest harness yet. Earlier placeholders such as `run_backtest.py` were removed so nobody accidentally relies on incomplete tooling. Research utilities that still live under `scripts/` remain strictly experimental; treat them as reference material until the official harness (data adapters, fills/slippage model, deterministic replay clock, seeded randomness) lands. Progress is tracked in `ROADMAP.md`.
+
 ## Key Directories
 
 | Path | Purpose |

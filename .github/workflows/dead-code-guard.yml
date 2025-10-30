@@ -1,0 +1,50 @@
+name: Dead Code Guard
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+jobs:
+  dead-code-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
+      - name: Forbid known-dead files and dirs
+        run: |
+          set -e
+          echo "🔎 Checking for forbidden stubs…"
+          forbidden_paths=$(git ls-files | grep -E '(^|/)(run_backtest\.py|ops/experiments/|ops/legacy/|scripts/experiments/|scripts/legacy/|scripts/backtest|scripts/sim|tools/backtest|bench/backtest)' || true)
+          if [ -n "$forbidden_paths" ]; then
+            if [ -f .deadcode-allowlist ]; then
+              filtered=$(echo "$forbidden_paths" | grep -v -E -f .deadcode-allowlist || true)
+            else
+              filtered="$forbidden_paths"
+            fi
+            if [ -n "$filtered" ]; then
+              echo "::error::Forbidden dead paths:"
+              echo "$filtered"
+              exit 1
+            fi
+          fi
+          echo "✅ No forbidden stubs found."
+
+      - name: Flag milestone-tagged dead code (M1-M24) in code files
+        run: |
+          set -e
+          tmpfile=$(mktemp)
+          rg -n --iglob '!**/{.git,venv,node_modules,dist,build,assets,docs}/**' \
+             -g '*.{py,ts,js,go,rs,sh,yaml,yml,toml,ini}' \
+             -e 'TODO[: ]*M[1-9]' -e 'TODO[: ]*M1[0-9]' -e 'TODO[: ]*M2[0-4]' || true > "$tmpfile"
+          if [ -s "$tmpfile" ]; then
+            offending=$(grep -vE '(^$|ROADMAP|CHANGELOG|README|docs/)' "$tmpfile" || true)
+            if [ -n "$offending" ]; then
+              echo "::error::Found legacy milestone tags in code:"
+              echo "$offending"
+              exit 1
+            fi
+          fi
+          echo "✅ No legacy milestone tags in code."

@@ -1,0 +1,4 @@
+# Paths intentionally kept even though they match dead-code guard patterns
+^scripts/backtest_hmm\.py$
+^scripts/backtest_ensemble\.py$
+^tools/deterministic_backtest\.py$
