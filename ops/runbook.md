@@ -15,10 +15,10 @@ cp ops/env.example .env
 uvicorn ml_service.app:app --host 0.0.0.0 --port 8010 --workers=1
 
 ## 4) Backtest
-python backtests/run_backtest.py --config backtests/configs/crypto_spot.yaml
+python scripts/backtest_hmm.py --csv data/BTCUSDT_1m.csv --model engine/models/hmm_policy.pkl --symbol BTCUSDT --quote 100 --out reports/backtest_BTCUSDT.json
 
-## 5) Paper trade (testnet)
-python ops/run_paper.py --symbol ${SYMBOL}
+## 5) Start engine in paper mode (Binance Spot Testnet)
+TRADING_ENABLED=false BINANCE_IS_TESTNET=true uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info
 
-## 6) Go live tiny size (when ready)
-BINANCE_IS_TESTNET=false python ops/run_live.py --symbol ${SYMBOL}
+## 6) Promote to live trading (tiny size)
+TRADING_ENABLED=true BINANCE_IS_TESTNET=false uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info

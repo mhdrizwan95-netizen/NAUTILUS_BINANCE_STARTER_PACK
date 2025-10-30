@@ -11,6 +11,7 @@ import httpx
 
 from engine.core.order_router import OrderRouter
 from engine.core.event_bus import BUS
+from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
 from engine.metrics import (
     listing_sniper_announcements_total,
     listing_sniper_cooldown_epoch,
@@ -417,11 +418,24 @@ class ListingSniper:
             return
         self._forwarded.add(key)
         try:
-            from engine.core.event_bus import BUS
-
-            await BUS.publish(
-                "events.binance_listing",
-                {"symbol": symbol, "time": int(announced_at * 1000.0)},
+            payload = {
+                "source": "listing_sniper_bridge",
+                "payload": {
+                    "symbol": symbol,
+                    "announced_at": int(announced_at * 1000.0),
+                    "time": int(announced_at * 1000.0),
+                    "forwarded_by": "listing_sniper",
+                },
+                "asset_hints": [symbol],
+                "priority": 0.8,
+            }
+            await SIGNAL_QUEUE.put(
+                QueuedEvent(
+                    topic="events.external_feed",
+                    data=payload,
+                    priority=float(payload.get("priority", 0.8)),
+                    source="listing_sniper_bridge",
+                )
             )
         except Exception:
             logger.debug("[LISTING] failed to forward legacy event for %s", symbol)

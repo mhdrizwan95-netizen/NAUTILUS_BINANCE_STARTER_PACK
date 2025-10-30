@@ -70,6 +70,21 @@ Enable the built‑in MA+HMM scheduler by setting `STRATEGY_ENABLED=true` (and f
 
 See docs/FEATURE_FLAGS.md for the one‑page index of important environment flags.
 
+### Configuration overview
+
+The `.env.example` file is now generated from `engine/config/defaults.py`, so every knob surfaced in the codebase appears in a single, well-documented template. Regenerate it with:
+
+```bash
+python scripts/generate_env_example.py
+```
+
+Key tips:
+
+* `TRADE_SYMBOLS` is the global allowlist. Leave it as `*` to permit every discovered symbol, or provide a comma-separated list (e.g., `BTCUSDT,ETHUSDT`).
+* Each strategy (`TREND_*`, `SCALP_*`, `MOMENTUM_RT_*`, `MEME_SENTIMENT_*`) has its own section with defaults that match the loader logic. Setting a per-strategy `*_SYMBOLS` value overrides `TRADE_SYMBOLS` for that module; blank or `*` falls back to the global list.
+* Risk rails (`MIN_NOTIONAL_USDT`, `EXPOSURE_CAP_*`, etc.) align with the defaults enforced by `engine.config.load_risk_config()` and `RiskRails`. Lower the limits to stay in “paper-safe” territory; raise them only once you have live liquidity to support it.
+* Deprecated aliases (`SOCIAL_SENTIMENT_*`) remain as commented entries so legacy deployments can copy/paste the correct replacements without guesswork.
+
 ## Key Directories
 
 | Path | Purpose |

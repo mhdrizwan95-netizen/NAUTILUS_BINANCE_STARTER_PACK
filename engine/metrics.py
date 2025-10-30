@@ -347,6 +347,17 @@ external_feed_last_event_epoch = Gauge(
     multiprocess_mode="max",
 )
 
+events_external_feed_published_total = Counter(
+    "events_external_feed_published_total",
+    "External events published onto events.external_feed",
+    ["source"],
+)
+events_external_feed_consumed_total = Counter(
+    "events_external_feed_consumed_total",
+    "External events consumed by subscribers",
+    ["consumer"],
+)
+
 # Listing sniper telemetry
 listing_sniper_announcements_total = Counter(
     "listing_sniper_announcements_total",
@@ -396,30 +407,6 @@ meme_sentiment_orders_total = Counter(
 meme_sentiment_cooldown_epoch = Gauge(
     "meme_sentiment_cooldown_epoch",
     "Epoch timestamp when meme sentiment cooldown expires for a symbol",
-    ["symbol"],
-    multiprocess_mode="max",
-)
-
-# Social sentiment module metrics
-social_sentiment_events_total = Counter(
-    "social_sentiment_events_total",
-    "Social sentiment evaluations grouped by decision outcome",
-    ["symbol", "decision"],
-)
-social_sentiment_orders_total = Counter(
-    "social_sentiment_orders_total",
-    "Orders initiated by the social sentiment module grouped by status",
-    ["symbol", "status"],
-)
-social_sentiment_cooldown_epoch = Gauge(
-    "social_sentiment_cooldown_epoch",
-    "Epoch timestamp when social sentiment cooldown expires for a symbol",
-    ["symbol"],
-    multiprocess_mode="max",
-)
-social_sentiment_signal_score = Gauge(
-    "social_sentiment_signal_score",
-    "Most recent social sentiment signal score per symbol",
     ["symbol"],
     multiprocess_mode="max",
 )
@@ -538,10 +525,6 @@ REGISTRY = {
     "meme_sentiment_events_total": meme_sentiment_events_total,
     "meme_sentiment_orders_total": meme_sentiment_orders_total,
     "meme_sentiment_cooldown_epoch": meme_sentiment_cooldown_epoch,
-    "social_sentiment_events_total": social_sentiment_events_total,
-    "social_sentiment_orders_total": social_sentiment_orders_total,
-    "social_sentiment_cooldown_epoch": social_sentiment_cooldown_epoch,
-    "social_sentiment_signal_score": social_sentiment_signal_score,
     "airdrop_promo_events_total": airdrop_events_total,
     "airdrop_promo_orders_total": airdrop_orders_total,
     "airdrop_promo_cooldown_epoch": airdrop_cooldown_epoch,
@@ -552,6 +535,8 @@ REGISTRY = {
     "external_feed_errors_total": external_feed_errors_total,
     "external_feed_latency_seconds": external_feed_latency_seconds,
     "external_feed_last_event_epoch": external_feed_last_event_epoch,
+    "events_external_feed_published_total": events_external_feed_published_total,
+    "events_external_feed_consumed_total": events_external_feed_consumed_total,
     "venue_exposure_usd": venue_exposure_usd,
     "risk_equity_buffer_usd": risk_equity_buffer_usd,
     "risk_equity_drawdown_pct": risk_equity_drawdown_pct,

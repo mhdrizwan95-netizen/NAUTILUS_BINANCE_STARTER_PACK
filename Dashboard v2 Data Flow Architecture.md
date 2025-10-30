@@ -3,13 +3,13 @@
                 ┌────────────────────────────────────────────┐
                 │               Strategy Core                │
                 │────────────────────────────────────────────│
-                │ strategies/hmm_policy/strategy.py           │
+                │ engine/strategies/policy_hmm.py             │
                 │ ml_service/app.py  → emits {state,action,confidence} │
                 └──────────────┬─────────────────────────────┘
                                │
                                ▼
                    ┌──────────────────────────┐
-                   │  telemetry.py (M14–M16)  │
+                   │  ops/telemetry_metrics.py│
                    │──────────────────────────│
                    │ Prometheus metrics        │
                    │  • state_active           │

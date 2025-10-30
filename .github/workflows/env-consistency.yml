@@ -1,0 +1,64 @@
+name: Env template consistency
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  env-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Regenerate env.example
+        run: |
+          python scripts/generate_env_example.py
+          git diff --exit-code .env.example
+      - name: Validate env keys
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import sys
+
+          ROOT = Path(__file__).resolve().parents[2]
+          sys.path.insert(0, str(ROOT))
+          from engine.config.defaults import ALL_DEFAULTS
+
+          comment_only = {"SOCIAL_SENTIMENT_ENABLED", "SOCIAL_SENTIMENT_SOURCES"}
+          env_path = ROOT / '.env.example'
+          text = env_path.read_text().splitlines()
+          active_keys = set()
+          commented_keys = set()
+          for line in text:
+              stripped = line.strip()
+              if not stripped:
+                  continue
+              if stripped.startswith('#'):
+                  if stripped.startswith('#') and '=' in stripped:
+                      key = stripped.lstrip('#').split('=', 1)[0]
+                      commented_keys.add(key)
+                  continue
+              key = stripped.split('=', 1)[0]
+              active_keys.add(key)
+
+          defaults_keys = set(ALL_DEFAULTS.keys())
+          missing = defaults_keys - active_keys - comment_only
+          extra = active_keys - defaults_keys
+          missing_comments = comment_only - commented_keys
+
+          if missing:
+              print(f"::error::Missing keys in .env.example: {sorted(missing)}")
+              raise SystemExit(1)
+          if extra:
+              print(f"::error::Unexpected keys present in .env.example: {sorted(extra)}")
+              raise SystemExit(1)
+          if missing_comments:
+              print(f"::error::Expected commented aliases not present: {sorted(missing_comments)}")
+              raise SystemExit(1)
+          print("Env template matches defaults")
+          PY

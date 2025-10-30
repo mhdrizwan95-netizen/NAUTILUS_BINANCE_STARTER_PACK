@@ -26,12 +26,11 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 import httpx
 import yaml
 
-from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
+from engine.events.publisher import publish_external_event
+from engine.events.schemas import ExternalEvent
 from engine.metrics import (
-    external_feed_events_total,
     external_feed_errors_total,
     external_feed_latency_seconds,
-    external_feed_last_event_epoch,
 )
 
 logger = logging.getLogger(__name__)
@@ -50,14 +49,13 @@ class ExternalFeedEvent:
     priority: float = 0.5
     expires_at: Optional[float] = None
 
-    def asdict(self) -> Dict[str, Any]:
-        return {
-            "source": self.source,
-            "payload": self.payload,
-            "asset_hints": self.asset_hints,
-            "priority": float(self.priority),
-            "expires_at": self.expires_at,
-        }
+    def as_envelope(self) -> ExternalEvent:
+        meta: Dict[str, Any] = {"priority": self.priority}
+        if self.expires_at is not None:
+            meta["expires_at"] = self.expires_at
+        if self.asset_hints:
+            meta["asset_hints"] = list(self.asset_hints)
+        return ExternalEvent(source=self.source, payload=self.payload, meta=meta)
 
 
 class ExternalFeedConnector:
@@ -124,18 +122,13 @@ class ExternalFeedConnector:
                 external_feed_latency_seconds.labels(self.source).observe(latency)
                 published = 0
                 for event in events or []:
-                    payload = event.asdict()
-                    await SIGNAL_QUEUE.put(
-                        QueuedEvent(
-                            topic=self.topic,
-                            data=payload,
-                            priority=payload.get("priority", self.default_priority),
-                            expires_at=payload.get("expires_at"),
-                            source=self.source,
-                        )
+                    envelope = event.as_envelope()
+                    await publish_external_event(
+                        envelope,
+                        priority=event.priority,
+                        expires_at=event.expires_at,
+                        asset_hints=event.asset_hints,
                     )
-                    external_feed_events_total.labels(self.source).inc()
-                    external_feed_last_event_epoch.labels(self.source).set(time.time())
                     published += 1
                 if published:
                     self._log.debug("Published %d event(s) for %s", published, self.source)
