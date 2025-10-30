@@ -963,6 +963,67 @@ class BinanceREST:
                     continue
                 raise RuntimeError(f"Binance error (submit_limit_order) status={status} body={body}") from e
 
+    async def cancel_order(
+        self,
+        symbol: str,
+        *,
+        order_id: int | str | None = None,
+        client_order_id: str | None = None,
+        market: Optional[str] = None,
+    ) -> dict[str, Any] | None:
+        if order_id is None and not client_order_id:
+            raise ValueError("cancel_order requires order_id or client_order_id")
+
+        market_key, base_url, is_futures = self._resolve_market(market)
+        clean_symbol = self._clean_symbol(symbol)
+        params = {
+            "symbol": clean_symbol,
+            "recvWindow": self._settings.recv_window,
+        }
+        if order_id is not None:
+            params["orderId"] = str(order_id)
+        if client_order_id:
+            params["origClientOrderId"] = client_order_id
+        if market_key == "margin" and _margin_isolated_default():
+            params["isIsolated"] = "TRUE"
+
+        if market_key == "options":
+            path = "/vapi/v1/order"
+        elif is_futures:
+            path = "/fapi/v1/order"
+        elif market_key == "margin":
+            path = "/sapi/v1/margin/order"
+        else:
+            path = "/api/v3/order"
+
+        for attempt in range(3):
+            signed = dict(params)
+            signed["timestamp"] = _now_ms()
+            signed["signature"] = self._sign(signed)
+            try:
+                async with httpx.AsyncClient(
+                    base_url=base_url,
+                    timeout=self._settings.timeout,
+                    headers={"X-MBX-APIKEY": self._settings.api_key},
+                ) as client:
+                    self._log_request("DELETE", path, params=signed)
+                    resp = await client.delete(path, params=signed)
+                resp.raise_for_status()
+                try:
+                    return resp.json()
+                except Exception:
+                    return None
+            except httpx.HTTPStatusError as exc:
+                status = exc.response.status_code if exc.response is not None else 0
+                if status in (418, 429) and attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise RuntimeError(
+                    f"Binance error (cancel_order) status={status} body={exc.response.text if exc.response else ''}"
+                ) from exc
+
+        return None
+
     async def place_reduce_only_market(
         self,
         symbol: str,

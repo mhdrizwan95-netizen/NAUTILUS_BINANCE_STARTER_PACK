@@ -327,6 +327,52 @@ class OrderRouter:
             return []
         return []
 
+    async def cancel_order(
+        self,
+        *,
+        symbol: str,
+        order_id: Any | None = None,
+        client_order_id: str | None = None,
+        market: str | None = None,
+    ) -> bool:
+        client = _CLIENTS.get(self._venue)
+        if client is None:
+            return False
+        cancel_fn = getattr(client, "cancel_order", None)
+        if cancel_fn is None:
+            return False
+
+        params: dict[str, Any] = {"symbol": symbol}
+        if order_id is not None:
+            params["order_id"] = order_id
+        if client_order_id:
+            params["client_order_id"] = client_order_id
+        if market:
+            params["market"] = market
+
+        try:
+            res = cancel_fn(**params)
+            if hasattr(res, "__await__"):
+                await res  # type: ignore[func-returns-value]
+            return True
+        except Exception as exc:  # noqa: BLE001
+            logging.getLogger(__name__).debug("cancel_order failed: %s", exc, exc_info=True)
+            return False
+
+    async def cancel_open_order(self, order: dict) -> bool:
+        symbol = str(order.get("symbol") or "").upper()
+        if not symbol:
+            return False
+        order_id = order.get("orderId") or order.get("order_id")
+        client_order_id = order.get("clientOrderId") or order.get("client_order_id")
+        market = order.get("market") or order.get("venue")
+        return await self.cancel_order(
+            symbol=symbol,
+            order_id=order_id,
+            client_order_id=client_order_id,
+            market=market,
+        )
+
     async def amend_stop_reduce_only(self, symbol: str, side: Side, stop_price: float, qty: float) -> None:
         import os, logging
         if os.getenv("ALLOW_STOP_AMEND", "").lower() not in {"1", "true", "yes"}:
