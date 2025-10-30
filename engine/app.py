@@ -934,6 +934,88 @@ _kraken_risk_loop_task: asyncio.Task | None = None
 _kraken_risk_stop_event = asyncio.Event()
 
 
+class ExternalEventRequest(BaseModel):
+    """Schema for enqueuing external feed events via the API."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str = Field(..., min_length=1, description="Canonical feed identifier")
+    payload: dict[str, Any] = Field(default_factory=dict, description="Arbitrary event payload")
+    asset_hints: list[str] = Field(default_factory=list, description="Optional trading symbols impacted")
+    priority: float = Field(0.5, ge=0.0, le=1.0, description="Queue priority [0.0, 1.0]")
+    expires_at: float | None = Field(
+        default=None, description="Optional epoch timestamp at which the event becomes stale"
+    )
+    ttl_sec: float | None = Field(
+        default=None, ge=0.0, description="Alternative to expires_at: TTL in seconds"
+    )
+
+    @field_validator("source")
+    @classmethod
+    def _normalize_source(cls, value: str) -> str:
+        cleaned = value.strip()
+        if not cleaned:
+            raise ValueError("source must be non-empty")
+        return cleaned
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def _default_payload(cls, value):
+        return value or {}
+
+    @field_validator("asset_hints", mode="before")
+    @classmethod
+    def _coerce_hints(cls, value):
+        if value is None:
+            return []
+        if isinstance(value, (str, bytes)):
+            return [value]
+        return list(value)
+
+    @field_validator("asset_hints", mode="after")
+    @classmethod
+    def _normalize_hints(cls, value: list[str]) -> list[str]:
+        normalized: list[str] = []
+        for item in value:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if not text:
+                continue
+            normalized.append(text.upper())
+        return normalized
+
+
+_external_event_logger = logging.getLogger("engine.api.external_events")
+
+
+async def _queue_external_event(evt: ExternalEventRequest) -> None:
+    expires_at = evt.expires_at
+    if expires_at is None and evt.ttl_sec is not None:
+        expires_at = time.time() + float(evt.ttl_sec)
+
+    event = {
+        "source": evt.source,
+        "payload": evt.payload,
+        "asset_hints": evt.asset_hints,
+        "priority": float(evt.priority),
+    }
+    if expires_at is not None:
+        event["expires_at"] = float(expires_at)
+
+    await SIGNAL_QUEUE.put(
+        QueuedEvent(
+            topic="events.external_feed",
+            data=event,
+            priority=float(evt.priority),
+            expires_at=float(expires_at) if expires_at is not None else None,
+            source=evt.source,
+        )
+    )
+    metrics.external_feed_events_total.labels(evt.source).inc()
+    metrics.external_feed_last_event_epoch.labels(evt.source).set(time.time())
+
+
 class MarketOrderRequest(BaseModel):
     """Market order request. Exactly one of {quantity, quote} must be provided."""
     model_config = ConfigDict(extra="ignore")  # allow unknown fields
