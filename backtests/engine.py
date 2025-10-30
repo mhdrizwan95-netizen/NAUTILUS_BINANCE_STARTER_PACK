@@ -146,6 +146,7 @@ class BacktestEngine:
         return self._client
 
     def run(self) -> Iterator[BacktestStep]:
+        self._prime_cursors()
         strategy = self._strategy_factory(self._client, self._clock)
         dispatch = self._resolve_dispatch(strategy)
 
@@ -201,6 +202,22 @@ class BacktestEngine:
                     state.cfg.timeframe,
                     closes[state.cursor],
                 )
+            elif closes:
+                # If we have never advanced, clamp the cursor to just before the
+                # first candle so clients still see an empty history.
+                self._client.set_close_time(
+                    state.cfg.symbol,
+                    state.cfg.timeframe,
+                    closes[0] - 1,
+                )
+
+    def _prime_cursors(self) -> None:
+        for state in self._feed_states:
+            if not state.close_times:
+                continue
+            idx, ts = state.initial_cursor()
+            state.cursor = idx
+            self._client.set_close_time(state.cfg.symbol, state.cfg.timeframe, ts)
 
     @staticmethod
     def _resolve_dispatch(strategy: Any) -> Callable[[str, float, float, float], Any]:
@@ -225,6 +242,19 @@ class _FeedState:
         self.close_times = [int(row[6]) for row in rows]
         self.cursor = -1
         self.start_index = min(len(rows), max(0, cfg.warmup_bars))
+
+    def initial_cursor(self) -> tuple[int, int]:
+        """Return the starting index and timestamp visible before the first event."""
+
+        if not self.close_times:
+            return -1, 0
+
+        if self.start_index <= 0:
+            # No warmup bars, expose an empty history until the first event.
+            return -1, self.close_times[0] - 1
+
+        idx = min(self.start_index, len(self.close_times)) - 1
+        return idx, self.close_times[idx]
 
 
 # ---------------------------------------------------------------------------
