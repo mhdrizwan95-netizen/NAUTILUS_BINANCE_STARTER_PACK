@@ -4,8 +4,14 @@ import os, time
 from typing import Optional
 from ib_insync import IB, Stock, MarketOrder, util
 
+
+def _enabled() -> bool:
+    return os.getenv("IBKR_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
+
 class IbkrClient:
     def __init__(self):
+        if not _enabled():
+            raise RuntimeError("IBKR client disabled. Set IBKR_ENABLED=true to initialize.")
         self.ib = None
         self._connected = False
         try:

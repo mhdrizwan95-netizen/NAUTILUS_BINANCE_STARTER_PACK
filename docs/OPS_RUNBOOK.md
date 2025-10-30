@@ -53,7 +53,7 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 ### Trend Auto-Tune & Symbol Scanner
 
 - **Auto-tune status**: look for `[TREND-AUTO]` log entries or query `trend_follow_trades_total` / `trend_follow_signals_total`; each parameter change writes to `data/runtime/trend_auto_tune.json`. If you need to disable tuning quickly, set `TREND_AUTO_TUNE_ENABLED=false` in `.env` and restart `engine_binance`.
-- **Symbol scanner status**: check the Grafana Trend dashboard (`symbol_scanner_score`, `symbol_scanner_selected_total`) or inspect `data/runtime/symbol_scanner_state.json` to see the active shortlist. If `SYMBOL_SCANNER_ENABLED=false`, the trend module falls back to `TREND_SYMBOLS`.
+- **Symbol scanner status**: check the Grafana Trend dashboard (`symbol_scanner_score`, `symbol_scanner_selected_total`) or inspect `data/runtime/symbol_scanner_state.json` to see the active shortlist. If `SYMBOL_SCANNER_ENABLED=false`, the systematic stack falls back to the global `TRADE_SYMBOLS` allowlist.
 - **Restart procedure**: after editing `.env` for either feature run `docker compose up -d engine_binance engine_binance_exporter`. The scanner starts a background thread; verify `[SCAN]` logs appear (or values change in Grafana) before trusting output.
 
 ## Restart & Recovery

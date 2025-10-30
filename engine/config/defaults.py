@@ -38,6 +38,11 @@ RISK_DEFAULTS: Dict[str, Any] = {
     "MARGIN_MAX_LIABILITY_USD": 25000.0,
     "MARGIN_MAX_LEVERAGE": 3.0,
     "OPTIONS_ENABLED": False,
+    "SOFT_BREACH_ENABLED": True,
+    "SOFT_BREACH_TIGHTEN_SL_PCT": 0.6,
+    "SOFT_BREACH_BREAKEVEN_OK": True,
+    "SOFT_BREACH_CANCEL_ENTRIES": True,
+    "SOFT_BREACH_LOG_ORDERS": True,
 }
 
 TREND_DEFAULTS: Dict[str, Any] = {
@@ -171,6 +176,10 @@ SYMBOL_SCANNER_DEFAULTS: Dict[str, Any] = {
     "SYMBOL_SCANNER_STATE_PATH": "data/runtime/symbol_scanner_state.json",
 }
 
+BROKER_DEFAULTS: Dict[str, Any] = {
+    "IBKR_ENABLED": False,
+}
+
 ALL_DEFAULTS: Dict[str, Any] = _merge_dicts(
     ENGINE_DEFAULTS,
     GLOBAL_DEFAULTS,
@@ -180,6 +189,7 @@ ALL_DEFAULTS: Dict[str, Any] = _merge_dicts(
     MOMENTUM_RT_DEFAULTS,
     MEME_SENTIMENT_DEFAULTS,
     SYMBOL_SCANNER_DEFAULTS,
+    BROKER_DEFAULTS,
 )
 
 __all__ = [

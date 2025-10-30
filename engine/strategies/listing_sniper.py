@@ -300,14 +300,46 @@ class ListingSniper:
 
         full_symbol = f"{symbol}.BINANCE"
         market_choice = resolve_market_choice(full_symbol, self.cfg.default_market)
-        ok, err = self.risk.check_order(symbol=full_symbol, side="BUY", quote=notional, quantity=None, market=market_choice)
-        if not ok:
-            self._record_skip(symbol, err.get("error", "risk"))
+
+        try:
+            execution = await self._executor.execute(
+                {
+                    "strategy": "listing_sniper",
+                    "symbol": full_symbol,
+                    "side": "BUY",
+                    "quote": notional,
+                    "market": market_choice,
+                    "meta": {
+                        "article_id": op.article_id,
+                        "announced_at": op.announced_at,
+                        "go_live_at": op.go_live_at,
+                        "initial_price": op.initial_price,
+                    },
+                    "tag": "listing_entry",
+                    "ts": time.time(),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[LISTING] execution failed for %s: %s", symbol, exc)
+            self._record_skip(symbol, "execution_exception")
+            if self.cfg.metrics_enabled:
+                listing_sniper_orders_total.labels(symbol=symbol, status="failed").inc()
             self._set_cooldown(symbol)
             return
 
-        status = "simulated" if self.cfg.dry_run else "submitted"
-        if self.cfg.dry_run:
+        status = str(execution.get("status") or "unknown")
+        if status == "rejected":
+            reason = str(execution.get("error") or execution.get("reason") or "risk")
+            self._record_skip(symbol, reason)
+            if self.cfg.metrics_enabled:
+                listing_sniper_orders_total.labels(symbol=symbol, status="rejected").inc()
+            self._set_cooldown(symbol)
+            return
+
+        if self.cfg.metrics_enabled:
+            listing_sniper_orders_total.labels(symbol=symbol, status=status).inc()
+
+        if status == "dry_run":
             logger.info(
                 "[LISTING] dry-run %s BUY %.2f USD baseline=%.4f spread=%.4f market=%s",
                 symbol,
@@ -316,31 +348,28 @@ class ListingSniper:
                 last_spread,
                 market_choice,
             )
-            if self.cfg.metrics_enabled:
-                listing_sniper_orders_total.labels(symbol=symbol, status=status).inc()
             self._set_cooldown(symbol)
             return
 
+        order_payload = execution.get("order", {})
+        router_result = order_payload.get("result", {})
         try:
-            result = await self.router.market_quote(full_symbol, "BUY", notional, market=market_choice)
-            logger.info(
-                "[LISTING] executed %s BUY %.2f USD -> avg=%.4f qty=%.6f market=%s",
-                symbol,
-                notional,
-                float(result.get("avg_fill_price") or last_price),
-                float(result.get("filled_qty_base") or 0.0),
-                market_choice,
-            )
-            if self.cfg.metrics_enabled:
-                listing_sniper_orders_total.labels(symbol=symbol, status=status).inc()
-            await self._deploy_exit_plan(full_symbol, result, last_price, market_choice)
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[LISTING] execution failed for %s: %s", symbol, exc)
-            self._record_skip(symbol, "execution")
-            if self.cfg.metrics_enabled:
-                listing_sniper_orders_total.labels(symbol=symbol, status="failed").inc()
-        finally:
-            self._set_cooldown(symbol)
+            avg_fill = float(router_result.get("avg_fill_price") or last_price)
+            qty_filled = float(router_result.get("filled_qty_base") or router_result.get("executedQty") or 0.0)
+        except Exception:
+            avg_fill = last_price
+            qty_filled = 0.0
+
+        logger.info(
+            "[LISTING] executed %s BUY %.2f USD -> avg=%.4f qty=%.6f market=%s",
+            symbol,
+            notional,
+            avg_fill,
+            qty_filled,
+            market_choice,
+        )
+        await self._deploy_exit_plan(full_symbol, router_result, last_price, market_choice)
+        self._set_cooldown(symbol)
 
     def _sizing_notional(self) -> float:
         try:

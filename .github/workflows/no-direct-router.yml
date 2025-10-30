@@ -1,0 +1,29 @@
+name: Disallow direct router usage
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - name: Block direct router usage
+        run: |
+          set -e
+          hits=$(rg -n 'router\.(submit|market_quote)\(' \
+            --glob '!engine/execution/execute.py' \
+            --glob '!engine/core/order_router.py' \
+            --glob '!engine/app.py' \
+            --glob '!engine/runtime/**' \
+            --glob '!engine/strategies/momentum_breakout.py' \
+            --glob '!tests/**' \
+            --glob '!tools/**' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Direct router calls found outside execution path:"
+            echo "$hits"
+            exit 1
+          fi

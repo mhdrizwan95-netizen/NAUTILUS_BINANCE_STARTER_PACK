@@ -32,6 +32,7 @@ from engine.ops.stop_validator import StopValidator
 from engine.core.portfolio import Portfolio, Position
 from engine.core.event_bus import BUS, initialize_event_bus, publish_order_event, publish_risk_event
 from engine.core.signal_queue import SIGNAL_QUEUE
+from engine.runtime import tasks as runtime_tasks
 from engine.core import alert_daemon
 from engine.risk import RiskRails
 from engine import metrics
@@ -3273,6 +3274,14 @@ async def _stop_kraken_risk_loop():
         _kraken_risk_logger.exception("Kraken telemetry loop shutdown error")
     finally:
         _kraken_risk_loop_task = None
+
+
+@app.on_event("shutdown")
+async def _shutdown_background_tasks() -> None:
+    try:
+        await runtime_tasks.shutdown()
+    except Exception:
+        logging.getLogger(__name__).exception("Background task shutdown failed")
 
 
 @app.on_event("startup")

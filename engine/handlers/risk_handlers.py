@@ -9,12 +9,19 @@ no-ops to avoid impacting tests. Wire real implementations incrementally.
 
 import logging
 
+from engine.ops.health_guard import SoftBreachGuard
+
+_SOFT_GUARDS: dict[int, SoftBreachGuard] = {}
+
 
 def on_cross_health_soft(router, cfg):
+    guard = _SOFT_GUARDS.setdefault(id(router), SoftBreachGuard(router))
+
     async def handler(payload: dict):
         logging.getLogger(__name__).info("[RISK] soft health breach: %s", payload)
-        # TODO: list_open_entries / cancel, amend_stop_reduce_only
+        await guard.on_cross_health_soft(payload or {})
         return None
+
     return handler
 
 
