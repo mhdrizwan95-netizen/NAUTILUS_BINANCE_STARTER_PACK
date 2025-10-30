@@ -22,6 +22,7 @@ from engine.metrics import (
 )
 from engine.risk import RiskRails
 from engine.core.market_resolver import resolve_market_choice
+from engine.execution.execute import StrategyExecutor
 
 logger = logging.getLogger("engine.strategies.listing_sniper")
 
@@ -171,6 +172,12 @@ class ListingSniper:
         self._forwarded: Set[str] = set()
         self._opportunities: Dict[str, ListingOpportunity] = {}
         self._dex_forwarded: Set[str] = set()
+        self._executor = StrategyExecutor(
+            risk=risk,
+            router=router,
+            default_dry_run=self.cfg.dry_run,
+            source="listing_sniper",
+        )
 
     # ------------------------------------------------------------------ public API
     async def on_external_event(self, evt: Dict[str, Any]) -> None:
