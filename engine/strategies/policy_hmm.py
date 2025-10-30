@@ -10,6 +10,10 @@ from .calibration import adjust_quote, adjust_confidence, cooldown_scale
 
 S = load_strategy_config()
 
+# Default directional prior used by consumers that need a quick mapping from
+# discrete HMM state → directional bias.
+STATE_EDGE = {0: 0.0, 1: 1.0, 2: -1.0}
+
 # Rolling buffers per symbol
 _prices: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
 _vols:   Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))

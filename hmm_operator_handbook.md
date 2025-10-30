@@ -99,22 +99,21 @@ curl -s -X POST http://127.0.0.1:8010/train -H "Content-Type: application/json" 
   -d '{"symbol":"BTCUSDT","feature_sequences":[[[1,2,3],[2,3,4],[3,4,5]]]}'
 ```
 
-### Backtest Harness (`backtests/run_backtest.py`)
-Simulates execution using Parquet tick data.
+### Backtest Harness (`scripts/backtest_hmm.py`)
+Lightweight CSV-driven scorer for evaluating HMM policies.
 
 **Outputs:**
-- `trades.csv`: per-trade metrics (vol_bp, spread_bp, l1_depth)
-- `guardrails.csv`: blocked trade reasons
-- `state_timeline.csv`: inferred states
-- `data_quality_issues.csv`: detected feed anomalies
+- `reports/backtest_*.json`: aggregated KPIs
+- `reports/backtest_equity.csv`: equity curve
 
 Run:
 ```bash
-python backtests/run_backtest.py --config backtests/configs/crypto_spot.yaml
+python scripts/backtest_hmm.py --csv data/BTCUSDT_1m.csv --model engine/models/hmm_policy.pkl --symbol BTCUSDT --quote 100
 ```
 
-### Strategy Layer (`strategies/hmm_policy/`)
-Implements dynamic sizing, per-symbol configuration, and global risk budget.
+### Strategy Layer (`engine/strategies/`)
+Single source of truth for live decisioning (`policy_hmm.py`) and MA/HMM
+blending (`ensemble_policy.py`).
 
 - **Dynamic sizing:** `qty = k * |exp_edge| / vol_bp`
 - **Guardrails:** enforce min confidence, per-state DD limit, daily risk, cooldowns
@@ -199,13 +198,13 @@ Add to cron:
 ### Paper Mode
 ```bash
 export BINANCE_IS_TESTNET=true
-python ops/run_paper.py --symbol BTCUSDT.BINANCE --symbol ETHUSDT.BINANCE
+TRADING_ENABLED=false uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info
 ```
 
 ### Live Mode
 ```bash
 export BINANCE_IS_TESTNET=false
-python ops/run_live.py --symbol BTCUSDT.BINANCE --symbol ETHUSDT.BINANCE
+TRADING_ENABLED=true uvicorn engine.app:app --host 0.0.0.0 --port 8003 --log-level info
 ```
 
 **Risk Controls:**
@@ -281,18 +280,14 @@ Aim for several thousand rows in feedback_log.csv for smooth plots.
 - Eigen-risk charts visualize dominant correlation clusters
 
 **Activation:**
-```python
-from strategies.hmm_policy.covariance_allocator import get_covariance_allocator
-allocator = get_covariance_allocator(window=500, target_var=0.0001)
-# Update after each trade: allocator.update(symbol, realized_return)
-# Query before sizing: weights = allocator.weights()
-```
+The covariance-aware sizing logic now lives alongside the live engine stack.
+See `engine/strategies/ensemble_policy.py` for the consolidated ensemble weights
+and `engine/strategies/policy_hmm.py` for the standalone HMM decision flow.
 
 **Diagnostics:**
-```bash
-python ops/m18_cov_diag.py --demo  # Demo with synthetic data
-python ops/m18_cov_diag.py         # Production diagnostics
-```
+Use the dashboard metrics (`m18_*` series) or bespoke notebooks to inspect
+portfolio covariance. The legacy `ops/m18_cov_diag.py` helper has been
+retired.
 
 ### M19 Self-Maintenance
 - Reads KPIs (drift, winrate, entropy, freshness).
@@ -350,10 +345,10 @@ python ops/m18_cov_diag.py         # Production diagnostics
 | Time | Task | Command |
 |------|------|----------|
 | 08:00 | Verify ML service | `curl http://127.0.0.1:8010/health` |
-| 09:00 | Run backtest | `python backtests/run_backtest.py` |
+| 09:00 | Run backtest | `python scripts/backtest_hmm.py --csv …` |
 | 12:00 | Check dashboard | http://127.0.0.1:8050 |
 | 14:00 | Canary + retrain | `bash ops/nightly_retrain.sh` |
-| 17:00 | Paper/live run | `python ops/run_live.py` |
+| 17:00 | Paper/live run | `TRADING_ENABLED=true uvicorn engine.app:app --host 0.0.0.0 --port 8003` |
 | 20:00 | Check Grafana metrics | `pnl_realized`, `guardrail_trigger_total` |
 
 ## 🧰 Troubleshooting Matrix
