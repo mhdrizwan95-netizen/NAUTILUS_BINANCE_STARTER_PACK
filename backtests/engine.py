@@ -14,9 +14,12 @@ code expects.
 from __future__ import annotations
 
 import os
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
+import threading
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence
 
 import math
@@ -26,6 +29,10 @@ import pandas as pd
 
 from engine.execution.execute import RecordedOrder, StrategyExecutor
 from engine.strategy import get_executor_override, reset_executor_cache, set_executor_override
+from engine.core.event_bus import BUS
+from engine.runtime import tasks as runtime_tasks
+
+from collections import defaultdict
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +125,370 @@ class BacktestStep:
     response: Any
 
 
+@dataclass
+class _OpenPosition:
+    symbol: str
+    venue: str
+    side: str
+    quantity: float
+    stop_price: Optional[float]
+    take_profit: Optional[float]
+    tag: str
+    order_id: str
+
+
+@dataclass
+class _PendingExit:
+    order: RecordedOrder
+    base: str
+    venue: str
+    quantity: float
+    trigger: Optional[str]
+    stop_price: Optional[float]
+    take_profit: Optional[float]
+    strategy_symbol: str
+    meta: Optional[Dict[str, Any]]
+    recorded_ts: float
+    recorded_price: float
+
+
+class _AsyncBusRunner:
+    def __init__(self, bus) -> None:
+        self._bus = bus
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._thread: Optional[threading.Thread] = None
+        self._started = False
+
+    def start(self) -> None:
+        if self._started:
+            return
+        if getattr(self._bus, "_running", False):
+            self._started = True
+            return
+        executor = getattr(self._bus, "_executor", None)
+        if executor and getattr(executor, "_shutdown", False):
+            max_workers = getattr(executor, "_max_workers", 8)
+            self._bus._executor = ThreadPoolExecutor(max_workers=max_workers)
+        loop = asyncio.new_event_loop()
+        self._loop = loop
+
+        def _runner() -> None:
+            asyncio.set_event_loop(loop)
+            loop.run_forever()
+
+        thread = threading.Thread(target=_runner, name="backtest-bus", daemon=True)
+        self._thread = thread
+        thread.start()
+        try:
+            fut = asyncio.run_coroutine_threadsafe(self._bus.start(), loop)
+            fut.result()
+            self._started = True
+        except Exception:
+            self.stop()
+            raise
+
+    def stop(self) -> None:
+        if not self._started:
+            return
+        loop = self._loop
+        thread = self._thread
+        self._started = False
+        if loop is None:
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._bus.stop(), loop).result(timeout=2)
+        except Exception:
+            pass
+        try:
+            asyncio.run_coroutine_threadsafe(runtime_tasks.shutdown(), loop).result(timeout=2)
+        except Exception:
+            pass
+        loop.call_soon_threadsafe(loop.stop)
+        if thread:
+            thread.join(timeout=2)
+        loop.close()
+        self._loop = None
+        self._thread = None
+        try:
+            self._bus.shutdown(wait=True)
+        except Exception:
+            pass
+
+    def publish(self, topic: str, payload: Dict[str, Any]) -> Optional[asyncio.Future]:
+        loop = self._loop
+        if not getattr(self._bus, "_running", False):
+            return None
+        if loop is None:
+            self._bus.fire(topic, payload)
+            return None
+        return asyncio.run_coroutine_threadsafe(self._bus.publish(topic, payload, urgent=True), loop)
+
+
+class _SyntheticFillSimulator:
+    def __init__(self, *, clock: SimClock) -> None:
+        self._clock = clock
+        self._bus_runner = _AsyncBusRunner(BUS)
+        self._last_prices: Dict[tuple[str, str], float] = {}
+        self._open_positions: Dict[tuple[str, str, str], List[_OpenPosition]] = defaultdict(list)
+        self._pending_exits: List[_PendingExit] = []
+
+    @contextmanager
+    def lifecycle(self):
+        self._bus_runner.start()
+        try:
+            yield
+        finally:
+            self._pending_exits.clear()
+            self._open_positions.clear()
+            self._last_prices.clear()
+            self._bus_runner.stop()
+
+    def on_price_event(self, event: BacktestEvent) -> None:
+        base = event.symbol.upper()
+        venue = event.venue.upper()
+        price = float(event.price)
+        ts = event.timestamp_seconds
+        self._last_prices[(base, venue)] = price
+        triggered: List[_PendingExit] = []
+        for pending in list(self._pending_exits):
+            if pending.base != base or pending.venue != venue:
+                continue
+            if self._exit_triggered(pending.order.side, pending.trigger, price, pending.stop_price, pending.take_profit):
+                triggered.append(pending)
+        for pending in triggered:
+            self._pending_exits.remove(pending)
+            self._emit_fill(
+                order=pending.order,
+                base=base,
+                venue=venue,
+                side=pending.order.side,
+                quantity=pending.quantity,
+                price=price,
+                ts=ts,
+                strategy_symbol=pending.strategy_symbol,
+                meta=pending.meta,
+            )
+            self._close_position(base, venue, pending.order.side, pending.quantity)
+
+    def record_order(self, order: RecordedOrder, event: Optional[BacktestEvent]) -> None:
+        if order is None:
+            return
+        if order.status not in {"backtest", "dry_run"}:
+            return
+        base, venue = self._resolve_symbol(order.symbol, event)
+        if base is None or venue is None:
+            return
+        price = self._resolve_price(base, venue, event)
+        if price is None or price <= 0.0:
+            return
+        quantity = self._resolve_quantity(order, price)
+        if quantity is None or quantity <= 0.0:
+            return
+        ts = event.timestamp_seconds if event else float(order.timestamp)
+        strategy_symbol = order.symbol or f"{base}.{venue}"
+        meta = order.meta if isinstance(order.meta, dict) else None
+        trigger = self._infer_trigger(order.tag, meta)
+
+        if trigger:
+            stop_price = self._safe_float(meta.get("stop_price")) if meta else None
+            take_profit = self._safe_float(meta.get("take_profit")) if meta else None
+            if self._exit_triggered(order.side, trigger, price, stop_price, take_profit):
+                self._emit_fill(order, base, venue, order.side, quantity, price, ts, strategy_symbol, meta)
+                self._close_position(base, venue, order.side, quantity)
+            else:
+                pending = _PendingExit(
+                    order=order,
+                    base=base,
+                    venue=venue,
+                    quantity=quantity,
+                    trigger=trigger,
+                    stop_price=stop_price,
+                    take_profit=take_profit,
+                    strategy_symbol=strategy_symbol,
+                    meta=dict(meta) if isinstance(meta, dict) else None,
+                    recorded_ts=ts,
+                    recorded_price=price,
+                )
+                self._pending_exits.append(pending)
+        else:
+            self._emit_fill(order, base, venue, order.side, quantity, price, ts, strategy_symbol, meta)
+            if meta:
+                stop_price = self._safe_float(meta.get("stop_price"))
+                take_profit = self._safe_float(meta.get("take_profit"))
+            else:
+                stop_price = None
+                take_profit = None
+            key = (base, venue, order.side.upper())
+            position = _OpenPosition(
+                symbol=base,
+                venue=venue,
+                side=order.side.upper(),
+                quantity=quantity,
+                stop_price=stop_price,
+                take_profit=take_profit,
+                tag=str(order.tag or ""),
+                order_id=str(order.idempotency_key or ""),
+            )
+            self._open_positions[key].append(position)
+
+    @staticmethod
+    def _infer_trigger(tag: Optional[str], meta: Optional[Dict[str, Any]]) -> Optional[str]:
+        if isinstance(meta, dict) and isinstance(meta.get("trigger"), str):
+            return str(meta["trigger"]).lower()
+        if not tag:
+            return None
+        lowered = tag.lower()
+        if lowered.endswith("_tp") or lowered.endswith("tp"):
+            return "tp"
+        if lowered.endswith("_sl") or lowered.endswith("sl"):
+            return "sl"
+        if "exit" in lowered:
+            return "exit"
+        return None
+
+    @staticmethod
+    def _resolve_quantity(order: RecordedOrder, price: float) -> Optional[float]:
+        quantity = order.quantity
+        if quantity is not None:
+            try:
+                return abs(float(quantity))
+            except Exception:
+                return None
+        quote = order.quote
+        if quote is None or price <= 0.0:
+            return None
+        try:
+            qty = float(quote) / price
+        except Exception:
+            return None
+        return abs(qty)
+
+    def _resolve_price(self, base: str, venue: str, event: Optional[BacktestEvent]) -> Optional[float]:
+        if event:
+            return float(event.price)
+        return self._last_prices.get((base, venue))
+
+    @staticmethod
+    def _resolve_symbol(symbol: Optional[str], event: Optional[BacktestEvent]) -> tuple[Optional[str], Optional[str]]:
+        if symbol and "." in symbol:
+            base, venue = symbol.split(".", 1)
+            return base.upper(), venue.upper()
+        if symbol:
+            return symbol.upper(), event.venue.upper() if event else "BINANCE"
+        if event:
+            return event.symbol.upper(), event.venue.upper()
+        return None, None
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            val = float(value)
+        except Exception:
+            return None
+        return val if math.isfinite(val) else None
+
+    def _emit_fill(
+        self,
+        order: RecordedOrder,
+        base: str,
+        venue: str,
+        side: str,
+        quantity: float,
+        price: float,
+        ts: float,
+        strategy_symbol: str,
+        meta: Optional[Dict[str, Any]],
+    ) -> None:
+        if quantity <= 0.0 or price <= 0.0:
+            return
+        payload: Dict[str, Any] = {
+            "ts": ts,
+            "symbol": base,
+            "side": str(side or "").upper(),
+            "venue": venue,
+            "intent": str(order.tag or "GENERIC"),
+            "order_id": str(order.idempotency_key or ""),
+            "filled_qty": float(quantity),
+            "avg_price": float(price),
+            "strategy_tag": str(order.tag or ""),
+            "strategy_side": str(side or "").upper(),
+            "strategy_symbol": strategy_symbol,
+        }
+        if isinstance(meta, dict) and meta:
+            payload["strategy_meta"] = dict(meta)
+        fut = self._bus_runner.publish("trade.fill", payload)
+        if fut is not None:
+            try:
+                fut.result(timeout=2)
+            except Exception:
+                pass
+
+    def _close_position(self, base: str, venue: str, exit_side: str, quantity: float) -> None:
+        entry_side = "BUY" if exit_side.upper() == "SELL" else "SELL"
+        key = (base, venue, entry_side)
+        positions = self._open_positions.get(key)
+        if not positions:
+            return
+        index = None
+        for idx, pos in enumerate(positions):
+            if math.isclose(pos.quantity, quantity, rel_tol=1e-6, abs_tol=1e-9):
+                index = idx
+                break
+        if index is None:
+            index = 0
+        positions.pop(index)
+        if not positions:
+            self._open_positions.pop(key, None)
+
+    def _exit_triggered(
+        self,
+        side: str,
+        trigger: Optional[str],
+        price: float,
+        stop_price: Optional[float],
+        take_profit: Optional[float],
+    ) -> bool:
+        if price <= 0.0:
+            return False
+        side_u = str(side or "").upper()
+        trigger_l = (trigger or "").lower()
+        if side_u == "SELL":
+            if trigger_l == "tp" and take_profit is not None:
+                return price >= take_profit
+            if trigger_l == "sl" and stop_price is not None:
+                return price <= stop_price
+            if trigger_l == "exit":
+                conds = []
+                if take_profit is not None:
+                    conds.append(price >= take_profit)
+                if stop_price is not None:
+                    conds.append(price <= stop_price)
+                return any(conds)
+            if take_profit is not None and price >= take_profit:
+                return True
+            if stop_price is not None and price <= stop_price:
+                return True
+        else:  # BUY closes shorts
+            if trigger_l == "tp" and take_profit is not None:
+                return price <= take_profit
+            if trigger_l == "sl" and stop_price is not None:
+                return price >= stop_price
+            if trigger_l == "exit":
+                conds = []
+                if take_profit is not None:
+                    conds.append(price <= take_profit)
+                if stop_price is not None:
+                    conds.append(price >= stop_price)
+                return any(conds)
+            if take_profit is not None and price <= take_profit:
+                return True
+            if stop_price is not None and price >= stop_price:
+                return True
+        return False
+
+
 class BacktestEngine:
     """Load historical klines and replay them through a strategy."""
 
@@ -143,6 +514,8 @@ class BacktestEngine:
         self._feed_states: List[_FeedState] = []
         self._events: List[BacktestEvent] = []
         self._recorded_orders: List[RecordedOrder] = []
+        self._active_event: Optional[BacktestEvent] = None
+        self._fill_simulator = _SyntheticFillSimulator(clock=self._clock)
 
         self._load_feeds()
         self._client = OfflineKlineClient(self._data)
@@ -165,12 +538,16 @@ class BacktestEngine:
             strategy = self._strategy_factory(self._client, self._clock)
             dispatch = self._resolve_dispatch(strategy)
 
-            for event in self._events:
-                self._advance_to(event.timestamp_ms)
-                self._clock.set(event.timestamp_seconds)
-                symbol = self._symbol_formatter(event.symbol, event.timeframe, event.venue)
-                response = dispatch(symbol, event.price, event.timestamp_seconds, event.volume)
-                yield BacktestStep(event=event, response=response)
+            with self._fill_simulator.lifecycle():
+                for event in self._events:
+                    self._fill_simulator.on_price_event(event)
+                    self._advance_to(event.timestamp_ms)
+                    self._clock.set(event.timestamp_seconds)
+                    symbol = self._symbol_formatter(event.symbol, event.timeframe, event.venue)
+                    self._active_event = event
+                    response = dispatch(symbol, event.price, event.timestamp_seconds, event.volume)
+                    self._active_event = None
+                    yield BacktestStep(event=event, response=response)
 
     # ------------------------------------------------------------------
     # Internals
@@ -220,6 +597,8 @@ class BacktestEngine:
 
     def _record_order(self, order: RecordedOrder) -> None:
         self._recorded_orders.append(order)
+        self._fill_simulator.record_order(order, self._active_event)
+
 
     @staticmethod
     def _default_executor_factory(recorder: Callable[[RecordedOrder], None]) -> StrategyExecutor:

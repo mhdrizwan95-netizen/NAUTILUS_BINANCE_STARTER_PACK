@@ -42,8 +42,9 @@ class EventBus:
 
     def __init__(self, max_workers: Optional[int] = None):
         self._subscribers: Dict[str, List[Callable[[Dict[str, Any]], Any]]] = {}
-        self._queue: asyncio.Queue = asyncio.Queue()
+        self._queue: Optional[asyncio.Queue] = None
         self._running = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._stats = {
             "published": 0,
             "delivered": 0,
@@ -53,15 +54,19 @@ class EventBus:
         if max_workers is None:
             max_workers = int(os.getenv("EVENTBUS_MAX_WORKERS", "8"))
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
+        self._worker: Optional[asyncio.Task[Any]] = None
 
     async def start(self) -> None:
         """Start the event processing loop."""
         if self._running:
             return
 
+        loop = asyncio.get_running_loop()
+        self._loop = loop
+        self._queue = asyncio.Queue()
         self._running = True
         logging.info("[BUS] Event bus started - ready for real-time coordination")
-        asyncio.create_task(self._process_events())
+        self._worker = asyncio.create_task(self._process_events())
 
     async def stop(self) -> None:
         """Gracefully stop the event processing."""
@@ -69,6 +74,17 @@ class EventBus:
         # Allow pending events to be processed
         await asyncio.sleep(0.1)
         logging.info(f"[BUS] Stopped. Stats: {self._stats}")
+        worker = self._worker
+        self._worker = None
+        if worker is not None:
+            try:
+                await worker
+            except asyncio.CancelledError:
+                pass
+            except RuntimeError:
+                pass
+        self._queue = None
+        self._loop = None
 
     def shutdown(self, wait: bool = False) -> None:
         """Tear down the executor. Useful for tests or process shutdown."""
@@ -107,6 +123,11 @@ class EventBus:
             logging.getLogger(__name__).debug("EventBus publish skipped; bus not running (topic=%s)", topic)
             return  # No-op if not started
 
+        queue = self._queue
+        if queue is None:
+            logging.getLogger(__name__).debug("EventBus publish skipped; queue not initialised (topic=%s)", topic)
+            return
+
         event = {
             "topic": topic,
             "data": data,
@@ -117,7 +138,7 @@ class EventBus:
         if urgent:
             await self._deliver_event(event)
         else:
-            await self._queue.put(event)
+            await queue.put(event)
 
         self._stats["published"] += 1
 
@@ -127,13 +148,25 @@ class EventBus:
 
     async def _process_events(self) -> None:
         """Main event processing loop."""
-        while self._running or not self._queue.empty():
+        while True:
+            queue = self._queue
+            if queue is None:
+                if not self._running:
+                    break
+                await asyncio.sleep(0.05)
+                continue
+
+            if not self._running and queue.empty():
+                break
             try:
                 # Timeout to allow shutdown
-                event = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+                event = await asyncio.wait_for(queue.get(), timeout=1.0)
                 await self._deliver_event(event)
             except asyncio.TimeoutError:
                 continue
+            except RuntimeError as e:
+                logging.error(f"[BUS] Queue processing error: {e}")
+                break
             except Exception as e:
                 logging.error(f"[BUS] Queue processing error: {e}")
 
@@ -185,7 +218,7 @@ class EventBus:
             **self._stats,
             "active_subscriptions": sum(len(handlers) for handlers in self._subscribers.values()),
             "topics_count": len(self._stats["topics"]),
-            "queue_size": self._queue.qsize(),
+            "queue_size": self._queue.qsize() if self._queue is not None else 0,
             "running": self._running
         }
 
