@@ -11,6 +11,7 @@ if str(ROOT) not in sys.path:
 from engine.config.defaults import ALL_DEFAULTS
 
 SECTIONS: Dict[str, Iterable[str]] = {
+    "Engine": ["EVENTBUS_MAX_WORKERS"],
     "Global": ["TRADE_SYMBOLS", "DRY_RUN"],
     "Risk": [
         "TRADING_ENABLED",
@@ -163,6 +164,7 @@ SECTIONS: Dict[str, Iterable[str]] = {
 }
 
 COMMENTS = {
+    "EVENTBUS_MAX_WORKERS": "Thread pool size for sync EventBus handlers.",
     "TRADE_SYMBOLS": "Comma list of BASEQUOTE symbols (e.g., BTCUSDT,ETHUSDT) or '*' for allow-all.",
     "DRY_RUN": "Set to true to avoid placing live orders.",
     "MIN_NOTIONAL_USDT": "Smallest order notional (USD/USDT).",

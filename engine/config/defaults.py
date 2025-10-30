@@ -10,6 +10,10 @@ def _merge_dicts(*sources: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
+ENGINE_DEFAULTS: Dict[str, Any] = {
+    "EVENTBUS_MAX_WORKERS": 8,
+}
+
 GLOBAL_DEFAULTS: Dict[str, Any] = {
     "TRADE_SYMBOLS": "*",
     "DRY_RUN": True,
@@ -168,6 +172,7 @@ SYMBOL_SCANNER_DEFAULTS: Dict[str, Any] = {
 }
 
 ALL_DEFAULTS: Dict[str, Any] = _merge_dicts(
+    ENGINE_DEFAULTS,
     GLOBAL_DEFAULTS,
     RISK_DEFAULTS,
     TREND_DEFAULTS,
@@ -178,6 +183,7 @@ ALL_DEFAULTS: Dict[str, Any] = _merge_dicts(
 )
 
 __all__ = [
+    "ENGINE_DEFAULTS",
     "GLOBAL_DEFAULTS",
     "RISK_DEFAULTS",
     "TREND_DEFAULTS",
