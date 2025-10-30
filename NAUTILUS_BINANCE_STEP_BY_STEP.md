@@ -55,6 +55,13 @@ nautilus_hmm/
     strategies/
       policy_hmm.py
       ensemble_policy.py
+      trend_follow.py
+      scalping.py
+      momentum_realtime.py
+      listing_sniper.py
+      meme_coin_sentiment.py
+      airdrop_promo.py
+      symbol_scanner.py
   ml_service/
     app.py                # FastAPI: /infer /partial_fit /train
     model_store/
@@ -63,19 +70,20 @@ nautilus_hmm/
     processed/
   backtests/
     configs/crypto_spot.yaml
-  ops/
-    env.example
-    runbook.md
   scripts/
     backtest_hmm.py
+    train_hmm_policy.py
+  docs/
+    FEATURE_FLAGS.md
+    SYSTEM_DESIGN.md
 ```
 
-> Keep your **feature schema versioned** (e.g., `FEATURES_V1`). If you change features, bump and retrain.
+> Keep your **feature schema versioned** (e.g., `FEATURES_V1`). If you change features, bump and retrain. The runtime loads all strategies from `engine/strategies/`, so add new modules there to inherit the engine wiring and EventBus subscriptions.
 
 
 ## 3) Keys & environment
 
-Create `.env` from `ops/env.example` and fill with your keys:
+Create `.env` from the repository root template and fill with your keys:
 
 ```
 # Venue selection
@@ -86,9 +94,11 @@ BINANCE_IS_TESTNET=true        # false for live
 BINANCE_API_KEY=fill_me
 BINANCE_API_SECRET=fill_me
 
-# Strategy
-SYMBOL=BTCUSDT.BINANCE         # spot
-# or: SYMBOL=BTCUSDT-PERP.BINANCE  # perps
+# Strategy defaults
+TRADE_SYMBOLS=BTCUSDT,ETHUSDT  # or keep `*` to allow every discovered symbol
+STRATEGY_ENABLED=false         # enable MA+HMM scheduler when ready
+TREND_ENABLED=true             # toggle systematic modules individually
+SCALP_ENABLED=false
 ```
 
 **Get Testnet keys:**
