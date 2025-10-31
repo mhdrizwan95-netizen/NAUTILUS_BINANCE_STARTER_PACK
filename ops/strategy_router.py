@@ -163,13 +163,21 @@ async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
 
     for endpoint in ENGINE_ENDPOINTS:
         try:
-            timeout = httpx.Timeout(10.0)  # 10 second timeout
+            timeout = httpx.Timeout(10.0)
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
-                    f"{endpoint}/orders/market",
+                    f"{endpoint}/strategy/signal",
                     json=signal_data,
-                    headers={"Content-Type": "application/json"}
+                    headers={"Content-Type": "application/json"},
                 )
+
+                if response.status_code == 404:
+                    # fallback to legacy orders endpoint for older engines
+                    response = await client.post(
+                        f"{endpoint}/orders/market",
+                        json=signal_data,
+                        headers={"Content-Type": "application/json"},
+                    )
 
                 response.raise_for_status()
                 result = response.json()
@@ -180,8 +188,7 @@ async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                 success = True
 
                 logging.info(f"[ROUTER] ✅ Signal routed to {model} in {result['routing_time']:.2f}s")
-
-                break  # Success, exit engine loop
+                break
 
         except Exception as e:
             logging.warning(f"[ROUTER] Engine {endpoint} failed for {model}: {e}")
@@ -250,7 +257,7 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
             timeout = httpx.Timeout(10.0)  # 10 second timeout
             async with httpx.AsyncClient(timeout=timeout) as client:
                 response = await client.post(
-                    f"{endpoint}/orders/market",
+                    f"{endpoint}/strategy/signal",
                     json=signal_data,
                     headers={"Content-Type": "application/json"}
                 )

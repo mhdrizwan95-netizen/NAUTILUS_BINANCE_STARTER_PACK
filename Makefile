@@ -12,8 +12,6 @@ COMPOSE_BUILD_FLAGS   ?= --progress=plain
 # Service names (as in docker-compose.yml)
 ENGINE_EXPORTER_SVC   ?= engine_binance_exporter
 ENGINE_TRADER_SVC     ?= engine_binance
-ENGINE_KRAKEN_SVC     ?= engine_kraken
-ENGINE_KRAKEN_EXPORTER_SVC ?= engine_kraken_exporter
 EXECUTOR_SVC          ?= executor
 OPS_SVC               ?= ops
 PROM_SVC              ?= prometheus
@@ -24,8 +22,6 @@ PROM_URL              ?= http://localhost:9090
 GRAFANA_URL           ?= http://localhost:3000
 ENGINE_TRADER_URL     ?= http://localhost:8003          # submit orders here
 ENGINE_EXPORTER_URL   ?= http://localhost:9103          # read-only metrics here
-KRAKEN_TRADER_URL     ?= http://localhost:8006          # Kraken order API
-KRAKEN_EXPORTER_URL   ?= http://localhost:9105          # Kraken metrics
 
 # Test-order defaults (override with: make order ORDER_QUOTE=50 ORDER_SYMBOL=ETHUSDT.BINANCE)
 ORDER_SYMBOL          ?= BTCUSDT.BINANCE
@@ -42,11 +38,9 @@ help:
 	@echo "--------------------------------------------------------------------"
 	@echo "Core lifecycle:"
 	@echo "  make build                 # build all core images"
-	@echo "  make up-core               # start universe,situations,screener,ops, engines"
+	@echo "  make up-core               # start universe,situations,screener,ops, engines + ML/backtest pipeline"
 	@echo "  make up-exporter           # start the Binance exporter (role=exporter)"
 	@echo "  make up-trader             # start the Binance trader (role=trader)"
-	@echo "  make up-kraken             # start Kraken trader"
-	@echo "  make up-kraken-exporter    # start the Kraken exporter (metrics)"
 	@echo "  make up-obs                # start Prometheus + Grafana"
 	@echo "  make ps                    # show important containers"
 	@echo ""
@@ -85,17 +79,7 @@ build:
 .PHONY: up-core
 up-core:
 	@echo "🚀 Starting core services (situations, universe, screener, ops, engines)…"
-	$(COMPOSE) up -d situations universe screener $(OPS_SVC) engine_binance engine_bybit engine_ibkr $(ENGINE_KRAKEN_SVC)
-
-.PHONY: up-kraken
-up-kraken:
-	@echo "🚀 Starting Kraken trader (order API @ $(KRAKEN_TRADER_URL))..."
-	$(COMPOSE) up -d $(ENGINE_KRAKEN_SVC)
-
-.PHONY: up-kraken-exporter
-up-kraken-exporter:
-	@echo "🚀 Starting Kraken exporter (metrics @ $(KRAKEN_EXPORTER_URL))..."
-	$(COMPOSE) up -d $(ENGINE_KRAKEN_EXPORTER_SVC)
+	$(COMPOSE) up -d situations universe screener data_ingester ml_service ml_scheduler param_controller backtest_runner data_backfill $(OPS_SVC) engine_binance
 
 .PHONY: up-exporter
 up-exporter:
@@ -128,7 +112,6 @@ smoke-exporter:
 	@curl -fsS -G --data-urlencode 'query=abs(equity_usd{job="engine_binance"}-(cash_usd{job="engine_binance"}+market_value_usd{job="engine_binance"}))' $(PROM_URL)/api/v1/query | jq -r '.data.result[]?.value[1]' || true
 	@echo "🔎 Heartbeat lag (s) — expect <15:"
 	@curl -fsS -G --data-urlencode 'query=time()-metrics_heartbeat{job="engine_binance_exporter"}' $(PROM_URL)/api/v1/query | jq -r '.data.result[]?.value[1]' || true
-	@curl -fsS -G --data-urlencode 'query=time()-metrics_heartbeat{job="engine_kraken_exporter"}' $(PROM_URL)/api/v1/query | jq -r '.data.result[]?.value[1]' || true
 
 .PHONY: smoke-prom
 smoke-prom:
@@ -215,7 +198,7 @@ autopilot:
 	@echo "1️⃣  Building images (if needed)..."
 	$(COMPOSE) build $(COMPOSE_BUILD_FLAGS)
 	@echo "2️⃣  Starting core services (universe, screener, ops, engines)..."
-	$(COMPOSE) up -d situations universe screener ops engine_binance engine_binance_exporter $(ENGINE_KRAKEN_SVC) $(ENGINE_KRAKEN_EXPORTER_SVC) engine_bybit engine_ibkr
+	$(COMPOSE) up -d situations universe screener data_ingester ml_service ml_scheduler param_controller backtest_runner data_backfill ops engine_binance engine_binance_exporter
 	@echo "3️⃣  Starting executor..."
 	$(COMPOSE) up -d $(EXECUTOR_SVC)
 	@echo "4️⃣  Health checks..."
@@ -223,23 +206,18 @@ autopilot:
 	@bash -c 'for i in {1..30}; do curl -fsS http://localhost:9103/metrics >/dev/null 2>&1 && break || sleep 1; done'
 	@echo " - Waiting for trader HTTP on :8003..."
 	@bash -c 'for i in {1..30}; do curl -fsS http://localhost:8003/health >/dev/null 2>&1 && break || sleep 1; done'
-	@echo " - Waiting for Kraken exporter metrics on :9105..."
-	@bash -c 'for i in {1..30}; do curl -fsS $(KRAKEN_EXPORTER_URL)/metrics >/dev/null 2>&1 && break || sleep 1; done'
-	@echo " - Waiting for Kraken trader HTTP on :8006..."
-	@bash -c 'for i in {1..30}; do curl -fsS $(KRAKEN_TRADER_URL)/health >/dev/null 2>&1 && break || sleep 1; done'
+	@echo " - Waiting for ML service health on :8015..."
+	@bash -c 'for i in {1..30}; do curl -fsS http://localhost:8015/health >/dev/null 2>&1 && break || sleep 1; done'
 	@echo "5️⃣  Starting observability (Prometheus + Grafana)..."
 	$(OBS_COMPOSE) up -d $(PROM_SVC) $(GRAFANA_SVC)
 	@echo "✅  All systems online. Waiting 10s for heartbeats..."
 	sleep 10
 	@echo "🔎  Checking exporter metrics health:"
 	@curl -fsS -G --data-urlencode 'query=time()-metrics_heartbeat{job="engine_binance_exporter"}' $(PROM_URL)/api/v1/query | jq -r '.data.result[]?.value[1]' || true
-	@curl -fsS -G --data-urlencode 'query=time()-metrics_heartbeat{job="engine_kraken_exporter"}' $(PROM_URL)/api/v1/query | jq -r '.data.result[]?.value[1]' || true
 	@echo "=============================================================="
 	@echo " 🏁  AUTONOMOUS TRADING LIVE!"
 	@echo " - Exporter @ $(ENGINE_EXPORTER_URL)"
 	@echo " - Trader   @ $(ENGINE_TRADER_URL)"
-	@echo " - Kraken Exporter @ $(KRAKEN_EXPORTER_URL)"
-	@echo " - Kraken Trader   @ $(KRAKEN_TRADER_URL)"
 	@echo " - Grafana  @ $(GRAFANA_URL) (dashboard: Command Center)"
 	@echo "=============================================================="
 
@@ -254,9 +232,7 @@ autopilot-observe:
 .PHONY: autopilot-status
 autopilot-status:
 	@echo "🩺 Exporter metrics sample:" && curl -fsS http://localhost:9103/metrics | egrep '^(equity_usd|cash_usd|market_value_usd|metrics_heartbeat|snapshot_id)' || true
-	@echo "🩺 Kraken exporter sample:" && curl -fsS $(KRAKEN_EXPORTER_URL)/metrics | egrep '^(equity_usd|cash_usd|market_value_usd|metrics_heartbeat|snapshot_id)' || true
 	@echo "🧪 Trader health:" && curl -fsS http://localhost:8003/health || true
-	@echo "🧪 Kraken trader health:" && curl -fsS $(KRAKEN_TRADER_URL)/health || true
 	@echo "📡 Prom targets (if running):" && curl -fsS http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job:.labels.job, url:.scrapeUrl, health:.health}' || true
 
 .PHONY: autopilot-paper
