@@ -2,14 +2,20 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends     ca-certificates curl &&     rm -rf /var/lib/apt/lists/*
+# hadolint ignore=DL3008
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt .
+COPY services/data_ingester/requirements.txt ./requirements.txt
+# hadolint ignore=DL3013
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-COPY app ./app
-COPY ../common /app/common
+COPY services/data_ingester/app ./app
+COPY services/common /app/common
 
 ENV LEDGER_DB=/shared/manifest.sqlite
 ENV DATA_LANDING=/data/incoming

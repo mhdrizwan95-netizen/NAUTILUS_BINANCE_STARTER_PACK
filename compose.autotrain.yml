@@ -1,7 +1,9 @@
 # Full stack for continuous ingestion -> training -> param control
 services:
   data_ingester:
-    build: ./services/data_ingester
+    build:
+      context: .
+      dockerfile: services/data_ingester/Dockerfile
     image: trading-app/data-ingester:local
     environment:
       - LEDGER_DB=/shared/manifest.sqlite
@@ -17,7 +19,9 @@ services:
     ports: ["8001:8001"]
 
   ml_service:
-    build: ./services/ml_service
+    build:
+      context: .
+      dockerfile: services/ml_service/Dockerfile
     image: trading-app/ml-service:local
     environment:
       - DATA_DIR=/data
@@ -52,7 +56,9 @@ services:
       - shared:/shared
 
   param_controller:
-    build: ./services/param_controller
+    build:
+      context: .
+      dockerfile: services/param_controller/Dockerfile
     image: trading-app/param-controller:local
     environment:
       - PC_DB=/shared/param_controller.sqlite

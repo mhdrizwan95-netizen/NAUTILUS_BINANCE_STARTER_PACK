@@ -28,10 +28,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker images
         run: |
-          docker build -t trading-app/ml-service:ci ./services/ml_service
-          docker build -t trading-app/data-ingester:ci ./services/data_ingester
-          docker build -t trading-app/param-controller:ci ./services/param_controller
-          docker build -t trading-app/backtest-runner:ci ./services/backtest_suite
+          docker build -t trading-app/ml-service:ci -f services/ml_service/Dockerfile .
+          docker build -t trading-app/data-ingester:ci -f services/data_ingester/Dockerfile .
+          docker build -t trading-app/param-controller:ci -f services/param_controller/Dockerfile .
+          docker build -t trading-app/backtest-runner:ci -f services/backtest_suite/Dockerfile .
+          docker build -t trading-app/backtester:ci -f services/backtester/Dockerfile .
       - name: Lint ml_service Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
@@ -48,3 +49,7 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: services/backtest_suite/Dockerfile
+      - name: Lint backtester Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/backtester/Dockerfile

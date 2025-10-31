@@ -10,12 +10,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY requirements.txt .
+COPY services/backtest_suite/requirements.txt ./requirements.txt
 # hadolint ignore=DL3013
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
-COPY app ./app
-COPY ../common /app/common
+COPY services/backtest_suite/app ./app
+COPY services/common /app/common
 
 ENV LEDGER_DB=/shared/manifest.sqlite     RESEARCH_DIR=/research     DATA_INCOMING=/data/incoming     ML_SERVICE=http://ml_service:8000     PARAM_CONTROLLER=http://param_controller:8002     LOG_LEVEL=INFO
 

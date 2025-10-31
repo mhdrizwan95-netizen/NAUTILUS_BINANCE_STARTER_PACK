@@ -1,7 +1,9 @@
 # Backtesting overlay that runs alongside data_ingester/ml_service/param_controller
 services:
   backtest_runner:
-    build: ./services/backtest_suite
+    build:
+      context: .
+      dockerfile: services/backtest_suite/Dockerfile
     image: trading-app/backtest-runner:local
     env_file: [.env]
     environment:
