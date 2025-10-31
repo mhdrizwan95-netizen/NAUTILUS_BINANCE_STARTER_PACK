@@ -180,6 +180,26 @@ BROKER_DEFAULTS: Dict[str, Any] = {
     "IBKR_ENABLED": False,
 }
 
+ML_SERVICE_DEFAULTS: Dict[str, Any] = {
+    "DATA_DIR": "/data",
+    "MODEL_DIR": "/models",
+    "REGISTRY_DIR": "/models/registry",
+    "CURRENT_SYMLINK": "/models/current",
+    "HMM_STATES": 4,
+    "TRAIN_WINDOW_DAYS": 365,
+    "PROMOTION_METRIC": "val_log_likelihood",
+    "PROMOTION_MIN_DELTA": 1.0,
+    "KEEP_N_MODELS": 5,
+    "AUTO_PROMOTE": True,
+    "TRAIN_DATA_GLOB": "*.csv",
+    "RETRAIN_CRON": "0 */6 * * *",
+    "REQUIRE_AUTH": False,
+    "JWT_ALG": "HS256",
+    "JWT_SECRET": "",
+    "JWT_PUBLIC_KEY": "",
+    "LOG_LEVEL": "INFO",
+}
+
 ALL_DEFAULTS: Dict[str, Any] = _merge_dicts(
     ENGINE_DEFAULTS,
     GLOBAL_DEFAULTS,
@@ -190,6 +210,7 @@ ALL_DEFAULTS: Dict[str, Any] = _merge_dicts(
     MEME_SENTIMENT_DEFAULTS,
     SYMBOL_SCANNER_DEFAULTS,
     BROKER_DEFAULTS,
+    ML_SERVICE_DEFAULTS,
 )
 
 __all__ = [
@@ -201,5 +222,6 @@ __all__ = [
     "MOMENTUM_RT_DEFAULTS",
     "MEME_SENTIMENT_DEFAULTS",
     "SYMBOL_SCANNER_DEFAULTS",
+    "ML_SERVICE_DEFAULTS",
     "ALL_DEFAULTS",
 ]

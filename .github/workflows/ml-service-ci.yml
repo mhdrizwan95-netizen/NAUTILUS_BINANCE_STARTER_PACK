@@ -1,0 +1,25 @@
+name: ml-service-ci
+
+on:
+  push:
+    paths:
+      - 'services/ml_service/**'
+      - 'compose.ml.yml'
+      - '.github/workflows/ml-service-ci.yml'
+  pull_request:
+    paths:
+      - 'services/ml_service/**'
+      - 'compose.ml.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ML service docker image
+        run: |
+          docker build -t trading-app/ml-service:ci ./services/ml_service
+      - name: Lint Dockerfile (hadolint)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/ml_service/Dockerfile

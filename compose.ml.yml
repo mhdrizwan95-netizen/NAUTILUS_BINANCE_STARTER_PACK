@@ -1,0 +1,52 @@
+# Compose overlay for automated ML service
+# Merge with your existing docker-compose.yml:
+#   docker compose -f docker-compose.yml -f compose.ml.yml up -d --build
+services:
+  ml_service:
+    build:
+      context: ./services/ml_service
+    image: trading-app/ml-service:local
+    env_file:
+      - .env
+    environment:
+      # In case you don't use an .env, these defaults will apply:
+      - DATA_DIR=/data
+      - MODEL_DIR=/models
+      - REGISTRY_DIR=/models/registry
+      - CURRENT_SYMLINK=/models/current
+      - LOG_LEVEL=INFO
+      - REQUIRE_AUTH=false  # set to true + configure JWT in production
+    volumes:
+      - models:/models
+      - data:/data
+    ports:
+      - "8003:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  ml_scheduler:
+    image: trading-app/ml-service:local
+    depends_on:
+      - ml_service
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - MODEL_DIR=/models
+      - REGISTRY_DIR=/models/registry
+      - CURRENT_SYMLINK=/models/current
+      - LOG_LEVEL=INFO
+      - REQUIRE_AUTH=false
+      - RETRAIN_CRON=0 */6 * * *  # retrain every 6 hours
+    command: ["python", "-m", "app.scheduler"]
+    volumes:
+      - models:/models
+      - data:/data
+
+volumes:
+  models:
+  data:
