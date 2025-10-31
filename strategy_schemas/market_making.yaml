@@ -1,0 +1,26 @@
+strategy: market_making
+parameters:
+  base_spread_bp:
+    type: float
+    min: 2.0
+    max: 50.0
+    presets: [5.0, 8.0, 12.0, 20.0, 30.0]
+  skew_sensitivity:
+    type: float
+    min: 0.0
+    max: 5.0
+    presets: [0.5, 1.0, 2.0, 3.0]
+  inventory_target:
+    type: float
+    min: -1.0
+    max: 1.0
+    presets: [-0.5, 0.0, 0.5]
+  size_per_quote:
+    type: float
+    min: 0.001
+    max: 1.0
+    presets: [0.01, 0.05, 0.1]
+risk_constraints:
+  apply_to_open_positions: true
+  max_daily_param_changes: 10
+  hysteresis: 0.05

@@ -1,39 +1,34 @@
+
 from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import Optional
 
-
 class Settings(BaseSettings):
-    # File system
-    DATA_DIR: str = Field("/data", description="Mounted location for raw market data (CSV, Parquet, etc.)")
-    MODEL_DIR: str = Field("/models", description="Mounted location for model symlink + registry")
-    REGISTRY_DIR: str = Field("/models/registry", description="Where versioned models are saved")
-    CURRENT_SYMLINK: str = Field("/models/current", description="Symlink pointing at active version dir")
+    DATA_DIR: str = Field("/data", description="mount for data")
+    MODEL_DIR: str = Field("/models")
+    REGISTRY_DIR: str = Field("/models/registry")
+    CURRENT_SYMLINK: str = Field("/models/current")
+    LEDGER_DB: str = Field("/shared/manifest.sqlite")
 
-    # Training
     HMM_STATES: int = 4
     TRAIN_WINDOW_DAYS: int = 365
-    MIN_TRAIN_INTERVAL_MIN: int = 120
-    PROMOTION_METRIC: str = "val_log_likelihood"
-    PROMOTION_MIN_DELTA: float = 1.0  # require some tangible lift to swap models
+    EXACTLY_ONCE: bool = False        # if true: use only new bars > training watermark (no reuse)
+    TRAIN_MIN_POINTS: int = 2000
+    PROMOTION_MIN_DELTA: float = 1.0
     KEEP_N_MODELS: int = 5
     AUTO_PROMOTE: bool = True
-    TRAIN_DATA_GLOB: str = "*.csv"
 
-    # Scheduler (when running the scheduler container)
-    RETRAIN_CRON: str = "0 */6 * * *"  # every 6 hours by default
+    DELETE_AFTER_PROCESS: bool = True # delete raw files once processed by a successful training round
 
-    # Auth / RBAC
-    REQUIRE_AUTH: bool = True
+    RETRAIN_CRON: str = "0 */6 * * *"
+
+    REQUIRE_AUTH: bool = False
     JWT_ALG: str = "HS256"
-    JWT_SECRET: Optional[str] = None      # For HS256
-    JWT_PUBLIC_KEY: Optional[str] = None  # For RS256/ES256, etc.
-
-    # Misc
+    JWT_SECRET: Optional[str] = None
+    JWT_PUBLIC_KEY: Optional[str] = None
     LOG_LEVEL: str = "INFO"
 
     class Config:
         env_file = ".env"
-
 
 settings = Settings()

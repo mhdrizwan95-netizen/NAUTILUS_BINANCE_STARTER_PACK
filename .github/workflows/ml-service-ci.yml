@@ -1,25 +1,55 @@
-name: ml-service-ci
+name: autotrain-ci
 
 on:
   push:
     paths:
+      - 'compose.autotrain.yml'
+      - 'compose.backtest.yml'
       - 'services/ml_service/**'
-      - 'compose.ml.yml'
+      - 'services/data_ingester/**'
+      - 'services/param_controller/**'
+      - 'services/backtest_suite/**'
+      - 'services/backtester/**'
       - '.github/workflows/ml-service-ci.yml'
   pull_request:
     paths:
       - 'services/ml_service/**'
-      - 'compose.ml.yml'
+      - 'services/data_ingester/**'
+      - 'services/param_controller/**'
+      - 'services/backtest_suite/**'
+      - 'services/backtester/**'
+      - 'compose.autotrain.yml'
+      - 'compose.backtest.yml'
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build ML service docker image
+      - name: Build Docker images
         run: |
-          docker build -t trading-app/ml-service:ci ./services/ml_service
-      - name: Lint Dockerfile (hadolint)
+          docker build -t trading-app/ml-service:ci -f services/ml_service/Dockerfile .
+          docker build -t trading-app/data-ingester:ci -f services/data_ingester/Dockerfile .
+          docker build -t trading-app/param-controller:ci -f services/param_controller/Dockerfile .
+          docker build -t trading-app/backtest-runner:ci -f services/backtest_suite/Dockerfile .
+          docker build -t trading-app/backtester:ci -f services/backtester/Dockerfile .
+      - name: Lint ml_service Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: services/ml_service/Dockerfile
+      - name: Lint data_ingester Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/data_ingester/Dockerfile
+      - name: Lint param_controller Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/param_controller/Dockerfile
+      - name: Lint backtest_suite Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/backtest_suite/Dockerfile
+      - name: Lint backtester Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: services/backtester/Dockerfile
