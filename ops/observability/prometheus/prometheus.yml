@@ -28,21 +28,6 @@ scrape_configs:
     labels:
       role: exporter
       venue: binance
-  - targets:
-      - engine_ibkr:8003
-    labels:
-      role: trader
-      venue: ibkr
-  - targets:
-      - engine_kraken:8003
-    labels:
-      role: trader
-      venue: kraken
-  - targets:
-      - engine_kraken_exporter:8003
-    labels:
-      role: exporter
-      venue: kraken
   relabel_configs:
   - source_labels: [__address__]
     regex: '([^:]+)(?::\d+)?'
