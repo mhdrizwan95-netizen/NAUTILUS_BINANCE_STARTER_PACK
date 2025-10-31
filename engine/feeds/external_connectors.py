@@ -4,8 +4,8 @@ from __future__ import annotations
 External data feed connectors.
 
 These classes normalize upstream signals (social, listings, macro, on-chain)
-into the shared event schema documented in
-`docs/Comprehensive Framework for a Binance Crypto Trading Bot.md`.
+into the shared event schema described in the strategy governance docs
+(`docs/PROJECT_OVERVIEW.md`).
 
 Each connector is intentionally stubbed – it wires metrics, config plumbing,
 and event shaping so we can drop in real API integrations later without

@@ -116,7 +116,8 @@ class MemeCoinSentiment:
 
     The module listens to ``events.external_feed`` payloads emitted by external
     connectors (Twitter firehose, Reddit scrapers, sentiment APIs). It applies
-    guardrails defined in ``docs/Comprehensive Framework for a Binance Crypto Trading Bot.md``:
+    the guardrails enumerated in the strategy governance notes (see
+    ``docs/PROJECT_OVERVIEW.md``):
 
       * small fixed-risk sizing (0.5–1% of equity) solved via per-trade risk pct
       * strict cooldowns and global lock to avoid stacking correlated trades

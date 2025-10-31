@@ -173,7 +173,7 @@ def _swing_low(klines: List[List[float]], lookback: int) -> Optional[float]:
 class TrendStrategyModule:
     """
     Evaluates multi-timeframe SMA/RSI conditions and emits signals that align with the
-    Trend-following design brief documented in docs/Comprehensive Framework....
+    trend-following design brief captured in ``docs/PROJECT_OVERVIEW.md``.
     """
 
     def __init__(

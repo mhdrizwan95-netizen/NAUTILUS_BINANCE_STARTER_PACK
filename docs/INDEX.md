@@ -2,7 +2,7 @@
 
 ## Orientation
 
-- Overview: `../README.md` summarises services, launch steps, and observability.
+- Overview: `PROJECT_OVERVIEW.md` and `../README.md` summarise services, launch steps, and observability.
 - Architecture: `SYSTEM_DESIGN.md` explains engine internals, event flow, storage, and governance loops.
 - Development: `DEV_GUIDE.md` covers local setup, testing strategy, and style conventions.
 - Operations: `OPS_RUNBOOK.md` provides daily checks, recovery playbooks, and emergency procedures.
@@ -19,15 +19,17 @@
 | Supporting services | Tradable universe, situation detection, screener scanning | `universe/service.py`, `situations/service.py`, `screener/service.py` |
 | Persistence & idempotency | Snapshot store, SQLite ingestion, deduplication cache, logs | `engine/state.py`, `engine/storage/sqlite.py`, `engine/idempotency.py`, `engine/logs/` |
 
-## Document Set
+## Curated document set
 
-- `SYSTEM_DESIGN.md` — layered architecture, execution flow, metrics, fault tolerance, and scaling notes.
-- `DEV_GUIDE.md` — environment bootstrap, coding guidelines, testing expectations, instrumentation, and dependency management.
-- `OPS_RUNBOOK.md` — checklists for routine operations, troubleshooting, governance controls, and incident response.
-- `network-dns-fix.md` — DNS incident write-up for the Kraken exporter/Prometheus scrape path.
-- `hmm_operator_handbook.md` — ML operator and calibration procedures for the HMM stack.
-- `NAUTILUS_BINANCE_STEP_BY_STEP.md` — step-by-step deployment walkthrough with screenshots.
-- `README_DEPLOYMENT.md` — deployment‑focused details.
+- `PROJECT_OVERVIEW.md` — mission, current snapshot, and open venue roadmap.
+- `SYSTEM_DESIGN.md` — layered architecture, execution flow, and fault-tolerance patterns.
+- `DEV_GUIDE.md` — environment bootstrap, coding standards, testing expectations, and instrumentation.
+- `OPS_RUNBOOK.md` — daily health checks, incident recovery, governance controls, and escalation paths.
+- `OBSERVABILITY.md` — Prometheus/Grafana topology, alerting rules, and validation tooling.
+- `FEATURE_FLAGS.md` — risk gates and feature toggles with recommended defaults.
+- `ML_SERVICE_INTEGRATION.md` — autotrain stack quick start, ledger semantics, and operational guardrails.
+- `BACKTEST_SUITE_GUIDE.md` — prequential simulation workflow, quick start, and extension hooks.
+- `README-BINANCE-BACKFILL.md` — historical backfill job covering configuration and safety notes.
 
 ## Daily References
 
