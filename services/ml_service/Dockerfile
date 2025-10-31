@@ -4,7 +4,15 @@ FROM python:3.11-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1     PYTHONUNBUFFERED=1     PIP_NO_CACHE_DIR=1     PIP_DISABLE_PIP_VERSION_CHECK=1
 
 # Build deps for scipy/numpy/scikit-learn wheels where needed
-RUN apt-get update && apt-get install -y --no-install-recommends     build-essential gcc gfortran     libatlas-base-dev liblapack-dev libblas-dev     && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        gcc \
+        gfortran \
+        libopenblas-dev \
+        liblapack-dev \
+        libblas-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
