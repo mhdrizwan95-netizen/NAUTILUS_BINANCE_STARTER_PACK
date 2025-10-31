@@ -24,7 +24,7 @@ This suite **mirrors the live learning loop**: it ingests data chunk‑by‑chun
    research/BTC_USDT/1m/file2.csv
    ```
 
-2. Launch the stack (including `ml_service`, `param_controller`, etc.) then add the backtester:
+2. Launch the stack (including `ml_service`, `param_controller`, etc.) then add the backtest runner:
    ```bash
    docker compose -f docker-compose.yml -f compose.autotrain.yml -f compose.backtest.yml up -d --build
    ```
@@ -63,5 +63,5 @@ Implement the interface in `strategy_base.Strategy` and add your logic in `on_ba
 ## Notes
 
 - The demo strategy is minimal for clarity. Integrate your real strategies through the same interface and have them read params from the Param Controller.
-- For compute‑heavy models, insert **training latency** (sleep) in the backtester to emulate downtime.
+- For compute‑heavy models, insert **training latency** (sleep) in the backtest runner to emulate downtime.
 - Always embargo/purge overlaps if you extend the trainer locally — or keep training in `ml_service` to guarantee the same code path as production.

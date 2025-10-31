@@ -32,7 +32,6 @@ jobs:
           docker build -t trading-app/data-ingester:ci -f services/data_ingester/Dockerfile .
           docker build -t trading-app/param-controller:ci -f services/param_controller/Dockerfile .
           docker build -t trading-app/backtest-runner:ci -f services/backtest_suite/Dockerfile .
-          docker build -t trading-app/backtester:ci -f services/backtester/Dockerfile .
       - name: Lint ml_service Dockerfile
         uses: hadolint/hadolint-action@v3.1.0
         with:
@@ -49,7 +48,3 @@ jobs:
         uses: hadolint/hadolint-action@v3.1.0
         with:
           dockerfile: services/backtest_suite/Dockerfile
-      - name: Lint backtester Dockerfile
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: services/backtester/Dockerfile

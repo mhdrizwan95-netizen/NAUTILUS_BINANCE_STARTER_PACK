@@ -11,17 +11,18 @@ This suite implements **prequential (test-then-train)** evaluation: at time *t*,
 
 ## Running it
 
-1. Put a CSV at `historical/sample.csv` with columns at least: `timestamp(ms), open, high, low, close, volume`.
-2. Build & run:
+1. Stage research CSVs under `research/<SYMBOL>/<TF>/` with columns at least: `timestamp, open, high, low, close, volume`.
+2. Build & run alongside the autotrain services:
    ```bash
-   docker compose -f compose.backtest.yml up -d --build
-   docker logs -f backtester
+   docker compose -f docker-compose.yml -f compose.autotrain.yml -f compose.backtest.yml up -d --build
+   docker logs -f backtest_runner
    ```
-3. Env knobs:
-   - `RETRAIN_EVERY_MIN` – how often the embedded HMM retrains (e.g., `360`).
-   - `STEP_MINUTES` – bar granularity.
+3. Env knobs (see `.env.example`):
+   - `CHUNK_ROWS` – rows per ingest tick when replaying research data.
+   - `TRAIN_CRON_MINUTES` – how often to trigger `/train` during simulation (e.g., `360`).
    - `EXACTLY_ONCE` – if `true`, each bar is used at most once across updates.
-   - `COST_BPS`, `SLIPPAGE_BPS_PER_VOL` – simple cost model.
+   - `TRAIN_MIN_POINTS` – minimum observations required to fit a model.
+   - `FEE_BP`, `SLIPPAGE_BP` – simple execution friction model.
 
 ## Extending to your stack
 
@@ -43,4 +44,3 @@ It **closes the *forward-simulation* gap** (how the system behaves while learnin
 - **Embargo overlapping outcomes** when outcomes span horizons > 1 bar.
 - **Freeze parameters mid‑trade**; apply new params to **new** positions only.
 - Enforce **maximum daily param changes** and **hysteresis** thresholds.
-
