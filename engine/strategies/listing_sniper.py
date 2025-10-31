@@ -23,6 +23,8 @@ from engine.metrics import (
 from engine.risk import RiskRails
 from engine.core.market_resolver import resolve_market_choice
 from engine.execution.execute import StrategyExecutor
+from shared.cooldown import CooldownTracker
+from shared.listing_utils import generate_listing_targets
 
 logger = logging.getLogger("engine.strategies.listing_sniper")
 
@@ -166,7 +168,7 @@ class ListingSniper:
         self.router = router
         self.risk = risk
         self.rest_client = rest_client
-        self._cooldowns: Dict[str, float] = {}
+        self._cooldowns = CooldownTracker(self.cfg.cooldown_sec)
         self._tasks: Set[asyncio.Task] = set()
         self._seen_ids: Set[str] = set()
         self._forwarded: Set[str] = set()
@@ -246,16 +248,12 @@ class ListingSniper:
             listing_sniper_skips_total.labels(symbol=symbol, reason=reason).inc()
 
     def _set_cooldown(self, symbol: str) -> None:
-        if self.cfg.cooldown_sec <= 0:
-            return
-        until = time.time() + float(self.cfg.cooldown_sec)
-        self._cooldowns[symbol] = until
-        if self.cfg.metrics_enabled:
+        until = self._cooldowns.set(symbol)
+        if self.cfg.metrics_enabled and until and listing_sniper_cooldown_epoch is not None:
             listing_sniper_cooldown_epoch.labels(symbol=symbol).set(until)
 
     def _cooldown_active(self, symbol: str) -> bool:
-        until = self._cooldowns.get(symbol)
-        if until and time.time() < until:
+        if self._cooldowns.active(symbol):
             self._record_skip(symbol, "cooldown")
             return True
         return False
@@ -402,12 +400,14 @@ class ListingSniper:
                 go_live_at = go_live_at + 1.0
             wait_until = max(wait_until, go_live_at)
         wait_until += max(self.cfg.entry_delay_sec, 0.0)
-        delay = wait_until - time.time()
-        if delay > 0:
+        while True:
+            remaining = wait_until - time.time()
+            if remaining <= 0:
+                break
             logger.info(
-                "[LISTING] %s waiting %.1fs for go-live window", op.symbol, delay
+                "[LISTING] %s waiting %.2fs for go-live window", op.symbol, remaining
             )
-            await asyncio.sleep(delay)
+            await asyncio.sleep(min(remaining, 0.05))
 
     async def _deploy_exit_plan(
         self,
@@ -421,22 +421,27 @@ class ListingSniper:
         if qty <= 0 or avg_px <= 0:
             return
 
-        if self.cfg.stop_loss_pct > 0:
-            stop_price = avg_px * max(0.0001, 1.0 - float(self.cfg.stop_loss_pct))
+        stop_price, target_prices = generate_listing_targets(
+            avg_px,
+            stop_pct=float(self.cfg.stop_loss_pct),
+            target_multipliers=(lvl for lvl in self.cfg.take_profit_levels if lvl > 0),
+        )
+
+        if stop_price is not None:
+            stop_price = max(avg_px * 0.0001, stop_price)
             try:
                 await self.router.amend_stop_reduce_only(symbol, "SELL", stop_price, abs(qty))
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[LISTING] stop placement failed for %s: %s", symbol, exc)
 
-        levels = [lvl for lvl in self.cfg.take_profit_levels if lvl > 0]
+        levels = [price for price in target_prices if price > 0]
         if not levels:
             return
 
         per_clip = qty / float(len(levels))
         placed = 0.0
         rounder = getattr(self.router, "round_tick", None)
-        for idx, level in enumerate(levels):
-            raw_price = avg_px * (1.0 + float(level))
+        for idx, raw_price in enumerate(levels):
             price = raw_price
             if callable(rounder):
                 try:
@@ -459,7 +464,7 @@ class ListingSniper:
         self._forwarded.add(key)
         try:
             payload = {
-                "source": "listing_sniper_bridge",
+                "source": "binance_announcements",
                 "payload": {
                     "symbol": symbol,
                     "announced_at": int(announced_at * 1000.0),
@@ -468,13 +473,14 @@ class ListingSniper:
                 },
                 "asset_hints": [symbol],
                 "priority": 0.8,
+                "meta": {"bridge": "listing_sniper_bridge"},
             }
             await SIGNAL_QUEUE.put(
                 QueuedEvent(
                     topic="events.external_feed",
                     data=payload,
                     priority=float(payload.get("priority", 0.8)),
-                    source="listing_sniper_bridge",
+                    source="binance_announcements",
                 )
             )
         except Exception:

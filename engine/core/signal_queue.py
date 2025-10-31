@@ -57,7 +57,8 @@ class SignalPriorityQueue:
 
     def start(self, bus) -> None:
         if self._task and not self._task.done():
-            return
+            self._task.cancel()
+        self._heap.clear()
         loop = asyncio.get_running_loop()
         self._task = loop.create_task(self._dispatch_loop(bus), name="signal-queue-dispatch")
 

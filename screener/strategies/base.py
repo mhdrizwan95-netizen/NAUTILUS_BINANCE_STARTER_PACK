@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
 
+from shared.signal_math import confidence_from_score
+
 
 MappingLike = Mapping[str, Any]
 
@@ -144,38 +146,6 @@ def atr(klines: Sequence[Sequence[Any]], length: int = 14) -> Optional[float]:
     return sum(ranges) / len(ranges)
 
 
-def rsi(values: Sequence[float], length: int = 14) -> Optional[float]:
-    if length <= 1 or len(values) <= length:
-        return None
-    gains: List[float] = []
-    losses: List[float] = []
-    for i in range(1, len(values)):
-        delta = values[i] - values[i - 1]
-        if delta >= 0:
-            gains.append(delta)
-            losses.append(0.0)
-        else:
-            gains.append(0.0)
-            losses.append(-delta)
-    avg_gain = sum(gains[:length]) / float(length)
-    avg_loss = sum(losses[:length]) / float(length)
-    if avg_loss == 0:
-        return 100.0
-    rs = avg_gain / avg_loss if avg_loss else float("inf")
-    rsi_val = 100.0 - (100.0 / (1.0 + rs))
-    if len(gains) == length:
-        return rsi_val
-    for i in range(length, len(gains)):
-        avg_gain = ((avg_gain * (length - 1)) + gains[i]) / float(length)
-        avg_loss = ((avg_loss * (length - 1)) + losses[i]) / float(length)
-        if avg_loss == 0:
-            rsi_val = 100.0
-        else:
-            rs = avg_gain / avg_loss
-            rsi_val = 100.0 - (100.0 / (1.0 + rs))
-    return rsi_val
-
-
 def swing_low(klines: Sequence[Sequence[Any]], lookback: int = 8) -> Optional[float]:
     if lookback <= 0 or len(klines) < lookback:
         return None
@@ -188,13 +158,6 @@ def swing_high(klines: Sequence[Sequence[Any]], lookback: int = 8) -> Optional[f
         return None
     highs = [float(row[2]) for row in klines[-lookback:]]
     return max(highs) if highs else None
-
-
-def confidence_from_score(raw: float, scale: float) -> float:
-    if scale <= 0:
-        return 0.0
-    normalized = raw / scale
-    return max(0.0, min(1.0, normalized))
 
 
 def listing_age(meta: Optional[MappingLike]) -> Optional[float]:

@@ -344,12 +344,23 @@ def _signal_payload(sig: StrategySignal) -> Dict[str, Any]:
     }
 
 
+def _present_strategy_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    if not isinstance(result, dict):
+        return result
+    status = result.get("status")
+    if status == "dry_run":
+        presented = {**result, "status": "simulated"}
+        presented.setdefault("mode", "dry_run")
+        return presented
+    return result
+
+
 async def _execute_strategy_signal_async(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict[str, Any]:
     executor = _get_executor()
     result = await executor.execute(_signal_payload(sig), idem_key=idem_key)
     if result.get("status") == "submitted":
         _record_tick_latency(sig.symbol)
-    return result
+    return _present_strategy_result(result)
 
 
 def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict[str, Any]:
@@ -357,7 +368,7 @@ def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = N
     result = executor.execute_sync(_signal_payload(sig), idem_key=idem_key)
     if result.get("status") == "submitted":
         _record_tick_latency(sig.symbol)
-    return result
+    return _present_strategy_result(result)
 
 
 def register_tick_listener(cb: Callable[[str, float, float], object]) -> None:
@@ -787,4 +798,3 @@ async def _submit_scalp_exit(payload: Dict[str, Any]) -> None:
         metrics.scalp_bracket_exits_total.labels(symbol=base, venue=venue, mode=tag).inc()
     except Exception:
         pass
-

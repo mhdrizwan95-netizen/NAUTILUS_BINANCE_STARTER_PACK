@@ -1,0 +1,13 @@
+{
+  "event_meme": [],
+  "momentum_hmm": [
+    "SOLUSDT",
+    "AVAXUSDT"
+  ],
+  "scalp_cex": [],
+  "trend_core": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT"
+  ]
+}

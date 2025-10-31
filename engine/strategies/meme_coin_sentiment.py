@@ -15,6 +15,8 @@ from engine.core.order_router import OrderRouter
 from engine.core.market_resolver import resolve_market_choice
 from engine.risk import RiskRails
 from engine.execution.execute import StrategyExecutor
+from shared.cooldown import CooldownTracker
+from shared.meme_utils import generate_meme_bracket
 
 try:  # Metrics are optional in some test contexts
     from engine.metrics import (
@@ -136,7 +138,7 @@ class MemeCoinSentiment:
         self.rest_client = rest_client
         self.cfg = cfg or load_meme_coin_config()
         self.clock = clock
-        self._cooldowns: Dict[str, float] = {}
+        self._cooldowns = CooldownTracker(self.cfg.cooldown_sec)
         self._global_lock_until: float = 0.0
         self._allow_sources = {src.lower() for src in self.cfg.allow_sources}
         self._executor = StrategyExecutor(
@@ -276,9 +278,14 @@ class MemeCoinSentiment:
         self._record_order(symbol, "filled")
         await self._publish_trade(symbol, qty, avg_px, score_meta, market_choice)
 
-        stop_px = avg_px * max(0.0001, 1.0 - self.cfg.stop_loss_pct)
-        tp_px = avg_px * (1.0 + self.cfg.take_profit_pct)
-        trail_px = avg_px * max(0.0001, 1.0 - self.cfg.trail_stop_pct)
+        stop_px, tp_px, trail_px = generate_meme_bracket(
+            avg_px,
+            stop_pct=self.cfg.stop_loss_pct,
+            take_profit_pct=self.cfg.take_profit_pct,
+            trail_pct=self.cfg.trail_stop_pct,
+        )
+        stop_px = max(avg_px * 0.0001, stop_px)
+        trail_px = max(avg_px * 0.0001, trail_px)
         await self._publish_bracket(symbol, qty, avg_px, stop_px, tp_px, trail_px, score_meta, market_choice)
 
         self._set_cooldown(symbol, now)
@@ -472,25 +479,15 @@ class MemeCoinSentiment:
             pass
 
     def _set_cooldown(self, symbol: str, now: Optional[float] = None) -> None:
-        if self.cfg.cooldown_sec <= 0:
-            return
-        now = now or self.clock.time()
-        until = now + float(self.cfg.cooldown_sec)
-        self._cooldowns[symbol] = until
-        if self.cfg.metrics_enabled and meme_sentiment_cooldown_epoch is not None:
+        until = self._cooldowns.set(symbol, now=now or self.clock.time())
+        if self.cfg.metrics_enabled and meme_sentiment_cooldown_epoch is not None and until:
             try:
                 meme_sentiment_cooldown_epoch.labels(symbol=symbol).set(until)
             except Exception:
                 pass
 
     def _cooldown_active(self, symbol: str, now: float) -> bool:
-        until = self._cooldowns.get(symbol)
-        if not until:
-            return False
-        if now >= until:
-            self._cooldowns.pop(symbol, None)
-            return False
-        return True
+        return self._cooldowns.active(symbol, now=now)
 
     def _arm_global_lock(self, now: float) -> None:
         if self.cfg.trade_lock_sec <= 0:

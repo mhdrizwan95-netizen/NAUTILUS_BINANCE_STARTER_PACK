@@ -1678,15 +1678,20 @@ def _startup_load_snapshot_and_reconcile():
 momentum_strategy = None
 try:
     if VENUE == "KRAKEN":
-        from strategies.momo_15m import Momentum15m
+        from engine.strategies.momentum_15m import Momentum15mStrategy, load_momentum_15m_config
         from engine import strategy as _strategy_mod
-        momentum_strategy = Momentum15m(engine=router, symbol="PI_XBTUSD")
-        _startup_logger.info("Momentum15m strategy initialized for Kraken")
+
+        mom_cfg = load_momentum_15m_config()
+        momentum_strategy = Momentum15mStrategy(router=router, risk=RAILS, cfg=mom_cfg)
+        if momentum_strategy.cfg.enabled:
+            _startup_logger.info("Momentum15m strategy initialized for Kraken (%s)", momentum_strategy.symbol)
+        else:
+            _startup_logger.info("Momentum15m strategy loaded but disabled via config")
         base_symbol = momentum_strategy.symbol.split(".")[0]
 
         def _momentum_listener(sym: str, price: float, ts: float, *, _base=base_symbol, _strategy=momentum_strategy):
-            if sym.split(".")[0] == _base:
-                _strategy.on_tick(price, ts)
+            if sym.split(".")[0].upper() == _base:
+                _strategy.on_tick(sym, price, ts)
 
         try:
             _strategy_mod.register_tick_listener(_momentum_listener)

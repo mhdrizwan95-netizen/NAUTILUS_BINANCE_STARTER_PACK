@@ -423,13 +423,14 @@ def _trim_snapshots() -> None:
 async def _risk_monitor_iteration() -> None:
     """Execute a single risk monitoring pass."""
     try:
+        ops_base = os.getenv("OPS_BASE", "http://127.0.0.1:8002").rstrip("/")
         async with httpx.AsyncClient() as client:
-            r = await client.get("http://localhost:8001/aggregate/exposure", timeout=5)
+            r = await client.get(f"{ops_base}/aggregate/exposure", timeout=5)
             r.raise_for_status()
-            data = r.json()
+            data = r.json() or {}
 
             alert_msg = None
-            for item in data.get("items", []):
+            for item in (data.get("by_symbol", {}) or {}).values():
                 symbol = item.get("symbol", "UNKNOWN")
                 value_usd = abs(item.get("value_usd", 0.0))
                 if value_usd > RISK_LIMIT_USD:

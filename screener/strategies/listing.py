@@ -1,16 +1,16 @@
 """Token listing sniper screener."""
 from __future__ import annotations
 
-from typing import Any, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from .base import (
     StrategyCandidate,
     StrategySignal,
     StrategyScreener,
-    confidence_from_score,
     freeze_mapping,
     listing_age,
 )
+from shared.listing_utils import compute_listing_metrics
 
 
 class ListingSniperScreener(StrategyScreener):
@@ -44,29 +44,33 @@ class ListingSniperScreener(StrategyScreener):
             return None
         vol_boost = float(features.get("vol_accel_5m_over_30m", 0.0))
         move = float(features.get("r60", 0.0))
-        score = max(0.0, 14.0 - age) * 6.0 + max(0.0, vol_boost - 1.0) * 24.0 + max(0.0, move) * 520.0
-        ctx_payload: MutableMapping[str, Any] = {
-            "listing_age_days": round(age, 3),
-            "vol_multiplier": round(vol_boost, 3),
-            "move_pct": round(move * 100.0, 3),
-        }
-        context = freeze_mapping(ctx_payload)
         last_px = float(features.get("last", 0.0))
-        stop = round(last_px * 0.9, 6) if last_px else None
-        tp = round(last_px * 1.25, 6) if last_px else None
-        confidence = confidence_from_score(score, scale=600.0)
+
+        metrics = compute_listing_metrics(
+            listing_age_days=age,
+            volume_multiplier=vol_boost,
+            move_fraction=move,
+            last_price=last_px if last_px > 0 else None,
+            stop_pct=0.10,
+            target_multipliers=(1.25,),
+        )
+
+        context = freeze_mapping(metrics.context)
+        stop = metrics.stop_price
+        targets = metrics.targets
+        tp = targets[0] if targets else None
         signal = StrategySignal(
             strategy_id=self.strategy_id,
             symbol=symbol,
             side="LONG",
-            confidence=confidence,
+            confidence=metrics.confidence,
             entry_mode="market",
             suggested_stop=stop,
             suggested_tp=tp,
             validity_ttl=1_800,
             metadata=context,
         )
-        return StrategyCandidate(score=score, signal=signal, context=context)
+        return StrategyCandidate(score=metrics.score, signal=signal, context=context)
 
 
 __all__ = ["ListingSniperScreener"]

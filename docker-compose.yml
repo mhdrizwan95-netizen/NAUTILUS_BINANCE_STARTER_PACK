@@ -30,7 +30,7 @@ x-engine-common: &engine_common
     STRATEGY_SLOW: ${STRATEGY_SLOW:-21}
     STRATEGY_QUOTE_USDT: ${STRATEGY_QUOTE_USDT:-10.0}
     # Service dependencies
-    HMM_URL: http://ml_service:8010
+    HMM_URL: http://ml_service:8000
     ENGINE_POLL_SEC: ${ENGINE_POLL_SEC:-2}
   healthcheck:
     # Lightweight health; avoid hitting account endpoints
@@ -106,105 +106,11 @@ services:
       /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 1024
     healthcheck:
       # Prefer cheap readiness endpoint to avoid transient timeouts
-      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 5 http://localhost:8003/readyz >/dev/null"]
-      interval: 10s
-      timeout: 6s
-      retries: 10
-      start_period: 30s
-
-  engine_kraken_exporter:
-    <<: *engine_common
-    container_name: hmm_engine_kraken_exporter
-    env_file: .env
-    environment:
-      - ROLE=exporter
-      - VENUE=KRAKEN
-      - TRADING_ENABLED=false
-      - GOVERNANCE_POLICY=/app/engine/policies.yaml
-      - KRAKEN_MODE=${KRAKEN_MODE:-testnet}
-      - KRAKEN_BASE_URL=${KRAKEN_BASE_URL:-https://demo-futures.kraken.com}
-      - KRAKEN_API_KEY=${KRAKEN_API_KEY}
-      - KRAKEN_API_SECRET=${KRAKEN_API_SECRET}
-      - KRAKEN_WS_URL=${KRAKEN_WS_URL:-wss://demo-futures.kraken.com/ws/v1}
-      - KRAKEN_API_TIMEOUT=${KRAKEN_API_TIMEOUT:-10}
-      - TRADE_SYMBOLS=${KRAKEN_TRADED_SYMBOLS:-PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN}
-      - QUOTE_CCY=USD
-      - ENGINE_PORT=8003
-    volumes:
-      - ./engine/state:/app/engine/state:rw
-      - ./engine/logs:/app/engine/logs:rw
-      - ./data:/app/data:rw
-    ports:
-      - "9105:8003"
-    depends_on:
-      - engine_kraken
-    networks:
-      - trading_net
-    command: >
-      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
-
-  engine_kraken:
-    <<: *engine_common
-    container_name: hmm_engine_kraken
-    env_file: .env
-    environment:
-      - ROLE=trader
-      - VENUE=KRAKEN
-      - GOVERNANCE_POLICY=/app/engine/policies.yaml
-      - KRAKEN_MODE=${KRAKEN_MODE:-testnet}
-      - KRAKEN_BASE_URL=${KRAKEN_BASE_URL:-https://demo-futures.kraken.com}
-      - KRAKEN_API_KEY=${KRAKEN_API_KEY}
-      - KRAKEN_API_SECRET=${KRAKEN_API_SECRET}
-      - KRAKEN_WS_URL=${KRAKEN_WS_URL:-wss://demo-futures.kraken.com/ws/v1}
-      - KRAKEN_API_TIMEOUT=${KRAKEN_API_TIMEOUT:-10}
-      - TRADE_SYMBOLS=${KRAKEN_TRADED_SYMBOLS:-PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN}
-      - QUOTE_CCY=USD
-      - ENGINE_PORT=8003
-    volumes:
-      - ./engine/state:/app/engine/state:rw
-      - ./engine/logs:/app/engine/logs:rw
-      - ./data:/app/data:rw
-    ports:
-      - "8006:8003"
-    networks:
-      - trading_net
-    command: >
-      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 512
-    healthcheck:
-      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 10 http://localhost:8003/health >/dev/null"]
+      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 10 http://localhost:8003/readyz >/dev/null"]
       interval: 15s
-      timeout: 10s
+      timeout: 8s
       retries: 10
       start_period: 30s
-
-  engine_ibkr:
-    <<: *engine_common
-    container_name: hmm_engine_ibkr
-    env_file: .env
-    environment:
-      - VENUE=IBKR
-      - GOVERNANCE_POLICY=/app/engine/policies.yaml
-      - ENGINE_PORT=8003
-      - TRADING_ENABLED=${TRADING_ENABLED}
-      - IBKR_HOST=${IBKR_HOST}
-      - IBKR_PORT=${IBKR_PORT}
-      - IBKR_CLIENT_ID=${IBKR_CLIENT_ID}
-      - IBKR_FEE_MODE=${IBKR_FEE_MODE}
-      - IBKR_FEE_PER_SHARE=${IBKR_FEE_PER_SHARE}
-      - IBKR_MIN_TRADE_FEE_USD=${IBKR_MIN_TRADE_FEE_USD}
-      - IBKR_MIN_NOTIONAL_USD=${IBKR_MIN_NOTIONAL_USD}
-      - BINANCE_API_TIMEOUT=15
-      - BINANCE_RECV_WINDOW=60000
-    volumes:
-      - ./engine/state:/app/engine/state:rw
-      - ./engine/logs:/app/engine/logs:rw
-      - ./data:/app/data:rw
-    ports:
-      - "8005:8003"
-    networks:
-      - trading_net
-    command: >
-      /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
 
   strategy_runtime:
     <<: *engine_common
@@ -229,28 +135,6 @@ services:
       timeout: 5s
       retries: 3
 
-
-  engine_bybit:
-    <<: *engine_common
-    container_name: hmm_engine_bybit
-    env_file:
-      - .env
-      - ops/env.bybit
-    environment:
-      - VENUE=BYBIT
-      - GOVERNANCE_POLICY=/app/engine/policies.yaml
-      - ENGINE_PORT=8003
-      - BINANCE_API_TIMEOUT=15
-      - BINANCE_RECV_WINDOW=60000
-    volumes:
-      - ./engine/state:/app/engine/state:rw
-      - ./engine/logs:/app/engine/logs:rw
-      - ./data:/app/data:rw
-    ports:
-      - "8004:8003"
-      - "9104:9104"
-    networks:
-      - trading_net
 
 # Legacy single-engine service for backward compatibility (commented out)
 # engine:
@@ -322,10 +206,6 @@ services:
       start_period: 15s
     depends_on:
       engine_binance:
-        condition: service_healthy
-      engine_ibkr:
-        condition: service_healthy
-      engine_bybit:
         condition: service_healthy
     networks:
       - trading_net
@@ -468,6 +348,170 @@ services:
     networks:
       - trading_net
 
+  data_ingester:
+    build:
+      context: .
+      dockerfile: services/data_ingester/Dockerfile
+    image: nautilus_data_ingester:local
+    container_name: hmm_data_ingester
+    environment:
+      - LEDGER_DB=/shared/manifest.sqlite
+      - DATA_LANDING=/data/incoming
+      - EXCHANGE=binance
+      - SYMBOLS=BTC/USDT,ETH/USDT
+      - TIMEFRAME=1m
+      - BATCH_LIMIT=1000
+      - START_TS=0
+    volumes:
+      - ml_data_volume:/data
+      - ml_shared_volume:/shared
+    ports:
+      - "8013:8001"
+    restart: unless-stopped
+    networks:
+      - trading_net
+
+  ml_service:
+    build:
+      context: .
+      dockerfile: services/ml_service/Dockerfile
+    image: nautilus_ml_service:local
+    container_name: hmm_ml_service
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - MODEL_DIR=/models
+      - REGISTRY_DIR=/models/registry
+      - CURRENT_SYMLINK=/models/current
+      - LEDGER_DB=/shared/manifest.sqlite
+      - EXACTLY_ONCE=false
+      - DELETE_AFTER_PROCESS=true
+      - LOG_LEVEL=INFO
+    depends_on:
+      data_ingester:
+        condition: service_started
+    volumes:
+      - ml_data_volume:/data
+      - ml_models_volume:/models
+      - ml_shared_volume:/shared
+    ports:
+      - "8015:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - trading_net
+
+  ml_scheduler:
+    image: nautilus_ml_service:local
+    container_name: hmm_ml_scheduler
+    depends_on:
+      ml_service:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data
+      - MODEL_DIR=/models
+      - REGISTRY_DIR=/models/registry
+      - CURRENT_SYMLINK=/models/current
+      - LEDGER_DB=/shared/manifest.sqlite
+      - EXACTLY_ONCE=false
+      - DELETE_AFTER_PROCESS=true
+      - LOG_LEVEL=INFO
+      - RETRAIN_CRON=0 */6 * * *
+    command: ["python", "-m", "app.scheduler"]
+    volumes:
+      - ml_data_volume:/data
+      - ml_models_volume:/models
+      - ml_shared_volume:/shared
+    restart: unless-stopped
+    networks:
+      - trading_net
+
+  param_controller:
+    build:
+      context: .
+      dockerfile: services/param_controller/Dockerfile
+    image: nautilus_param_controller:local
+    container_name: hmm_param_controller
+    environment:
+      - PC_DB=/shared/param_controller.sqlite
+    volumes:
+      - ml_shared_volume:/shared
+    ports:
+      - "8016:8002"
+    restart: unless-stopped
+    networks:
+      - trading_net
+
+  backtest_runner:
+    build:
+      context: .
+      dockerfile: services/backtest_suite/Dockerfile
+    image: nautilus_backtest_runner:local
+    container_name: hmm_backtest_runner
+    env_file:
+      - .env
+    environment:
+      - LEDGER_DB=/shared/manifest.sqlite
+      - RESEARCH_DIR=/research
+      - DATA_INCOMING=/data/incoming
+      - ML_SERVICE=http://ml_service:8000
+      - PARAM_CONTROLLER=http://param_controller:8002
+      - CHUNK_ROWS=2000
+      - TRAIN_CRON_MINUTES=360
+      - EXACTLY_ONCE=false
+      - TRAIN_MIN_POINTS=2000
+      - FEE_BP=1.0
+      - SLIPPAGE_BP=2.0
+      - MAX_STEPS=1000
+    depends_on:
+      ml_service:
+        condition: service_healthy
+      param_controller:
+        condition: service_started
+    volumes:
+      - backtest_research_volume:/research
+      - ml_data_volume:/data
+      - ml_shared_volume:/shared
+      - backtest_results_volume:/results
+    command: ["run"]
+    restart: unless-stopped
+    networks:
+      - trading_net
+
+  data_backfill:
+    build:
+      context: .
+      dockerfile: services/data_ingester/Dockerfile
+    image: nautilus_data_backfill:local
+    container_name: hmm_data_backfill
+    env_file:
+      - .env
+    environment:
+      - EXCHANGE=binance
+      - SYMBOLS=BTC/USDT,ETH/USDT
+      - TIMEFRAME=1m
+      - BATCH_LIMIT=1000
+      - START_TS=0
+      - END_TS=0
+      - SLEEP_MS=500
+    command: ["python", "-m", "app.backfill"]
+    volumes:
+      - ml_data_volume:/data
+      - ml_shared_volume:/shared
+    depends_on:
+      data_ingester:
+        condition: service_started
+    networks:
+      - trading_net
+
   hmm_deck:
     image: python:3.11-slim
     container_name: hmm_deck
@@ -513,3 +557,10 @@ networks:
   trading_net:
     external: true
     name: nautilus_trading_network
+
+volumes:
+  ml_data_volume:
+  ml_models_volume:
+  ml_shared_volume:
+  backtest_research_volume:
+  backtest_results_volume:

@@ -273,7 +273,7 @@ class _SyntheticFillSimulator:
     def record_order(self, order: RecordedOrder, event: Optional[BacktestEvent]) -> None:
         if order is None:
             return
-        if order.status not in {"backtest", "dry_run"}:
+        if order.status not in {"backtest", "dry_run", "simulated"}:
             return
         base, venue = self._resolve_symbol(order.symbol, event)
         if base is None or venue is None:
@@ -841,4 +841,3 @@ __all__ = [
     "OfflineKlineClient",
     "SimClock",
 ]
-

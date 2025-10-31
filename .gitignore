@@ -22,3 +22,6 @@ nautilus-ui/node_modules/
 nautilus-ui/.next/
 nautilus-ui/out/
 nautilus-ui/build/
+
+# Archived research utilities
+legacy/

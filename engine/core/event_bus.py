@@ -7,6 +7,7 @@ turning reactive components into a coordinated trading intelligence.
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import logging
 import os
@@ -253,10 +254,11 @@ class EventBus:
         loop: asyncio.AbstractEventLoop,
     ) -> Any:
         """Dispatch handler execution via async/await or executor offloading."""
+        payload_copy = copy.deepcopy(payload)
         if _is_async_callable(handler):
-            return await handler(payload)
+            return await handler(payload_copy)
 
-        return await loop.run_in_executor(self._executor, _call_sync, handler, payload)
+        return await loop.run_in_executor(self._executor, _call_sync, handler, payload_copy)
 
 
 # Global event bus instance - the central nervous system

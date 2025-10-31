@@ -24,7 +24,6 @@ from typing import Dict, List, Any, Optional
 
 import httpx
 
-from ops.strategy_selector import promote_best
 from ops.capital_allocator import get_model_quota
 
 
@@ -304,16 +303,22 @@ async def fetch_price_for_symbol(symbol: str) -> float:
     if not symbol:
         return 0.0
 
-    # Try to get price from first available engine
+    # Try to get price from first available engine via batched prices endpoint
+    base = symbol.split(".")[0] if "." in symbol else symbol
     for endpoint in ENGINE_ENDPOINTS:
         try:
             timeout = httpx.Timeout(3.0)
             async with httpx.AsyncClient(timeout=timeout) as session:
-                # Assume engine has a price endpoint
-                response = await session.get(f"{endpoint}/price", params={"symbol": symbol})
+                response = await session.get(f"{endpoint}/prices")
                 if response.status_code == 200:
-                    data = response.json()
-                    return float(data.get("price", 0.0))
+                    data = response.json() or {}
+                    prices = data.get("prices", {}) or {}
+                    price = prices.get(base)
+                    if price is not None:
+                        try:
+                            return float(price)
+                        except (TypeError, ValueError):
+                            pass
         except Exception:
             continue
 
@@ -332,12 +337,15 @@ async def strategy_signal_endpoint(signal_data: Dict[str, Any]) -> Dict[str, Any
         if not signal_data:
             raise HTTPException(status_code=400, detail="Empty signal data")
 
-        # Validate required fields
+        # Validate required fields and order sizing
         required = ["symbol", "side"]
-        optional = ["quote", "quantity"]
-
-        if not any(signal_data.get(field) for field in required + optional):
-            raise HTTPException(status_code=400, detail="Missing required signal fields")
+        for f in required:
+            if not signal_data.get(f):
+                raise HTTPException(status_code=400, detail="symbol and side are required")
+        q = signal_data.get("quote")
+        qty = signal_data.get("quantity")
+        if (q is None) == (qty is None):  # exactly one must be provided
+            raise HTTPException(status_code=400, detail="Provide exactly one of quote or quantity")
 
         # Route and execute signal with capital allocation
         result = await route_signal_with_allocation(signal_data)

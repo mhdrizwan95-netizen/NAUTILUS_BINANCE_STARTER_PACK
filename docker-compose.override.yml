@@ -10,6 +10,7 @@ services:
 
   executor:
     environment:
+      - DRY_RUN=true
       # Override with gentler pacing to prevent request storms
       - EXEC_INTERVAL_SEC=10
       - EXEC_JITTER=0.35

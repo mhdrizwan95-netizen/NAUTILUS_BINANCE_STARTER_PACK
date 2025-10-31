@@ -202,19 +202,30 @@ DEFAULT_TRADE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
 
 def load_risk_config() -> RiskConfig:
     settings = get_settings()
-    trade_symbols_env = env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]).strip()
-    if not trade_symbols_env:
+
+    trade_symbols_env_raw = os.getenv("TRADE_SYMBOLS")
+    if trade_symbols_env_raw is None:
         trade_symbols = DEFAULT_TRADE_SYMBOLS.copy()
-    elif trade_symbols_env.lower() in {"*", "all"}:
-        trade_symbols = []
     else:
-        parsed = split_symbols(trade_symbols_env) or []
-        trade_symbols = parsed or DEFAULT_TRADE_SYMBOLS.copy()
+        trade_symbols_env = trade_symbols_env_raw.strip()
+        if not trade_symbols_env:
+            trade_symbols = DEFAULT_TRADE_SYMBOLS.copy()
+        elif trade_symbols_env.lower() in {"*", "all"}:
+            trade_symbols = []
+        else:
+            parsed = split_symbols(trade_symbols_env) or []
+            trade_symbols = parsed or DEFAULT_TRADE_SYMBOLS.copy()
+
+    trading_enabled_env = os.getenv("TRADING_ENABLED")
+    if trading_enabled_env is None:
+        trading_enabled = env_bool("DRY_RUN", GLOBAL_DEFAULTS["DRY_RUN"])
+    else:
+        trading_enabled = env_bool("TRADING_ENABLED", RISK_DEFAULTS["TRADING_ENABLED"])
     # Futures venues typically have higher min notional (e.g., 100 USDT on testnet).
     # If MIN_NOTIONAL_USDT not explicitly set, choose a sensible per-mode default.
     default_min_notional = 100.0 if getattr(settings, "is_futures", False) else 5.0
     return RiskConfig(
-        trading_enabled=env_bool("TRADING_ENABLED", RISK_DEFAULTS["TRADING_ENABLED"]),
+        trading_enabled=trading_enabled,
         min_notional_usdt=env_float("MIN_NOTIONAL_USDT", default_min_notional),
         max_notional_usdt=env_float("MAX_NOTIONAL_USDT", RISK_DEFAULTS["MAX_NOTIONAL_USDT"]),
         max_orders_per_min=env_int("MAX_ORDERS_PER_MIN", RISK_DEFAULTS["MAX_ORDERS_PER_MIN"]),

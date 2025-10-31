@@ -72,7 +72,14 @@ class TrendFollowingScreener(StrategyScreener):
             return None
         if fast <= slow:
             return None
-        rsi_val = rsi(closes, length=14)
+        feature_rsi = features.get("rsi_14") if isinstance(features, Mapping) else None
+        if feature_rsi is not None:
+            try:
+                rsi_val = float(feature_rsi)
+            except (TypeError, ValueError):
+                rsi_val = None
+        else:
+            rsi_val = rsi(closes, length=14)
         if rsi_val is None:
             return None
         prev_rsi = None

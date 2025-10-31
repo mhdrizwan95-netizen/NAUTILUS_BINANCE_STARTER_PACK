@@ -163,8 +163,22 @@ class StrategyExecutor:
         should_record_only = bool(eff_dry or self._backtest_mode)
 
         if should_record_only:
-            status = "dry_run" if eff_dry and not self._backtest_mode else "backtest"
-            payload = {"status": status, "order": order_ctx, "signal": signal, "timestamp": ts}
+            if eff_dry and not self._backtest_mode:
+                status = "dry_run"
+            else:
+                status = "backtest"
+            payload = {
+                "status": status,
+                "symbol": order_ctx["symbol"],
+                "side": order_ctx["side"],
+                "quote": order_ctx["quote"],
+                "quantity": order_ctx["quantity"],
+                "market": order_ctx["market"],
+                "order": order_ctx,
+                "signal": signal,
+                "timestamp": ts,
+                "idempotency_key": key,
+            }
             cfg_hash = self._safe_config_hash()
             if cfg_hash:
                 payload["cfg_hash"] = cfg_hash
@@ -277,11 +291,18 @@ class StrategyExecutor:
     ) -> Any:
         submit_callable = None
         call_kwargs: Dict[str, Any] = {}
+        fallback_args: Optional[tuple[Any, ...]] = None
 
         if quote is not None:
             submit_callable = getattr(self._router, "market_quote", None)
             if submit_callable:
-                call_kwargs = {"symbol": symbol, "side": side, "quote": float(quote), "market": market_hint}
+                call_kwargs = {"symbol": symbol, "side": side, "quote": float(quote)}
+                if market_hint is not None:
+                    call_kwargs["market"] = market_hint
+                args: tuple[Any, ...] = (symbol, side, float(quote))
+                if market_hint is not None:
+                    args = (*args, market_hint)
+                fallback_args = args
         if submit_callable is None:
             submit_callable = getattr(self._router, "place_market_order", None)
             if submit_callable:
@@ -290,8 +311,16 @@ class StrategyExecutor:
                     "side": side,
                     "quote": None if quote is None else float(quote),
                     "quantity": None if quantity is None else float(quantity),
-                    "market": market_hint,
                 }
+                if market_hint is not None:
+                    call_kwargs["market"] = market_hint
+                base_args = (
+                    symbol,
+                    side,
+                    None if quote is None else float(quote),
+                    None if quantity is None else float(quantity),
+                )
+                fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
         if submit_callable is None:
             submit_callable = getattr(self._router, "place_market_order_async", None)
             if submit_callable:
@@ -300,8 +329,16 @@ class StrategyExecutor:
                     "side": side,
                     "quote": None if quote is None else float(quote),
                     "quantity": None if quantity is None else float(quantity),
-                    "market": market_hint,
                 }
+                if market_hint is not None:
+                    call_kwargs["market"] = market_hint
+                base_args = (
+                    symbol,
+                    side,
+                    None if quote is None else float(quote),
+                    None if quantity is None else float(quantity),
+                )
+                fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
         if submit_callable is None:
             raise RuntimeError("router does not expose market order submission")
 
@@ -314,11 +351,37 @@ class StrategyExecutor:
         except Exception:  # noqa: BLE001
             cleanup = False
 
+        is_async_callable = _is_async_callable(submit_callable)
+
+        async def _invoke_with_kwargs() -> Any:
+            if is_async_callable:
+                return await submit_callable(**call_kwargs)
+            return await loop.run_in_executor(None, partial(submit_callable, **call_kwargs))
+
         try:
-            if _is_async_callable(submit_callable):
-                result = await submit_callable(**call_kwargs)
-            else:
-                result = await loop.run_in_executor(None, partial(submit_callable, **call_kwargs))
+            try:
+                result = await _invoke_with_kwargs()
+            except TypeError as exc:
+                handled = False
+                if "unexpected keyword" in str(exc):
+                    alt_kwargs = None
+                    if "quote" in call_kwargs and "notional" not in call_kwargs:
+                        alt_kwargs = dict(call_kwargs)
+                        alt_kwargs["notional"] = alt_kwargs.pop("quote")
+                    if alt_kwargs is not None:
+                        if is_async_callable:
+                            result = await submit_callable(**alt_kwargs)
+                        else:
+                            result = await loop.run_in_executor(None, partial(submit_callable, **alt_kwargs))
+                        handled = True
+                    elif fallback_args:
+                        if is_async_callable:
+                            result = await submit_callable(*fallback_args)
+                        else:
+                            result = await loop.run_in_executor(None, lambda: submit_callable(*fallback_args))
+                        handled = True
+                if not handled:
+                    raise
         finally:
             if cleanup:
                 try:

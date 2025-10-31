@@ -1,15 +1,15 @@
 """Social sentiment meme coin screener."""
 from __future__ import annotations
 
-from typing import Any, Mapping, MutableMapping, Optional, Sequence
+from typing import Any, Mapping, Optional, Sequence
 
 from .base import (
     StrategyCandidate,
     StrategySignal,
     StrategyScreener,
-    confidence_from_score,
     freeze_mapping,
 )
+from shared.meme_utils import compute_meme_metrics
 
 
 class MemeCoinScreener(StrategyScreener):
@@ -50,40 +50,34 @@ class MemeCoinScreener(StrategyScreener):
         sentiment = None
         if meta:
             sentiment = meta.get("news_score") or meta.get("social_score")
-        score = vol_spike * 12.0 + move * 1_200.0
-        if sentiment is not None:
-            try:
-                score += float(sentiment)
-            except (TypeError, ValueError):
-                pass
-        ctx_payload: MutableMapping[str, Any] = {
-            "vol_spike": round(vol_spike, 3),
-            "move_pct": round(move * 100.0, 3),
-            "depth_usd": round(depth, 2),
-        }
-        if sentiment is not None:
-            try:
-                ctx_payload["sentiment"] = round(float(sentiment), 3)
-            except (TypeError, ValueError):
-                pass
-        context = freeze_mapping(ctx_payload)
         last_px = float(features.get("last", 0.0))
-        stop = round(last_px * (1.0 - 0.09), 6) if last_px else None
-        tp_ladder = [round(last_px * mult, 6) for mult in (1.1, 1.2, 1.35)] if last_px else []
-        confidence = confidence_from_score(score, scale=1500.0)
+
+        metrics = compute_meme_metrics(
+            vol_spike=vol_spike,
+            move_fraction=move,
+            depth_usd=depth,
+            sentiment=float(sentiment) if sentiment is not None else None,
+            last_price=last_px if last_px > 0 else None,
+            stop_pct=0.09,
+            target_multipliers=(1.10, 1.20, 1.35),
+        )
+
+        context = freeze_mapping(metrics.context)
+        stop = metrics.stop_price
+        tp_ladder = list(metrics.targets)
         metadata = freeze_mapping({**dict(context), "take_profit_ladder": tp_ladder})
         signal = StrategySignal(
             strategy_id=self.strategy_id,
             symbol=symbol,
             side="LONG",
-            confidence=confidence,
+            confidence=metrics.confidence,
             entry_mode="market",
             suggested_stop=stop,
             suggested_tp=tp_ladder[0] if tp_ladder else None,
             validity_ttl=900,
             metadata=metadata,
         )
-        return StrategyCandidate(score=score, signal=signal, context=context)
+        return StrategyCandidate(score=metrics.score, signal=signal, context=context)
 
 
 __all__ = ["MemeCoinScreener"]
