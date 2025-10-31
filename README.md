@@ -102,6 +102,10 @@ Enable the built‑in MA+HMM scheduler by setting `STRATEGY_ENABLED=true` (and f
 
 See docs/FEATURE_FLAGS.md for the one‑page index of important environment flags.
 
+## Command Center UI
+
+The React/TypeScript Command Center ships inside the `ops` service image. Any target that brings the core stack online (`make up-core`, `make autopilot`, etc.) now bakes and serves the SPA directly from the Ops API container. Once `ops` is healthy, open [http://localhost:8002/](http://localhost:8002/) to reach the UI; all API calls are routed to the co-located `/api/*` endpoints inside the same container, so no extra proxy or compose services are required.
+
 ### Configuration overview
 
 The `.env.example` file is now generated from `engine/config/defaults.py`, so every knob surfaced in the codebase appears in a single, well-documented template. Regenerate it with:

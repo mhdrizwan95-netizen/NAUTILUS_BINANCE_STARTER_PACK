@@ -50,3 +50,44 @@ export interface VolScannerConfig {
   mode: 'alert' | 'trade';
   minVolume: number;
 }
+
+// Schema used to render dynamic parameter forms
+export type ParamField =
+  | {
+      type: 'number' | 'integer';
+      key: string;
+      label: string;
+      min?: number;
+      max?: number;
+      step?: number;
+      default?: number;
+      hint?: string;
+    }
+  | {
+      type: 'boolean';
+      key: string;
+      label: string;
+      default?: boolean;
+      hint?: string;
+    }
+  | {
+      type: 'string';
+      key: string;
+      label: string;
+      placeholder?: string;
+      default?: string;
+      hint?: string;
+    }
+  | {
+      type: 'select';
+      key: string;
+      label: string;
+      options: Array<{ value: string; label: string }>;
+      default?: string;
+      hint?: string;
+    };
+
+export type ParamSchema = {
+  title?: string;
+  fields: ParamField[];
+};

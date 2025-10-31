@@ -14,7 +14,7 @@ env/
 venv/
 
 # Node, misc
-frontend/
+# Keep frontend sources so the Docker build can produce the static Command Center bundle
 node_modules/
 
 # Large datasets & archives

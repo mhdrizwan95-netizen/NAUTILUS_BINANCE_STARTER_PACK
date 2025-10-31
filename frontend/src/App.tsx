@@ -3,22 +3,13 @@ import { TopHUD } from './components/TopHUD';
 import { TabbedInterface } from './components/TabbedInterface';
 import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner@2.0.3';
-import {
-  venues,
-  strategies,
-  generatePerformanceData,
-  generateRecentTrades,
-  generateAlerts,
-  getGlobalMetrics,
-} from './lib/mockData';
+import { venues, generatePerformanceData, getGlobalMetrics } from './lib/mockData';
 import type { ModeType } from './types/trading';
 import { motion } from 'motion/react';
 
 export default function App() {
   const [mode, setMode] = useState<ModeType>('paper');
   const [performances, setPerformances] = useState(generatePerformanceData());
-  const [recentTrades, setRecentTrades] = useState(generateRecentTrades());
-  const [alerts, setAlerts] = useState(generateAlerts());
   const [isBooting, setIsBooting] = useState(true);
 
   const globalMetrics = getGlobalMetrics(performances);
@@ -40,12 +31,6 @@ export default function App() {
 
     const interval = setInterval(() => {
       setPerformances(generatePerformanceData());
-      setRecentTrades(generateRecentTrades());
-      
-      // Occasionally add a new alert
-      if (Math.random() > 0.7) {
-        setAlerts((prev) => [generateAlerts(1)[0], ...prev.slice(0, 9)]);
-      }
     }, 5000);
 
     return () => clearInterval(interval);
@@ -116,13 +101,7 @@ export default function App() {
       />
 
       {/* Tabbed Interface */}
-      <TabbedInterface
-        performances={performances}
-        strategies={strategies}
-        venues={venues}
-        recentTrades={recentTrades}
-        alerts={alerts}
-      />
+      <TabbedInterface />
 
       {/* Toast Notifications */}
       <Toaster />

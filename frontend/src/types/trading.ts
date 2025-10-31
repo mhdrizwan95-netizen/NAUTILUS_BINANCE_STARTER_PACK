@@ -1,3 +1,5 @@
+import type { ParamSchema } from './settings';
+
 // Trading domain types
 export type VenueType = 'crypto' | 'equities' | 'fx';
 export type MarketType = 'spot' | 'futures' | 'options';
@@ -68,3 +70,49 @@ export interface GlobalMetrics {
   activePositions: number;
   dailyTradeCount: number;
 }
+
+// Schema-driven UI data contracts
+export type KPI = { label: string; value: string | number; hint?: string };
+
+export type EquityPoint = { t: string; equity: number };
+export type Series<T> = Array<T>;
+
+export type StrategyPerformanceSnapshot = {
+  pnl: number;
+  equitySeries?: Series<EquityPoint>;
+  winRate?: number;
+  sharpe?: number;
+  drawdown?: number;
+};
+
+export type StrategySummary = {
+  id: string;
+  name: string;
+  kind: string;
+  status: 'stopped' | 'running' | 'error';
+  symbols: string[];
+  paramsSchema: ParamSchema;
+  params?: Record<string, unknown>;
+  performance?: StrategyPerformanceSnapshot;
+};
+
+export type BacktestResult = {
+  metrics: {
+    totalReturn: number;
+    sharpe: number;
+    maxDrawdown: number;
+    winRate: number;
+    trades: number;
+  };
+  equityCurve: Series<EquityPoint>;
+  pnlBySymbol: Array<{ symbol: string; pnl: number }>;
+  returns: number[];
+  trades?: Array<{
+    time: string;
+    symbol: string;
+    side: 'buy' | 'sell';
+    qty: number;
+    price: number;
+    pnl?: number;
+  }>;
+};
