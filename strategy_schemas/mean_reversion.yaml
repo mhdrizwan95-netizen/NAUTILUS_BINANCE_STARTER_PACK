@@ -1,0 +1,31 @@
+strategy: mean_reversion
+parameters:
+  z_entry:
+    type: float
+    min: 0.5
+    max: 4.0
+    presets: [0.8, 1.0, 1.2, 1.5, 2.0]
+  z_exit:
+    type: float
+    min: 0.2
+    max: 2.0
+    presets: [0.3, 0.5, 0.7, 1.0]
+  lookback:
+    type: int
+    min: 10
+    max: 200
+    presets: [20, 40, 60, 90, 120]
+  atr_stop_mult:
+    type: float
+    min: 0.5
+    max: 4.0
+    presets: [0.8, 1.0, 1.2, 1.5, 2.0]
+  max_gross_leverage:
+    type: float
+    min: 0.0
+    max: 3.0
+    presets: [0.25, 0.5, 0.75, 1.0]
+risk_constraints:
+  apply_to_open_positions: false
+  max_daily_param_changes: 2
+  hysteresis: 0.15

@@ -180,6 +180,20 @@ BROKER_DEFAULTS: Dict[str, Any] = {
     "IBKR_ENABLED": False,
 }
 
+AUTOTRAIN_SHARED_DEFAULTS: Dict[str, Any] = {
+    "LEDGER_DB": "/shared/manifest.sqlite",
+}
+
+DATA_INGESTER_DEFAULTS: Dict[str, Any] = {
+    "DATA_LANDING": "/data/incoming",
+    "EXCHANGE": "binance",
+    "SYMBOLS": "BTC/USDT,ETH/USDT",
+    "TIMEFRAME": "1m",
+    "BATCH_LIMIT": 1000,
+    "START_TS": 0,
+    "LOG_LEVEL": "INFO",
+}
+
 ML_SERVICE_DEFAULTS: Dict[str, Any] = {
     "DATA_DIR": "/data",
     "MODEL_DIR": "/models",
@@ -187,16 +201,45 @@ ML_SERVICE_DEFAULTS: Dict[str, Any] = {
     "CURRENT_SYMLINK": "/models/current",
     "HMM_STATES": 4,
     "TRAIN_WINDOW_DAYS": 365,
-    "PROMOTION_METRIC": "val_log_likelihood",
+    "EXACTLY_ONCE": False,
+    "TRAIN_MIN_POINTS": 2000,
     "PROMOTION_MIN_DELTA": 1.0,
     "KEEP_N_MODELS": 5,
     "AUTO_PROMOTE": True,
-    "TRAIN_DATA_GLOB": "*.csv",
+    "DELETE_AFTER_PROCESS": True,
     "RETRAIN_CRON": "0 */6 * * *",
     "REQUIRE_AUTH": False,
     "JWT_ALG": "HS256",
     "JWT_SECRET": "",
     "JWT_PUBLIC_KEY": "",
+    "LOG_LEVEL": "INFO",
+}
+
+PARAM_CONTROLLER_DEFAULTS: Dict[str, Any] = {
+    "PC_DB": "/shared/param_controller.sqlite",
+    "EPSILON": 0.05,
+    "L2": 1.0,
+    "MAX_PRESETS": 12,
+    "LOG_LEVEL": "INFO",
+}
+
+BACKTEST_RUNNER_DEFAULTS: Dict[str, Any] = {
+    "RESEARCH_DIR": "/research",
+    "DATA_INCOMING": "/data/incoming",
+    "ML_SERVICE": "http://ml_service:8000",
+    "PARAM_CONTROLLER": "http://param_controller:8002",
+    "SYMBOLS": "BTC/USDT,ETH/USDT",
+    "TIMEFRAME": "1m",
+    "CHUNK_ROWS": 1000,
+    "START_TS": 0,
+    "END_TS": 0,
+    "TRAIN_CRON_MINUTES": 360,
+    "PROMOTE": True,
+    "EXACTLY_ONCE": False,
+    "TRAIN_MIN_POINTS": 2000,
+    "FEE_BP": 1.0,
+    "SLIPPAGE_BP": 2.0,
+    "MAX_STEPS": 100000,
     "LOG_LEVEL": "INFO",
 }
 
@@ -210,7 +253,11 @@ ALL_DEFAULTS: Dict[str, Any] = _merge_dicts(
     MEME_SENTIMENT_DEFAULTS,
     SYMBOL_SCANNER_DEFAULTS,
     BROKER_DEFAULTS,
+    AUTOTRAIN_SHARED_DEFAULTS,
+    DATA_INGESTER_DEFAULTS,
     ML_SERVICE_DEFAULTS,
+    PARAM_CONTROLLER_DEFAULTS,
+    BACKTEST_RUNNER_DEFAULTS,
 )
 
 __all__ = [
@@ -222,6 +269,10 @@ __all__ = [
     "MOMENTUM_RT_DEFAULTS",
     "MEME_SENTIMENT_DEFAULTS",
     "SYMBOL_SCANNER_DEFAULTS",
+    "AUTOTRAIN_SHARED_DEFAULTS",
+    "DATA_INGESTER_DEFAULTS",
     "ML_SERVICE_DEFAULTS",
+    "PARAM_CONTROLLER_DEFAULTS",
+    "BACKTEST_RUNNER_DEFAULTS",
     "ALL_DEFAULTS",
 ]

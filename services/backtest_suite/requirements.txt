@@ -1,0 +1,6 @@
+httpx==0.27.*
+pandas>=2,<3
+numpy>=1.26,<3
+pydantic==2.*
+pydantic-settings==2.*
+loguru>=0.7

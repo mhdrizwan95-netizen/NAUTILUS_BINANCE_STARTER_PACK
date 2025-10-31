@@ -1,11 +1,10 @@
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
-from typing import List, Optional
 from .config import settings
 
 bearer = HTTPBearer(auto_error=False)
-
 
 def _decode(token: str) -> dict:
     try:
@@ -13,16 +12,14 @@ def _decode(token: str) -> dict:
             return jwt.decode(token, settings.JWT_PUBLIC_KEY, algorithms=[settings.JWT_ALG])
         if settings.JWT_SECRET:
             return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALG])
-        # If no key is configured and auth is required, fail hard
         if settings.REQUIRE_AUTH:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Auth required")
         return {"role": "admin"}  # dev-mode permissive
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-
 def require_role(*roles: str):
-    def _checker(creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer)):
+    def _check(creds: HTTPAuthorizationCredentials = Depends(bearer)):
         if settings.REQUIRE_AUTH and not creds:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing Authorization header")
         payload = _decode(creds.credentials) if creds else {"role": "admin"}
@@ -31,4 +28,4 @@ def require_role(*roles: str):
         if not allowed:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
         return payload
-    return _checker
+    return _check
