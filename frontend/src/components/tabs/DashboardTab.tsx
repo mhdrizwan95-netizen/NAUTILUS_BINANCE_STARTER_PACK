@@ -1,335 +1,484 @@
-import { TrendingUp, TrendingDown, Calendar as CalendarIcon, AlertCircle, Info, AlertTriangle } from 'lucide-react';
-import { BarChart, Bar, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import type { StrategyPerformance, Strategy, Trade, Alert } from '../../types/trading';
-import { Calendar } from '../ui/calendar';
-import { ScrollArea } from '../ui/scroll-area';
-import { Badge } from '../ui/badge';
-import { useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DateRange } from 'react-day-picker';
+import { Calendar as CalendarIcon, Filter, RefreshCcw } from 'lucide-react';
+import { toast } from 'sonner';
+import { Calendar } from '@/components/ui/calendar';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Label } from '@/components/ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Separator } from '@/components/ui/separator';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { Skeleton } from '@/components/ui/skeleton';
+import { EquityCurves } from '@/components/charts/EquityCurves';
+import { PnlBySymbol } from '@/components/charts/PnlBySymbol';
+import { ReturnsHistogram } from '@/components/charts/ReturnsHistogram';
+import {
+  getAlerts,
+  getDashboardSummary,
+  getHealth,
+  getPositions,
+  getRecentTrades,
+  getStrategies,
+} from '@/lib/api';
+import type { StrategySummary } from '@/types/trading';
 
-interface DashboardTabProps {
-  performances: StrategyPerformance[];
-  strategies: Strategy[];
-  recentTrades: Trade[];
-  alerts: Alert[];
+type DashboardSummary = Awaited<ReturnType<typeof getDashboardSummary>>;
+type PositionsResponse = Awaited<ReturnType<typeof getPositions>>;
+type TradesResponse = Awaited<ReturnType<typeof getRecentTrades>>;
+type AlertsResponse = Awaited<ReturnType<typeof getAlerts>>;
+type HealthResponse = Awaited<ReturnType<typeof getHealth>>;
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
-export function DashboardTab({ performances, strategies, recentTrades, alerts }: DashboardTabProps) {
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(new Date());
+function formatPercent(value: number) {
+  return `${(value * 100).toFixed(2)}%`;
+}
 
-  // Calculate aggregate metrics
-  const totalPnL = performances.reduce((sum, p) => sum + p.metrics.pnl, 0);
-  const totalCapital = strategies.reduce((sum, s) => sum + s.capital, 0);
-  const totalPnLPercent = (totalPnL / totalCapital) * 100;
-  
-  // Mock daily PnL
-  const dailyPnL = totalPnL * 0.3; // Assume 30% is today
-  const unPnL = totalPnL * 0.15; // Unrealized
-  const realizedPnL = totalPnL - unPnL;
-  
-  const maxDrawdown = Math.max(...performances.map(p => p.metrics.drawdown)) * 100;
+const getDefaultRange = (): DateRange => {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 7);
+  return { from, to };
+};
 
-  // Strategy performance chart data
-  const strategyChartData = strategies
-    .filter(s => s.enabled)
-    .map(strategy => {
-      const strategyPerfs = performances.filter(p => p.strategyId === strategy.id);
-      const strategyPnL = strategyPerfs.reduce((sum, p) => sum + p.metrics.pnl, 0);
-      const strategyPnLPercent = (strategyPnL / strategy.capital) * 100;
-      
-      return {
-        name: strategy.name,
-        pnl: strategyPnL,
-        pnlPercent: strategyPnLPercent,
-        sharpe: strategyPerfs.reduce((sum, p) => sum + p.metrics.sharpe, 0) / strategyPerfs.length || 0,
-        trades: strategyPerfs.reduce((sum, p) => sum + p.metrics.tradeCount, 0),
-      };
-    });
+export function DashboardTab() {
+  const [strategies, setStrategies] = useState<StrategySummary[]>([]);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [positions, setPositions] = useState<PositionsResponse>([]);
+  const [trades, setTrades] = useState<TradesResponse>([]);
+  const [alerts, setAlertsData] = useState<AlertsResponse>([]);
+  const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  // Daily PnL calendar data (mock)
-  const getDayPnL = (date: Date) => {
-    const seed = date.getDate() + date.getMonth() * 31;
-    return (Math.sin(seed) * 1000 + Math.cos(seed * 2) * 500);
+  const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
+  const [appliedStrategies, setAppliedStrategies] = useState<string[]>([]);
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
+  const [appliedSymbols, setAppliedSymbols] = useState<string[]>([]);
+  const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() => getDefaultRange());
+  const [activeRange, setActiveRange] = useState<DateRange | undefined>(() => getDefaultRange());
+
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    getStrategies(controller.signal)
+      .then(setStrategies)
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          console.warn('Failed to load strategies', error);
+        }
+      });
+    return () => controller.abort();
+  }, []);
+
+  const load = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setLoading(true);
+
+    const params = new URLSearchParams();
+    if (activeRange?.from) params.set('from', activeRange.from.toISOString());
+    if (activeRange?.to) params.set('to', activeRange.to.toISOString());
+    appliedStrategies.forEach((strategyId) => params.append('strategies[]', strategyId));
+    appliedSymbols.forEach((symbol) => params.append('symbols[]', symbol));
+
+    try {
+      const [summaryPayload, positionsPayload, tradesPayload, alertsPayload, healthPayload] =
+        await Promise.all([
+          getDashboardSummary(params, controller.signal),
+          getPositions(controller.signal),
+          getRecentTrades(controller.signal),
+          getAlerts(controller.signal),
+          getHealth(controller.signal),
+        ]);
+
+      if (!controller.signal.aborted) {
+        setSummary(summaryPayload);
+        setPositions(positionsPayload);
+        setTrades(tradesPayload);
+        setAlertsData(alertsPayload);
+        setHealth(healthPayload);
+      }
+    } catch (error) {
+      if (!controller.signal.aborted && error instanceof Error) {
+        toast.error('Failed to refresh dashboard', { description: error.message });
+      }
+    } finally {
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
+    }
+  }, [activeRange, appliedStrategies, appliedSymbols]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const symbolOptions = useMemo(() => {
+    const symbols = new Set<string>();
+    strategies.forEach((strategy) => strategy.symbols.forEach((symbol) => symbols.add(symbol)));
+    summary?.pnlBySymbol.forEach((row) => symbols.add(row.symbol));
+    return Array.from(symbols).sort();
+  }, [strategies, summary]);
+
+  const equitySeriesKeys = useMemo(() => {
+    if (!summary?.equityByStrategy?.length) return [];
+    const first = summary.equityByStrategy[0];
+    return Object.keys(first)
+      .filter((key) => key !== 't')
+      .map((key) => ({ key, label: key }));
+  }, [summary]);
+
+  const handleApplyFilters = () => {
+    setActiveRange(pendingRange);
+    setAppliedStrategies(selectedStrategies);
+    setAppliedSymbols(selectedSymbols);
   };
 
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(value);
+  const handleResetFilters = () => {
+    const resetRange = getDefaultRange();
+    setPendingRange(resetRange);
+    setActiveRange(resetRange);
+    setSelectedStrategies([]);
+    setAppliedStrategies([]);
+    setSelectedSymbols([]);
+    setAppliedSymbols([]);
   };
 
-  const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  const toggleStrategySelection = (strategyId: string) => {
+    setSelectedStrategies((prev) =>
+      prev.includes(strategyId)
+        ? prev.filter((item) => item !== strategyId)
+        : [...prev, strategyId],
+    );
+  };
+
+  const toggleSymbolSelection = (symbol: string) => {
+    setSelectedSymbols((prev) =>
+      prev.includes(symbol) ? prev.filter((item) => item !== symbol) : [...prev, symbol],
+    );
   };
 
   return (
-    <div className="grid grid-cols-12 gap-4 p-6">
-      {/* Top Metrics Row */}
-      <div className="col-span-12 grid grid-cols-4 gap-4">
-        <MetricCard
-          label="Total PnL"
-          value={formatCurrency(totalPnL)}
-          subtitle={`${totalPnLPercent >= 0 ? '+' : ''}${totalPnLPercent.toFixed(2)}%`}
-          trend={totalPnL >= 0 ? 'up' : 'down'}
-          color={totalPnL >= 0 ? 'emerald' : 'red'}
-        />
-        <MetricCard
-          label="Daily PnL"
-          value={formatCurrency(dailyPnL)}
-          subtitle="Today's P&L"
-          trend={dailyPnL >= 0 ? 'up' : 'down'}
-          color={dailyPnL >= 0 ? 'emerald' : 'red'}
-        />
-        <MetricCard
-          label="Unrealized PnL"
-          value={formatCurrency(unPnL)}
-          subtitle={`Realized: ${formatCurrency(realizedPnL)}`}
-          color="cyan"
-        />
-        <MetricCard
-          label="Max Drawdown"
-          value={`${maxDrawdown.toFixed(2)}%`}
-          subtitle="Peak to trough"
-          color={maxDrawdown < 10 ? 'zinc' : 'amber'}
-        />
-      </div>
-
-      {/* Calendar and Charts Row */}
-      <div className="col-span-5 bg-zinc-900/50 backdrop-blur-sm border border-zinc-800/50 rounded-xl p-4">
-        <h3 className="text-zinc-400 mb-4">Calendar PnL</h3>
-        <div className="flex flex-col items-center">
-          <Calendar
-            mode="single"
-            selected={selectedDate}
-            onSelect={setSelectedDate}
-            className="rounded-lg border-zinc-800"
-            classNames={{
-              months: "flex flex-col",
-              month: "space-y-4",
-              caption: "flex justify-center pt-1 relative items-center text-zinc-300",
-              caption_label: "text-sm",
-              nav: "space-x-1 flex items-center",
-              nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-              nav_button_previous: "absolute left-1",
-              nav_button_next: "absolute right-1",
-              table: "w-full border-collapse space-y-1",
-              head_row: "flex",
-              head_cell: "text-zinc-500 rounded-md w-9 text-xs",
-              row: "flex w-full mt-2",
-              cell: "relative p-0 text-center text-sm focus-within:relative focus-within:z-20 [&:has([aria-selected])]:bg-accent",
-              day: "h-9 w-9 p-0 font-mono text-xs hover:bg-zinc-800/50 rounded-md",
-              day_selected: "bg-cyan-500/20 text-cyan-400 hover:bg-cyan-500/30",
-              day_today: "bg-zinc-800/50 text-zinc-100",
-              day_outside: "text-zinc-700 opacity-50",
-              day_disabled: "text-zinc-700 opacity-50",
-              day_range_middle: "aria-selected:bg-accent aria-selected:text-accent-foreground",
-              day_hidden: "invisible",
-            }}
-            components={{
-              DayContent: ({ date }) => {
-                const dayPnL = getDayPnL(date);
-                const isPositive = dayPnL >= 0;
-                return (
-                  <div className="flex flex-col items-center justify-center h-full">
-                    <span>{date.getDate()}</span>
-                    <span className={`text-[8px] ${isPositive ? 'text-emerald-400' : 'text-red-400'}`}>
-                      {isPositive ? '+' : ''}{(dayPnL / 1000).toFixed(1)}k
-                    </span>
-                  </div>
-                );
-              }
-            }}
-          />
-          {selectedDate && (
-            <div className="mt-4 p-3 bg-zinc-800/50 rounded-lg w-full">
-              <p className="text-xs text-zinc-500 mb-1">Selected Date PnL</p>
-              <p className={`font-mono ${getDayPnL(selectedDate) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                {formatCurrency(getDayPnL(selectedDate))}
-              </p>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Strategy Performance Chart */}
-      <div className="col-span-7 bg-zinc-900/50 backdrop-blur-sm border border-zinc-800/50 rounded-xl p-4">
-        <h3 className="text-zinc-400 mb-4">Strategy Performance</h3>
-        <ResponsiveContainer width="100%" height={300}>
-          <BarChart data={strategyChartData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-            <XAxis dataKey="name" stroke="#71717a" className="text-xs" />
-            <YAxis stroke="#71717a" className="text-xs" />
-            <Tooltip
-              contentStyle={{
-                backgroundColor: '#18181b',
-                border: '1px solid #3f3f46',
-                borderRadius: '8px',
-              }}
-              labelStyle={{ color: '#a1a1aa' }}
-              itemStyle={{ color: '#fafafa' }}
-            />
-            <Bar dataKey="pnl" fill="#06b6d4" radius={[4, 4, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
-        
-        {/* Strategy Stats Table */}
-        <div className="mt-4 space-y-2">
-          {strategyChartData.map((strategy) => (
-            <div
-              key={strategy.name}
-              className="flex items-center justify-between p-2 rounded-lg bg-zinc-800/30 hover:bg-zinc-800/50 transition-colors"
-            >
-              <span className="text-sm text-zinc-300">{strategy.name}</span>
-              <div className="flex items-center gap-4 font-mono text-xs">
-                <span className={strategy.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}>
-                  {formatCurrency(strategy.pnl)}
-                </span>
-                <span className="text-zinc-500">Sharpe: {strategy.sharpe.toFixed(2)}</span>
-                <span className="text-zinc-600">{strategy.trades} trades</span>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Recent Trades and Alerts Row */}
-      <div className="col-span-6 bg-zinc-900/50 backdrop-blur-sm border border-zinc-800/50 rounded-xl p-4">
-        <h3 className="text-zinc-400 mb-4">Recent Trades</h3>
-        <ScrollArea className="h-[300px]">
+    <div className="space-y-6 p-6">
+      <Card className="p-4">
+        <div className="flex flex-wrap items-end gap-4">
           <div className="space-y-2">
-            {recentTrades.slice(0, 15).map((trade) => {
-              const strategy = strategies.find(s => s.id === trade.strategyId);
-              return (
-                <div
-                  key={trade.id}
-                  className="flex items-center justify-between p-3 rounded-lg bg-zinc-800/30 hover:bg-zinc-800/50 transition-colors"
-                >
-                  <div className="flex items-center gap-3">
-                    <Badge 
-                      variant={trade.side === 'buy' ? 'default' : 'secondary'}
-                      className={`${
-                        trade.side === 'buy' 
-                          ? 'bg-emerald-500/20 text-emerald-400 border-emerald-400/30' 
-                          : 'bg-red-500/20 text-red-400 border-red-400/30'
-                      }`}
-                    >
-                      {trade.side.toUpperCase()}
-                    </Badge>
-                    <div>
-                      <p className="text-sm text-zinc-300 font-mono">{trade.symbol}</p>
-                      <p className="text-xs text-zinc-500">{strategy?.name}</p>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-mono text-zinc-300">
-                      {trade.quantity.toFixed(4)} @ {formatCurrency(trade.price)}
-                    </p>
-                    <div className="flex items-center gap-2 justify-end">
-                      <p className="text-xs text-zinc-500">{formatTime(trade.timestamp)}</p>
-                      {trade.pnl !== undefined && (
-                        <p className={`text-xs font-mono ${
-                          trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
-                        }`}>
-                          {trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
-                        </p>
+            <Label className="text-xs">Date Range</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="flex w-48 items-center justify-start gap-2">
+                  <CalendarIcon className="h-4 w-4" />
+                  {pendingRange?.from && pendingRange?.to
+                    ? `${pendingRange.from.toLocaleDateString()} – ${pendingRange.to.toLocaleDateString()}`
+                    : 'Select range'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="p-0">
+                <Calendar
+                  mode="range"
+                  selected={pendingRange}
+                  onSelect={setPendingRange}
+                  numberOfMonths={2}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs">Strategies</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="flex w-56 items-center justify-start gap-2">
+                  <Filter className="h-4 w-4" />
+                  {selectedStrategies.length > 0
+                    ? `${selectedStrategies.length} selected`
+                    : 'All strategies'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-0" align="start">
+                <div className="p-3">
+                  <ScrollArea className="max-h-64">
+                    <div className="space-y-2">
+                      {strategies.map((strategy) => (
+                        <label key={strategy.id} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={selectedStrategies.includes(strategy.id)}
+                            onCheckedChange={() => toggleStrategySelection(strategy.id)}
+                          />
+                          <span>{strategy.name}</span>
+                        </label>
+                      ))}
+                      {strategies.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No strategies available</p>
                       )}
                     </div>
-                  </div>
+                  </ScrollArea>
                 </div>
-              );
-            })}
+              </PopoverContent>
+            </Popover>
           </div>
-        </ScrollArea>
-      </div>
 
-      <div className="col-span-6 bg-zinc-900/50 backdrop-blur-sm border border-zinc-800/50 rounded-xl p-4">
-        <h3 className="text-zinc-400 mb-4">System Alerts</h3>
-        <ScrollArea className="h-[300px]">
           <div className="space-y-2">
-            {alerts.map((alert) => {
-              const alertConfig = {
-                info: {
-                  icon: <Info className="w-4 h-4" />,
-                  color: 'text-cyan-400',
-                  bgColor: 'bg-cyan-500/10',
-                  borderColor: 'border-cyan-400/30',
-                },
-                warning: {
-                  icon: <AlertTriangle className="w-4 h-4" />,
-                  color: 'text-amber-400',
-                  bgColor: 'bg-amber-500/10',
-                  borderColor: 'border-amber-400/30',
-                },
-                error: {
-                  icon: <AlertCircle className="w-4 h-4" />,
-                  color: 'text-red-400',
-                  bgColor: 'bg-red-500/10',
-                  borderColor: 'border-red-400/30',
-                },
-              };
-
-              const config = alertConfig[alert.type];
-
-              return (
-                <div
-                  key={alert.id}
-                  className={`flex items-start gap-3 p-3 rounded-lg border ${config.bgColor} ${config.borderColor} hover:brightness-110 transition-all`}
-                >
-                  <div className={config.color}>
-                    {config.icon}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm text-zinc-300">{alert.message}</p>
-                    <p className="text-xs text-zinc-500 mt-1">{formatTime(alert.timestamp)}</p>
-                  </div>
+            <Label className="text-xs">Symbols</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="flex w-56 items-center justify-start gap-2">
+                  <Filter className="h-4 w-4" />
+                  {selectedSymbols.length > 0
+                    ? `${selectedSymbols.length} selected`
+                    : 'All symbols'}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-64 p-0" align="start">
+                <div className="p-3">
+                  <ScrollArea className="max-h-64">
+                    <div className="space-y-2">
+                      {symbolOptions.map((symbol) => (
+                        <label key={symbol} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={selectedSymbols.includes(symbol)}
+                            onCheckedChange={() => toggleSymbolSelection(symbol)}
+                          />
+                          <span>{symbol}</span>
+                        </label>
+                      ))}
+                      {symbolOptions.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No symbols available</p>
+                      )}
+                    </div>
+                  </ScrollArea>
                 </div>
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="flex gap-2">
+            <Button size="sm" onClick={handleApplyFilters} disabled={loading}>
+              Apply Filters
+            </Button>
+            <Button size="sm" variant="ghost" onClick={handleResetFilters} disabled={loading}>
+              Reset
+            </Button>
+            <Button size="icon" variant="outline" onClick={() => load()} disabled={loading}>
+              <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
+        </div>
+
+        {(selectedStrategies.length > 0 || selectedSymbols.length > 0) && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            {selectedStrategies.map((strategyId) => {
+              const strategy = strategies.find((item) => item.id === strategyId);
+              return (
+                <Badge key={strategyId} variant="outline">
+                  {strategy?.name ?? strategyId}
+                </Badge>
               );
             })}
+            {selectedSymbols.map((symbol) => (
+              <Badge key={symbol} variant="secondary">
+                {symbol}
+              </Badge>
+            ))}
           </div>
-        </ScrollArea>
-      </div>
-    </div>
-  );
-}
-
-interface MetricCardProps {
-  label: string;
-  value: string;
-  subtitle?: string;
-  trend?: 'up' | 'down';
-  color: 'emerald' | 'red' | 'cyan' | 'amber' | 'zinc';
-}
-
-function MetricCard({ label, value, subtitle, trend, color }: MetricCardProps) {
-  const colorClasses = {
-    emerald: 'text-emerald-400 border-emerald-400/30',
-    red: 'text-red-400 border-red-400/30',
-    cyan: 'text-cyan-400 border-cyan-400/30',
-    amber: 'text-amber-400 border-amber-400/30',
-    zinc: 'text-zinc-400 border-zinc-700/30',
-  };
-
-  return (
-    <div className={`bg-zinc-900/50 backdrop-blur-sm border ${colorClasses[color]} rounded-xl p-4`}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-xs text-zinc-500">{label}</span>
-        {trend && (
-          trend === 'up' ? (
-            <TrendingUp className="w-4 h-4 text-emerald-400" />
-          ) : (
-            <TrendingDown className="w-4 h-4 text-red-400" />
-          )
         )}
+      </Card>
+
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+        <Card className="p-4">
+          <div className="text-xs text-muted-foreground">Total PnL</div>
+          <div className="text-lg font-semibold">
+            {summary ? formatCurrency(summary.kpis.totalPnl) : <Skeleton className="h-6 w-32" />}
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-muted-foreground">Win Rate</div>
+          <div className="text-lg font-semibold">
+            {summary ? formatPercent(summary.kpis.winRate) : <Skeleton className="h-6 w-24" />}
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-muted-foreground">Sharpe</div>
+          <div className="text-lg font-semibold">
+            {summary ? summary.kpis.sharpe.toFixed(2) : <Skeleton className="h-6 w-16" />}
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-muted-foreground">Max Drawdown</div>
+          <div className="text-lg font-semibold">
+            {summary ? formatPercent(summary.kpis.maxDrawdown) : <Skeleton className="h-6 w-24" />}
+          </div>
+        </Card>
+        <Card className="p-4">
+          <div className="text-xs text-muted-foreground">Open Positions</div>
+          <div className="text-lg font-semibold">
+            {summary ? summary.kpis.openPositions : <Skeleton className="h-6 w-12" />}
+          </div>
+        </Card>
       </div>
-      <div className={`font-mono ${colorClasses[color].split(' ')[0]}`}>
-        {value}
+
+      <Card className="space-y-4 p-4">
+        <div className="flex items-center justify-between">
+          <h3 className="font-medium">Equity Curves</h3>
+        </div>
+        <EquityCurves data={summary?.equityByStrategy ?? []} series={equitySeriesKeys} />
+      </Card>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <Card className="space-y-4 p-4">
+          <h3 className="font-medium">PnL by Symbol</h3>
+          <PnlBySymbol data={summary?.pnlBySymbol ?? []} />
+        </Card>
+        <Card className="space-y-4 p-4">
+          <h3 className="font-medium">Distribution of Returns</h3>
+          <ReturnsHistogram returns={summary?.returns ?? []} />
+        </Card>
       </div>
-      {subtitle && (
-        <div className="text-xs text-zinc-600 mt-1 font-mono">{subtitle}</div>
-      )}
+
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        <Card className="p-4">
+          <h3 className="mb-3 font-medium">Open Positions</h3>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Symbol</TableHead>
+                <TableHead>Qty</TableHead>
+                <TableHead>Entry</TableHead>
+                <TableHead>Mark</TableHead>
+                <TableHead className="text-right">PnL</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {positions.map((position) => (
+                <TableRow key={position.symbol}>
+                  <TableCell>{position.symbol}</TableCell>
+                  <TableCell>{position.qty}</TableCell>
+                  <TableCell>{formatCurrency(position.entry)}</TableCell>
+                  <TableCell>{formatCurrency(position.mark)}</TableCell>
+                  <TableCell className={`text-right ${position.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                    {formatCurrency(position.pnl)}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+            <TableCaption>{positions.length === 0 ? 'No open positions' : undefined}</TableCaption>
+          </Table>
+        </Card>
+
+        <Card className="p-4">
+          <h3 className="mb-3 font-medium">Recent Trades</h3>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Time</TableHead>
+                <TableHead>Symbol</TableHead>
+                <TableHead>Side</TableHead>
+                <TableHead>Qty</TableHead>
+                <TableHead>Price</TableHead>
+                <TableHead className="text-right">PnL</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {trades.map((trade) => (
+                <TableRow key={`${trade.time}-${trade.symbol}-${trade.side}`}>
+                  <TableCell>{new Date(trade.time).toLocaleTimeString()}</TableCell>
+                  <TableCell>{trade.symbol}</TableCell>
+                  <TableCell className={trade.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}>
+                    {trade.side.toUpperCase()}
+                  </TableCell>
+                  <TableCell>{trade.qty}</TableCell>
+                  <TableCell>{formatCurrency(trade.price)}</TableCell>
+                  <TableCell className="text-right">
+                    {trade.pnl !== undefined ? formatCurrency(trade.pnl) : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+            <TableCaption>{trades.length === 0 ? 'No recent trades' : undefined}</TableCaption>
+          </Table>
+        </Card>
+
+        <Card className="p-4">
+          <h3 className="mb-3 font-medium">Alerts</h3>
+          <ScrollArea className="h-64 pr-2">
+            <div className="space-y-3">
+              {alerts.map((alert) => (
+                <div key={`${alert.time}-${alert.text}`} className="rounded-md border border-border p-3">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{new Date(alert.time).toLocaleTimeString()}</span>
+                    <Badge
+                      variant={
+                        alert.level === 'error'
+                          ? 'destructive'
+                          : alert.level === 'warn'
+                          ? 'secondary'
+                          : 'outline'
+                      }
+                    >
+                      {alert.level.toUpperCase()}
+                    </Badge>
+                  </div>
+                  <Separator className="my-2" />
+                  <p className="text-sm leading-tight text-muted-foreground">{alert.text}</p>
+                </div>
+              ))}
+              {alerts.length === 0 && <p className="text-xs text-muted-foreground">No alerts</p>}
+            </div>
+          </ScrollArea>
+        </Card>
+
+        <Card className="p-4">
+          <h3 className="mb-3 font-medium">Venue Health</h3>
+          <div className="space-y-3">
+            {health?.venues.map((venue) => (
+              <div key={venue.name} className="rounded-md border border-border p-3 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">{venue.name}</span>
+                  <Badge
+                    variant={
+                      venue.status === 'ok'
+                        ? 'outline'
+                        : venue.status === 'warn'
+                        ? 'secondary'
+                        : 'destructive'
+                    }
+                  >
+                    {venue.status.toUpperCase()}
+                  </Badge>
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+                  <span>Latency: {venue.latencyMs.toFixed(1)} ms</span>
+                  <span>Queue: {venue.queue}</span>
+                </div>
+              </div>
+            ))}
+            {!health?.venues?.length && <p className="text-xs text-muted-foreground">No venue data</p>}
+          </div>
+        </Card>
+      </div>
     </div>
   );
 }

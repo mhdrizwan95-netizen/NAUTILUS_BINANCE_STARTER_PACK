@@ -5,19 +5,9 @@ import { StrategyTab } from './tabs/StrategyTab';
 import { FundingTab } from './tabs/FundingTab';
 import { BacktestingTab } from './tabs/BacktestingTab';
 import { SettingsTab } from './tabs/SettingsTab';
-import type { StrategyPerformance, Strategy, Venue, Trade, Alert } from '../types/trading';
 import { motion } from 'motion/react';
 
-interface TabbedInterfaceProps {
-  performances: StrategyPerformance[];
-  strategies: Strategy[];
-  venues: Venue[];
-  recentTrades: Trade[];
-  alerts: Alert[];
-  onStrategyToggle?: (strategyId: string, enabled: boolean) => void;
-}
-
-export function TabbedInterface({ performances, strategies, venues, recentTrades, alerts, onStrategyToggle }: TabbedInterfaceProps) {
+export function TabbedInterface() {
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -66,25 +56,15 @@ export function TabbedInterface({ performances, strategies, venues, recentTrades
 
         <div className="flex-1 overflow-auto">
           <TabsContent value="dashboard" className="m-0 h-full">
-            <DashboardTab 
-              performances={performances} 
-              strategies={strategies}
-              recentTrades={recentTrades}
-              alerts={alerts}
-            />
+            <DashboardTab />
           </TabsContent>
 
           <TabsContent value="strategy" className="m-0 h-full">
-            <StrategyTab 
-              strategies={strategies} 
-              performances={performances}
-              recentTrades={recentTrades}
-              onStrategyToggle={onStrategyToggle}
-            />
+            <StrategyTab />
           </TabsContent>
 
           <TabsContent value="funding" className="m-0 h-full">
-            <FundingTab venues={venues} />
+            <FundingTab />
           </TabsContent>
 
           <TabsContent value="backtesting" className="m-0 h-full">

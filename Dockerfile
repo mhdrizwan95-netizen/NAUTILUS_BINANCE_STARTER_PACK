@@ -16,6 +16,16 @@ COPY requirements.txt .
 RUN python -m pip install --upgrade pip \
  && pip install --prefix=/install -r requirements.txt
 
+# Build the React/TypeScript Command Center bundle
+FROM node:20-bookworm-slim AS frontend_builder
+WORKDIR /frontend
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
 # Runtime stage
 FROM python:3.11-slim
 
@@ -38,6 +48,9 @@ COPY --from=builder /install /usr/local
 
 # Copy code
 COPY . .
+
+# Drop the prebuilt Command Center assets into the ops static directory
+COPY --from=frontend_builder /frontend/build /app/ops/static_ui
 
 # Non-root user
 RUN useradd -m appuser \

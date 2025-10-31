@@ -1,12 +1,6 @@
 import { Wallet, TrendingUp, ArrowUpDown, PieChart } from 'lucide-react';
 import { PieChart as RechartsPie, Pie, Cell, ResponsiveContainer, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
-import type { Venue } from '../../types/trading';
-
-interface FundingTabProps {
-  venues: Venue[];
-}
-
-export function FundingTab({ venues }: FundingTabProps) {
+export function FundingTab() {
   // Mock funding data
   const venueFunds = [
     { venue: 'Binance', available: 125000, allocated: 85000, reserved: 15000, type: 'crypto' as const },
