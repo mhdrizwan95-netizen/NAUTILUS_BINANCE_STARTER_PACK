@@ -179,6 +179,8 @@ SECTIONS: Dict[str, Iterable[str]] = {
         "TIMEFRAME",
         "BATCH_LIMIT",
         "START_TS",
+        "END_TS",
+        "SLEEP_MS",
         "LOG_LEVEL",
     ],
     "ML Service": [
@@ -290,6 +292,8 @@ COMMENTS = {
     "TIMEFRAME": "Candlestick interval requested from the exchange.",
     "BATCH_LIMIT": "Maximum candles fetched per ingest request.",
     "START_TS": "Initial timestamp (ms) used when no watermark exists.",
+    "END_TS": "Optional end timestamp (ms) to cap ingestion (0 = now).",
+    "SLEEP_MS": "Extra delay between requests in milliseconds to avoid rate limits.",
     "DATA_DIR": "Shared data volume mounted into ml_service containers.",
     "MODEL_DIR": "Root directory for persisted models.",
     "REGISTRY_DIR": "Location where model versions are stored.",
