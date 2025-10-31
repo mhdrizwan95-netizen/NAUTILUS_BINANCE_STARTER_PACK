@@ -191,6 +191,8 @@ DATA_INGESTER_DEFAULTS: Dict[str, Any] = {
     "TIMEFRAME": "1m",
     "BATCH_LIMIT": 1000,
     "START_TS": 0,
+    "END_TS": 0,
+    "SLEEP_MS": 500,
     "LOG_LEVEL": "INFO",
 }
 
