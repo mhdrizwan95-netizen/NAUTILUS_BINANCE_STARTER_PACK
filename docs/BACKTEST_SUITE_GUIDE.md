@@ -51,6 +51,7 @@ Stop the container when the simulation finishes; it writes metrics to `/results/
    - `STEP_MINUTES` – bar granularity.
    - `EXACTLY_ONCE` – if `true`, each bar is used at most once across updates.
    - `COST_BPS`, `SLIPPAGE_BPS_PER_VOL` – simple cost model.
+   - The trainer mirrors production behaviour: ledger files are claimed atomically and requeued if the job fails, so you never “burn” research data during a crash loop.
 
 ## Extending to your stack
 

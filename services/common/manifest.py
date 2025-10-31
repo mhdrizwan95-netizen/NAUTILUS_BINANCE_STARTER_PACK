@@ -122,6 +122,21 @@ def mark_processed(file_id: str, delete_file: bool = True, db_path: str = DEFAUL
     if delete_file:
         _delete_file_by_id(file_id, db_path)
 
+def requeue(file_ids: List[str], db_path: str = DEFAULT_DB):
+    if not file_ids:
+        return
+    conn = _connect(db_path)
+    try:
+        cur = conn.cursor()
+        placeholders = ",".join(["?"] * len(file_ids))
+        cur.execute(
+            f"UPDATE files SET status='downloaded', processed_at=NULL, deleted_at=NULL WHERE file_id IN ({placeholders}) AND status='processing'",
+            file_ids,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
 def _delete_file_by_id(file_id: str, db_path: str = DEFAULT_DB):
     conn = _connect(db_path)
     try:

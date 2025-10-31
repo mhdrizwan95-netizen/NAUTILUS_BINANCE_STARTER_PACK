@@ -23,7 +23,12 @@
 | Situations service | `hmm_situations` | `8011` | `situations/service.py` | Pattern matcher with feedback loop, exposes `/metrics`. |
 | Screener service | `hmm_screener` | `8010` | `screener/service.py` | Computes alpha features, posts hits to situations. |
 | Executor daemon | `hmm_executor` | `9102` (metrics) | `ops/main.py` | Storm-proof probing loop that can drive orders via engine API. |
-| ML service (manual) | - | `8010` (default) | `ml_service/app.py` | Run with `uvicorn ml_service.app:app --host 0.0.0.0 --port 8010` when model training endpoints are needed. |
+| ML service API | `hmm_ml_service` | `8015` | `services/ml_service/app/main.py` | Brought in via `compose.autotrain.yml`; hosts `/train`, `/predict`, and model registry endpoints. |
+| ML scheduler | `hmm_ml_scheduler` | - | `services/ml_service/app/scheduler.py` | Cron worker that claims ledger files and triggers retrains; shares volumes with the API. |
+| Param controller | `hmm_param_controller` | `8016` | `services/param_controller/app/main.py` | Bandit-driven preset selection for strategies; mounts shared SQLite state. |
+| Data ingester | `hmm_data_ingester` | `8013` | `services/data_ingester/app/main.py` | CCXT-powered fetcher that writes OHLCV chunks to `/data/incoming` and registers them in the ledger. |
+| Data backfill job | `hmm_data_backfill` | - | `services/data_ingester/app/backfill.py` | One-shot historical loader; reuses ledger + watermarks to avoid overlap with live ingestion. |
+| Backtest runner | `hmm_backtest_runner` | - | `services/backtest_suite/app/cli.py` | Prequential simulator that replays research data, retrains on cadence, and writes results under `/results`. |
 | Observability bundle | `hmm_prometheus`, `hmm_grafana`, `hmm_loki`, `hmm_promtail` | `9090`, `3000`, `3100` | `ops/observability/docker-compose.observability.yml` | Scrape engine/ops metrics, ship logs, and auto-provision dashboards. |
 
 ## Runtime Flow
@@ -97,6 +102,25 @@ make smoke-exporter
 make down
 make down-all  # also stops Prometheus/Grafana
 ```
+
+### Autotrain overlay
+
+Run the ingestion → training → parameter loop alongside the core engine with the
+compose overlays shipped in this repo:
+
+```bash
+# ML + parameter loop
+docker compose -f docker-compose.yml -f compose.autotrain.yml up -d --build data_ingester ml_service ml_scheduler param_controller
+
+# Historical replay (prequential simulator)
+docker compose -f docker-compose.yml -f compose.autotrain.yml -f compose.backtest.yml up -d --build backtest_runner
+
+# One-shot Binance backfill
+docker compose -f docker-compose.yml -f compose.autotrain.yml -f compose.backfill.yml run --rm data_backfill
+```
+
+The services share the `/data`, `/models`, and `/shared` volumes declared in the overlays,
+so ledger state, model registries, and backtest artifacts stay consistent between runs.
 
 Enable the built‑in MA+HMM scheduler by setting `STRATEGY_ENABLED=true` (and flip `STRATEGY_DRY_RUN=false` once comfortable). To exercise the Kraken venue, populate `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`, and set `KRAKEN_MODE=testnet|live`. IBKR connectivity requires `ib_insync` and a reachable TWS/Gateway; see `engine/connectors/ibkr_client.py`.
 

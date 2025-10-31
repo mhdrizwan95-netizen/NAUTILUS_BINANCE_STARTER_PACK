@@ -39,4 +39,6 @@ live ingester, so backfills and real-time ingestion never overlap. Each file is 
 with a SHA-256 hash in the ledger; if a file already exists, the duplicate is deleted
 immediately. Models that run with `EXACTLY_ONCE=true` will see each bar at most once,
 while sliding-window mode (`EXACTLY_ONCE=false`) keeps the statistical efficiency HMMs
-like without retraining on duplicate data.
+like without retraining on duplicate data. If a downstream trainer crashes mid-run,
+the ledger automatically requeues the claimed files so the next attempt still
+processes the full history.

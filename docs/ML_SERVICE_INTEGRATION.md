@@ -39,6 +39,8 @@ All services share the `data`, `models`, and `shared` volumes declared in the co
 - **Training modes**:
   - *Sliding window* (`EXACTLY_ONCE=false`, default): the ledger dedupes bars within the active window but allows historic data to be re-used as the window advances for higher-quality HMMs.
   - *Strict exactly-once* (`EXACTLY_ONCE=true`): every bar is trained at most once. Use only if compliance requires non-reuse—model quality typically suffers without long look-back context.
+- **Window blending**: in sliding-window mode the trainer stitches together the latest claimed files with the rolling `TRAIN_WINDOW_DAYS` archive, deduping by timestamp so late-arriving bars overwrite older copies safely.
+- **Metadata**: `/train` responses expose `metadata.claimed_files` so you can alert on empty ledger runs and track how much fresh data each job consumed.
 
 ### `param_controller`
 - **Preset menu**: register safe presets via `POST /preset/register/{strategy}/{instrument}` with a `{ "preset_id": ..., "params": { ... } }` payload.
@@ -52,6 +54,7 @@ All services mount `/shared/manifest.sqlite`, giving them consistent state:
 - Files are **content-addressed** (SHA-256) and stored once. Duplicates are discarded before training.
 - A per-stream **watermark** (`ingest:<exchange>:<symbol>:<timeframe>`) ensures backfills and live ingestion never overlap ranges.
 - Trainers atomically claim files (`downloaded → processing → processed`) so that concurrent retrains cannot double-consume data.
+- If a training run exits early, all claimed file IDs are **requeued** back to `downloaded` so the next cycle can retry without losing coverage.
 
 Recommended practice:
 
@@ -85,7 +88,8 @@ If you run the stack standalone, expose ports or add an SSH tunnel so that off-h
 ## Operational runbook
 
 - **Start of day:** confirm the ingester watermark advanced, check `/models/registry` for the latest promoted tag, and ensure the scheduler container is healthy.
-- **Every retrain:** capture metrics (`metric_name`, `metric_value`), archive the model directory, and verify the controller reloads the new preset set if applicable.
+- **Every retrain:** capture metrics (`metric_name`, `metric_value`), archive the model directory, validate `metadata.claimed_files` is non-zero, and verify the controller reloads the new preset set if applicable.
+- **Failure handling:** if a retrain aborts, the dashboard should show the claimed-files count dropping to zero because the trainer requeues the ledger entries; reruns will automatically pick them up.
 - **Weekly:** review controller outcome logs; prune underperforming presets and seed new candidates from offline research.
 - **Monthly:** rehearse a rollback by repointing the `/models/current` symlink and restoring ledger snapshots from backups.
 
