@@ -1,8 +1,9 @@
 # ops/portfolio_collector.py
 from __future__ import annotations
-import os, asyncio, time, math, logging, httpx
+import asyncio, time, math, logging, httpx
 from datetime import datetime, timezone
 from ops.prometheus import REGISTRY, get_or_create_gauge
+from ops.env import engine_endpoints
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -96,10 +97,7 @@ async def portfolio_collector_loop(interval_sec: int = 10):
     _BASELINE_EQUITY = None
     _BASELINE_DAYKEY = None
 
-    endpoints = [e.strip() for e in os.getenv(
-        "ENGINE_ENDPOINTS",
-        "http://engine_binance:8003"
-    ).split(",") if e.strip()]
+    endpoints = engine_endpoints()
 
     while True:
         try:

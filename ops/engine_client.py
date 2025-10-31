@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import httpx
 
-ENGINE_BASE = os.getenv("ENGINE_BASE", "http://engine:8003").rstrip("/")
+from ops.env import primary_engine_endpoint
+
+ENGINE_BASE = primary_engine_endpoint()
 
 
 async def market_order(payload: dict[str, Any]) -> dict[str, Any]:

@@ -2,6 +2,7 @@
 import json, logging, time, asyncio, httpx, os
 from pathlib import Path
 from datetime import datetime, timezone
+from ops.env import engine_endpoints
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
@@ -130,7 +131,7 @@ def promote_best():
 
 async def push_model_update(model_tag: str):
     """Broadcast strategy change to all running engines."""
-    endpoints = os.getenv("ENGINE_ENDPOINTS", "http://engine_binance:8003").split(",")
+    endpoints = engine_endpoints()
 
     async with httpx.AsyncClient() as client:
         for url in endpoints:

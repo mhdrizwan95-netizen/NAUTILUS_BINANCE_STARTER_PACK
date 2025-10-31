@@ -1,7 +1,8 @@
 # ops/pnl_collector.py
 from __future__ import annotations
-import os, asyncio, time, logging, httpx
+import asyncio, time, logging, httpx
 from ops.prometheus import REGISTRY, get_or_create_gauge
+from ops.env import engine_endpoints
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -47,7 +48,7 @@ async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
 
 async def pnl_collector_loop():
     """Continuously collect PnL from all engines."""
-    endpoints = os.getenv("ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005").split(",")
+    endpoints = engine_endpoints()
 
     while True:
         try:

@@ -143,6 +143,23 @@ class BinanceREST:
             # Never let logging break request flow
             pass
 
+    def _sign(self, params: dict[str, Any]) -> str:
+        """
+        Return HMAC-SHA256 signature for Binance signed endpoints.
+
+        Binance expects the query string (without URL encoding) signed with the API
+        secret. We guard against missing credentials so dry-run/test deployments can
+        still exercise the REST client without crashing the engine; in that case an
+        empty signature is returned and upstream calls will fail fast with a clear
+        error from Binance.
+        """
+        secret = getattr(self._settings, "api_secret", "") or ""
+        if not secret:
+            self._logger.debug("Signing request without API secret (dry-run/test configuration)")
+            return ""
+        query = urlencode(params, doseq=True)
+        return hmac.new(secret.encode(), query.encode(), sha256).hexdigest()
+
     async def close(self) -> None:
         # Clients are created per-call; nothing persistent to close
         return None
@@ -1236,12 +1253,6 @@ class BinanceMarginREST(BinanceREST):
 
     def __init__(self) -> None:
         super().__init__(market="margin")
-
-
-    def _sign(self, params: dict[str, Any]) -> str:
-        secret = self._settings.api_secret.encode()
-        query = urlencode(params)
-        return hmac.new(secret, query.encode(), sha256).hexdigest()
 
 
 def _now_ms() -> int:

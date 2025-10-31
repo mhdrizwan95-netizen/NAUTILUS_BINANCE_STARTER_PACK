@@ -3,18 +3,24 @@
 # Environment configuration files (contain API keys)
 ops/env.*
 
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
 # Model artifacts (large, generated)
 ml_service/model_store/
 **/*.joblib
 **/*.pt
 **/*.onnx
 **/*.h5
-ml_service/model_store/
-**/*.joblib
-**/*.pt
-**/*.onnx
-**/*.h5
 .DS_Store
+
+# Logs and runtime snapshots
+snapshots/
+*.log
+data/runtime/
+data/ops_snapshots/
 
 # Frontend build artifacts
 node_modules/

@@ -14,7 +14,7 @@ from threading import Lock
 from pathlib import Path
 from typing import Literal, Optional, Any, Callable, cast
 
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, Header, HTTPException, Request, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, ValidationError
 import hmac
@@ -22,7 +22,7 @@ import hashlib
 import httpx as _httpx
 
 import os
-from engine.config import get_settings, load_risk_config, QUOTE_CCY
+from engine.config import get_settings, load_risk_config, QUOTE_CCY, norm_symbol
 from engine.core.binance import BinanceREST, BinanceMarginREST
 from engine.core.kraken import KrakenREST
 from engine.core.binance_ws import BinanceWS
@@ -2445,6 +2445,30 @@ def get_universe():
 async def get_prices():
     """Return last trade/mark prices for current universe."""
     return {"prices": await last_prices(), "ts": time.time(), "quote_ccy": QUOTE_CCY}
+
+@app.get("/price")
+async def get_price(symbol: str = Query(..., description="Symbol e.g. BTCUSDT or BTCUSDT.BINANCE")):
+    """Return the latest price for a single symbol."""
+    normalized = norm_symbol(symbol)
+    prices = await last_prices()
+    price = prices.get(normalized)
+
+    if price is None:
+        venue_symbol = symbol if "." in symbol else f"{normalized}.{VENUE}"
+        try:
+            price = await router.get_last_price(venue_symbol)
+        except Exception:
+            price = None
+
+    if price is None:
+        raise HTTPException(status_code=404, detail=f"price unavailable for {symbol}")
+
+    return {
+        "symbol": normalized,
+        "price": float(price),
+        "quote_ccy": QUOTE_CCY,
+        "ts": time.time(),
+    }
 
 @app.post("/strategy/promote")
 async def promote_strategy(request: Request):

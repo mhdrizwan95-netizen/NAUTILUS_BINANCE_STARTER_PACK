@@ -175,8 +175,7 @@ services:
       # LIVE-3: Environment variables for live metrics
       OPS_API_TOKEN: "dev-token"  # Set to actual token for production
 
-      ENGINE_BASE: "http://engine_binance:8003"
-      ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS}"
+      ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS:-http://engine_binance:8003}"
 
       # Situations SSE (use service name DNS)
       SITUATIONS_SSE_URL: "http://situations:8011/events/stream"

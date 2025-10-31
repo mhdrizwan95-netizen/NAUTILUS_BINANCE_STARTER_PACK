@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 
 from ops.prometheus import REGISTRY, render_latest, get_or_create_counter
 from ops.pnl_collector import PNL_REALIZED, PNL_UNREALIZED
+from ops.env import engine_endpoints
 from ops.portfolio_collector import (
     PORTFOLIO_EQUITY,
     PORTFOLIO_CASH,
@@ -46,15 +47,8 @@ RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL")
 EXPOSURE_CHECK_INTERVAL = int(os.getenv("EXPOSURE_CHECK_INTERVAL_SEC", "30"))
 
-# Parse engine endpoints from env, with safe defaults
-def _parse_endpoints(env_val: str | None):
-    if not env_val:
-        return []
-    return [e.strip() for e in env_val.split(",") if e.strip()]
-
-ENGINE_ENDPOINTS = _parse_endpoints(os.getenv("ENGINE_ENDPOINTS")) or [
-    "http://engine_binance:8003",
-]
+# Resolve engine endpoints once for reuse
+ENGINE_ENDPOINTS = engine_endpoints()
 
 # --- metrics snapshot surface -----------------------------------------------
 from ops.telemetry_store import load as _load_snap, save as _save_snap, Metrics as _Metrics, Snapshot as _Snapshot

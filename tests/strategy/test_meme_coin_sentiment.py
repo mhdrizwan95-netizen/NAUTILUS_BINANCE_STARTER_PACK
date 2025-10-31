@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from engine.idempotency import CACHE
+
 from engine.strategies.meme_coin_sentiment import MemeCoinConfig, MemeCoinSentiment
 
 
@@ -26,12 +28,12 @@ class _Portfolio:
 class _Router:
     def __init__(self, equity: float = 2_000.0) -> None:
         self._portfolio = _Portfolio(equity)
-        self.calls: list[tuple[str, str, float]] = []
+        self.calls: list[tuple[str, str, float, str | None]] = []
 
-    async def market_quote(self, symbol: str, side: str, notional: float, market: str | None = None):
-        self.calls.append((symbol, side, notional, market))
+    async def market_quote(self, symbol: str, side: str, quote: float, market: str | None = None):
+        self.calls.append((symbol, side, quote, market))
         price = 0.1
-        qty = notional / price
+        qty = quote / price
         return {"avg_fill_price": price, "filled_qty_base": qty}
 
 
@@ -51,6 +53,7 @@ class _RestClient:
 
 @pytest.mark.asyncio
 async def test_skips_when_priority_low():
+    CACHE.cache.clear()
     router = _Router()
     risk = _Risk()
     rest = _RestClient()
@@ -80,6 +83,7 @@ async def test_skips_when_priority_low():
 
 @pytest.mark.asyncio
 async def test_places_order_for_high_score_event():
+    CACHE.cache.clear()
     router = _Router()
     risk = _Risk()
     rest = _RestClient()
@@ -120,4 +124,4 @@ async def test_places_order_for_high_score_event():
     assert notional > 0
     assert market == "spot"
     assert len(risk.calls) == 1
-    assert strat._cooldowns.get("WOJAKUSDT") is not None
+    assert strat._cooldowns.active("WOJAKUSDT", now=strat.clock.time())

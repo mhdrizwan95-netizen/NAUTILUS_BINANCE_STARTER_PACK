@@ -96,12 +96,9 @@ def test_aggregate_defaults_when_env_missing():
     respx.get("http://engine_binance:8003/health").mock(
         return_value=Response(200, json={"engine":"ok"})
     )
-    respx.get("http://engine_bybit:8004/health").mock(
-        return_value=Response(200, json={"engine":"ok"})
-    )
     r = c.get("/aggregate/health")
     assert r.status_code == 200
-    assert len(r.json()["venues"]) == 2
+    assert len(r.json()["venues"]) == 1
 
 @respx.mock
 def test_partial_failure_isolation():

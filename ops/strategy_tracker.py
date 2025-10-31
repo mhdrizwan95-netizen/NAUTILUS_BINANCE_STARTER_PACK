@@ -1,7 +1,8 @@
 # ops/strategy_tracker.py
-import os, time, json, math, asyncio, httpx, logging
+import time, json, math, asyncio, httpx, logging
 from statistics import mean, pstdev
 from pathlib import Path
+from ops.env import engine_endpoints
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 
@@ -103,7 +104,7 @@ async def strategy_tracker_loop():
     Continuously collect performance metrics from all engines and update registry.
     Maintains rolling performance statistics for strategy comparison.
     """
-    engines = os.getenv("ENGINE_ENDPOINTS", "http://engine_binance:8003").split(",")
+    engines = engine_endpoints()
     registry = load_registry()
     metrics: dict[str, list[float]] = {}
     samples = 0

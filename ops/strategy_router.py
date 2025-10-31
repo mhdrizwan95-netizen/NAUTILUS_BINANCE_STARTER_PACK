@@ -15,7 +15,6 @@ Architecture:
 import asyncio
 import json
 import logging
-import os
 import random
 import time
 import math
@@ -25,12 +24,12 @@ from typing import Dict, List, Any, Optional
 import httpx
 
 from ops.capital_allocator import get_model_quota
+from ops.env import engine_endpoints
 
 
 # Configuration
 WEIGHTS_PATH = Path("ops/strategy_weights.json")
-ENGINE_ENDPOINTS = [e.strip() for e in os.getenv("ENGINE_ENDPOINTS", "http://engine_binance:8003").split(",")
-                   if e.strip()]
+ENGINE_ENDPOINTS = engine_endpoints()
 
 # Prometheus-style metrics (would replace with actual prometheus client)
 class StrategyMetrics:

@@ -5,6 +5,8 @@ from typing import Dict, List, Tuple
 import httpx
 from dataclasses import dataclass, asdict
 
+from ops.env import engine_endpoints
+
 @dataclass
 class Position:
     symbol: str          # "BTCUSDT.BINANCE" | "AAPL.IBKR"
@@ -21,8 +23,8 @@ class AggregateExposure:
     totals: Dict[str, float]     # {"exposure_usd": x, "count": n, "venues": m}
 
 def _parse_endpoints(raw: str | None) -> List[str]:
-    raw = raw or "http://engine_binance:8003,http://engine_ibkr:8005"
-    return [p.strip() for p in raw.split(",") if p.strip()]
+    parsed = [p.strip().rstrip("/") for p in (raw or "").split(",") if p.strip()]
+    return parsed or engine_endpoints()
 
 def _venue_from_symbol(symbol: str) -> str:
     return symbol.split(".")[1].upper() if "." in symbol else ("BINANCE" if symbol.endswith("USDT") else "IBKR")
