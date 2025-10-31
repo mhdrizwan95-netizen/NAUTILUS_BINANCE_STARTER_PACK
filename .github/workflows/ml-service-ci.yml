@@ -5,6 +5,7 @@ on:
     paths:
       - 'compose.autotrain.yml'
       - 'compose.backtest.yml'
+      - 'compose.backfill.yml'
       - 'services/ml_service/**'
       - 'services/data_ingester/**'
       - 'services/param_controller/**'
@@ -20,6 +21,7 @@ on:
       - 'services/backtester/**'
       - 'compose.autotrain.yml'
       - 'compose.backtest.yml'
+      - 'compose.backfill.yml'
 
 jobs:
   build:
