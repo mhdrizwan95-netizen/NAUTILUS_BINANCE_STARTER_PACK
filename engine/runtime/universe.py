@@ -47,17 +47,23 @@ class UniverseManager:
         self._universes: Dict[str, Tuple[int, Tuple[str, ...]]] = {}
         self._events: Dict[str, asyncio.Event] = {}
         self._metadata: Dict[str, Dict[str, Any]] = {}
-        self._snapshot_dir = Path(config.snapshot_dir).expanduser() if config.snapshot_dir else None
+        self._snapshot_dir = (
+            Path(config.snapshot_dir).expanduser() if config.snapshot_dir else None
+        )
         if self._snapshot_dir:
             self._snapshot_dir.mkdir(parents=True, exist_ok=True)
         self._spot_exchange_info: Dict[str, dict] = {}
         self._futures_exchange_info: Dict[str, dict] = {}
 
-    async def update(self, strategy: str, symbols: Iterable[str], version_hint: Optional[int] = None) -> None:
+    async def update(
+        self, strategy: str, symbols: Iterable[str], version_hint: Optional[int] = None
+    ) -> None:
         key = strategy.lower()
         async with self._lock:
             current_version, _ = self._universes.get(key, (0, ()))
-            new_version = (current_version + 1) if version_hint is None else version_hint
+            new_version = (
+                (current_version + 1) if version_hint is None else version_hint
+            )
             clean = tuple(dict.fromkeys(sym.upper() for sym in symbols))
             self._universes[key] = (new_version, clean)
             self._events.setdefault(key, asyncio.Event()).set()
@@ -66,15 +72,24 @@ class UniverseManager:
                 snapshot_path = self._snapshot_dir / f"{key}-{int(time.time())}.json"
                 try:
                     with snapshot_path.open("w", encoding="utf-8") as fh:
-                        json.dump({"strategy": key, "version": new_version, "symbols": clean}, fh)
+                        json.dump(
+                            {"strategy": key, "version": new_version, "symbols": clean},
+                            fh,
+                        )
                 except Exception:
-                    log.warning("[universe] failed to write snapshot %s", snapshot_path, exc_info=True)
+                    log.warning(
+                        "[universe] failed to write snapshot %s",
+                        snapshot_path,
+                        exc_info=True,
+                    )
 
     async def current(self, strategy: str) -> Tuple[int, Tuple[str, ...]]:
         key = strategy.lower()
         async with self._lock:
             if key not in self._universes:
-                default_symbols = tuple(sym.upper() for sym in self._config.symbols.core)
+                default_symbols = tuple(
+                    sym.upper() for sym in self._config.symbols.core
+                )
                 self._universes[key] = (0, default_symbols)
             event = self._events.get(key)
             if event is None or event.is_set():
@@ -161,7 +176,9 @@ class BinanceMetricsFetcher:
 
 
 class UniverseScreener:
-    def __init__(self, config: RuntimeConfig, client: BinanceREST, manager: UniverseManager) -> None:
+    def __init__(
+        self, config: RuntimeConfig, client: BinanceREST, manager: UniverseManager
+    ) -> None:
         self.config = config
         self.client = client
         self.manager = manager
@@ -204,12 +221,16 @@ class UniverseScreener:
         leverage = await self.fetcher.leverage_brackets()
 
         for sym, metric in list(futures_metrics.items()):
-            futures_metrics[sym] = replace(metric, max_leverage=leverage.get(sym, metric.max_leverage))
+            futures_metrics[sym] = replace(
+                metric, max_leverage=leverage.get(sym, metric.max_leverage)
+            )
 
         metadata = self.manager.metadata_snapshot()
         universes = self.config.universes or {}
         for strategy, filter_cfg in universes.items():
-            symbols = self._apply_filter(filter_cfg, futures_metrics, spot_metrics, metadata)
+            symbols = self._apply_filter(
+                filter_cfg, futures_metrics, spot_metrics, metadata
+            )
             await self.manager.update(strategy, symbols)
             log.info("[universe] strategy=%s symbols=%d", strategy, len(symbols))
 
@@ -228,7 +249,9 @@ class UniverseScreener:
                         symbol = str(sym.get("symbol") or "").upper()
                         if not symbol:
                             continue
-                        filters = {f.get("filterType"): f for f in sym.get("filters", []) or []}
+                        filters = {
+                            f.get("filterType"): f for f in sym.get("filters", []) or []
+                        }
                         price_filter = filters.get("PRICE_FILTER", {})
                         tick_size = float(price_filter.get("tickSize", 0.0) or 0.0)
                         info[symbol] = {
@@ -245,7 +268,11 @@ class UniverseScreener:
                 async with httpx.AsyncClient(
                     base_url=self.client._futures_base,
                     timeout=self.fetcher.timeout,
-                    headers={"X-MBX-APIKEY": self.client._settings.api_key} if self.client._settings.api_key else None,
+                    headers=(
+                        {"X-MBX-APIKEY": self.client._settings.api_key}
+                        if self.client._settings.api_key
+                        else None
+                    ),
                 ) as http:
                     resp = await http.get("/fapi/v1/exchangeInfo")
                     resp.raise_for_status()
@@ -255,7 +282,9 @@ class UniverseScreener:
                         symbol = str(sym.get("symbol") or "").upper()
                         if not symbol:
                             continue
-                        filters = {f.get("filterType"): f for f in sym.get("filters", []) or []}
+                        filters = {
+                            f.get("filterType"): f for f in sym.get("filters", []) or []
+                        }
                         price_filter = filters.get("PRICE_FILTER", {})
                         tick_size = float(price_filter.get("tickSize", 0.0) or 0.0)
                         info[symbol] = {
@@ -288,7 +317,9 @@ class UniverseScreener:
                 max_leverage=1,
             )
         # Fetch open interest for most liquid symbols only
-        top_symbols = sorted(metrics.values(), key=lambda m: m.volume_usdt, reverse=True)[:200]
+        top_symbols = sorted(
+            metrics.values(), key=lambda m: m.volume_usdt, reverse=True
+        )[:200]
         semaphore = asyncio.Semaphore(10)
 
         async def fetch(symbol: str) -> None:
@@ -335,12 +366,22 @@ class UniverseScreener:
         await self._enrich_metrics(metrics, venue="spot")
         return metrics
 
-    async def _fetch_orderbook(self, symbol: str, venue: str, limit: int = 20) -> Optional[Tuple[float, float, float]]:
-        base_url = self.client._futures_base if venue == "futures" else self.client._spot_base
+    async def _fetch_orderbook(
+        self, symbol: str, venue: str, limit: int = 20
+    ) -> Optional[Tuple[float, float, float]]:
+        base_url = (
+            self.client._futures_base if venue == "futures" else self.client._spot_base
+        )
         path = "/fapi/v1/depth" if venue == "futures" else "/api/v3/depth"
-        headers = {"X-MBX-APIKEY": self.client._settings.api_key} if self.client._settings.api_key and venue == "futures" else None
+        headers = (
+            {"X-MBX-APIKEY": self.client._settings.api_key}
+            if self.client._settings.api_key and venue == "futures"
+            else None
+        )
         try:
-            async with httpx.AsyncClient(base_url=base_url, timeout=self.fetcher.timeout, headers=headers) as http:
+            async with httpx.AsyncClient(
+                base_url=base_url, timeout=self.fetcher.timeout, headers=headers
+            ) as http:
                 resp = await http.get(path, params={"symbol": symbol, "limit": limit})
                 resp.raise_for_status()
                 data = resp.json()
@@ -372,22 +413,41 @@ class UniverseScreener:
         depth = bid_liq + ask_liq
         return spread_pct, bid_liq, depth
 
-    async def _fetch_klines(self, symbol: str, venue: str, interval: str, limit: int) -> Optional[List[List[str]]]:
-        base_url = self.client._futures_base if venue == "futures" else self.client._spot_base
+    async def _fetch_klines(
+        self, symbol: str, venue: str, interval: str, limit: int
+    ) -> Optional[List[List[str]]]:
+        base_url = (
+            self.client._futures_base if venue == "futures" else self.client._spot_base
+        )
         path = "/fapi/v1/klines" if venue == "futures" else "/api/v3/klines"
-        headers = {"X-MBX-APIKEY": self.client._settings.api_key} if self.client._settings.api_key and venue == "futures" else None
+        headers = (
+            {"X-MBX-APIKEY": self.client._settings.api_key}
+            if self.client._settings.api_key and venue == "futures"
+            else None
+        )
         try:
-            async with httpx.AsyncClient(base_url=base_url, timeout=self.fetcher.timeout, headers=headers) as http:
-                resp = await http.get(path, params={"symbol": symbol, "interval": interval, "limit": limit})
+            async with httpx.AsyncClient(
+                base_url=base_url, timeout=self.fetcher.timeout, headers=headers
+            ) as http:
+                resp = await http.get(
+                    path,
+                    params={"symbol": symbol, "interval": interval, "limit": limit},
+                )
                 resp.raise_for_status()
                 return resp.json()
         except Exception:
             return None
 
-    async def _enrich_metrics(self, metrics: Dict[str, SymbolMetrics], venue: str) -> None:
+    async def _enrich_metrics(
+        self, metrics: Dict[str, SymbolMetrics], venue: str
+    ) -> None:
         if not metrics:
             return
-        info_map = self._futures_exchange_info if venue == "futures" else self._spot_exchange_info
+        info_map = (
+            self._futures_exchange_info
+            if venue == "futures"
+            else self._spot_exchange_info
+        )
         ordered = sorted(metrics.values(), key=lambda m: m.volume_usdt, reverse=True)
         limit = min(len(ordered), 80)
         semaphore = asyncio.Semaphore(6)
@@ -406,7 +466,9 @@ class UniverseScreener:
                 klines_5m = await self._fetch_klines(metric.symbol, venue, "5m", 60)
                 if klines_5m:
                     atr_pct = self._compute_atr_pct(klines_5m)
-                    price_change_pct = self._compute_price_change_pct(klines_5m, steps=12)
+                    price_change_pct = self._compute_price_change_pct(
+                        klines_5m, steps=12
+                    )
 
                 trend_pct = 0.0
                 klines_1d = await self._fetch_klines(metric.symbol, venue, "1d", 31)
@@ -428,7 +490,11 @@ class UniverseScreener:
                     except (TypeError, ValueError):
                         listing_age = None
 
-                tick_pct = (tick_size / metric.price * 100.0) if metric.price > 0 and tick_size > 0 else 0.0
+                tick_pct = (
+                    (tick_size / metric.price * 100.0)
+                    if metric.price > 0 and tick_size > 0
+                    else 0.0
+                )
 
                 metrics[metric.symbol] = replace(
                     metric,
@@ -503,32 +569,66 @@ class UniverseScreener:
                 return False
             if metric.price < filter_cfg.min_price_usdt:
                 return False
-            if filter_cfg.max_price_usdt is not None and metric.price > filter_cfg.max_price_usdt:
+            if (
+                filter_cfg.max_price_usdt is not None
+                and metric.price > filter_cfg.max_price_usdt
+            ):
                 return False
-            if metric.venue == "futures" and filter_cfg.min_futures_open_interest_usdt is not None:
+            if (
+                metric.venue == "futures"
+                and filter_cfg.min_futures_open_interest_usdt is not None
+            ):
                 if metric.open_interest_usd < filter_cfg.min_futures_open_interest_usdt:
                     return False
-            if metric.venue == "futures" and filter_cfg.min_leverage_supported is not None:
+            if (
+                metric.venue == "futures"
+                and filter_cfg.min_leverage_supported is not None
+            ):
                 if metric.max_leverage < filter_cfg.min_leverage_supported:
                     return False
-            if filter_cfg.min_30d_trend_pct is not None and metric.trend_30d_pct < filter_cfg.min_30d_trend_pct:
+            if (
+                filter_cfg.min_30d_trend_pct is not None
+                and metric.trend_30d_pct < filter_cfg.min_30d_trend_pct
+            ):
                 return False
-            if filter_cfg.max_bid_ask_spread_pct is not None and metric.bid_ask_spread_pct > filter_cfg.max_bid_ask_spread_pct:
+            if (
+                filter_cfg.max_bid_ask_spread_pct is not None
+                and metric.bid_ask_spread_pct > filter_cfg.max_bid_ask_spread_pct
+            ):
                 return False
-            if filter_cfg.min_5m_atr_pct is not None and metric.atr_5m_pct < filter_cfg.min_5m_atr_pct:
+            if (
+                filter_cfg.min_5m_atr_pct is not None
+                and metric.atr_5m_pct < filter_cfg.min_5m_atr_pct
+            ):
                 return False
-            if filter_cfg.min_price_change_pct_last_1h is not None and metric.price_change_1h_pct < filter_cfg.min_price_change_pct_last_1h:
+            if (
+                filter_cfg.min_price_change_pct_last_1h is not None
+                and metric.price_change_1h_pct < filter_cfg.min_price_change_pct_last_1h
+            ):
                 return False
-            if filter_cfg.min_liquidity_bid_size is not None and metric.bid_liquidity_usd < filter_cfg.min_liquidity_bid_size:
+            if (
+                filter_cfg.min_liquidity_bid_size is not None
+                and metric.bid_liquidity_usd < filter_cfg.min_liquidity_bid_size
+            ):
                 return False
-            if filter_cfg.min_orderbook_depth_usdt is not None and metric.orderbook_depth_usd < filter_cfg.min_orderbook_depth_usdt:
+            if (
+                filter_cfg.min_orderbook_depth_usdt is not None
+                and metric.orderbook_depth_usd < filter_cfg.min_orderbook_depth_usdt
+            ):
                 return False
-            if filter_cfg.min_tick_size_pct is not None and metric.tick_size_pct < filter_cfg.min_tick_size_pct:
+            if (
+                filter_cfg.min_tick_size_pct is not None
+                and metric.tick_size_pct < filter_cfg.min_tick_size_pct
+            ):
                 return False
             if filter_cfg.new_listing_within_days is not None:
-                if metric.listing_age_days is None or metric.listing_age_days > float(filter_cfg.new_listing_within_days):
+                if metric.listing_age_days is None or metric.listing_age_days > float(
+                    filter_cfg.new_listing_within_days
+                ):
                     return False
-            if filter_cfg.has_major_news_flag and not bool(meta.get("has_major_news_flag") or meta.get("news_flag")):
+            if filter_cfg.has_major_news_flag and not bool(
+                meta.get("has_major_news_flag") or meta.get("news_flag")
+            ):
                 return False
             upper_symbol = symbol
             for prefix in filter_cfg.exclude_prefixes:
@@ -599,7 +699,10 @@ class UniverseScreener:
 
         limit = filter_cfg.max_symbols
         if filter_cfg.max_concurrent_symbols is not None:
-            limit = min(limit or filter_cfg.max_concurrent_symbols, filter_cfg.max_concurrent_symbols)
+            limit = min(
+                limit or filter_cfg.max_concurrent_symbols,
+                filter_cfg.max_concurrent_symbols,
+            )
         if limit is not None:
             ordered = ordered[:limit]
 

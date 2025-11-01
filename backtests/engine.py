@@ -28,7 +28,11 @@ from bisect import bisect_right
 import pandas as pd
 
 from engine.execution.execute import RecordedOrder, StrategyExecutor
-from engine.strategy import get_executor_override, reset_executor_cache, set_executor_override
+from engine.strategy import (
+    get_executor_override,
+    reset_executor_cache,
+    set_executor_override,
+)
 from engine.core.event_bus import BUS
 from engine.runtime import tasks as runtime_tasks
 
@@ -58,8 +62,7 @@ class OfflineKlineClient:
     def __init__(self, data: Dict[tuple[str, str], List[List[float]]]):
         self._data = data
         self._closes: Dict[tuple[str, str], List[int]] = {
-            key: [int(row[6]) for row in rows]
-            for key, rows in data.items()
+            key: [int(row[6]) for row in rows] for key, rows in data.items()
         }
         self._cursor: Dict[tuple[str, str], int] = {}
 
@@ -200,7 +203,9 @@ class _AsyncBusRunner:
         except Exception:
             pass
         try:
-            asyncio.run_coroutine_threadsafe(runtime_tasks.shutdown(), loop).result(timeout=2)
+            asyncio.run_coroutine_threadsafe(runtime_tasks.shutdown(), loop).result(
+                timeout=2
+            )
         except Exception:
             pass
         loop.call_soon_threadsafe(loop.stop)
@@ -221,7 +226,9 @@ class _AsyncBusRunner:
         if loop is None:
             self._bus.fire(topic, payload)
             return None
-        return asyncio.run_coroutine_threadsafe(self._bus.publish(topic, payload, urgent=True), loop)
+        return asyncio.run_coroutine_threadsafe(
+            self._bus.publish(topic, payload, urgent=True), loop
+        )
 
 
 class _SyntheticFillSimulator:
@@ -229,7 +236,9 @@ class _SyntheticFillSimulator:
         self._clock = clock
         self._bus_runner = _AsyncBusRunner(BUS)
         self._last_prices: Dict[tuple[str, str], float] = {}
-        self._open_positions: Dict[tuple[str, str, str], List[_OpenPosition]] = defaultdict(list)
+        self._open_positions: Dict[tuple[str, str, str], List[_OpenPosition]] = (
+            defaultdict(list)
+        )
         self._pending_exits: List[_PendingExit] = []
 
     @contextmanager
@@ -253,7 +262,13 @@ class _SyntheticFillSimulator:
         for pending in list(self._pending_exits):
             if pending.base != base or pending.venue != venue:
                 continue
-            if self._exit_triggered(pending.order.side, pending.trigger, price, pending.stop_price, pending.take_profit):
+            if self._exit_triggered(
+                pending.order.side,
+                pending.trigger,
+                price,
+                pending.stop_price,
+                pending.take_profit,
+            ):
                 triggered.append(pending)
         for pending in triggered:
             self._pending_exits.remove(pending)
@@ -270,7 +285,9 @@ class _SyntheticFillSimulator:
             )
             self._close_position(base, venue, pending.order.side, pending.quantity)
 
-    def record_order(self, order: RecordedOrder, event: Optional[BacktestEvent]) -> None:
+    def record_order(
+        self, order: RecordedOrder, event: Optional[BacktestEvent]
+    ) -> None:
         if order is None:
             return
         if order.status not in {"backtest", "dry_run", "simulated"}:
@@ -292,8 +309,20 @@ class _SyntheticFillSimulator:
         if trigger:
             stop_price = self._safe_float(meta.get("stop_price")) if meta else None
             take_profit = self._safe_float(meta.get("take_profit")) if meta else None
-            if self._exit_triggered(order.side, trigger, price, stop_price, take_profit):
-                self._emit_fill(order, base, venue, order.side, quantity, price, ts, strategy_symbol, meta)
+            if self._exit_triggered(
+                order.side, trigger, price, stop_price, take_profit
+            ):
+                self._emit_fill(
+                    order,
+                    base,
+                    venue,
+                    order.side,
+                    quantity,
+                    price,
+                    ts,
+                    strategy_symbol,
+                    meta,
+                )
                 self._close_position(base, venue, order.side, quantity)
             else:
                 pending = _PendingExit(
@@ -311,7 +340,17 @@ class _SyntheticFillSimulator:
                 )
                 self._pending_exits.append(pending)
         else:
-            self._emit_fill(order, base, venue, order.side, quantity, price, ts, strategy_symbol, meta)
+            self._emit_fill(
+                order,
+                base,
+                venue,
+                order.side,
+                quantity,
+                price,
+                ts,
+                strategy_symbol,
+                meta,
+            )
             if meta:
                 stop_price = self._safe_float(meta.get("stop_price"))
                 take_profit = self._safe_float(meta.get("take_profit"))
@@ -332,7 +371,9 @@ class _SyntheticFillSimulator:
             self._open_positions[key].append(position)
 
     @staticmethod
-    def _infer_trigger(tag: Optional[str], meta: Optional[Dict[str, Any]]) -> Optional[str]:
+    def _infer_trigger(
+        tag: Optional[str], meta: Optional[Dict[str, Any]]
+    ) -> Optional[str]:
         if isinstance(meta, dict) and isinstance(meta.get("trigger"), str):
             return str(meta["trigger"]).lower()
         if not tag:
@@ -363,13 +404,17 @@ class _SyntheticFillSimulator:
             return None
         return abs(qty)
 
-    def _resolve_price(self, base: str, venue: str, event: Optional[BacktestEvent]) -> Optional[float]:
+    def _resolve_price(
+        self, base: str, venue: str, event: Optional[BacktestEvent]
+    ) -> Optional[float]:
         if event:
             return float(event.price)
         return self._last_prices.get((base, venue))
 
     @staticmethod
-    def _resolve_symbol(symbol: Optional[str], event: Optional[BacktestEvent]) -> tuple[Optional[str], Optional[str]]:
+    def _resolve_symbol(
+        symbol: Optional[str], event: Optional[BacktestEvent]
+    ) -> tuple[Optional[str], Optional[str]]:
         if symbol and "." in symbol:
             base, venue = symbol.split(".", 1)
             return base.upper(), venue.upper()
@@ -425,7 +470,9 @@ class _SyntheticFillSimulator:
             except Exception:
                 pass
 
-    def _close_position(self, base: str, venue: str, exit_side: str, quantity: float) -> None:
+    def _close_position(
+        self, base: str, venue: str, exit_side: str, quantity: float
+    ) -> None:
         entry_side = "BUY" if exit_side.upper() == "SELL" else "SELL"
         key = (base, venue, entry_side)
         positions = self._open_positions.get(key)
@@ -499,12 +546,16 @@ class BacktestEngine:
         strategy_factory: Callable[[OfflineKlineClient, SimClock], Any],
         symbol_formatter: Optional[Callable[[str, str, str], str]] = None,
         patch_executor: Optional[bool] = None,
-        executor_factory: Optional[Callable[[Callable[[RecordedOrder], None]], StrategyExecutor]] = None,
+        executor_factory: Optional[
+            Callable[[Callable[[RecordedOrder], None]], StrategyExecutor]
+        ] = None,
     ) -> None:
         if not feeds:
             raise ValueError("At least one feed configuration is required")
         self._feeds = list(feeds)
-        self._symbol_formatter = symbol_formatter or (lambda sym, tf, venue: f"{sym}.{venue}")
+        self._symbol_formatter = symbol_formatter or (
+            lambda sym, tf, venue: f"{sym}.{venue}"
+        )
         self._strategy_factory = strategy_factory
         self._patch_executor = self._resolve_patch_flag(patch_executor)
         self._executor_factory = executor_factory
@@ -543,9 +594,13 @@ class BacktestEngine:
                     self._fill_simulator.on_price_event(event)
                     self._advance_to(event.timestamp_ms)
                     self._clock.set(event.timestamp_seconds)
-                    symbol = self._symbol_formatter(event.symbol, event.timeframe, event.venue)
+                    symbol = self._symbol_formatter(
+                        event.symbol, event.timeframe, event.venue
+                    )
                     self._active_event = event
-                    response = dispatch(symbol, event.price, event.timestamp_seconds, event.volume)
+                    response = dispatch(
+                        symbol, event.price, event.timestamp_seconds, event.volume
+                    )
                     self._active_event = None
                     yield BacktestStep(event=event, response=response)
 
@@ -599,9 +654,10 @@ class BacktestEngine:
         self._recorded_orders.append(order)
         self._fill_simulator.record_order(order, self._active_event)
 
-
     @staticmethod
-    def _default_executor_factory(recorder: Callable[[RecordedOrder], None]) -> StrategyExecutor:
+    def _default_executor_factory(
+        recorder: Callable[[RecordedOrder], None],
+    ) -> StrategyExecutor:
         class _PassthroughRisk:
             def check_order(self, **_: Any) -> tuple[bool, Dict[str, Any]]:  # type: ignore[override]
                 return True, {}
@@ -622,7 +678,9 @@ class BacktestEngine:
         for cfg in self._feeds:
             rows = _load_klines(cfg)
             if not rows:
-                raise ValueError(f"No rows loaded for {cfg.symbol} {cfg.timeframe} from {cfg.path}")
+                raise ValueError(
+                    f"No rows loaded for {cfg.symbol} {cfg.timeframe} from {cfg.path}"
+                )
             key = (cfg.symbol, cfg.timeframe)
             self._data[key] = rows
             state = _FeedState(cfg=cfg, rows=rows)
@@ -798,7 +856,19 @@ def _load_klines(cfg: FeedConfig) -> List[List[float]]:
         frame[ts_col] = ts_series.astype(int)
 
     rows: List[List[float]] = []
-    for open_time, open_px, high, low, close, volume, ts_ms, quote_vol, trade_count, taker_base, taker_quote in zip(
+    for (
+        open_time,
+        open_px,
+        high,
+        low,
+        close,
+        volume,
+        ts_ms,
+        quote_vol,
+        trade_count,
+        taker_base,
+        taker_quote,
+    ) in zip(
         frame[open_col].astype(float),
         frame[open_price_col].astype(float),
         frame[high_col].astype(float),

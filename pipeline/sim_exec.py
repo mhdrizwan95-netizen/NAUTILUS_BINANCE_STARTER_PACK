@@ -5,7 +5,6 @@ import os
 from datetime import datetime, timedelta
 from typing import List
 
-import numpy as np
 import pandas as pd
 
 
@@ -34,12 +33,26 @@ def _simulate_day(symbol: str, day: str, model: str = "quarantine") -> str | Non
         if idx >= len(bars.index):
             continue
         entry_ts = int(bars.index[min(idx + 1, len(bars.index) - 1)])
-        entry_px = float(bars.loc[entry_ts, "last"]) if "last" in bars.columns else float(bars.loc[entry_ts, "vwap_dev"] * 0 + bars.loc[entry_ts, "r60"] * 0 + bars.loc[entry_ts, "spread_over_atr"] * 0 + 1.0)
+        entry_px = (
+            float(bars.loc[entry_ts, "last"])
+            if "last" in bars.columns
+            else float(
+                bars.loc[entry_ts, "vwap_dev"] * 0
+                + bars.loc[entry_ts, "r60"] * 0
+                + bars.loc[entry_ts, "spread_over_atr"] * 0
+                + 1.0
+            )
+        )
 
         # ATR proxy
         atr = float(0.001 * entry_px)
-        if "spread_over_atr" in bars.columns and bars.loc[entry_ts, "spread_over_atr"] > 0:
-            atr = max(atr, float(bars.loc[entry_ts, "spread_over_atr"]) * 0.001 * entry_px)
+        if (
+            "spread_over_atr" in bars.columns
+            and bars.loc[entry_ts, "spread_over_atr"] > 0
+        ):
+            atr = max(
+                atr, float(bars.loc[entry_ts, "spread_over_atr"]) * 0.001 * entry_px
+            )
 
         direction = +1 if h.situation != "parabolic_blowoff" else -1
         stop_mult = 1.8 if model == "quarantine" else 2.2
@@ -69,7 +82,11 @@ def _simulate_day(symbol: str, day: str, model: str = "quarantine") -> str | Non
         if exit_ts is None:
             continue
 
-        spread_over_atr = float(bars.loc[entry_ts, "spread_over_atr"]) if "spread_over_atr" in bars.columns else 0.0
+        spread_over_atr = (
+            float(bars.loc[entry_ts, "spread_over_atr"])
+            if "spread_over_atr" in bars.columns
+            else 0.0
+        )
         slip_bps = max(5.0, 0.3 * spread_over_atr * 100.0)
         ret = direction * (exit_px - entry_px) / max(entry_px, 1e-9)
         ret -= slip_bps / 10_000.0

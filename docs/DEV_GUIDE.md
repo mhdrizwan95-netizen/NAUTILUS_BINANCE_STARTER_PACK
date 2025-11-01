@@ -130,6 +130,9 @@ Tips:
 - Orders/fills go to both JSONL logs and `data/runtime/trades.db`; if you change schemas, update `engine/storage/schema.sql` and migration code.
 - Idempotency cache lives at `engine/state/idempotency_cache.json`; flush it via `engine/idempotency.py` when changing key formats.
 - When developing universe/screener logic, watch rate-limit gauges (`RATE_LIMIT_429`) and respect Binance testnet quotas.
+- Production ML ingestion now mounts `/ml` (`LEDGER_DB=/ml/manifest.sqlite`, `DATA_DIR=/ml/data`) to isolate retrains from research workloads.
+- Research and backtest pipelines mount the `/research` volume. Set `LEDGER_DB=/research/manifest.sqlite` and `DATA_INCOMING=/research/incoming` (see `compose.backtest.yml`) so CI/staging jobs do not write into the production `/ml` mount.
+- Deterministic retrains are controlled by `TRAIN_SEED`; override it per run to reproduce models. The ML service now records `train_seed` in model metadata so audit trails capture the exact RNG state used during promotion.
 
 ## Submitting changes
 

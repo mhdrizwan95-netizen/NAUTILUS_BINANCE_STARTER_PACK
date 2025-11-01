@@ -1,0 +1,54 @@
+service: nautilus-command-center
+owner: platform-trading
+slos:
+  - id: trading-latency
+    description: "95% of engine market order round-trips complete within 1.5s over 7 days."
+    indicator:
+      type: histogram
+      source: prometheus
+      query: histogram_quantile(0.95, sum by (le) (rate(fill_latency_ms_bucket[5m])))
+      unit: milliseconds
+    target: 1500
+    window: 7d
+    alerting:
+      burn_rate_alerts:
+        - window: 1h
+          burn_rate: 14
+          page: true
+        - window: 6h
+          burn_rate: 7
+          page: false
+
+  - id: ops-api-availability
+    description: "Ops API returns success responses for 99.5% of requests each 30-day window."
+    indicator:
+      type: ratio
+      source: prometheus
+      numerator: sum(rate(http_requests_total{service="ops-api",status!~"5.."}[5m]))
+      denominator: sum(rate(http_requests_total{service="ops-api"}[5m]))
+    target: 0.995
+    window: 30d
+    alerting:
+      burn_rate_alerts:
+        - window: 2h
+          burn_rate: 4
+          page: true
+        - window: 24h
+          burn_rate: 2
+          page: false
+
+  - id: websocket-freshness
+    description: "Dashboard websocket pushes a metrics heartbeat every 30s (99% compliance)."
+    indicator:
+      type: gauge
+      source: prometheus
+      query: max_over_time(realtime_heartbeat_age_seconds[5m])
+      threshold: 30
+      comparison: "<="
+    target: 0.99
+    window: 7d
+    alerting:
+      threshold_alert:
+        expr: realtime_heartbeat_age_seconds > 30
+        for: 2m
+        severity: warn

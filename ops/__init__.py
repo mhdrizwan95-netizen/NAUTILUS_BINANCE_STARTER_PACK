@@ -11,6 +11,7 @@ try:  # Compatibility shim for respx>=0.20
     import respx as _respx
 
     if not hasattr(_respx, "requests"):
+
         class _RequestsProxy:
             def __iter__(self):
                 for call in _respx.calls:  # type: ignore[attr-defined]

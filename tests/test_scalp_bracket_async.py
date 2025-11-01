@@ -30,6 +30,7 @@ class DummyLogger:
     def exception(self, *args: Any, **kwargs: Any) -> None:
         pass
 
+
 def test_scalp_bracket_manager_triggers_exit() -> None:
     async def _run() -> None:
         fetcher = DummyFetcher([None, 99.0, 101.2])
@@ -38,7 +39,9 @@ def test_scalp_bracket_manager_triggers_exit() -> None:
         async def submit_exit(payload: Dict[str, Any]) -> None:
             exits.append(payload)
 
-        mgr = ScalpBracketManager(price_fetcher=fetcher, submit_exit=submit_exit, logger=DummyLogger())
+        mgr = ScalpBracketManager(
+            price_fetcher=fetcher, submit_exit=submit_exit, logger=DummyLogger()
+        )
         mgr.watch(
             key="order-1",
             symbol="BTCUSDT.BINANCE",

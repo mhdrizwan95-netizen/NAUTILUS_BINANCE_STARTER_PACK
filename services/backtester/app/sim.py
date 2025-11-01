@@ -1,12 +1,12 @@
-
-import numpy as np
 import pandas as pd
-from loguru import logger
 from typing import List, Callable, Dict, Any
 from .ml import HMMModel
 
+
 class Trade:
-    def __init__(self, ts_open, ts_close, side, entry, exit, qty, symbol, params, features):
+    def __init__(
+        self, ts_open, ts_close, side, entry, exit, qty, symbol, params, features
+    ):
         self.ts_open = ts_open
         self.ts_close = ts_close
         self.side = side
@@ -17,10 +17,14 @@ class Trade:
         self.params = params
         self.features = features
         self.cost = 0.0
+
     @property
     def pnl(self):
-        gross = (self.exit - self.entry) * (self.qty if self.side == "long" else -self.qty)
+        gross = (self.exit - self.entry) * (
+            self.qty if self.side == "long" else -self.qty
+        )
         return gross - self.cost
+
 
 class PrequentialSim:
     """
@@ -30,7 +34,15 @@ class PrequentialSim:
       2) We observe bar t, execute trade logic and close intrabar (toy) or after N bars.
       3) We update the model with the bar t (or every RETRAIN cadence).
     """
-    def __init__(self, df: pd.DataFrame, bar_minutes: int, retrain_every_min: int, exactly_once: bool, cost_fn: Callable):
+
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        bar_minutes: int,
+        retrain_every_min: int,
+        exactly_once: bool,
+        cost_fn: Callable,
+    ):
         self.df = df
         self.bar_minutes = bar_minutes
         self.retrain_every_min = retrain_every_min
@@ -92,6 +104,16 @@ class PrequentialSim:
         entry = row["close"]
         # in this toy, exit at same close (intrabar) so pnl=0 before costs; real engine would manage positions
         exitp = row["close"]
-        trade = Trade(now, now, side, entry, exitp, qty, order["symbol"], order.get("params", {}), order.get("features", {}))
+        trade = Trade(
+            now,
+            now,
+            side,
+            entry,
+            exitp,
+            qty,
+            order["symbol"],
+            order.get("params", {}),
+            order.get("features", {}),
+        )
         trade.cost = self.cost_fn(trade)
         return trade

@@ -12,7 +12,9 @@ class StubExecutor:
 
     async def sell(self, *, symbol: str, token_address: str, qty: float):
         self.calls.append((symbol, token_address, qty))
-        return DexExecutionResult(symbol=symbol, qty=qty, price=0.02, notional=qty * 0.02, side="SELL")
+        return DexExecutionResult(
+            symbol=symbol, qty=qty, price=0.02, notional=qty * 0.02, side="SELL"
+        )
 
 
 class StubOracle:

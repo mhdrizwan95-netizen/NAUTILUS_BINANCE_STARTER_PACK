@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import time
@@ -14,7 +13,9 @@ def _as_bool(v: str | None, default: bool) -> bool:
 
 
 class DepegGuard:
-    def __init__(self, router, md=None, bus=None, clock=time, log: logging.Logger | None = None) -> None:
+    def __init__(
+        self, router, md=None, bus=None, clock=time, log: logging.Logger | None = None
+    ) -> None:
         self.router = router
         self.md = md
         self.bus = bus
@@ -27,7 +28,13 @@ class DepegGuard:
         self.cooldown_min = int(float(os.getenv("DEPEG_ACTION_COOLDOWN_MIN", "120")))
         self.exit_risk = _as_bool(os.getenv("DEPEG_EXIT_RISK"), False)
         self.switch_quote = _as_bool(os.getenv("DEPEG_SWITCH_QUOTE"), False)
-        self.watch_symbols = [s.strip().upper() for s in os.getenv("DEPEG_WATCH_SYMBOLS", "USDTUSDC,BTCUSDT,BTCUSDC").split(",") if s.strip()]
+        self.watch_symbols = [
+            s.strip().upper()
+            for s in os.getenv("DEPEG_WATCH_SYMBOLS", "USDTUSDC,BTCUSDT,BTCUSDC").split(
+                ","
+            )
+            if s.strip()
+        ]
         # State
         self.confirm = 0
         self.safe_until = 0.0
@@ -44,6 +51,7 @@ class DepegGuard:
             px = self.router.get_last_price(f"{symbol}.BINANCE")
             if hasattr(px, "__await__"):
                 import asyncio
+
                 loop = asyncio.get_event_loop()
                 px = loop.run_until_complete(px)  # in case called sync
             return float(px) if px else 0.0
@@ -87,7 +95,9 @@ class DepegGuard:
             try:
                 if self.bus is not None:
                     self.bus.fire("risk.depeg_trigger", {"deviation_pct": dev})
-                    self.bus.fire("health.state", {"state": 2, "reason": "depeg_trigger"})
+                    self.bus.fire(
+                        "health.state", {"state": 2, "reason": "depeg_trigger"}
+                    )
             except Exception:
                 pass
             await self._apply_actions(dev)
@@ -110,14 +120,26 @@ class DepegGuard:
                 positions = []
             for p in positions or []:
                 try:
-                    sym = p.get("symbol") if isinstance(p, dict) else getattr(p, "symbol", "")
-                    qty = float(p.get("qty") if isinstance(p, dict) else getattr(p, "quantity", 0.0))
+                    sym = (
+                        p.get("symbol")
+                        if isinstance(p, dict)
+                        else getattr(p, "symbol", "")
+                    )
+                    qty = float(
+                        p.get("qty")
+                        if isinstance(p, dict)
+                        else getattr(p, "quantity", 0.0)
+                    )
                     if not sym or qty == 0:
                         continue
                     side = "SELL" if qty > 0 else "BUY"
-                    await self._maybe_await(self.router.place_reduce_only_market(sym, side, abs(qty)))
+                    await self._maybe_await(
+                        self.router.place_reduce_only_market(sym, side, abs(qty))
+                    )
                 except Exception as e:
-                    self.log.warning("[DEPEG] exit fail %s: %s", getattr(p, "symbol", "?"), e)
+                    self.log.warning(
+                        "[DEPEG] exit fail %s: %s", getattr(p, "symbol", "?"), e
+                    )
         if self.switch_quote:
             try:
                 if hasattr(self.router, "set_preferred_quote"):

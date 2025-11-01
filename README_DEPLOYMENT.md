@@ -138,7 +138,7 @@ The Ops API exposes:
 Engines provide `GET /health` and `/metrics`.
 
 #### Control & Auth
-The following Ops endpoints require `X-OPS-TOKEN` with the value of `OPS_API_TOKEN` (default: `dev-token`):
+Set `OPS_API_TOKEN` directly (or provide a file via `OPS_API_TOKEN_FILE`, e.g. mounted from `${SECRETS_DIR}/ops_api_token`) before bringing the stack up. The following Ops endpoints require `X-OPS-TOKEN` with the value of `OPS_API_TOKEN`:
 
 - `POST /kill` — pause/resume trading globally.
 - `POST /strategy/weights` — adjust rollout weights.

@@ -30,10 +30,14 @@ def _fetch_binance_universe() -> List[str]:
         return _DEFAULT_UNIVERSE
 
     is_futures = getattr(settings, "is_futures", False)
-    base = settings.futures_base if is_futures else settings.spot_base or settings.base_url
+    base = (
+        settings.futures_base if is_futures else settings.spot_base or settings.base_url
+    )
     endpoint = "/fapi/v1/exchangeInfo" if is_futures else "/api/v3/exchangeInfo"
     url = f"{base.rstrip('/')}{endpoint}"
-    headers = {"X-MBX-APIKEY": settings.api_key} if getattr(settings, "api_key", "") else None
+    headers = (
+        {"X-MBX-APIKEY": settings.api_key} if getattr(settings, "api_key", "") else None
+    )
     response = httpx.get(url, timeout=10.0, headers=headers)
     response.raise_for_status()
 

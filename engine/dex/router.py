@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import List, Sequence
 
 from web3 import Web3
-from web3.contract import Contract
 
 ROUTER_ABI = [
     {
@@ -64,7 +63,9 @@ class DexRouter:
             None,
             lambda: self.router.functions.getAmountsOut(amount_in, path_cs).call(),
         )
-        return SwapQuote(amount_in=amount_out[0], amount_out=amount_out[-1], path=path_cs)
+        return SwapQuote(
+            amount_in=amount_out[0], amount_out=amount_out[-1], path=path_cs
+        )
 
     def build_swap_tx(
         self,

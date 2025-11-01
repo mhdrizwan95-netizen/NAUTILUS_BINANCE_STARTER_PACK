@@ -36,14 +36,22 @@ class WSRunner:
         self.last_evt_ts = 0.0
 
     async def run(self) -> None:
-        backoffs = [int(x) for x in str(self.cfg.get("WS_RECONNECT_BACKOFF_MS", "500,1000,2000")).split(",") if str(x).strip()]
+        backoffs = [
+            int(x)
+            for x in str(
+                self.cfg.get("WS_RECONNECT_BACKOFF_MS", "500,1000,2000")
+            ).split(",")
+            if str(x).strip()
+        ]
         while True:
             try:
                 ws = await self.ws_factory()
                 self.log.info("[WS] connected")
                 if self.cfg.get("WS_HEALTH_ENABLED", False):
                     try:
-                        self.bus.fire("health.state", {"state": 0, "reason": "ws_connected"})
+                        self.bus.fire(
+                            "health.state", {"state": 0, "reason": "ws_connected"}
+                        )
                     except Exception:
                         pass
                 self.last_evt_ts = float(self.clock.time())
@@ -58,7 +66,9 @@ class WSRunner:
             finally:
                 if self.cfg.get("WS_HEALTH_ENABLED", False):
                     try:
-                        self.bus.fire("health.state", {"state": 1, "reason": "ws_disconnected"})
+                        self.bus.fire(
+                            "health.state", {"state": 1, "reason": "ws_disconnected"}
+                        )
                     except Exception:
                         pass
                 await self._watchdog()
@@ -77,4 +87,3 @@ class WSRunner:
                 self.bus.fire("health.state", {"state": 1, "reason": "ws_silent"})
             except Exception:
                 pass
-

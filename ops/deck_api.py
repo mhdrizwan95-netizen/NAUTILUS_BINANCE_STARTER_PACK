@@ -11,7 +11,14 @@ from typing import Any, Dict, List, Optional, Set
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    FastAPI,
+    HTTPException,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -68,7 +75,9 @@ DECK_TOKEN = os.environ.get("DECK_TOKEN", "")
 
 DECK_TOKEN = os.environ.get("DECK_TOKEN", "")
 
-BINANCE_SAPI_BASE = os.getenv("BINANCE_SAPI_BASE", "https://api.binance.com").rstrip("/")
+BINANCE_SAPI_BASE = os.getenv("BINANCE_SAPI_BASE", "https://api.binance.com").rstrip(
+    "/"
+)
 BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
 BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
 ALLOWED_WALLETS = {
@@ -130,7 +139,9 @@ async def _sapi_signed_post(path: str, payload: Dict[str, Any]) -> Any:
     params = dict(payload or {})
     params.setdefault("timestamp", int(time.time() * 1000))
     query = urlencode(params, doseq=True)
-    signature = hmac.new(BINANCE_API_SECRET.encode(), query.encode(), hashlib.sha256).hexdigest()
+    signature = hmac.new(
+        BINANCE_API_SECRET.encode(), query.encode(), hashlib.sha256
+    ).hexdigest()
     headers = {
         "X-MBX-APIKEY": BINANCE_API_KEY,
         "Content-Type": "application/x-www-form-urlencoded",
@@ -219,7 +230,9 @@ class TradeIn(BaseModel):
 
 
 class TransferIn(BaseModel):
-    from_wallet: str = Field(..., description="Source wallet (e.g., FUNDING, MAIN, UMFUTURE)")
+    from_wallet: str = Field(
+        ..., description="Source wallet (e.g., FUNDING, MAIN, UMFUTURE)"
+    )
     to_wallet: str = Field(..., description="Destination wallet")
     asset: str = Field(default="USDT", description="Asset to transfer")
     amount: float = Field(..., gt=0.0, description="Amount to transfer")
@@ -280,7 +293,9 @@ def _merge_metrics(state_metrics: Dict[str, Any], updates: Dict[str, Any]) -> bo
     for raw_key, value in updates.items():
         key = _METRIC_ALIASES.get(raw_key, raw_key)
         if key == "breaker" and isinstance(value, dict):
-            breaker = state_metrics.setdefault("breaker", {"equity": False, "venue": False})
+            breaker = state_metrics.setdefault(
+                "breaker", {"equity": False, "venue": False}
+            )
             for field in ("equity", "venue"):
                 if field in value and breaker.get(field) != bool(value[field]):
                     breaker[field] = bool(value[field])
@@ -302,6 +317,8 @@ def _merge_metrics(state_metrics: Dict[str, Any], updates: Dict[str, Any]) -> bo
             state_metrics[key] = parsed
             changed = True
     return changed
+
+
 @app.get("/status")
 async def status() -> JSONResponse:
     async with STATE_LOCK:
@@ -333,7 +350,9 @@ async def set_weights(body: RiskShareIn, request: Request) -> Dict[str, Any]:
     async with STATE_LOCK:
         strategies = STATE["strategies"]
         if body.strategy not in strategies:
-            raise HTTPException(status_code=404, detail=f"Unknown strategy '{body.strategy}'")
+            raise HTTPException(
+                status_code=404, detail=f"Unknown strategy '{body.strategy}'"
+            )
         strategies[body.strategy]["risk_share"] = float(body.risk_share)
         payload = {
             "type": "weights",
@@ -355,12 +374,16 @@ async def set_universe(body: UniverseWeightsIn, request: Request) -> Dict[str, A
 
 
 @app.post("/strategies/{strategy}")
-async def update_strategy(strategy: str, body: StrategyStateIn, request: Request) -> Dict[str, Any]:
+async def update_strategy(
+    strategy: str, body: StrategyStateIn, request: Request
+) -> Dict[str, Any]:
     require_token(request)
     async with STATE_LOCK:
         strategies = STATE["strategies"]
         if strategy not in strategies:
-            raise HTTPException(status_code=404, detail=f"Unknown strategy '{strategy}'")
+            raise HTTPException(
+                status_code=404, detail=f"Unknown strategy '{strategy}'"
+            )
         strat_state = strategies[strategy]
         if body.enabled is not None:
             strat_state["enabled"] = bool(body.enabled)

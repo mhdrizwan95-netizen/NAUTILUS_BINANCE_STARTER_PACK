@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from .signal_math import confidence_from_score
 
@@ -85,7 +85,9 @@ def compute_listing_metrics(
     stop, targets = (None, ())
     ladders: Tuple[float, ...] = ()
     if last_price and last_price > 0:
-        stop_val, tgt = generate_listing_targets(last_price, stop_pct=stop_pct, target_multipliers=target_multipliers)
+        stop_val, tgt = generate_listing_targets(
+            last_price, stop_pct=stop_pct, target_multipliers=target_multipliers
+        )
         stop = stop_val
         ladders = tuple(tgt)
 
@@ -112,4 +114,3 @@ __all__ = [
     "generate_listing_targets",
     "compute_listing_metrics",
 ]
-

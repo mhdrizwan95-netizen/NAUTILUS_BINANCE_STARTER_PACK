@@ -107,7 +107,9 @@ class DexState:
         try:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             payload = {
-                "positions": {pid: pos.to_dict() for pid, pos in self._positions.items()}
+                "positions": {
+                    pid: pos.to_dict() for pid, pos in self._positions.items()
+                }
             }
             tmp_path = f"{self.path}.tmp"
             with open(tmp_path, "w", encoding="utf-8") as fh:
@@ -176,7 +178,9 @@ class DexState:
         self._save()
         return position
 
-    def close_position(self, pos_id: str, *, reason: str | None = None) -> Optional[DexPosition]:
+    def close_position(
+        self, pos_id: str, *, reason: str | None = None
+    ) -> Optional[DexPosition]:
         position = self._positions.get(pos_id)
         if position is None:
             return None
@@ -206,7 +210,14 @@ class DexState:
         position.metadata[key] = value
         self._save()
 
-    def register_fill(self, pos_id: str, qty_sold: float, *, target_index: int | None = None, reason: str | None = None) -> Optional[DexPosition]:
+    def register_fill(
+        self,
+        pos_id: str,
+        qty_sold: float,
+        *,
+        target_index: int | None = None,
+        reason: str | None = None,
+    ) -> Optional[DexPosition]:
         position = self._positions.get(pos_id)
         if position is None:
             return None

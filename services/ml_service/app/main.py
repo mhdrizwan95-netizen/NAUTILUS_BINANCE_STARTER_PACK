@@ -1,44 +1,61 @@
-
 from fastapi import FastAPI, Depends
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-from loguru import logger
-from .config import settings
 from .auth import require_role
-from .schemas import TrainRequest, TrainResponse, ModelInfo, PredictRequest, PredictResponse
+from .schemas import (
+    TrainRequest,
+    TrainResponse,
+    ModelInfo,
+    PredictRequest,
+    PredictResponse,
+)
 from .trainer import train_once
 from .inference import start_watchdog, predict_proba
 from . import model_store
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     start_watchdog()
     yield
 
+
 app = FastAPI(title="ml-service (HMM)", version="0.2.0", lifespan=lifespan)
+
 
 @app.get("/health")
 def health():
-    return {"status":"ok"}
+    return {"status": "ok"}
+
 
 @app.get("/model", response_model=ModelInfo)
 def model_info():
     model, scaler, meta = model_store.load_current()
     active = meta.get("version_id") if meta else None
-    return ModelInfo(active_version=active, registry_size=model_store.registry_size(), metrics=meta if meta else None)
+    return ModelInfo(
+        active_version=active,
+        registry_size=model_store.registry_size(),
+        metrics=meta if meta else None,
+    )
 
-@app.post("/train", dependencies=[Depends(require_role("trainer","admin"))], response_model=TrainResponse)
+
+@app.post(
+    "/train",
+    dependencies=[Depends(require_role("trainer", "admin"))],
+    response_model=TrainResponse,
+)
 def train(req: TrainRequest):
     res = train_once(n_states=req.n_states, tag=req.tag, promote=req.promote)
     meta = res.get("metadata", {})
-    version_id = res.get("version_dir","").split("/")[-1]
+    version_id = res.get("version_dir", "").split("/")[-1]
     return TrainResponse(
         version_id=version_id or "n/a",
-        metric_name=meta.get("metric_name","val_log_likelihood"),
-        metric_value=float(meta.get("metric_value",0.0)),
+        metric_name=meta.get("metric_name", "val_log_likelihood"),
+        metric_value=float(meta.get("metric_value", 0.0)),
         promoted=bool(res.get("promoted", False)),
-        message=res.get("message","ok")
+        message=res.get("message", "ok"),
     )
+
 
 @app.post("/predict", response_model=PredictResponse)
 def predict(req: PredictRequest):

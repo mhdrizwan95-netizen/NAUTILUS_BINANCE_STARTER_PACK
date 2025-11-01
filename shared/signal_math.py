@@ -32,4 +32,3 @@ def confidence_from_score(score: float, *, scale: float = 100.0) -> float:
 
 
 __all__ = ["confidence_from_score"]
-

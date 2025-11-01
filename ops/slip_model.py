@@ -27,7 +27,9 @@ def fit_ridge(X: np.ndarray, y: np.ndarray, lam: float = 1.0) -> np.ndarray:
     return w
 
 
-def train_from_parquet(parq_path: str = PARQUET_PATH, lam: float = 1.0, min_rows: int = 200) -> Optional[Dict[str, Any]]:
+def train_from_parquet(
+    parq_path: str = PARQUET_PATH, lam: float = 1.0, min_rows: int = 200
+) -> Optional[Dict[str, Any]]:
     if not os.path.exists(parq_path):
         return None
     df = pd.read_parquet(parq_path)
@@ -43,7 +45,12 @@ def train_from_parquet(parq_path: str = PARQUET_PATH, lam: float = 1.0, min_rows
     Xz = (X - mu) / sigma
     y = df["slip_bp"].astype(float).values
     w = fit_ridge(Xz, y, lam=lam)
-    model = {"w": w.tolist(), "mu": mu.tolist(), "sigma": sigma.tolist(), "features": FEATURES}
+    model = {
+        "w": w.tolist(),
+        "mu": mu.tolist(),
+        "sigma": sigma.tolist(),
+        "features": FEATURES,
+    }
     os.makedirs(os.path.dirname(MODEL_PATH) or ".", exist_ok=True)
     with open(MODEL_PATH, "w") as f:
         json.dump(model, f)

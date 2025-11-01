@@ -23,9 +23,15 @@ def parse_args() -> argparse.Namespace:
     ap.add_argument("--symbol", required=True, help="Symbol, e.g. BTCUSDT")
     ap.add_argument("--data", required=True, help="Path to CSV/Parquet klines")
     ap.add_argument("--timeframe", default="1m", help="Dataset timeframe label")
-    ap.add_argument("--quote", type=float, default=100.0, help="Quote exposure per signal")
+    ap.add_argument(
+        "--quote", type=float, default=100.0, help="Quote exposure per signal"
+    )
     ap.add_argument("--allow-shorts", action="store_true", help="Allow short signals")
-    ap.add_argument("--output", default="backtests/results/momentum_backtest.json", help="Output JSON path")
+    ap.add_argument(
+        "--output",
+        default="backtests/results/momentum_backtest.json",
+        help="Output JSON path",
+    )
     return ap.parse_args()
 
 
@@ -80,10 +86,11 @@ def main() -> None:
 
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps({"summary": summary, "signals": signals, "orders": orders}, indent=2))
+    out_path.write_text(
+        json.dumps({"summary": summary, "signals": signals, "orders": orders}, indent=2)
+    )
     print(json.dumps(summary, indent=2))
 
 
 if __name__ == "__main__":
     main()
-

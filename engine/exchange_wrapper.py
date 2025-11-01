@@ -3,6 +3,7 @@ import time
 from .metrics import submit_to_ack_ms
 from .risk import RAILS
 
+
 class SafeExchangeClient:
     """Wrapper around exchange client to track latency and record venue errors."""
 

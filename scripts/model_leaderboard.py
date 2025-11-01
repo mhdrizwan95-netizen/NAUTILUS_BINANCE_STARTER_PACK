@@ -12,12 +12,15 @@ Usage:
   python scripts/model_leaderboard.py --top 5              # Show top 5
 """
 
-import os, json, argparse, sys
+import json
+import argparse
+import sys
 from pathlib import Path
 import pandas as pd
 from tabulate import tabulate
 
 REPORTS_DIR = Path("reports")
+
 
 def load_reports() -> pd.DataFrame:
     """Load all backtest reports from reports directory."""
@@ -34,6 +37,7 @@ def load_reports() -> pd.DataFrame:
         raise SystemExit(f"No reports found in {REPORTS_DIR}")
     return pd.DataFrame(rows)
 
+
 def rank_models(metric: str, top: int = 10, ascending: bool = False) -> None:
     """Rank and display models by specified metric."""
     df = load_reports()
@@ -44,7 +48,11 @@ def rank_models(metric: str, top: int = 10, ascending: bool = False) -> None:
 
     # Determine sorting direction
     if ascending is False:  # User didn't specify, determine from metric
-        ascending = "drawdown" in metric.lower() or metric.lower().endswith("_dd") or "max_" in metric.lower()
+        ascending = (
+            "drawdown" in metric.lower()
+            or metric.lower().endswith("_dd")
+            or "max_" in metric.lower()
+        )
 
     df_sorted = df.sort_values(metric, ascending=ascending).reset_index(drop=True)
     df_sorted["rank"] = range(1, len(df_sorted) + 1)
@@ -72,7 +80,7 @@ def rank_models(metric: str, top: int = 10, ascending: bool = False) -> None:
 
         # Show winner details
         best = df_sorted.iloc[0]
-        metric_val = best[metric]
+        best[metric]
         symbol = best.get("symbol", "N/A")
 
         print(f"\n🏆 Best Model: {best['file']}")
@@ -88,28 +96,30 @@ def rank_models(metric: str, top: int = 10, ascending: bool = False) -> None:
         total_models = len(df_sorted)
         print(f"\n📊 Benchmark Summary ({total_models} models)")
         print(f"   Mean {metric}: {df[metric].mean():.4f}")
-        print(f"   Best {metric}: {df[metric].max() if not ascending else df[metric].min():.4f}")
+        print(
+            f"   Best {metric}: {df[metric].max() if not ascending else df[metric].min():.4f}"
+        )
         print(f"   Std {metric}: {df[metric].std():.4f}")
     else:
         print("No models to display")
 
+
 def main():
-    ap = argparse.ArgumentParser(description="Rank model performance across all backtest reports")
+    ap = argparse.ArgumentParser(
+        description="Rank model performance across all backtest reports"
+    )
     ap.add_argument(
         "--metric",
         default="sharpe",
-        help="Metric to rank by: sharpe, pnl_usd, winrate, max_drawdown_usd, trades"
+        help="Metric to rank by: sharpe, pnl_usd, winrate, max_drawdown_usd, trades",
     )
     ap.add_argument(
-        "--top",
-        type=int,
-        default=10,
-        help="Number of top models to display"
+        "--top", type=int, default=10, help="Number of top models to display"
     )
     ap.add_argument(
         "--asc",
         action="store_true",
-        help="Sort ascending (useful for drawdown metrics)"
+        help="Sort ascending (useful for drawdown metrics)",
     )
 
     args = ap.parse_args()
@@ -122,6 +132,8 @@ def main():
 
     return 0
 
+
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

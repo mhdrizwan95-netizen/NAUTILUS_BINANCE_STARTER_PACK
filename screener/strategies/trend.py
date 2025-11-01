@@ -1,4 +1,5 @@
 """Trend-following screener adhering to the live trading E2E lifecycle."""
+
 from __future__ import annotations
 
 from typing import Any, Mapping, MutableMapping, Optional, Sequence

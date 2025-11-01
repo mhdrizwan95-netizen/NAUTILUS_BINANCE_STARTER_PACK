@@ -27,13 +27,16 @@ def on_cross_health_soft(router, cfg):
 
 def on_cross_health_critical(router, cfg):
     async def handler(payload: dict):
-        logging.getLogger(__name__).warning("[RISK] CRITICAL health breach: %s", payload)
+        logging.getLogger(__name__).warning(
+            "[RISK] CRITICAL health breach: %s", payload
+        )
         try:
             # Best-effort hard gate via trading flag
             from engine.risk_guardian import _write_trading_flag
+
             _write_trading_flag(False)
         except Exception:
             pass
         return None
-    return handler
 
+    return handler

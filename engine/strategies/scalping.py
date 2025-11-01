@@ -10,7 +10,7 @@ from typing import Callable, Deque, Dict, Optional, TYPE_CHECKING
 
 from engine import metrics
 from engine.config.defaults import SCALP_DEFAULTS
-from engine.config.env import env_bool, env_float, env_int, env_str
+from engine.config.env import env_bool, env_float, env_int
 from engine.core.market_resolver import resolve_market_choice
 from engine.universe.effective import StrategyUniverse
 from engine.state.cooldown import Cooldowns
@@ -63,26 +63,88 @@ def load_scalp_config(scanner: "SymbolScanner" | None = None) -> ScalpConfig:
         symbols=symbols,
         window_sec=window,
         min_ticks=max(3, env_int("SCALP_MIN_TICKS", SCALP_DEFAULTS["SCALP_MIN_TICKS"])),
-        min_range_bps=max(3.0, env_float("SCALP_MIN_RANGE_BPS", SCALP_DEFAULTS["SCALP_MIN_RANGE_BPS"])),
-        lower_threshold=min(0.45, max(0.0, env_float("SCALP_LOWER_THRESHOLD", SCALP_DEFAULTS["SCALP_LOWER_THRESHOLD"]))),
-        upper_threshold=max(0.55, min(1.0, env_float("SCALP_UPPER_THRESHOLD", SCALP_DEFAULTS["SCALP_UPPER_THRESHOLD"]))),
-        rsi_length=max(2, env_int("SCALP_RSI_LENGTH", SCALP_DEFAULTS["SCALP_RSI_LENGTH"])),
+        min_range_bps=max(
+            3.0, env_float("SCALP_MIN_RANGE_BPS", SCALP_DEFAULTS["SCALP_MIN_RANGE_BPS"])
+        ),
+        lower_threshold=min(
+            0.45,
+            max(
+                0.0,
+                env_float(
+                    "SCALP_LOWER_THRESHOLD", SCALP_DEFAULTS["SCALP_LOWER_THRESHOLD"]
+                ),
+            ),
+        ),
+        upper_threshold=max(
+            0.55,
+            min(
+                1.0,
+                env_float(
+                    "SCALP_UPPER_THRESHOLD", SCALP_DEFAULTS["SCALP_UPPER_THRESHOLD"]
+                ),
+            ),
+        ),
+        rsi_length=max(
+            2, env_int("SCALP_RSI_LENGTH", SCALP_DEFAULTS["SCALP_RSI_LENGTH"])
+        ),
         rsi_buy=max(0.0, env_float("SCALP_RSI_BUY", SCALP_DEFAULTS["SCALP_RSI_BUY"])),
-        rsi_sell=min(100.0, env_float("SCALP_RSI_SELL", SCALP_DEFAULTS["SCALP_RSI_SELL"])),
-        stop_bps=max(4.0, env_float("SCALP_STOP_BPS", SCALP_DEFAULTS["SCALP_STOP_BPS"])),
-        take_profit_bps=max(4.0, env_float("SCALP_TP_BPS", SCALP_DEFAULTS["SCALP_TP_BPS"])),
-        quote_usd=max(10.0, env_float("SCALP_QUOTE_USD", SCALP_DEFAULTS["SCALP_QUOTE_USD"])),
-        cooldown_sec=max(0.0, env_float("SCALP_COOLDOWN_SEC", SCALP_DEFAULTS["SCALP_COOLDOWN_SEC"])),
-        allow_shorts=env_bool("SCALP_ALLOW_SHORTS", SCALP_DEFAULTS["SCALP_ALLOW_SHORTS"]),
-        prefer_futures=env_bool("SCALP_PREFER_FUTURES", SCALP_DEFAULTS["SCALP_PREFER_FUTURES"]),
-        signal_ttl_sec=max(5.0, env_float("SCALP_SIGNAL_TTL_SEC", SCALP_DEFAULTS["SCALP_SIGNAL_TTL_SEC"])),
-        max_signals_per_min=max(1, env_int("SCALP_MAX_SIGNALS_PER_MIN", SCALP_DEFAULTS["SCALP_MAX_SIGNALS_PER_MIN"])),
-        imbalance_threshold=max(0.0, min(1.0, env_float("SCALP_IMBALANCE_THRESHOLD", SCALP_DEFAULTS["SCALP_IMBALANCE_THRESHOLD"]))),
-        max_spread_bps=max(1.0, env_float("SCALP_MAX_SPREAD_BPS", SCALP_DEFAULTS["SCALP_MAX_SPREAD_BPS"])),
-        min_depth_usd=max(1000.0, env_float("SCALP_MIN_DEPTH_USD", SCALP_DEFAULTS["SCALP_MIN_DEPTH_USD"])),
-        momentum_ticks=max(1, env_int("SCALP_MOMENTUM_TICKS", SCALP_DEFAULTS["SCALP_MOMENTUM_TICKS"])),
+        rsi_sell=min(
+            100.0, env_float("SCALP_RSI_SELL", SCALP_DEFAULTS["SCALP_RSI_SELL"])
+        ),
+        stop_bps=max(
+            4.0, env_float("SCALP_STOP_BPS", SCALP_DEFAULTS["SCALP_STOP_BPS"])
+        ),
+        take_profit_bps=max(
+            4.0, env_float("SCALP_TP_BPS", SCALP_DEFAULTS["SCALP_TP_BPS"])
+        ),
+        quote_usd=max(
+            10.0, env_float("SCALP_QUOTE_USD", SCALP_DEFAULTS["SCALP_QUOTE_USD"])
+        ),
+        cooldown_sec=max(
+            0.0, env_float("SCALP_COOLDOWN_SEC", SCALP_DEFAULTS["SCALP_COOLDOWN_SEC"])
+        ),
+        allow_shorts=env_bool(
+            "SCALP_ALLOW_SHORTS", SCALP_DEFAULTS["SCALP_ALLOW_SHORTS"]
+        ),
+        prefer_futures=env_bool(
+            "SCALP_PREFER_FUTURES", SCALP_DEFAULTS["SCALP_PREFER_FUTURES"]
+        ),
+        signal_ttl_sec=max(
+            5.0,
+            env_float("SCALP_SIGNAL_TTL_SEC", SCALP_DEFAULTS["SCALP_SIGNAL_TTL_SEC"]),
+        ),
+        max_signals_per_min=max(
+            1,
+            env_int(
+                "SCALP_MAX_SIGNALS_PER_MIN", SCALP_DEFAULTS["SCALP_MAX_SIGNALS_PER_MIN"]
+            ),
+        ),
+        imbalance_threshold=max(
+            0.0,
+            min(
+                1.0,
+                env_float(
+                    "SCALP_IMBALANCE_THRESHOLD",
+                    SCALP_DEFAULTS["SCALP_IMBALANCE_THRESHOLD"],
+                ),
+            ),
+        ),
+        max_spread_bps=max(
+            1.0,
+            env_float("SCALP_MAX_SPREAD_BPS", SCALP_DEFAULTS["SCALP_MAX_SPREAD_BPS"]),
+        ),
+        min_depth_usd=max(
+            1000.0,
+            env_float("SCALP_MIN_DEPTH_USD", SCALP_DEFAULTS["SCALP_MIN_DEPTH_USD"]),
+        ),
+        momentum_ticks=max(
+            1, env_int("SCALP_MOMENTUM_TICKS", SCALP_DEFAULTS["SCALP_MOMENTUM_TICKS"])
+        ),
         fee_bps=max(0.0, env_float("SCALP_FEE_BPS", SCALP_DEFAULTS["SCALP_FEE_BPS"])),
-        book_stale_sec=max(1.0, env_float("SCALP_BOOK_STALE_SEC", SCALP_DEFAULTS["SCALP_BOOK_STALE_SEC"])),
+        book_stale_sec=max(
+            1.0,
+            env_float("SCALP_BOOK_STALE_SEC", SCALP_DEFAULTS["SCALP_BOOK_STALE_SEC"]),
+        ),
     )
 
 
@@ -220,7 +282,9 @@ class ScalpStrategyModule:
         venue = symbol.split(".")[1].lower() if "." in symbol else "binance"
         try:
             metrics.scalp_spread_bp.labels(symbol=base, venue=venue).set(book.spread_bp)
-            metrics.scalp_orderbook_imbalance.labels(symbol=base, venue=venue).set(book.imbalance)
+            metrics.scalp_orderbook_imbalance.labels(symbol=base, venue=venue).set(
+                book.imbalance
+            )
         except Exception:
             pass
 
@@ -230,7 +294,9 @@ class ScalpStrategyModule:
             return 0.0
         return float(predictor(features))
 
-    def _slip_features(self, book: _BookState, *, side: str, range_bps: float) -> Dict[str, float]:
+    def _slip_features(
+        self, book: _BookState, *, side: str, range_bps: float
+    ) -> Dict[str, float]:
         return {
             "spread_bp": max(book.spread_bp, 0.0),
             "depth_imbalance": book.imbalance,
@@ -259,9 +325,15 @@ class ScalpStrategyModule:
                 side=side,
                 reason=reason,
             ).inc()
-            metrics.scalp_signal_ttl_sec.labels(symbol=base, venue=venue, side=side).set(ttl)
-            metrics.scalp_signal_edge_bp.labels(symbol=base, venue=venue, side=side).set(edge_bp)
-            metrics.scalp_slippage_estimate_bp.labels(symbol=base, venue=venue, side=side).set(slip_bp)
+            metrics.scalp_signal_ttl_sec.labels(
+                symbol=base, venue=venue, side=side
+            ).set(ttl)
+            metrics.scalp_signal_edge_bp.labels(
+                symbol=base, venue=venue, side=side
+            ).set(edge_bp)
+            metrics.scalp_slippage_estimate_bp.labels(
+                symbol=base, venue=venue, side=side
+            ).set(slip_bp)
         except Exception:
             pass
 
@@ -306,7 +378,9 @@ class ScalpStrategyModule:
         rsi_value = _rsi(prices, self.cfg.rsi_length)
 
         momentum_idx = min(self.cfg.momentum_ticks, len(prices) - 1)
-        prev_price = prices[-momentum_idx - 1] if momentum_idx < len(prices) else prices[0]
+        prev_price = (
+            prices[-momentum_idx - 1] if momentum_idx < len(prices) else prices[0]
+        )
         momentum = price - prev_price
 
         try:
@@ -384,7 +458,9 @@ class ScalpStrategyModule:
             slip_bp=slip_bp,
         )
 
-        market_pref = "futures" if (self.cfg.prefer_futures or side == "SELL") else "spot"
+        market_pref = (
+            "futures" if (self.cfg.prefer_futures or side == "SELL") else "spot"
+        )
         market_choice = resolve_market_choice(symbol, market_pref)
         return {
             "symbol": symbol,
@@ -405,4 +481,3 @@ class ScalpStrategyModule:
             },
             "market": market_choice,
         }
-

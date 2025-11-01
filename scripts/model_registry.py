@@ -28,8 +28,10 @@ import sys
 REGISTRY_PATH = Path("engine/models/registry.jsonl")
 ACTIVE_LINK = Path("engine/models/active_hmm_policy.pkl")
 
+
 def _now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
 
 def _read_registry():
     """Read append-only registry file."""
@@ -44,8 +46,12 @@ def _read_registry():
                     entries.append(json.loads(line))
                 except json.JSONDecodeError:
                     # Skip malformed lines but log
-                    print(f"Warning: Skipping malformed registry entry: {line[:50]}...", file=sys.stderr)
+                    print(
+                        f"Warning: Skipping malformed registry entry: {line[:50]}...",
+                        file=sys.stderr,
+                    )
         return entries
+
 
 def _write_entry(entry: dict):
     """Append entry to registry."""
@@ -53,10 +59,12 @@ def _write_entry(entry: dict):
     with open(REGISTRY_PATH, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
+
 def _get_entry_by_tag(tag: str):
     """Find entry by tag."""
     entries = _read_registry()
     return next((e for e in entries if e.get("tag") == tag), None)
+
 
 def cmd_register(args):
     """Register a model in the governance registry."""
@@ -75,12 +83,17 @@ def cmd_register(args):
             except json.JSONDecodeError as e:
                 print(f"Warning: Could not read metrics file: {e}", file=sys.stderr)
         else:
-            print(f"Warning: Metrics file does not exist: {metrics_path}", file=sys.stderr)
+            print(
+                f"Warning: Metrics file does not exist: {metrics_path}", file=sys.stderr
+            )
 
     # Check for existing tag
     existing = _get_entry_by_tag(args.tag)
     if existing:
-        print(f"Warning: Tag '{args.tag}' already exists. Registration will create duplicate.", file=sys.stderr)
+        print(
+            f"Warning: Tag '{args.tag}' already exists. Registration will create duplicate.",
+            file=sys.stderr,
+        )
 
     entry = {
         "tag": args.tag,
@@ -103,6 +116,7 @@ def cmd_register(args):
         sharpe = train_metrics.get("Sharpe", "N/A")
         max_dd = train_metrics.get("max_drawdown_usd", "N/A")
         print(f"   Performance: PnL=${pnl}, Sharpe={sharpe}, MaxDD=${max_dd}")
+
 
 def cmd_promote(args):
     """Promote a registered model to active production."""
@@ -131,7 +145,7 @@ def cmd_promote(args):
         "model_path_dst": str(dst_path),
         "ts_promoted": _now(),
         "promoted_by": args.user or "unknown",
-        "promote_reason": args.reason or f"Promoted {args.tag} to production"
+        "promote_reason": args.reason or f"Promoted {args.tag} to production",
     }
 
     _write_entry(promote_entry)
@@ -141,6 +155,7 @@ def cmd_promote(args):
 
     # Show registry update
     _show_registry_status()
+
 
 def cmd_list(args):
     """List all registered models."""
@@ -169,6 +184,7 @@ def cmd_list(args):
         active_mark = " ← ACTIVE" if _is_active_model(e) else ""
         print(f"{tag:<12} {symbol:<8} {ts:<20} {notes}{active_mark}")
 
+
 def cmd_info(args):
     """Show detailed info for a specific model."""
     entry = _get_entry_by_tag(args.tag)
@@ -194,6 +210,7 @@ def cmd_info(args):
         print(f"  Max Drawdown: ${metrics.get('max_drawdown_usd', 0):.2f}")
         print(f"  Trades:      {metrics.get('trades', 0)}")
 
+
 def _is_active_model(entry):
     """Check if a model is currently active."""
     if not ACTIVE_LINK.exists():
@@ -204,6 +221,7 @@ def _is_active_model(entry):
         return active_path == model_path
     except (OSError, KeyError):
         return False
+
 
 def _show_registry_status():
     """Show current registry status."""
@@ -224,27 +242,32 @@ def _show_registry_status():
     else:
         print("  Active Model: None (engine will use default)")
 
+
 def main():
     parser = argparse.ArgumentParser(description="HMM Model Governance Registry")
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
 
     # Register command
     reg_parser = subparsers.add_parser("register", help="Register a new model")
-    reg_parser.add_argument("--model", required=True,
-                           help="Path to trained HMM model .pkl file")
-    reg_parser.add_argument("--symbol", required=True,
-                           help="Trading symbol for this model")
-    reg_parser.add_argument("--train-metrics",
-                           help="Path to backtest JSON file with performance metrics")
-    reg_parser.add_argument("--tag", required=True,
-                           help="Unique tag for this model (e.g., 'hmm_v1')")
-    reg_parser.add_argument("--notes", default="",
-                           help="Optional notes about this model")
+    reg_parser.add_argument(
+        "--model", required=True, help="Path to trained HMM model .pkl file"
+    )
+    reg_parser.add_argument(
+        "--symbol", required=True, help="Trading symbol for this model"
+    )
+    reg_parser.add_argument(
+        "--train-metrics", help="Path to backtest JSON file with performance metrics"
+    )
+    reg_parser.add_argument(
+        "--tag", required=True, help="Unique tag for this model (e.g., 'hmm_v1')"
+    )
+    reg_parser.add_argument(
+        "--notes", default="", help="Optional notes about this model"
+    )
 
     # Promote command
     prom_parser = subparsers.add_parser("promote", help="Promote model to production")
-    prom_parser.add_argument("--tag", required=True,
-                            help="Model tag to promote")
+    prom_parser.add_argument("--tag", required=True, help="Model tag to promote")
     prom_parser.add_argument("--user", help="Who is promoting (for audit)")
     prom_parser.add_argument("--reason", help="Reason for promotion")
 
@@ -270,6 +293,7 @@ def main():
         cmd_list(args)
     elif args.command == "info":
         cmd_info(args)
+
 
 if __name__ == "__main__":
     main()

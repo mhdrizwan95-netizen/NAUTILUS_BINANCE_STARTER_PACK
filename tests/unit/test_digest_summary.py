@@ -1,5 +1,4 @@
 import types
-import os
 
 from engine.ops.digest import DigestJob
 
@@ -43,7 +42,14 @@ def test_digest_summary_basic(monkeypatch):
     monkeypatch.setenv("DIGEST_INCLUDE_SYMBOLS", "true")
     rollups = FakeRollups()
     tg = FakeTelegram()
-    job = DigestJob(rollups, tg, log=types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None), clock=FakeClock())
+    job = DigestJob(
+        rollups,
+        tg,
+        log=types.SimpleNamespace(
+            info=lambda *a, **k: None, warning=lambda *a, **k: None
+        ),
+        clock=FakeClock(),
+    )
     summary = job._summary()
 
     assert "*Event Breakout – Daily Digest*" in summary
@@ -54,4 +60,3 @@ def test_digest_summary_basic(monkeypatch):
     assert "Half-size applied: *4*" in summary
     assert "late_chase: *3*" in summary and "spread: *2*" in summary
     assert "Top traded:" in summary and "ABCUSDT *3*" in summary
-

@@ -7,7 +7,7 @@ import os
 import statistics
 import time
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence
 
 from engine.metrics import (
     momentum_breakout_candidates_total,
@@ -118,7 +118,9 @@ def load_momentum_config() -> MomentumConfig:
         leverage_major=max(1, _env_int("MOMENTUM_LEVERAGE_MAJOR", 2)),
         leverage_default=max(1, _env_int("MOMENTUM_LEVERAGE_DEFAULT", 2)),
         max_signals_per_cycle=max(1, _env_int("MOMENTUM_MAX_SIGNALS_PER_CYCLE", 3)),
-        min_quote_volume_usd=max(50_000.0, _env_float("MOMENTUM_MIN_QUOTE_VOL_USD", 250_000.0)),
+        min_quote_volume_usd=max(
+            50_000.0, _env_float("MOMENTUM_MIN_QUOTE_VOL_USD", 250_000.0)
+        ),
         default_market=default_market,
     )
 
@@ -140,7 +142,14 @@ class MomentumPlan:
 class MomentumBreakout:
     """Momentum breakout scanner + executor for Binance spot/futures markets."""
 
-    def __init__(self, router, risk, cfg: Optional[MomentumConfig] = None, scanner=None, clock=time) -> None:
+    def __init__(
+        self,
+        router,
+        risk,
+        cfg: Optional[MomentumConfig] = None,
+        scanner=None,
+        clock=time,
+    ) -> None:
         self.cfg = cfg or load_momentum_config()
         self.router = router
         self.risk = risk
@@ -222,11 +231,19 @@ class MomentumBreakout:
         client = self.router.exchange_client()
         if client is None or not hasattr(client, "klines"):
             return None
-        limit = max(self.cfg.lookback_bars + self.cfg.volume_baseline_window + self.cfg.volume_window + 5, self.cfg.atr_length + 5)
+        limit = max(
+            self.cfg.lookback_bars
+            + self.cfg.volume_baseline_window
+            + self.cfg.volume_window
+            + 5,
+            self.cfg.atr_length + 5,
+        )
         raw = client.klines(symbol, interval=self.cfg.atr_interval, limit=limit)
         if hasattr(raw, "__await__"):
             raw = await raw
-        if not isinstance(raw, list) or len(raw) < (self.cfg.lookback_bars + self.cfg.volume_window + 3):
+        if not isinstance(raw, list) or len(raw) < (
+            self.cfg.lookback_bars + self.cfg.volume_window + 3
+        ):
             return None
 
         closes = [float(row[4]) for row in raw]
@@ -237,22 +254,37 @@ class MomentumBreakout:
         price = closes[-1]
         if not math.isfinite(price) or price <= 0:
             return None
-        lookback_idx = -self.cfg.lookback_bars if self.cfg.lookback_bars < len(closes) else -len(closes)
+        lookback_idx = (
+            -self.cfg.lookback_bars
+            if self.cfg.lookback_bars < len(closes)
+            else -len(closes)
+        )
         baseline_price = closes[lookback_idx]
         if baseline_price <= 0:
             return None
         move = (price - baseline_price) / baseline_price
         recent_high = max(highs[lookback_idx:])
-        prior_high = max(highs[:lookback_idx]) if abs(lookback_idx) < len(highs) else recent_high
+        prior_high = (
+            max(highs[:lookback_idx]) if abs(lookback_idx) < len(highs) else recent_high
+        )
         breakout = price >= prior_high and move >= self.cfg.pct_move_threshold
 
-        recent_vol = sum(vols[-self.cfg.volume_window:])
-        baseline_slice = vols[-(self.cfg.volume_window + self.cfg.volume_baseline_window):-self.cfg.volume_window]
+        recent_vol = sum(vols[-self.cfg.volume_window :])
+        baseline_slice = vols[
+            -(
+                self.cfg.volume_window + self.cfg.volume_baseline_window
+            ) : -self.cfg.volume_window
+        ]
         baseline_vol = statistics.mean(baseline_slice) if baseline_slice else 0.0
-        volume_boost = baseline_vol > 0 and (recent_vol / baseline_vol) >= self.cfg.volume_multiplier
-        notional_recent = sum(qvols[-self.cfg.volume_window:])
+        volume_boost = (
+            baseline_vol > 0
+            and (recent_vol / baseline_vol) >= self.cfg.volume_multiplier
+        )
+        notional_recent = sum(qvols[-self.cfg.volume_window :])
         if notional_recent < self.cfg.min_quote_volume_usd:
-            momentum_breakout_candidates_total.labels(symbol, "BINANCE", "low_volume").inc()
+            momentum_breakout_candidates_total.labels(
+                symbol, "BINANCE", "low_volume"
+            ).inc()
             return None
 
         if not breakout or not volume_boost:
@@ -264,7 +296,9 @@ class MomentumBreakout:
         low_anchor = min(window_lows) if window_lows else price
         extension = (price - low_anchor) / max(low_anchor, 1e-9)
         if extension >= self.cfg.max_extension_pct:
-            momentum_breakout_candidates_total.labels(symbol, "BINANCE", "extended").inc()
+            momentum_breakout_candidates_total.labels(
+                symbol, "BINANCE", "extended"
+            ).inc()
             return None
 
         atr = self._atr(highs, lows, closes, self.cfg.atr_length)
@@ -275,7 +309,11 @@ class MomentumBreakout:
         stop_price = max(price - atr * self.cfg.stop_atr_mult, low_anchor)
         trail_distance = atr * self.cfg.trail_atr_mult
         take_profit = price * (1.0 + self.cfg.take_profit_pct)
-        lev = self.cfg.leverage_major if symbol.startswith(("BTC", "ETH")) else self.cfg.leverage_default
+        lev = (
+            self.cfg.leverage_major
+            if symbol.startswith(("BTC", "ETH"))
+            else self.cfg.leverage_default
+        )
         qualified = f"{symbol}.BINANCE"
         market_choice = resolve_market_choice(qualified, self.cfg.default_market)
         plan = MomentumPlan(
@@ -297,7 +335,13 @@ class MomentumBreakout:
         symbol = plan.symbol
         clean = symbol.split(".")[0]
         now = float(self.clock.time())
-        ok, err = self.risk.check_order(symbol=symbol, side="BUY", quote=plan.notional_usd, quantity=None, market=plan.market)
+        ok, err = self.risk.check_order(
+            symbol=symbol,
+            side="BUY",
+            quote=plan.notional_usd,
+            quantity=None,
+            market=plan.market,
+        )
         if not ok:
             reason = (err or {}).get("error", "risk")
             momentum_breakout_orders_total.labels(clean, plan.venue, reason).inc()
@@ -318,9 +362,13 @@ class MomentumBreakout:
             return
         qty = 0.0
         try:
-            result = await self.router.market_quote(symbol, "BUY", plan.notional_usd, market=plan.market)
+            result = await self.router.market_quote(
+                symbol, "BUY", plan.notional_usd, market=plan.market
+            )
             avg = float(result.get("avg_fill_price") or plan.price)
-            qty = float(result.get("filled_qty_base") or result.get("executedQty") or 0.0)
+            qty = float(
+                result.get("filled_qty_base") or result.get("executedQty") or 0.0
+            )
             self.log.info(
                 "[MOMO] LIVE %s qty=%.6f avg=%.4f stop=%.4f tp=%.4f trail≈%.4f market=%s",
                 symbol,
@@ -339,13 +387,19 @@ class MomentumBreakout:
             self.log.warning("[MOMO] execution failed for %s: %s", symbol, exc)
             momentum_breakout_orders_total.labels(clean, plan.venue, "failed").inc()
 
-    async def _arm_managed_exits(self, symbol: str, qty: float, plan: MomentumPlan) -> None:
+    async def _arm_managed_exits(
+        self, symbol: str, qty: float, plan: MomentumPlan
+    ) -> None:
         try:
-            await self.router.amend_stop_reduce_only(symbol, "SELL", plan.stop_price, abs(qty))
+            await self.router.amend_stop_reduce_only(
+                symbol, "SELL", plan.stop_price, abs(qty)
+            )
         except Exception:
             pass
         try:
-            await self.router.place_reduce_only_limit(symbol, "SELL", abs(qty) * 0.5, plan.take_profit)
+            await self.router.place_reduce_only_limit(
+                symbol, "SELL", abs(qty) * 0.5, plan.take_profit
+            )
         except Exception:
             pass
 
@@ -362,7 +416,12 @@ class MomentumBreakout:
         momentum_breakout_cooldown_epoch.labels(symbol).set(resume)
 
     @staticmethod
-    def _atr(highs: Sequence[float], lows: Sequence[float], closes: Sequence[float], length: int) -> float:
+    def _atr(
+        highs: Sequence[float],
+        lows: Sequence[float],
+        closes: Sequence[float],
+        length: int,
+    ) -> float:
         if length <= 1 or len(highs) <= length:
             return 0.0
         trs: List[float] = []

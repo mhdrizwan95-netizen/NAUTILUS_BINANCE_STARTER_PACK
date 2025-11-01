@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI, HTTPException
 from typing import Dict, Any
 import numpy as np
@@ -9,14 +8,17 @@ from .bandit import LinTS
 
 app = FastAPI(title="param-controller", version="0.1.0")
 
+
 @app.on_event("startup")
 def on_start():
     store.init(settings.PC_DB)
     logger.info("param-controller up")
 
+
 @app.get("/health")
 def health():
-    return {"status":"ok"}
+    return {"status": "ok"}
+
 
 @app.post("/preset/register/{strategy}/{instrument}")
 def register_preset(strategy: str, instrument: str, body: Dict[str, Any]):
@@ -26,6 +28,7 @@ def register_preset(strategy: str, instrument: str, body: Dict[str, Any]):
         raise HTTPException(400, "preset_id and params required")
     store.upsert_preset(settings.PC_DB, strategy, instrument, pid, params)
     return {"ok": True}
+
 
 @app.get("/param/{strategy}/{instrument}")
 def get_param(strategy: str, instrument: str, features: Dict[str, float] = {}):
@@ -46,10 +49,18 @@ def get_param(strategy: str, instrument: str, features: Dict[str, float] = {}):
     k = bandit.choose(X)
     pid, params = presets[k]
     config_id = f"{strategy}:{instrument}:{pid}"
-    return {"config_id": config_id, "params": params, "policy_version": "0.1.0", "features_used": feat_keys}
+    return {
+        "config_id": config_id,
+        "params": params,
+        "policy_version": "0.1.0",
+        "features_used": feat_keys,
+    }
+
 
 @app.post("/learn/outcome/{strategy}/{instrument}/{preset_id}")
-def report_outcome(strategy: str, instrument: str, preset_id: str, body: Dict[str, Any]):
+def report_outcome(
+    strategy: str, instrument: str, preset_id: str, body: Dict[str, Any]
+):
     reward = float(body.get("reward", 0.0))
     features = body.get("features", {})
     store.log_outcome(settings.PC_DB, strategy, instrument, preset_id, reward, features)

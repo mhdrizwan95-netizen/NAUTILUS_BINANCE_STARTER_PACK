@@ -48,17 +48,39 @@ def _as_float(v, default=0.0) -> float:
 def _tier_for(item: Dict[str, Any]) -> Optional[DexCandidate]:
     # Extract required fields with defaults
     chain = str(item.get("chainId") or item.get("chain") or "?")
-    token_addr = str((base.get("address") if isinstance(base, dict) else None) or item.get("baseTokenAddress") or "")
-    pair_addr = str(item.get("pairAddress") or item.get("address") or item.get("id") or "")
-    base = (item.get("baseToken") or {})
+    token_addr = str(
+        (base.get("address") if isinstance(base, dict) else None)
+        or item.get("baseTokenAddress")
+        or ""
+    )
+    pair_addr = str(
+        item.get("pairAddress") or item.get("address") or item.get("id") or ""
+    )
+    base = item.get("baseToken") or {}
     symbol = str(base.get("symbol") or item.get("symbol") or "?")
     name = str(base.get("name") or item.get("name") or symbol)
     price = _as_float(item.get("priceUsd") or item.get("price"))
-    liq = _as_float(item.get("liquidity", {}).get("usd") if isinstance(item.get("liquidity"), dict) else item.get("liquidity"))
+    liq = _as_float(
+        item.get("liquidity", {}).get("usd")
+        if isinstance(item.get("liquidity"), dict)
+        else item.get("liquidity")
+    )
     mcap = _as_float(item.get("fdv") or item.get("mcap") or 0.0)
-    vol1h = _as_float(item.get("volume", {}).get("h1") if isinstance(item.get("volume"), dict) else item.get("volumeH1"))
-    vol24 = _as_float(item.get("volume", {}).get("h24") if isinstance(item.get("volume"), dict) else item.get("volumeH24"))
-    chg5 = _as_float(item.get("priceChange", {}).get("m5") if isinstance(item.get("priceChange"), dict) else item.get("change5m"))
+    vol1h = _as_float(
+        item.get("volume", {}).get("h1")
+        if isinstance(item.get("volume"), dict)
+        else item.get("volumeH1")
+    )
+    vol24 = _as_float(
+        item.get("volume", {}).get("h24")
+        if isinstance(item.get("volume"), dict)
+        else item.get("volumeH24")
+    )
+    chg5 = _as_float(
+        item.get("priceChange", {}).get("m5")
+        if isinstance(item.get("priceChange"), dict)
+        else item.get("change5m")
+    )
 
     if (mcap < 3_000_000) or (mcap > 50_000_000):
         return None
@@ -93,7 +115,10 @@ async def fetch_top_gainers(chains: list[str] | None = None) -> List[DexCandidat
     params = {"chains": ",".join(chains)}
     async with httpx.AsyncClient(timeout=10.0) as client:
         try:
-            r = await client.get("https://api.dexscreener.com/latest/dex/search?q=trending", params=params)
+            r = await client.get(
+                "https://api.dexscreener.com/latest/dex/search?q=trending",
+                params=params,
+            )
             r.raise_for_status()
             js = r.json() or {}
             pairs = js.get("pairs") or []
@@ -111,6 +136,7 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
     if os.getenv("DEX_FEED_ENABLED", "").lower() not in {"1", "true", "yes"}:
         return
     from engine.core.event_bus import publish_strategy_event
+
     # Optional social ROC tiering
     try:
         from engine.feeds.social import roc as social_roc
@@ -139,7 +165,9 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
                         "meta": {
                             "source": "dexscreener",
                             "tier_raw": c.tier,
-                            "volume_ratio": (c.vol_1h / max((c.vol_24h / 24) or 1.0, 1e-9)),
+                            "volume_ratio": (
+                                c.vol_1h / max((c.vol_24h / 24) or 1.0, 1e-9)
+                            ),
                         },
                     },
                 )

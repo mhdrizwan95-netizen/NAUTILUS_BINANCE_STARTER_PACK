@@ -6,7 +6,6 @@ Tests sample payloads from all four fallback chain shapes.
 import unittest
 from dashboard.app import _parse_prometheus_text
 from dashboard.app import _from_json
-from dashboard.app import PROM_MAP
 
 
 class TestParsing(unittest.TestCase):
@@ -143,12 +142,14 @@ class TestJsonHelpers(unittest.TestCase):
         """Test nested JSON structure like Ops API responses."""
         obj = {
             "pnl": {"realized": 1000.0, "pnl_realized": 2000.0},
-            "policy": {"drift": 0.33, "confidence": 0.88}
+            "policy": {"drift": 0.33, "confidence": 0.88},
         }
         # Test key extraction with fallbacks
         self.assertEqual(_from_json(obj["pnl"], "realized", "pnl_realized"), 1000.0)
         self.assertEqual(_from_json(obj["policy"], "drift", "drift_score"), 0.33)
-        self.assertEqual(_from_json(obj["policy"], "confidence", "policy_confidence"), 0.88)
+        self.assertEqual(
+            _from_json(obj["policy"], "confidence", "policy_confidence"), 0.88
+        )
 
     def test_invalid_inputs(self):
         """Test handling of None/invalid inputs."""
@@ -174,7 +175,7 @@ class TestFallbackShapes(unittest.TestCase):
                 "drift_score": 0.42,
                 "policy_confidence": 0.88,
                 "order_fill_ratio": 0.67,
-                "venue_latency_ms": 42.0
+                "venue_latency_ms": 42.0,
             }
         }
         metrics = obj.get("metrics") if "metrics" in obj else obj
@@ -201,18 +202,22 @@ class TestFallbackShapes(unittest.TestCase):
         obj = {
             "pnl": {"realized_usd": 1234.56, "unrealized_usd": 78.90},
             "policy": {"drift": 0.42, "policy_confidence": 0.88},
-            "execution": {"fill_ratio": 0.67, "venue_latency_ms": 42.0}
+            "execution": {"fill_ratio": 0.67, "venue_latency_ms": 42.0},
         }
         pnl = obj.get("pnl", obj)
         pol = obj.get("policy", obj)
         exe = obj.get("execution", obj)
         result = {
             "pnl_realized": _from_json(pnl, "realized", "pnl_realized", "realized_usd"),
-            "pnl_unrealized": _from_json(pnl, "unrealized", "pnl_unrealized", "unrealized_usd"),
+            "pnl_unrealized": _from_json(
+                pnl, "unrealized", "pnl_unrealized", "unrealized_usd"
+            ),
             "drift_score": _from_json(pol, "drift", "drift_score"),
             "policy_confidence": _from_json(pol, "confidence", "policy_confidence"),
             "order_fill_ratio": _from_json(exe, "fill_ratio", "order_fill_ratio"),
-            "venue_latency_ms": _from_json(exe, "venue_latency_ms", "latency_ms", "exchange_latency_ms"),
+            "venue_latency_ms": _from_json(
+                exe, "venue_latency_ms", "latency_ms", "exchange_latency_ms"
+            ),
         }
         expected = {
             "pnl_realized": 1234.56,
@@ -227,15 +232,28 @@ class TestFallbackShapes(unittest.TestCase):
     def test_split_endpoints_shape(self):
         """Test split /pnl and /state endpoints."""
         pnl_obj = {"realized_usd": 1234.56, "unrealized_usd": 78.90}
-        state_obj = {"drift": 0.42, "confidence": 0.88, "fill_ratio": 0.67, "exchange_latency_ms": 42.0}
+        state_obj = {
+            "drift": 0.42,
+            "confidence": 0.88,
+            "fill_ratio": 0.67,
+            "exchange_latency_ms": 42.0,
+        }
 
         result = {
-            "pnl_realized": _from_json(pnl_obj, "realized", "pnl_realized", "realized_usd"),
-            "pnl_unrealized": _from_json(pnl_obj, "unrealized", "pnl_unrealized", "unrealized_usd"),
+            "pnl_realized": _from_json(
+                pnl_obj, "realized", "pnl_realized", "realized_usd"
+            ),
+            "pnl_unrealized": _from_json(
+                pnl_obj, "unrealized", "pnl_unrealized", "unrealized_usd"
+            ),
             "drift_score": _from_json(state_obj, "drift", "drift_score"),
-            "policy_confidence": _from_json(state_obj, "confidence", "policy_confidence"),
+            "policy_confidence": _from_json(
+                state_obj, "confidence", "policy_confidence"
+            ),
             "order_fill_ratio": _from_json(state_obj, "fill_ratio", "order_fill_ratio"),
-            "venue_latency_ms": _from_json(state_obj, "latency_ms", "venue_latency_ms", "exchange_latency_ms"),
+            "venue_latency_ms": _from_json(
+                state_obj, "latency_ms", "venue_latency_ms", "exchange_latency_ms"
+            ),
         }
         expected = {
             "pnl_realized": 1234.56,
@@ -248,5 +266,5 @@ class TestFallbackShapes(unittest.TestCase):
         self.assertEqual(result, expected)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()

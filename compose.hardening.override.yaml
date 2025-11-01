@@ -1,0 +1,18 @@
+services:
+  ops:
+    environment:
+      OPS_API_TOKEN_FILE: /run/secrets/ops_api_token
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${SECRETS_DIR:?}/ops_api_token:/run/secrets/ops_api_token:ro
+
+  grafana:
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+    user: "472:472"
+    volumes:
+      - ${SECRETS_DIR:?}/grafana_admin_password:/run/secrets/grafana_admin_password:ro

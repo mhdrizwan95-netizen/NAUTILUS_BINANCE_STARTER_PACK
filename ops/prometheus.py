@@ -4,6 +4,7 @@ Shared Prometheus registry setup with multiprocess support for the ops service.
 Each uvicorn worker owns its own in-memory registry but metrics are aggregated
 through `prometheus_client.multiprocess` using the configured data directory.
 """
+
 from __future__ import annotations
 
 import os

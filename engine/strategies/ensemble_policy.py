@@ -1,8 +1,8 @@
 # engine/strategies/ensemble_policy.py
 from __future__ import annotations
-import math, time
+import time
 from dataclasses import replace
-from typing import Dict, Optional, Tuple, List
+from typing import Dict, Optional, Tuple
 from ..config import load_strategy_config
 from .calibration import adjust_confidence
 
@@ -37,8 +37,13 @@ S = _StrategyConfigProxy(load_strategy_config())
 
 _last_ts: Dict[str, float] = {}
 
-def combine(symbol: str, ma_side: Optional[str], ma_conf: float,
-            hmm_decision: Optional[Tuple[str, float, Dict]]) -> Optional[Tuple[str, float, Dict]]:
+
+def combine(
+    symbol: str,
+    ma_side: Optional[str],
+    ma_conf: float,
+    hmm_decision: Optional[Tuple[str, float, Dict]],
+) -> Optional[Tuple[str, float, Dict]]:
     """
     Combine MA + HMM into one consensus decision.
     Returns (side, quote, meta) or None.
@@ -55,7 +60,11 @@ def combine(symbol: str, ma_side: Optional[str], ma_conf: float,
     has_hmm = hmm_decision is not None
     if has_hmm:
         hmm_val = 1 if hmm_decision[0] == "BUY" else -1
-        hmm_conf = max(hmm_decision[2].get("probs", [0])) if isinstance(hmm_decision[2], dict) else 0.5
+        hmm_conf = (
+            max(hmm_decision[2].get("probs", [0]))
+            if isinstance(hmm_decision[2], dict)
+            else 0.5
+        )
 
     score = (w_ma * ma_val * ma_conf) + (w_hmm * hmm_val * hmm_conf)
     conf = abs((w_ma * ma_conf) + (w_hmm * hmm_conf))
@@ -76,7 +85,9 @@ def combine(symbol: str, ma_side: Optional[str], ma_conf: float,
         "components": {
             "ma_side": ma_side,
             "ma_conf": ma_conf,
-            "hmm_side": "BUY" if has_hmm and hmm_val > 0 else ("SELL" if has_hmm else "NONE"),
+            "hmm_side": (
+                "BUY" if has_hmm and hmm_val > 0 else ("SELL" if has_hmm else "NONE")
+            ),
             "hmm_conf": hmm_conf,
         },
     }

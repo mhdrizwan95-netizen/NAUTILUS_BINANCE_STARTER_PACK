@@ -1,4 +1,5 @@
 """Service implementations that back the Command Center UI API."""
+
 from __future__ import annotations
 
 import json
@@ -24,7 +25,9 @@ def _deepcopy(value: Any) -> Any:
     try:
         return deepcopy(value)
     except Exception:  # pragma: no cover - defensive guard
-        return json.loads(json.dumps(value)) if isinstance(value, (dict, list)) else value
+        return (
+            json.loads(json.dumps(value)) if isinstance(value, (dict, list)) else value
+        )
 
 
 class PortfolioService:
@@ -76,7 +79,9 @@ class OrdersService:
         if self._cancel_endpoint:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 try:
-                    resp = await client.post(self._cancel_endpoint, json={"order_ids": list(ids)})
+                    resp = await client.post(
+                        self._cancel_endpoint, json={"order_ids": list(ids)}
+                    )
                     resp.raise_for_status()
                 except Exception as exc:  # noqa: BLE001
                     raise RuntimeError(f"engine cancellation failed: {exc}") from exc
@@ -182,7 +187,9 @@ class StrategyGovernanceService:
             return {"current": "trend_core", "weights": {"trend_core": 1.0}}
 
     def _save(self, payload: Dict[str, Any]) -> None:
-        self._path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        self._path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     async def list(self) -> Dict[str, Any]:
         with self._lock:
@@ -255,7 +262,9 @@ class ScannerService:
             "event_meme": [],
             "scalp_cex": [],
         }
-        self._path.write_text(json.dumps(default, indent=2, sort_keys=True), encoding="utf-8")
+        self._path.write_text(
+            json.dumps(default, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     def _load(self) -> Dict[str, List[str]]:
         try:
@@ -265,7 +274,9 @@ class ScannerService:
             return {}
 
     def _save(self, payload: Dict[str, List[str]]) -> None:
-        self._path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+        self._path.write_text(
+            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     async def universe(self, strategy_id: str) -> Dict[str, Any]:
         with self._lock:
@@ -353,7 +364,9 @@ class OpsGovernanceService:
             return {"trading_enabled": True}
 
     def _persist(self, state: Dict[str, Any]) -> None:
-        self._state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
+        self._state_path.write_text(
+            json.dumps(state, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     async def status(self) -> Dict[str, Any]:
         state = self._load_state()
@@ -385,7 +398,9 @@ class OpsGovernanceService:
             self._persist(state)
             return {"trading_enabled": state["trading_enabled"], "ts": _now()}
 
-    async def transfer_internal(self, asset: str, amount: float, source: str, target: str) -> Dict[str, Any]:
+    async def transfer_internal(
+        self, asset: str, amount: float, source: str, target: str
+    ) -> Dict[str, Any]:
         # This implementation simply logs the intent; integration with the venue API can be
         # added later without changing the UI contract.
         logger.info(

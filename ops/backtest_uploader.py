@@ -8,7 +8,11 @@ so it appears instantly in /strategy/ui leaderboard.
 This creates the closed-loop: research → registry → governance → deployment
 """
 
-import os, json, hashlib, shutil, time, subprocess
+import json
+import hashlib
+import shutil
+import time
+import subprocess
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
@@ -78,7 +82,7 @@ def register_model(
     config_path: Optional[str] = None,
     extra_metrics: Optional[Dict[str, Any]] = None,
     register_type: str = "backtest",
-    description: str = ""
+    description: str = "",
 ):
     """
     Copy artifacts into ops/model_artifacts/<tag>/ and register metadata.
@@ -159,7 +163,7 @@ def register_model(
         "register_type": register_type,
         "description": description or f"Registered via {register_type}",
         "git_sha": get_git_sha(),
-        "registered_at": utc_now()
+        "registered_at": utc_now(),
     }
 
     # Initialize model if it doesn't exist
@@ -169,9 +173,22 @@ def register_model(
         # Update existing but preserve some live statistics
         existing = registry[tag]
         for key, value in entry.items():
-            if key in ["sharpe", "drawdown", "realized", "trades", "version", "artifact_path",
-                      "metrics_path", "backtest_plot", "config_hash", "last_promotion",
-                      "register_type", "description", "git_sha", "registered_at"]:
+            if key in [
+                "sharpe",
+                "drawdown",
+                "realized",
+                "trades",
+                "version",
+                "artifact_path",
+                "metrics_path",
+                "backtest_plot",
+                "config_hash",
+                "last_promotion",
+                "register_type",
+                "description",
+                "git_sha",
+                "registered_at",
+            ]:
                 existing[key] = value
         registry[tag] = existing
 
@@ -183,7 +200,7 @@ def register_model(
         "registry_path": str(REGISTRY_PATH),
         "artifact_dir": str(model_dir),
         "hash": config_hash,
-        "ready_for_promotion": True
+        "ready_for_promotion": True,
     }
 
 
@@ -193,8 +210,10 @@ def list_registered_models() -> Dict[str, Any]:
 
     summary = {
         "current_model": registry.get("current_model"),
-        "total_registered": len([k for k in registry.keys() if k not in ["current_model", "promotion_log"]]),
-        "models": {}
+        "total_registered": len(
+            [k for k in registry.keys() if k not in ["current_model", "promotion_log"]]
+        ),
+        "models": {},
     }
 
     for tag, stats in registry.items():
@@ -205,7 +224,7 @@ def list_registered_models() -> Dict[str, Any]:
             "version": stats.get("version", 1),
             "registered": stats.get("registered_at"),
             "has_artifacts": bool(stats.get("artifact_path")),
-            "has_plot": bool(stats.get("backtest_plot"))
+            "has_plot": bool(stats.get("backtest_plot")),
         }
 
     return summary
@@ -238,7 +257,7 @@ Examples:
     --weights experiments/sma_fast/weights.pt \\
     --type exploration \\
     --description "Fast SMA crossover variant for testing"
-        """
+        """,
     )
 
     parser.add_argument("--tag", required=True, help="Model tag identifier")
@@ -246,11 +265,16 @@ Examples:
     parser.add_argument("--metrics", help="Path to metrics.json file")
     parser.add_argument("--plot", help="Path to backtest plot image")
     parser.add_argument("--config", help="Path to hyperparameters config")
-    parser.add_argument("--type", choices=["backtest", "training", "exploration"],
-                       default="backtest", help="Registration type")
+    parser.add_argument(
+        "--type",
+        choices=["backtest", "training", "exploration"],
+        default="backtest",
+        help="Registration type",
+    )
     parser.add_argument("--description", help="Human-readable description")
-    parser.add_argument("--extra-metrics", type=json.loads,
-                       help="Extra metrics as JSON string")
+    parser.add_argument(
+        "--extra-metrics", type=json.loads, help="Extra metrics as JSON string"
+    )
 
     args = parser.parse_args()
 
@@ -263,11 +287,11 @@ Examples:
             config_path=args.config,
             extra_metrics=args.extra_metrics,
             register_type=args.type,
-            description=args.description
+            description=args.description,
         )
 
         # Success summary
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print("🎉 MODEL REGISTRATION SUCCESSFUL!")
         print(f"   Tag: {result['model_tag']}")
         print(f"   Hash: {result['hash']}")
@@ -276,7 +300,7 @@ Examples:
         print("\n📊 Check governance dashboard:")
         print("   http://localhost:8002/strategy/ui")
         print("   http://localhost:8002/strategy/leaderboard")
-        print("="*60)
+        print("=" * 60)
 
     except Exception as e:
         print(f"\n❌ REGISTRATION FAILED: {e}")

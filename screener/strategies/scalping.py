@@ -1,4 +1,5 @@
 """High frequency scalping screener built for the shared pipeline."""
+
 from __future__ import annotations
 
 from typing import Any, Mapping, MutableMapping, Optional, Sequence

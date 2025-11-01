@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture()
 def client() -> TestClient:
     from ops import ops_api as appmod
+
     return TestClient(appmod.app)
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -49,7 +49,9 @@ async def patch_situation(name: str, patch: Dict[str, Any]):
 async def update_priorities(body: Dict[str, Any]):
     ok = True
     for u in body.get("updates", []):
-        ok = (await _store.update_priority(u.get("name"), float(u.get("priority", 0)))) and ok
+        ok = (
+            await _store.update_priority(u.get("name"), float(u.get("priority", 0)))
+        ) and ok
     return {"ok": ok}
 
 
@@ -62,7 +64,7 @@ async def post_feedback(body: Dict[str, Any]):
 
 @router.get("/situations/events/recent")
 def recent_events(limit: int = 100) -> Dict[str, Any]:
-    items = list(_matcher.recent)[-int(limit):]
+    items = list(_matcher.recent)[-int(limit) :]
     return {"items": items}
 
 

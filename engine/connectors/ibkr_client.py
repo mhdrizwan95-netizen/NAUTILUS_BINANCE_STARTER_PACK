@@ -1,17 +1,20 @@
 # engine/connectors/ibkr_client.py
 from __future__ import annotations
-import os, time
+import os
 from typing import Optional
-from ib_insync import IB, Stock, MarketOrder, util
+from ib_insync import IB, Stock, MarketOrder
 
 
 def _enabled() -> bool:
     return os.getenv("IBKR_ENABLED", "").strip().lower() in {"1", "true", "yes", "on"}
 
+
 class IbkrClient:
     def __init__(self):
         if not _enabled():
-            raise RuntimeError("IBKR client disabled. Set IBKR_ENABLED=true to initialize.")
+            raise RuntimeError(
+                "IBKR client disabled. Set IBKR_ENABLED=true to initialize."
+            )
         self.ib = None
         self._connected = False
         try:
@@ -56,9 +59,14 @@ class IbkrClient:
         if not self._connected or not self.ib:
             raise ValueError("IBKR_NOT_CONNECTED", "IBKR client is not connected")
         if quote:
-            raise ValueError("QUOTE_UNSUPPORTED", "Router must convert quote→quantity for IBKR equities.")
+            raise ValueError(
+                "QUOTE_UNSUPPORTED",
+                "Router must convert quote→quantity for IBKR equities.",
+            )
         if quantity is None or int(quantity) != quantity:
-            raise ValueError("QTY_INTEGER_REQUIRED", "IBKR equities require integer share quantity.")
+            raise ValueError(
+                "QTY_INTEGER_REQUIRED", "IBKR equities require integer share quantity."
+            )
         try:
             c = self._to_contract(symbol)
             action = "BUY" if side.upper() == "BUY" else "SELL"

@@ -4,7 +4,6 @@ import argparse
 import glob
 import os
 from datetime import datetime
-from typing import List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -13,7 +12,9 @@ import pandas as pd
 def _load_outcomes(pattern: str) -> pd.DataFrame:
     paths = sorted(glob.glob(pattern))
     if not paths:
-        return pd.DataFrame(columns=["symbol", "situation", "pnl_usd", "entry_ts", "exit_ts"])
+        return pd.DataFrame(
+            columns=["symbol", "situation", "pnl_usd", "entry_ts", "exit_ts"]
+        )
     return pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
 
 
@@ -22,14 +23,16 @@ def _max_drawdown(equity: np.ndarray) -> float:
     mdd = 0.0
     for v in equity:
         peak = max(peak, v)
-        dd = (peak - v)
+        dd = peak - v
         if dd > mdd:
             mdd = dd
     return float(mdd)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Generate simple backtest report from outcomes")
+    ap = argparse.ArgumentParser(
+        description="Generate simple backtest report from outcomes"
+    )
     ap.add_argument("--range", required=False, help="Range label for report directory")
     ap.add_argument("--pattern", default="data/outcomes/*.parquet")
     args = ap.parse_args()
@@ -46,7 +49,13 @@ def main() -> None:
     wins = int((df["pnl_usd"] > 0).sum())
     n = int(len(df))
     win_rate = (wins / n) * 100.0 if n else 0.0
-    sharpe = float(np.mean(df["pnl_usd"])) / (float(np.std(df["pnl_usd"])) + 1e-9) * (252 ** 0.5) if n else 0.0
+    sharpe = (
+        float(np.mean(df["pnl_usd"]))
+        / (float(np.std(df["pnl_usd"])) + 1e-9)
+        * (252**0.5)
+        if n
+        else 0.0
+    )
     mdd = _max_drawdown(equity)
 
     label = args.range or datetime.utcnow().strftime("%Y-%m-%d")
@@ -63,9 +72,13 @@ def main() -> None:
         "",
         "## By Situation",
     ]
-    by_sit = df.groupby("situation")["pnl_usd"].agg(["count", "mean", "sum"]).reset_index()
+    by_sit = (
+        df.groupby("situation")["pnl_usd"].agg(["count", "mean", "sum"]).reset_index()
+    )
     for _, r in by_sit.iterrows():
-        md.append(f"- {r['situation']}: n={int(r['count'])} mean={float(r['mean']):.2f} sum={float(r['sum']):.2f}")
+        md.append(
+            f"- {r['situation']}: n={int(r['count'])} mean={float(r['mean']):.2f} sum={float(r['sum']):.2f}"
+        )
     with open(os.path.join(outdir, "index.md"), "w") as f:
         f.write("\n".join(md))
     print(os.path.join(outdir, "index.md"))

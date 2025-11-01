@@ -1,12 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import glob
 import os
 from datetime import datetime, timedelta
-from typing import Iterable, List
+from typing import List
 
-import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
@@ -24,7 +22,12 @@ def daterange(start: str, end: str) -> List[str]:
     return out
 
 
-def _build_day(symbol: str, day: str, src_root: str = "data/raw/binance/spot/1m", dst_root: str = "data/features/1m") -> str | None:
+def _build_day(
+    symbol: str,
+    day: str,
+    src_root: str = "data/raw/binance/spot/1m",
+    dst_root: str = "data/features/1m",
+) -> str | None:
     year = day[:4]
     src = f"{src_root}/{symbol}/{year}/{day}.parquet"
     if not os.path.exists(src):
@@ -35,7 +38,10 @@ def _build_day(symbol: str, day: str, src_root: str = "data/raw/binance/spot/1m"
     for i in range(60, len(raw)):
         window = raw.iloc[i - 60 : i + 1]
         # construct minimal klines used by live_compute (indexes 4=close,5=volume)
-        kl = [[None, None, None, None, str(x.close), str(x.volume)] for x in window.itertuples()]
+        kl = [
+            [None, None, None, None, str(x.close), str(x.volume)]
+            for x in window.itertuples()
+        ]
         last = float(window.close.iloc[-1])
         # use a simple spread proxy (5 bps) if no depth available
         book = {"bids": [[last * 0.9995, 1.0]], "asks": [[last * 1.0005, 1.0]]}
@@ -53,7 +59,9 @@ def _build_day(symbol: str, day: str, src_root: str = "data/raw/binance/spot/1m"
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Build offline features from raw Parquet")
-    ap.add_argument("--symbols", required=True, help="Comma-separated symbols, e.g. BTCUSDT,ETHUSDT")
+    ap.add_argument(
+        "--symbols", required=True, help="Comma-separated symbols, e.g. BTCUSDT,ETHUSDT"
+    )
     ap.add_argument("--range", required=True, help="YYYY-MM-DD..YYYY-MM-DD inclusive")
     args = ap.parse_args()
 

@@ -1,12 +1,17 @@
 # ops/strategy_tracker.py
-import time, json, math, asyncio, httpx, logging
+import json
+import asyncio
+import httpx
+import logging
 from statistics import mean, pstdev
 from pathlib import Path
 from ops.env import engine_endpoints
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+)
 
 # Prometheus metrics for strategy performance monitoring
 from prometheus_client import Gauge
@@ -34,6 +39,7 @@ REALIZED_GAUGE = Gauge(
     multiprocess_mode="max",
 )
 
+
 def load_registry() -> dict:
     if REGISTRY_PATH.exists():
         try:
@@ -42,12 +48,16 @@ def load_registry() -> dict:
             pass
     return {"current_model": None}
 
+
 def save_registry(d: dict):
     tmp = REGISTRY_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(d, indent=2))
     tmp.replace(REGISTRY_PATH)
 
-async def fetch_strategy_metrics(base_url: str, current_model: str | None = None) -> dict:
+
+async def fetch_strategy_metrics(
+    base_url: str, current_model: str | None = None
+) -> dict:
     """
     Scrape strategy-tagged PnL metrics from engine /metrics endpoint.
     Expects Prometheus format like: pnl_realized_total{venue="BINANCE",model="hmm_v1"} 120.0
@@ -80,12 +90,12 @@ async def fetch_strategy_metrics(base_url: str, current_model: str | None = None
         realized = None
         unrealized = None
         for line in txt.splitlines():
-            if line.startswith("pnl_realized_total ") and ' {' not in line:
+            if line.startswith("pnl_realized_total ") and " {" not in line:
                 try:
                     realized = float(line.split()[-1])
                 except Exception:
                     pass
-            if line.startswith("pnl_unrealized_total ") and ' {' not in line:
+            if line.startswith("pnl_unrealized_total ") and " {" not in line:
                 try:
                     unrealized = float(line.split()[-1])
                 except Exception:
@@ -98,6 +108,7 @@ async def fetch_strategy_metrics(base_url: str, current_model: str | None = None
                 data[current_model]["unrealized"] = unrealized
 
     return data
+
 
 async def strategy_tracker_loop():
     """
@@ -161,7 +172,9 @@ async def strategy_tracker_loop():
             save_registry(registry)
             samples += 1
             if samples % 6 == 0:  # Every 60s at 10s intervals
-                logging.info(f"[StrategyTracker] Updated {len(all_data)} models; current: {registry.get('current_model')}")
+                logging.info(
+                    f"[StrategyTracker] Updated {len(all_data)} models; current: {registry.get('current_model')}"
+                )
         except Exception as e:
             logging.warning(f"Strategy tracker error: {e}")
 

@@ -3,12 +3,12 @@ IBKR venue adapter for the multi-venue engine.
 
 Provides IBKR-specific implementation of VenueClient protocol.
 """
+
 from __future__ import annotations
 from typing import Optional, Dict, Any, List
 import logging
 
 from engine.connectors.ibkr_client import IbkrClient
-from engine.config import load_ibkr_fee_config, ibkr_min_notional_usd
 
 
 class IbkrVenue:
@@ -26,18 +26,20 @@ class IbkrVenue:
         clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
         return self._c.get_last_price(clean_symbol)
 
-    def place_market_order(self, *, symbol: str, side: str, quote: float | None, quantity: float | None) -> Dict[str, Any]:
+    def place_market_order(
+        self, *, symbol: str, side: str, quote: float | None, quantity: float | None
+    ) -> Dict[str, Any]:
         """Place market order via IBKR. Only supports quantity (integer shares)."""
         if quote is not None:
-            raise ValueError("QUOTE_UNSUPPORTED: IBKR router must convert quote to integer shares")
+            raise ValueError(
+                "QUOTE_UNSUPPORTED: IBKR router must convert quote to integer shares"
+            )
 
         clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
         quantity_int = int(quantity or 0)
 
         result = self._c.place_market_order(
-            symbol=clean_symbol,
-            side=side,
-            quantity=quantity_int
+            symbol=clean_symbol, side=side, quantity=quantity_int
         )
 
         # Add venue info
@@ -61,18 +63,21 @@ class IbkrVenue:
         """List open orders for IBKR reconciliation."""
         try:
             orders = self._c.ib.openOrders()
-            return [{
-                "order_id": str(o.orderId),
-                "symbol": o.contract.symbol,
-                "side": o.action,
-                "type": o.orderType,
-                "price": o.l_auxPrice or o.lmtPrice or 0.0,
-                "stop_price": o.auxPrice if o.orderType.startswith("STP") else 0.0,
-                "origQty": o.totalQuantity,
-                "executedQty": 0.0,  # IBKR doesn't expose partial fills easily
-                "status": "Submitted",  # IBKR openOrders are active
-                "timeInForce": o.tif or "GTC"
-            } for o in orders]
+            return [
+                {
+                    "order_id": str(o.orderId),
+                    "symbol": o.contract.symbol,
+                    "side": o.action,
+                    "type": o.orderType,
+                    "price": o.l_auxPrice or o.lmtPrice or 0.0,
+                    "stop_price": o.auxPrice if o.orderType.startswith("STP") else 0.0,
+                    "origQty": o.totalQuantity,
+                    "executedQty": 0.0,  # IBKR doesn't expose partial fills easily
+                    "status": "Submitted",  # IBKR openOrders are active
+                    "timeInForce": o.tif or "GTC",
+                }
+                for o in orders
+            ]
         except Exception as e:
             logging.warning(f"[IBKR] Failed to list open orders: {e}")
             return []

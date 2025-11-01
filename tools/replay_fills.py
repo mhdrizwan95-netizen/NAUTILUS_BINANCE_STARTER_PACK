@@ -33,13 +33,18 @@ def main(path: str) -> int:
             fee_usd=float(fill.get("fee_usd", 0.0)),
         )
     snap = p.state.snapshot()
-    print(json.dumps({
-        "cash": snap["cash"],
-        "equity": snap["equity"],
-        "exposure": snap["exposure"],
-        "pnl": snap["pnl"],
-        "positions": snap["positions"],
-    }, separators=(",", ":")))
+    print(
+        json.dumps(
+            {
+                "cash": snap["cash"],
+                "equity": snap["equity"],
+                "exposure": snap["exposure"],
+                "pnl": snap["pnl"],
+                "positions": snap["positions"],
+            },
+            separators=(",", ":"),
+        )
+    )
     return 0
 
 
@@ -48,4 +53,3 @@ if __name__ == "__main__":
         print("Usage: python tools/replay_fills.py <path-to-fills.json>")
         sys.exit(2)
     sys.exit(main(sys.argv[1]))
-

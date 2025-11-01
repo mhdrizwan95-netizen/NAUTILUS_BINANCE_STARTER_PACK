@@ -3,9 +3,11 @@ Central venue registry and protocol for multi-venue trading.
 
 Provides unified interface across different exchanges (Binance crypto, IBKR traditional assets).
 """
+
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol, Optional, Dict, Any, List
+
 
 class VenueClient(Protocol):
     """Unified interface that all venue adapters must implement."""
@@ -14,7 +16,9 @@ class VenueClient(Protocol):
         """Get latest price for a symbol. Returns None if unavailable."""
         ...
 
-    def place_market_order(self, *, symbol: str, side: str, quote: float | None, quantity: float | None) -> Dict[str, Any]:
+    def place_market_order(
+        self, *, symbol: str, side: str, quote: float | None, quantity: float | None
+    ) -> Dict[str, Any]:
         """
         Place market order.
 
@@ -41,6 +45,7 @@ class VenueClient(Protocol):
 @dataclass
 class VenueEntry:
     """Registered venue with client."""
+
     name: str
     client: VenueClient
 

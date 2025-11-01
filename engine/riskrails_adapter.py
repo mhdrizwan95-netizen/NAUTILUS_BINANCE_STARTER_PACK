@@ -4,6 +4,7 @@ RiskRails adapter: convenience helpers to thread dynamic_policy into existing si
 Call `compute_order(...)` from your risk checks to obtain mode, dynamic position sizing,
 and updated exposure caps based on live market/account inputs.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

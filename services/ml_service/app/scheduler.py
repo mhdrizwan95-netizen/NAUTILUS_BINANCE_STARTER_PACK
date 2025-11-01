@@ -1,9 +1,9 @@
-
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 from .config import settings
 from .trainer import train_once
+
 
 def main():
     logger.info("scheduler starting")
@@ -16,12 +16,20 @@ def main():
         except Exception as e:
             logger.exception(f"retrain failed: {e}")
 
-    sched.add_job(_job, CronTrigger.from_crontab(settings.RETRAIN_CRON), name="periodic_retrain", max_instances=1, coalesce=True, misfire_grace_time=600)
+    sched.add_job(
+        _job,
+        CronTrigger.from_crontab(settings.RETRAIN_CRON),
+        name="periodic_retrain",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=600,
+    )
 
     try:
         sched.start()
     except (KeyboardInterrupt, SystemExit):
         pass
+
 
 if __name__ == "__main__":
     main()

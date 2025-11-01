@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import time
-from typing import Any
 
 
 class HealthNotifier:
@@ -34,7 +32,9 @@ class HealthNotifier:
         if (now - self.last_change_ts) < int(self.cfg.get("HEALTH_DEBOUNCE_SEC", 10)):
             return
         try:
-            self.metrics.health_transitions_total.labels(str(self.last_state), str(new), reason).inc()
+            self.metrics.health_transitions_total.labels(
+                str(self.last_state), str(new), reason
+            ).inc()
         except Exception:
             pass
         self.last_state, self.last_change_ts = new, now
@@ -48,4 +48,3 @@ class HealthNotifier:
                 self.log.warning("[HEALTH] Telegram send failed: %s", e)
             except Exception:
                 pass
-

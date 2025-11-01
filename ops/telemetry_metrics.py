@@ -1,4 +1,5 @@
 """Lightweight Prometheus counters shared across ops utilities."""
+
 from __future__ import annotations
 
 from prometheus_client import Counter

@@ -11,6 +11,7 @@ ENV:
   EXPLORATION: 0..1 exploration weight added to each score (default 0.08)
   EMA_ALPHA: 0..1 smoothing of PnL EMA (default 0.35)
 """
+
 from __future__ import annotations
 
 import math

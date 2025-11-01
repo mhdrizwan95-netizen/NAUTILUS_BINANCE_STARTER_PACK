@@ -1,11 +1,20 @@
 """FastAPI router exposing the Command Center surface."""
+
 from __future__ import annotations
 
 import asyncio
 import os
 from typing import Any, Dict, List, Optional, Set
 
-from fastapi import APIRouter, Depends, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    HTTPException,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 import json
 import random
 import time
@@ -22,7 +31,21 @@ from pydantic import BaseModel
 
 from ops import ui_state
 
-OPS_TOKEN = os.getenv("OPS_API_TOKEN", "dev-token")
+
+def _load_ops_token() -> str:
+    token = os.getenv("OPS_API_TOKEN")
+    token_file = os.getenv("OPS_API_TOKEN_FILE")
+    if token_file:
+        try:
+            token = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE ({token_file})") from exc
+    if not token or token == "dev-token":
+        raise RuntimeError("Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Command Center API")
+    return token
+
+
+OPS_TOKEN = _load_ops_token()
 WS_TOKEN = OPS_TOKEN
 
 router = APIRouter(prefix="/api", tags=["command-center"])
@@ -55,7 +78,9 @@ class TransferRequest(BaseModel):
 
 def require_ops_token(x_ops_token: Optional[str] = Header(None)) -> None:
     if x_ops_token != OPS_TOKEN:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
+        )
 
 
 def get_state() -> Dict[str, Any]:
@@ -84,7 +109,9 @@ def _load_params() -> Dict[str, Any]:
 
 
 def _save_params(payload: Dict[str, Any]) -> None:
-    PARAMS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    PARAMS_PATH.write_text(
+        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    )
 
 
 def _yaml_schema_to_param_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -93,40 +120,48 @@ def _yaml_schema_to_param_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
     for key, spec in (raw.get("parameters") or {}).items():
         typ = (spec.get("type") or "").lower()
         if typ in {"int", "integer"}:
-            fields.append({
-                "type": "integer",
-                "key": key,
-                "label": key.replace("_", " ").title(),
-                "min": spec.get("min"),
-                "max": spec.get("max"),
-                "step": 1,
-                "default": (spec.get("presets") or [spec.get("min") or 0])[0],
-            })
+            fields.append(
+                {
+                    "type": "integer",
+                    "key": key,
+                    "label": key.replace("_", " ").title(),
+                    "min": spec.get("min"),
+                    "max": spec.get("max"),
+                    "step": 1,
+                    "default": (spec.get("presets") or [spec.get("min") or 0])[0],
+                }
+            )
         elif typ in {"float", "number"}:
-            fields.append({
-                "type": "number",
-                "key": key,
-                "label": key.replace("_", " ").title(),
-                "min": spec.get("min"),
-                "max": spec.get("max"),
-                "step": 0.1,
-                "default": (spec.get("presets") or [spec.get("min") or 0.0])[0],
-            })
+            fields.append(
+                {
+                    "type": "number",
+                    "key": key,
+                    "label": key.replace("_", " ").title(),
+                    "min": spec.get("min"),
+                    "max": spec.get("max"),
+                    "step": 0.1,
+                    "default": (spec.get("presets") or [spec.get("min") or 0.0])[0],
+                }
+            )
         elif typ == "bool":
-            fields.append({
-                "type": "boolean",
-                "key": key,
-                "label": key.replace("_", " ").title(),
-                "default": bool(spec.get("default", False)),
-            })
+            fields.append(
+                {
+                    "type": "boolean",
+                    "key": key,
+                    "label": key.replace("_", " ").title(),
+                    "default": bool(spec.get("default", False)),
+                }
+            )
         else:
             # fallback to string
-            fields.append({
-                "type": "string",
-                "key": key,
-                "label": key.replace("_", " ").title(),
-                "default": str(spec.get("default", "")),
-            })
+            fields.append(
+                {
+                    "type": "string",
+                    "key": key,
+                    "label": key.replace("_", " ").title(),
+                    "default": str(spec.get("default", "")),
+                }
+            )
     return {"title": raw.get("strategy") or raw.get("title"), "fields": fields}
 
 
@@ -188,7 +223,9 @@ async def strategies_patch(
 
 
 @router.get("/universe/{strategy_id}")
-async def universe_get(strategy_id: str, state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def universe_get(
+    strategy_id: str, state: Dict[str, Any] = Depends(get_state)
+) -> Any:
     return await state["scanner"].universe(strategy_id)
 
 
@@ -270,7 +307,9 @@ async def account_transfer(
     state: Dict[str, Any] = Depends(get_state),
     _auth: None = Depends(require_ops_token),
 ) -> Any:
-    return await state["ops"].transfer_internal(body.asset, body.amount, body.source, body.target)
+    return await state["ops"].transfer_internal(
+        body.asset, body.amount, body.source, body.target
+    )
 
 
 @router.post("/events/trade")
@@ -280,14 +319,18 @@ async def post_trade_event(
 ) -> Any:
     # Capture recent trade for the frontend feed
     try:
-        RECENT_TRADES.append({
-            "time": item.get("time") or item.get("timestamp") or int(time.time() * 1000),
-            "symbol": item.get("symbol"),
-            "side": item.get("side"),
-            "qty": float(item.get("qty") or item.get("quantity") or 0),
-            "price": float(item.get("price") or 0),
-            "pnl": item.get("pnl"),
-        })
+        RECENT_TRADES.append(
+            {
+                "time": item.get("time")
+                or item.get("timestamp")
+                or int(time.time() * 1000),
+                "symbol": item.get("symbol"),
+                "side": item.get("side"),
+                "qty": float(item.get("qty") or item.get("quantity") or 0),
+                "price": float(item.get("price") or 0),
+                "pnl": item.get("pnl"),
+            }
+        )
     except Exception:
         pass
     await broadcast_trade(item)
@@ -296,6 +339,7 @@ async def post_trade_event(
 
 
 # ----------------------- Frontend integration endpoints ----------------------
+
 
 @router.get("/strategies")
 async def cc_strategies_list(state: Dict[str, Any] = Depends(get_state)) -> Any:
@@ -321,12 +365,15 @@ async def cc_strategies_list(state: Dict[str, Any] = Depends(get_state)) -> Any:
         perf = {"pnl": 0.0}
         try:
             import random, time as _time
+
             rnd = random.Random(hash(sid) & 0xFFFF)
             base = 10000.0
             series = []
             for i in range(24):
-                base *= (1 + rnd.gauss(0.0005, 0.01))
-                ts = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime(_time.time() - (24 - i) * 3600))
+                base *= 1 + rnd.gauss(0.0005, 0.01)
+                ts = _time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", _time.gmtime(_time.time() - (24 - i) * 3600)
+                )
                 series.append({"t": ts, "equity": round(base, 2)})
             perf = {
                 "pnl": round(base - 10000.0, 2),
@@ -338,22 +385,26 @@ async def cc_strategies_list(state: Dict[str, Any] = Depends(get_state)) -> Any:
         except Exception:
             pass
 
-        items.append({
-            "id": sid,
-            "name": sid,
-            "kind": "strategy",
-            "status": "running" if entry.get("enabled") else "stopped",
-            "symbols": symbols,
-            "paramsSchema": schema,
-            "params": params,
-            "performance": perf,
-        })
+        items.append(
+            {
+                "id": sid,
+                "name": sid,
+                "kind": "strategy",
+                "status": "running" if entry.get("enabled") else "stopped",
+                "symbols": symbols,
+                "paramsSchema": schema,
+                "params": params,
+                "performance": perf,
+            }
+        )
 
     return items
 
 
 @router.get("/strategies/{strategy_id}")
-async def cc_strategy_get(strategy_id: str, state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def cc_strategy_get(
+    strategy_id: str, state: Dict[str, Any] = Depends(get_state)
+) -> Any:
     params_store = _load_params()
     schema = _load_strategy_schema(strategy_id)
     try:
@@ -373,7 +424,11 @@ async def cc_strategy_get(strategy_id: str, state: Dict[str, Any] = Depends(get_
 
 
 @router.post("/strategies/{strategy_id}/start")
-async def cc_strategy_start(strategy_id: str, body: Dict[str, Any] | None = None, state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def cc_strategy_start(
+    strategy_id: str,
+    body: Dict[str, Any] | None = None,
+    state: Dict[str, Any] = Depends(get_state),
+) -> Any:
     try:
         await state["strategy"].patch(strategy_id, {"enabled": True})
         # Optionally accept params overrides
@@ -387,7 +442,9 @@ async def cc_strategy_start(strategy_id: str, body: Dict[str, Any] | None = None
 
 
 @router.post("/strategies/{strategy_id}/stop")
-async def cc_strategy_stop(strategy_id: str, state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def cc_strategy_stop(
+    strategy_id: str, state: Dict[str, Any] = Depends(get_state)
+) -> Any:
     try:
         await state["strategy"].patch(strategy_id, {"enabled": False})
         return {"ok": True}
@@ -396,7 +453,9 @@ async def cc_strategy_stop(strategy_id: str, state: Dict[str, Any] = Depends(get
 
 
 @router.post("/strategies/{strategy_id}/update")
-async def cc_strategy_update(strategy_id: str, body: Dict[str, Any], state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def cc_strategy_update(
+    strategy_id: str, body: Dict[str, Any], state: Dict[str, Any] = Depends(get_state)
+) -> Any:
     try:
         params = body.get("params") or {}
         if not isinstance(params, dict):
@@ -418,18 +477,23 @@ from tempfile import NamedTemporaryFile
 BACKTEST_DIR = _Path("data/ops_backtests")
 BACKTEST_DIR.mkdir(parents=True, exist_ok=True)
 
+
 def _job_path(job_id: str) -> _Path:
     return BACKTEST_DIR / f"{job_id}.json"
+
 
 def _save_job(job_id: str, payload: Dict[str, Any]) -> None:
     path = _job_path(job_id)
     # Best-effort atomic write
-    with NamedTemporaryFile("w", delete=False, dir=str(BACKTEST_DIR), prefix=f"{job_id}.", suffix=".tmp") as tmp:
+    with NamedTemporaryFile(
+        "w", delete=False, dir=str(BACKTEST_DIR), prefix=f"{job_id}.", suffix=".tmp"
+    ) as tmp:
         tmp.write(json.dumps(payload, ensure_ascii=False))
         tmp.flush()
         os.fsync(tmp.fileno())
         tmp_path = _Path(tmp.name)
     tmp_path.replace(path)
+
 
 def _load_job(job_id: str) -> Dict[str, Any] | None:
     path = _job_path(job_id)
@@ -449,10 +513,13 @@ def _synth_backtest_result(strategy_name: str) -> Dict[str, Any]:
     for i in range(60):
         r = random.gauss(0.0005, 0.01)
         returns.append(r)
-        equity *= (1 + r)
+        equity *= 1 + r
         ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - (60 - i) * 3600))
         series.append({"t": ts, "equity": round(equity, 2)})
-    pnl_by_symbol = [{"symbol": s, "pnl": round(random.uniform(-200, 400), 2)} for s in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]]
+    pnl_by_symbol = [
+        {"symbol": s, "pnl": round(random.uniform(-200, 400), 2)}
+        for s in ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+    ]
     return {
         "metrics": {
             "totalReturn": (equity / 10000.0) - 1.0,
@@ -466,7 +533,10 @@ def _synth_backtest_result(strategy_name: str) -> Dict[str, Any]:
         "returns": returns,
         "trades": [
             {
-                "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - random.randint(0, 60) * 3600)),
+                "time": time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ",
+                    time.gmtime(now - random.randint(0, 60) * 3600),
+                ),
                 "symbol": random.choice(["BTCUSDT", "ETHUSDT", "BNBUSDT"]),
                 "side": random.choice(["buy", "sell"]),
                 "qty": round(random.uniform(0.1, 2.0), 4),
@@ -569,27 +639,34 @@ async def cc_metrics_summary(
         snap = await state["portfolio"].snapshot()
     except Exception:
         snap = {}
-    positions = (snap.get("positions") or [])
+    positions = snap.get("positions") or []
     open_positions = len(positions)
 
     # PnL attribution by symbol from positions
     pnl_by_symbol: Dict[str, float] = {}
     for p in positions:
         sym = p.get("symbol") or p.get("product") or "UNKNOWN"
-        pnl_val = float(p.get("pnl") or p.get("unrealizedPnl") or p.get("unrealized_pnl") or 0.0)
+        pnl_val = float(
+            p.get("pnl") or p.get("unrealizedPnl") or p.get("unrealized_pnl") or 0.0
+        )
         pnl_by_symbol[sym] = pnl_by_symbol.get(sym, 0.0) + pnl_val
 
     # Aggregate portfolio KPIs from enhanced model data
     total_realized = sum(float(d.get("pnl_realized_total", 0.0)) for d in enhanced_data)
-    total_unrealized = sum(float(d.get("pnl_unrealized_total", 0.0)) for d in enhanced_data)
+    total_unrealized = sum(
+        float(d.get("pnl_unrealized_total", 0.0)) for d in enhanced_data
+    )
     total_pnl = total_realized + total_unrealized
     win_rate = pnl.calculate_overall_win_rate(enhanced_data) if enhanced_data else 0.0
     sharpe = pnl.calculate_portfolio_sharpe(enhanced_data) if enhanced_data else 0.0
-    max_dd = max((float(d.get("max_drawdown", 0.0)) for d in enhanced_data), default=0.0)
+    max_dd = max(
+        (float(d.get("max_drawdown", 0.0)) for d in enhanced_data), default=0.0
+    )
 
     # Dev-friendly seeding: if nothing available, provide a small synthetic snapshot
     if not enhanced_data and not positions:
         import random
+
         rnd = random.Random(42)
         seeded_pnl = round(rnd.uniform(-1500, 2500), 2)
         seeded_symbols = [
@@ -603,8 +680,8 @@ async def cc_metrics_summary(
         eq_series = []
         s1, s2 = 10000.0, 10000.0
         for i in range(60):
-            s1 *= (1 + rnd.gauss(0.0004, 0.006))
-            s2 *= (1 + rnd.gauss(0.0002, 0.008))
+            s1 *= 1 + rnd.gauss(0.0004, 0.006)
+            s2 *= 1 + rnd.gauss(0.0002, 0.008)
             ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - (60 - i) * 3600))
             eq_series.append({"t": ts, "alpha": round(s1, 2), "beta": round(s2, 2)})
 
@@ -647,13 +724,30 @@ async def cc_positions(state: Dict[str, Any] = Depends(get_state)) -> Any:
         pos = []
     out: list[dict[str, Any]] = []
     for p in pos:
-        out.append({
-            "symbol": p.get("symbol") or p.get("product") or p.get("instrument") or "UNKNOWN",
-            "qty": float(p.get("qty") or p.get("quantity") or p.get("size") or 0),
-            "entry": float(p.get("entry") or p.get("entry_price") or p.get("avgEntryPrice") or 0),
-            "mark": float(p.get("mark") or p.get("mark_price") or p.get("markPrice") or 0),
-            "pnl": float(p.get("pnl") or p.get("unrealizedPnl") or p.get("unrealized_pnl") or 0),
-        })
+        out.append(
+            {
+                "symbol": p.get("symbol")
+                or p.get("product")
+                or p.get("instrument")
+                or "UNKNOWN",
+                "qty": float(p.get("qty") or p.get("quantity") or p.get("size") or 0),
+                "entry": float(
+                    p.get("entry")
+                    or p.get("entry_price")
+                    or p.get("avgEntryPrice")
+                    or 0
+                ),
+                "mark": float(
+                    p.get("mark") or p.get("mark_price") or p.get("markPrice") or 0
+                ),
+                "pnl": float(
+                    p.get("pnl")
+                    or p.get("unrealizedPnl")
+                    or p.get("unrealized_pnl")
+                    or 0
+                ),
+            }
+        )
     return out
 
 
@@ -664,8 +758,22 @@ async def cc_trades_recent(limit: int = 100) -> Any:
         # Dev seed a few example trades for UI when no feed present
         now = int(time.time())
         rows = [
-            {"time": now - 300, "symbol": "BTCUSDT", "side": "buy", "qty": 0.15, "price": 58500.0, "pnl": 24.5},
-            {"time": now - 120, "symbol": "ETHUSDT", "side": "sell", "qty": 1.8, "price": 3150.0, "pnl": -12.3},
+            {
+                "time": now - 300,
+                "symbol": "BTCUSDT",
+                "side": "buy",
+                "qty": 0.15,
+                "price": 58500.0,
+                "pnl": 24.5,
+            },
+            {
+                "time": now - 120,
+                "symbol": "ETHUSDT",
+                "side": "sell",
+                "qty": 1.8,
+                "price": 3150.0,
+                "pnl": -12.3,
+            },
         ]
     # Ensure shape matches frontend expectations
     return [
@@ -687,14 +795,24 @@ async def cc_alerts(limit: int = 50) -> Any:
     if not rows:
         now = int(time.time())
         rows = [
-            {"time": now - 600, "level": "info", "text": "Started Command Center in dev mode"},
-            {"time": now - 120, "level": "warn", "text": "Exporter heartbeat lag detected"},
+            {
+                "time": now - 600,
+                "level": "info",
+                "text": "Started Command Center in dev mode",
+            },
+            {
+                "time": now - 120,
+                "level": "warn",
+                "text": "Exporter heartbeat lag detected",
+            },
         ]
     return rows
 
 
 @router.post("/alerts")
-async def cc_alerts_post(item: Dict[str, Any], _auth: None = Depends(require_ops_token)) -> Any:
+async def cc_alerts_post(
+    item: Dict[str, Any], _auth: None = Depends(require_ops_token)
+) -> Any:
     row = {
         "time": item.get("time") or int(time.time() * 1000),
         "level": item.get("level") or item.get("type") or "info",
@@ -710,6 +828,7 @@ async def cc_health(state: Dict[str, Any] = Depends(get_state)) -> Any:
     """Return venue/engine health for the dashboard."""
     try:
         from ops.engine_client import health as engine_health
+
         eng = await engine_health()
         venues = eng.get("venues") or []
         if isinstance(venues, list) and venues:
@@ -717,7 +836,8 @@ async def cc_health(state: Dict[str, Any] = Depends(get_state)) -> Any:
             out = [
                 {
                     "name": v.get("name") or v.get("venue") or "engine",
-                    "status": v.get("status") or ("ok" if v.get("ok", True) else "down"),
+                    "status": v.get("status")
+                    or ("ok" if v.get("ok", True) else "down"),
                     "latencyMs": float(v.get("latencyMs") or v.get("latency_ms") or 0),
                     "queue": int(v.get("queue") or 0),
                 }
@@ -727,13 +847,17 @@ async def cc_health(state: Dict[str, Any] = Depends(get_state)) -> Any:
             out = [
                 {
                     "name": "trading-engine",
-                    "status": "ok" if eng.get("engine") == "ok" or eng.get("ok") else "warn",
+                    "status": (
+                        "ok" if eng.get("engine") == "ok" or eng.get("ok") else "warn"
+                    ),
                     "latencyMs": float(eng.get("latency_ms") or 0.0),
                     "queue": int(eng.get("queue") or 0),
                 }
             ]
     except Exception:
-        out = [{"name": "trading-engine", "status": "down", "latencyMs": 0.0, "queue": 0}]
+        out = [
+            {"name": "trading-engine", "status": "down", "latencyMs": 0.0, "queue": 0}
+        ]
     return {"venues": out}
 
 

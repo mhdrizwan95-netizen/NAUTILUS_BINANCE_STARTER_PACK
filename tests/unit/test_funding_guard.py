@@ -16,13 +16,22 @@ class _Router:
         class _S:
             def __init__(self):
                 from engine.core.portfolio import Position
-                self.positions = {"BTCUSDT": Position(symbol="BTCUSDT", quantity=0.1, avg_price=20000.0)}
+
+                self.positions = {
+                    "BTCUSDT": Position(
+                        symbol="BTCUSDT", quantity=0.1, avg_price=20000.0
+                    )
+                }
+
         self._state = _S()
         self.trimmed = False
+
     def exchange_client(self):
         return _Client()
+
     def portfolio_service(self):
         return types.SimpleNamespace(state=self._state)
+
     async def place_reduce_only_market(self, symbol, side, qty):
         self.trimmed = True
 
@@ -41,4 +50,3 @@ async def test_funding_guard_trims(monkeypatch):
     g = FundingGuard(r, bus=_Bus())
     await g.tick()
     assert r.trimmed is True
-

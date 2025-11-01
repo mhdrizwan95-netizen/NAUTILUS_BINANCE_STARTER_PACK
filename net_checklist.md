@@ -3,6 +3,7 @@ Network Wiring Checklist
 - Timeouts
   - Engine venue clients: httpx timeouts from env (`BINANCE_API_TIMEOUT` seconds). Backoff on 418/429 implemented.
   - Ops/ML/Ingester endpoints: set short, explicit timeouts; avoid relying on defaults.
+  - Frontend fetches: Abort after 10s via shared timeout helper to avoid hung UI.
 
 - Retries & Backoff
   - Engine REST: retries with exponential backoff on throttle (418/429).
@@ -20,7 +21,7 @@ Network Wiring Checklist
 
 - Keep-Alive
   - Prefer long-lived AsyncClients in loops; avoid recreate-per-request in hot paths to reduce handshake overhead.
+  - Executor heartbeat uses pooled httpx client (`Limits(8/4)`) and respects proxies via `trust_env=True`.
 
 - Circuit Breakers
   - Executor breaker implemented in ops/main.py. For HTTP surfaces, keep short timeouts and soft retries to bound waiting.
-

@@ -1,16 +1,22 @@
-
-import os, json, time, shutil
+import json
+import time
+import shutil
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any
 from joblib import dump, load
 from loguru import logger
 from .config import settings
 
+
 def _registry() -> Path:
-    p = Path(settings.REGISTRY_DIR); p.mkdir(parents=True, exist_ok=True); return p
+    p = Path(settings.REGISTRY_DIR)
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
 
 def _current_symlink() -> Path:
     return Path(settings.CURRENT_SYMLINK)
+
 
 def save_version(model, scaler, metadata: Dict[str, Any]) -> Path:
     ts = time.strftime("%Y-%m-%dT%H-%M-%SZ", time.gmtime())
@@ -25,29 +31,42 @@ def save_version(model, scaler, metadata: Dict[str, Any]) -> Path:
     logger.info(f"Saved model version {version_id}")
     return version_dir
 
+
 def load_current():
     cur = _current_symlink()
     if not cur.exists():
         return None, None, {}
-    model_p, scaler_p, meta_p = cur / "model.joblib", cur / "scaler.joblib", cur / "metadata.json"
+    model_p, scaler_p, meta_p = (
+        cur / "model.joblib",
+        cur / "scaler.joblib",
+        cur / "metadata.json",
+    )
     if not model_p.exists() or not scaler_p.exists():
         return None, None, {}
-    return load(model_p), load(scaler_p), json.loads(meta_p.read_text()) if meta_p.exists() else {}
+    return (
+        load(model_p),
+        load(scaler_p),
+        json.loads(meta_p.read_text()) if meta_p.exists() else {},
+    )
 
 
 def registry_size() -> int:
     return sum(1 for p in _registry().glob("*") if p.is_dir())
 
+
 def promote(version_dir: Path) -> str:
     cur = _current_symlink()
     if cur.is_symlink() or cur.exists():
-        try: cur.unlink()
-        except Exception: pass
+        try:
+            cur.unlink()
+        except Exception:
+            pass
     target = version_dir.resolve()
     cur.symlink_to(target, target_is_directory=True)
     (target / "version.txt").write_text(str(time.time()))
     logger.info(f"Promoted {target.name}")
     return target.name
+
 
 def prune_keep_last(n: int = 5):
     allv = sorted([p for p in _registry().glob("*") if p.is_dir()])

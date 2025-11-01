@@ -141,7 +141,12 @@ class StrategyExecutor:
         )
         if not ok:
             metrics.orders_rejected.inc()
-            payload = {"status": "rejected", **err, "source": self._source, "idempotency_key": key}
+            payload = {
+                "status": "rejected",
+                **err,
+                "source": self._source,
+                "idempotency_key": key,
+            }
             CACHE.set(key, payload)
             return payload
 
@@ -193,7 +198,9 @@ class StrategyExecutor:
             CACHE.set(key, payload)
             return payload
 
-        result = await self._submit(symbol, side, quote, quantity, market_hint, tag, meta)
+        result = await self._submit(
+            symbol, side, quote, quantity, market_hint, tag, meta
+        )
 
         metrics.orders_submitted.inc()
         payload = {
@@ -273,11 +280,15 @@ class StrategyExecutor:
             loop = None
         if loop and loop.is_running():
             fut = asyncio.run_coroutine_threadsafe(
-                self.execute(signal, idem_key=idem_key, dry_run_override=dry_run_override),
+                self.execute(
+                    signal, idem_key=idem_key, dry_run_override=dry_run_override
+                ),
                 loop,
             )
             return fut.result()
-        return asyncio.run(self.execute(signal, idem_key=idem_key, dry_run_override=dry_run_override))
+        return asyncio.run(
+            self.execute(signal, idem_key=idem_key, dry_run_override=dry_run_override)
+        )
 
     async def _submit(
         self,
@@ -320,7 +331,9 @@ class StrategyExecutor:
                     None if quote is None else float(quote),
                     None if quantity is None else float(quantity),
                 )
-                fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
+                fallback_args = (
+                    (*base_args, market_hint) if market_hint is not None else base_args
+                )
         if submit_callable is None:
             submit_callable = getattr(self._router, "place_market_order_async", None)
             if submit_callable:
@@ -338,12 +351,20 @@ class StrategyExecutor:
                     None if quote is None else float(quote),
                     None if quantity is None else float(quantity),
                 )
-                fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
+                fallback_args = (
+                    (*base_args, market_hint) if market_hint is not None else base_args
+                )
         if submit_callable is None:
             raise RuntimeError("router does not expose market order submission")
 
         loop = asyncio.get_running_loop()
-        context = {"meta": meta, "tag": tag, "symbol": symbol, "side": side, "market": market_hint}
+        context = {
+            "meta": meta,
+            "tag": tag,
+            "symbol": symbol,
+            "side": side,
+            "market": market_hint,
+        }
         cleanup = False
         try:
             setattr(self._router, "_strategy_pending_meta", context)
@@ -356,7 +377,9 @@ class StrategyExecutor:
         async def _invoke_with_kwargs() -> Any:
             if is_async_callable:
                 return await submit_callable(**call_kwargs)
-            return await loop.run_in_executor(None, partial(submit_callable, **call_kwargs))
+            return await loop.run_in_executor(
+                None, partial(submit_callable, **call_kwargs)
+            )
 
         try:
             try:
@@ -372,13 +395,17 @@ class StrategyExecutor:
                         if is_async_callable:
                             result = await submit_callable(**alt_kwargs)
                         else:
-                            result = await loop.run_in_executor(None, partial(submit_callable, **alt_kwargs))
+                            result = await loop.run_in_executor(
+                                None, partial(submit_callable, **alt_kwargs)
+                            )
                         handled = True
                     elif fallback_args:
                         if is_async_callable:
                             result = await submit_callable(*fallback_args)
                         else:
-                            result = await loop.run_in_executor(None, lambda: submit_callable(*fallback_args))
+                            result = await loop.run_in_executor(
+                                None, lambda: submit_callable(*fallback_args)
+                            )
                         handled = True
                 if not handled:
                     raise

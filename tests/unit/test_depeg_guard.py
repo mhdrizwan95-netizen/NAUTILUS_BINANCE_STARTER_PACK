@@ -19,6 +19,7 @@ class _RouterStub:
 class _BusStub:
     def __init__(self):
         self.fired = []
+
     def fire(self, topic, data):
         self.fired.append((topic, data))
 
@@ -38,9 +39,13 @@ async def test_depeg_guard_triggers(monkeypatch):
     # md stub with USDTUSDC 0.992 (~0.8% deviation) and BTC parity ~1.0
     class _MD:
         def last(self, s):
-            return {"USDTUSDC": 0.992, "BTCUSDT": 20000.0, "BTCUSDC": 20000.0}.get(s, 0.0)
+            return {"USDTUSDC": 0.992, "BTCUSDT": 20000.0, "BTCUSDC": 20000.0}.get(
+                s, 0.0
+            )
 
-    g = DepegGuard(r, md=_MD(), bus=bus, clock=types.SimpleNamespace(time=lambda: 1_700_000_000.0))
+    g = DepegGuard(
+        r, md=_MD(), bus=bus, clock=types.SimpleNamespace(time=lambda: 1_700_000_000.0)
+    )
 
     await g.tick()  # confirm 1
     await g.tick()  # confirm 2 -> trigger

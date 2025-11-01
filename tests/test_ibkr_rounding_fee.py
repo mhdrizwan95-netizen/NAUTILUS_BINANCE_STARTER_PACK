@@ -1,15 +1,22 @@
 import importlib
-from types import SimpleNamespace
+
 
 def test_ibkr_quote_to_qty_rounding_and_fee(monkeypatch):
     from engine.core import order_router as r
+
     importlib.reload(r)
 
     # Stub IBKR client
     class StubIbkr:
-        def get_last_price(self, symbol): return 200.0  # $200/share
+        def get_last_price(self, symbol):
+            return 200.0  # $200/share
+
         def place_market_order(self, **kw):
-            return {"avg_fill_price":200.0, "filled_qty_base": int(kw["quantity"]), "status":"Filled"}
+            return {
+                "avg_fill_price": 200.0,
+                "filled_qty_base": int(kw["quantity"]),
+                "status": "Filled",
+            }
 
     r.set_exchange_client("IBKR", StubIbkr())
 
@@ -26,21 +33,35 @@ def test_ibkr_quote_to_qty_rounding_and_fee(monkeypatch):
     assert res["rounded_qty"] == 1.0
     assert res["fee_usd"] >= 1.0  # min trade fee default
 
+
 def test_ibkr_auto_venue_routing(monkeypatch):
     from engine.core import order_router as r
+
     importlib.reload(r)
 
     # Stub IBKR client
     class StubIbkr:
-        def get_last_price(self, symbol): return 150.0  # AAPL at $150
+        def get_last_price(self, symbol):
+            return 150.0  # AAPL at $150
+
         def place_market_order(self, **kw):
-            return {"avg_fill_price":150.0, "filled_qty_base": int(kw["quantity"]), "status":"Filled"}
+            return {
+                "avg_fill_price": 150.0,
+                "filled_qty_base": int(kw["quantity"]),
+                "status": "Filled",
+            }
 
     # Stub Binance client
     class StubBinance:
-        def get_last_price(self, symbol): return 50000.0  # BTC at $50k
+        def get_last_price(self, symbol):
+            return 50000.0  # BTC at $50k
+
         def place_market_order(self, **kw):
-            return {"avg_fill_price":50000.0, "filled_qty_base": kw["quantity"], "status":"Filled"}
+            return {
+                "avg_fill_price": 50000.0,
+                "filled_qty_base": kw["quantity"],
+                "status": "Filled",
+            }
 
     r.set_exchange_client("IBKR", StubIbkr())
     r.set_exchange_client("BINANCE", StubBinance())
@@ -51,9 +72,12 @@ def test_ibkr_auto_venue_routing(monkeypatch):
     assert res1["rounded_qty"] == 1.0
 
     # BTCUSDT should auto-route to Binance
-    res2 = r.place_market_order(symbol="BTCUSDT", side="BUY", quote=None, quantity=0.001)
+    res2 = r.place_market_order(
+        symbol="BTCUSDT", side="BUY", quote=None, quantity=0.001
+    )
     assert res2["venue"] == "BINANCE"
     assert res2["rounded_qty"] == 0.001
+
 
 def test_ibkr_fee_calculation(monkeypatch):
     """Test IBKR fee calculation with per-share and BPS modes."""
@@ -90,6 +114,7 @@ def test_ibkr_fee_calculation(monkeypatch):
     fee_bps = (10.0 / 10000.0) * 10000.0
     assert fee_bps == 10.0
 
+
 def test_ibkr_specs_loading(monkeypatch):
     """Test IBKR specs auto-loading from venue_specs.json"""
     from engine.core.venue_specs import SPECS, DEFAULT_SPECS
@@ -104,6 +129,7 @@ def test_ibkr_specs_loading(monkeypatch):
     assert "BINANCE" in SPECS
     assert "BTCUSDT" in DEFAULT_SPECS
     assert DEFAULT_SPECS["BTCUSDT"].min_qty == 0.00001
+
 
 if __name__ == "__main__":
     test_ibkr_quote_to_qty_rounding_and_fee(None)

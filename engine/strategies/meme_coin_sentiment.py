@@ -30,6 +30,8 @@ except Exception:  # pragma: no cover - metrics disabled
     meme_sentiment_cooldown_epoch = None  # type: ignore[assignment]
 
 _LOG = logging.getLogger("engine.strategies.meme_sentiment")
+
+
 @dataclass(frozen=True)
 class MemeCoinConfig:
     enabled: bool = False
@@ -58,43 +60,124 @@ class MemeCoinConfig:
 
 
 def load_meme_coin_config() -> MemeCoinConfig:
-    if os.environ.get("SOCIAL_SENTIMENT_ENABLED") and not os.environ.get("MEME_SENTIMENT_ENABLED"):
+    if os.environ.get("SOCIAL_SENTIMENT_ENABLED") and not os.environ.get(
+        "MEME_SENTIMENT_ENABLED"
+    ):
         os.environ["MEME_SENTIMENT_ENABLED"] = os.environ["SOCIAL_SENTIMENT_ENABLED"]
-        _LOG.warning("SOCIAL_SENTIMENT_ENABLED is deprecated; use MEME_SENTIMENT_ENABLED instead")
-    if os.environ.get("SOCIAL_SENTIMENT_SOURCES") and not os.environ.get("MEME_SENTIMENT_SOURCES"):
+        _LOG.warning(
+            "SOCIAL_SENTIMENT_ENABLED is deprecated; use MEME_SENTIMENT_ENABLED instead"
+        )
+    if os.environ.get("SOCIAL_SENTIMENT_SOURCES") and not os.environ.get(
+        "MEME_SENTIMENT_SOURCES"
+    ):
         os.environ["MEME_SENTIMENT_SOURCES"] = os.environ["SOCIAL_SENTIMENT_SOURCES"]
-        _LOG.warning("SOCIAL_SENTIMENT_SOURCES is deprecated; use MEME_SENTIMENT_SOURCES instead")
+        _LOG.warning(
+            "SOCIAL_SENTIMENT_SOURCES is deprecated; use MEME_SENTIMENT_SOURCES instead"
+        )
 
-    default_market_raw = env_str(
-        "MEME_SENTIMENT_DEFAULT_MARKET",
-        MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DEFAULT_MARKET"],
-    ).strip().lower()
+    default_market_raw = (
+        env_str(
+            "MEME_SENTIMENT_DEFAULT_MARKET",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DEFAULT_MARKET"],
+        )
+        .strip()
+        .lower()
+    )
     default_market = default_market_raw or "spot"
     if default_market not in {"spot", "margin", "futures", "options"}:
         default_market = "spot"
     return MemeCoinConfig(
-        enabled=env_bool("MEME_SENTIMENT_ENABLED", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_ENABLED"]),
-        dry_run=env_bool("MEME_SENTIMENT_DRY_RUN", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DRY_RUN"]),
-        per_trade_risk_pct=env_float("MEME_SENTIMENT_RISK_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_RISK_PCT"]),
-        stop_loss_pct=env_float("MEME_SENTIMENT_STOP_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_STOP_PCT"]),
-        take_profit_pct=env_float("MEME_SENTIMENT_TP_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_TP_PCT"]),
-        trail_stop_pct=env_float("MEME_SENTIMENT_TRAIL_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_TRAIL_PCT"]),
-        fallback_equity_usd=env_float("MEME_SENTIMENT_FALLBACK_EQUITY", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_FALLBACK_EQUITY"]),
-        notional_min_usd=env_float("MEME_SENTIMENT_NOTIONAL_MIN", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_NOTIONAL_MIN"]),
-        notional_max_usd=env_float("MEME_SENTIMENT_NOTIONAL_MAX", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_NOTIONAL_MAX"]),
-        min_priority=env_float("MEME_SENTIMENT_MIN_PRIORITY", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_PRIORITY"]),
-        min_social_score=env_float("MEME_SENTIMENT_MIN_SCORE", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_SCORE"]),
-        min_mentions=env_int("MEME_SENTIMENT_MIN_MENTIONS", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_MENTIONS"]),
-        min_velocity_score=env_float("MEME_SENTIMENT_MIN_VELOCITY", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_VELOCITY"]),
-        max_chase_pct=env_float("MEME_SENTIMENT_MAX_CHASE_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MAX_CHASE_PCT"]),
-        max_spread_pct=env_float("MEME_SENTIMENT_MAX_SPREAD_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MAX_SPREAD_PCT"]),
-        cooldown_sec=env_float("MEME_SENTIMENT_COOLDOWN_SEC", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_COOLDOWN_SEC"]),
-        trade_lock_sec=env_float("MEME_SENTIMENT_LOCK_SEC", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_LOCK_SEC"]),
-        deny_keywords=tuple(env_csv("MEME_SENTIMENT_DENY_KEYWORDS", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DENY_KEYWORDS"])),
-        allow_sources=tuple(env_csv("MEME_SENTIMENT_SOURCES", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_SOURCES"])),
-        quote_priority=tuple(env_csv("MEME_SENTIMENT_QUOTES", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_QUOTES"])),
-        metrics_enabled=env_bool("MEME_SENTIMENT_METRICS_ENABLED", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_METRICS_ENABLED"]),
-        publish_topic=env_str("MEME_SENTIMENT_PUBLISH_TOPIC", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_PUBLISH_TOPIC"]),
+        enabled=env_bool(
+            "MEME_SENTIMENT_ENABLED", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_ENABLED"]
+        ),
+        dry_run=env_bool(
+            "MEME_SENTIMENT_DRY_RUN", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DRY_RUN"]
+        ),
+        per_trade_risk_pct=env_float(
+            "MEME_SENTIMENT_RISK_PCT",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_RISK_PCT"],
+        ),
+        stop_loss_pct=env_float(
+            "MEME_SENTIMENT_STOP_PCT",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_STOP_PCT"],
+        ),
+        take_profit_pct=env_float(
+            "MEME_SENTIMENT_TP_PCT", MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_TP_PCT"]
+        ),
+        trail_stop_pct=env_float(
+            "MEME_SENTIMENT_TRAIL_PCT",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_TRAIL_PCT"],
+        ),
+        fallback_equity_usd=env_float(
+            "MEME_SENTIMENT_FALLBACK_EQUITY",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_FALLBACK_EQUITY"],
+        ),
+        notional_min_usd=env_float(
+            "MEME_SENTIMENT_NOTIONAL_MIN",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_NOTIONAL_MIN"],
+        ),
+        notional_max_usd=env_float(
+            "MEME_SENTIMENT_NOTIONAL_MAX",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_NOTIONAL_MAX"],
+        ),
+        min_priority=env_float(
+            "MEME_SENTIMENT_MIN_PRIORITY",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_PRIORITY"],
+        ),
+        min_social_score=env_float(
+            "MEME_SENTIMENT_MIN_SCORE",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_SCORE"],
+        ),
+        min_mentions=env_int(
+            "MEME_SENTIMENT_MIN_MENTIONS",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_MENTIONS"],
+        ),
+        min_velocity_score=env_float(
+            "MEME_SENTIMENT_MIN_VELOCITY",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MIN_VELOCITY"],
+        ),
+        max_chase_pct=env_float(
+            "MEME_SENTIMENT_MAX_CHASE_PCT",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MAX_CHASE_PCT"],
+        ),
+        max_spread_pct=env_float(
+            "MEME_SENTIMENT_MAX_SPREAD_PCT",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_MAX_SPREAD_PCT"],
+        ),
+        cooldown_sec=env_float(
+            "MEME_SENTIMENT_COOLDOWN_SEC",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_COOLDOWN_SEC"],
+        ),
+        trade_lock_sec=env_float(
+            "MEME_SENTIMENT_LOCK_SEC",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_LOCK_SEC"],
+        ),
+        deny_keywords=tuple(
+            env_csv(
+                "MEME_SENTIMENT_DENY_KEYWORDS",
+                MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_DENY_KEYWORDS"],
+            )
+        ),
+        allow_sources=tuple(
+            env_csv(
+                "MEME_SENTIMENT_SOURCES",
+                MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_SOURCES"],
+            )
+        ),
+        quote_priority=tuple(
+            env_csv(
+                "MEME_SENTIMENT_QUOTES",
+                MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_QUOTES"],
+            )
+        ),
+        metrics_enabled=env_bool(
+            "MEME_SENTIMENT_METRICS_ENABLED",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_METRICS_ENABLED"],
+        ),
+        publish_topic=env_str(
+            "MEME_SENTIMENT_PUBLISH_TOPIC",
+            MEME_SENTIMENT_DEFAULTS["MEME_SENTIMENT_PUBLISH_TOPIC"],
+        ),
         default_market=default_market,
     )
 
@@ -200,7 +283,10 @@ class MemeCoinSentiment:
             self._record_event(symbol, "spread_high")
             return
 
-        move = max(score_meta.price_change, score_meta.raw_payload.get("price_change_event", 0.0))
+        move = max(
+            score_meta.price_change,
+            score_meta.raw_payload.get("price_change_event", 0.0),
+        )
         if move > self.cfg.max_chase_pct:
             self._record_event(symbol, "chase")
             return
@@ -266,7 +352,9 @@ class MemeCoinSentiment:
         order_payload = execution.get("order", {})
         router_result = order_payload.get("result", {})
         avg_px = self._as_float(router_result.get("avg_fill_price")) or price
-        qty = self._as_float(router_result.get("filled_qty_base")) or (notional / max(avg_px, 1e-9))
+        qty = self._as_float(router_result.get("filled_qty_base")) or (
+            notional / max(avg_px, 1e-9)
+        )
         _LOG.info(
             "[MEME] executed BUY %s notional=%.2f qty=%.6f avg=%.6f score=%.2f market=%s",
             symbol,
@@ -287,7 +375,9 @@ class MemeCoinSentiment:
         )
         stop_px = max(avg_px * 0.0001, stop_px)
         trail_px = max(avg_px * 0.0001, trail_px)
-        await self._publish_bracket(symbol, qty, avg_px, stop_px, tp_px, trail_px, score_meta, market_choice)
+        await self._publish_bracket(
+            symbol, qty, avg_px, stop_px, tp_px, trail_px, score_meta, market_choice
+        )
 
         self._set_cooldown(symbol, now)
         self._arm_global_lock(now)
@@ -321,24 +411,49 @@ class MemeCoinSentiment:
         mentions = self._as_float(payload.get("mentions"))
         mentions = max(mentions, self._as_float(payload.get("mention_count")))
         mentions = max(mentions, self._as_float(metrics.get("mention_count")))
-        likes = self._as_float(metrics.get("like_count") or metrics.get("favorite_count"))
+        likes = self._as_float(
+            metrics.get("like_count") or metrics.get("favorite_count")
+        )
         retweets = self._as_float(metrics.get("retweet_count"))
         quotes = self._as_float(metrics.get("quote_count"))
-        replies = self._as_float(metrics.get("reply_count") or payload.get("comment_count"))
+        replies = self._as_float(
+            metrics.get("reply_count") or payload.get("comment_count")
+        )
 
-        interactions = mentions + (retweets * 1.8) + (likes * 0.35) + (quotes * 0.5) + (replies * 0.8)
+        interactions = (
+            mentions
+            + (retweets * 1.8)
+            + (likes * 0.35)
+            + (quotes * 0.5)
+            + (replies * 0.8)
+        )
         interactions = max(interactions, 0.0)
 
-        velocity_raw = self._as_float(payload.get("social_velocity") or payload.get("velocity") or payload.get("social_volume_change_pct"))
-        velocity_raw = max(velocity_raw, self._as_float(metrics.get("velocity") or metrics.get("social_velocity")))
+        velocity_raw = self._as_float(
+            payload.get("social_velocity")
+            or payload.get("velocity")
+            or payload.get("social_volume_change_pct")
+        )
+        velocity_raw = max(
+            velocity_raw,
+            self._as_float(metrics.get("velocity") or metrics.get("social_velocity")),
+        )
         velocity_raw = max(velocity_raw, 0.0)
         velocity_score = math.log1p(velocity_raw)
 
-        sentiment = self._as_float(payload.get("sentiment_score") or payload.get("sentiment") or metrics.get("sentiment_score"))
+        sentiment = self._as_float(
+            payload.get("sentiment_score")
+            or payload.get("sentiment")
+            or metrics.get("sentiment_score")
+        )
         sentiment = max(min(sentiment, 1.5), -1.5)
 
         price_change_pct = payload.get("price_change_pct")
-        price_change_pct = self._as_float(price_change_pct if price_change_pct is not None else payload.get("price_change_5m_pct"))
+        price_change_pct = self._as_float(
+            price_change_pct
+            if price_change_pct is not None
+            else payload.get("price_change_5m_pct")
+        )
         price_change_pct = self._normalize_pct(price_change_pct)
 
         priority = self._as_float(evt.get("priority") or payload.get("priority") or 0.5)
@@ -379,7 +494,9 @@ class MemeCoinSentiment:
             equity = float(self.cfg.fallback_equity_usd)
         risk_budget = equity * float(self.cfg.per_trade_risk_pct)
         notional = risk_budget / max(self.cfg.stop_loss_pct, 1e-6)
-        notional = max(self.cfg.notional_min_usd, min(self.cfg.notional_max_usd, notional))
+        notional = max(
+            self.cfg.notional_min_usd, min(self.cfg.notional_max_usd, notional)
+        )
         return float(notional)
 
     def _router_equity(self) -> float:
@@ -481,7 +598,11 @@ class MemeCoinSentiment:
 
     def _set_cooldown(self, symbol: str, now: Optional[float] = None) -> None:
         until = self._cooldowns.set(symbol, now=now or self.clock.time())
-        if self.cfg.metrics_enabled and meme_sentiment_cooldown_epoch is not None and until:
+        if (
+            self.cfg.metrics_enabled
+            and meme_sentiment_cooldown_epoch is not None
+            and until
+        ):
             try:
                 meme_sentiment_cooldown_epoch.labels(symbol=symbol).set(until)
             except Exception:
@@ -493,7 +614,9 @@ class MemeCoinSentiment:
     def _arm_global_lock(self, now: float) -> None:
         if self.cfg.trade_lock_sec <= 0:
             return
-        self._global_lock_until = max(self._global_lock_until, now + float(self.cfg.trade_lock_sec))
+        self._global_lock_until = max(
+            self._global_lock_until, now + float(self.cfg.trade_lock_sec)
+        )
 
     def _record_event(self, symbol: str, decision: str) -> None:
         if not self.cfg.metrics_enabled or meme_sentiment_events_total is None:

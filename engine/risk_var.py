@@ -11,7 +11,7 @@ fields: symbol, quantity, avg_price, last_price). If a position exposes
 If md is missing or ATR unavailable, we fall back to notional risk.
 """
 
-from typing import Iterable, Optional, Any, List
+from typing import Iterable, Any, List
 
 
 def _get(attr: str, obj: Any, default=None):
@@ -21,7 +21,14 @@ def _get(attr: str, obj: Any, default=None):
         return default
 
 
-def estimate_var_usd(position: Any, md: Any | None = None, tf: str = "5m", n: int = 14, *, use_stop_first: bool = True) -> float:
+def estimate_var_usd(
+    position: Any,
+    md: Any | None = None,
+    tf: str = "5m",
+    n: int = 14,
+    *,
+    use_stop_first: bool = True,
+) -> float:
     qty = float(abs(_get("quantity", position, 0.0)) or 0.0)
     if qty <= 0:
         return 0.0
@@ -62,7 +69,14 @@ def estimate_var_usd(position: Any, md: Any | None = None, tf: str = "5m", n: in
         return 0.0
 
 
-def sort_positions_by_var_desc(positions: Iterable[Any], md: Any | None = None, tf: str = "5m", n: int = 14, *, use_stop_first: bool = True) -> List[Any]:
+def sort_positions_by_var_desc(
+    positions: Iterable[Any],
+    md: Any | None = None,
+    tf: str = "5m",
+    n: int = 14,
+    *,
+    use_stop_first: bool = True,
+) -> List[Any]:
     return sorted(
         list(positions),
         key=lambda p: estimate_var_usd(p, md, tf, n, use_stop_first=use_stop_first),

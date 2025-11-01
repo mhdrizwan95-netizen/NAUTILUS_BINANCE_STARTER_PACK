@@ -1,0 +1,65 @@
+{
+  "findings": [
+    {
+      "id": "obs-missing-scrapes",
+      "severity": "S2",
+      "area": "observability",
+      "file": "ops/observability/prometheus/prometheus.yml",
+      "lines": "14-42",
+      "evidence": "Prometheus scrapes only engines/ops/executor; ML, data_ingester, and param_controller containers in docker-compose are absent, so their health is invisible.",
+      "impact": "Model training/backfills can fail silently because there is no up/latency signal for those services, delaying incident detection and post-mortems.",
+      "fix": "Add scrape jobs for ml_service:8000, data_ingester:8001, and param_controller:8002 with team labels, and expose metrics in each service.",
+      "diff": "diff --git a/ops/observability/prometheus/prometheus.yml b/ops/observability/prometheus/prometheus.yml\n@@\n - job_name: hmm_executor\n   scrape_interval: 15s\n   static_configs:\n   - targets:\n       - hmm_executor:9102\n+\n+- job_name: ml_service\n+  scrape_interval: 15s\n+  static_configs:\n+  - targets:\n+      - hmm_ml_service:8000\n+    labels:\n+      team: ml\n+\n+- job_name: data_ingester\n+  scrape_interval: 30s\n+  static_configs:\n+  - targets:\n+      - hmm_data_ingester:8001\n+    labels:\n+      team: data\n+\n+- job_name: param_controller\n+  scrape_interval: 30s\n+  static_configs:\n+  - targets:\n+      - hmm_param_controller:8002\n+    labels:\n+      team: ml"
+    },
+    {
+      "id": "obs-ops-api-no-metrics",
+      "severity": "S2",
+      "area": "observability",
+      "file": "ops/ops_api.py",
+      "lines": "1-80",
+      "evidence": "The FastAPI app lacks Prometheus or OpenTelemetry middleware; there is no request histogram or trace emission for Ops API endpoints.",
+      "impact": "Ops control-plane outages or latency spikes go undetected, making it impossible to enforce SLOs or debug user reports.",
+      "fix": "Instrument the FastAPI app with prometheus-fastapi-instrumentator and FastAPIInstrumentor, exposing /metrics.",
+      "diff": "diff --git a/ops/ops_api.py b/ops/ops_api.py\n@@\n-from fastapi import FastAPI, HTTPException, Request, WebSocket\n+from fastapi import FastAPI, HTTPException, Request, WebSocket\n+from prometheus_fastapi_instrumentator import Instrumentator\n+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor\n@@\n-app = FastAPI(title=\"Ops API\", version=\"0.3.0\")\n+app = FastAPI(title=\"Ops API\", version=\"0.3.0\")\n+Instrumentator().instrument(app).expose(app, include_in_schema=False, endpoint=\"/metrics\")\n+FastAPIInstrumentor.instrument_app(app)"
+    },
+    {
+      "id": "obs-logs-unstructured",
+      "severity": "S2",
+      "area": "observability",
+      "file": "ops/main.py",
+      "lines": "73-108",
+      "evidence": "Executor daemon prints plain strings (e.g. `[executor] metrics listening on :9102`) with no correlation id or JSON structure.",
+      "impact": "Logs from multiple workers interleave without context, hindering debugging and violating future redaction policy.",
+      "fix": "Adopt the shared JSON logging contract and replace print statements with structured logger calls bound to correlation ids.",
+      "diff": "diff --git a/ops/main.py b/ops/main.py\n@@\n-import time\n-import sys\n+import time\n+import sys\n+import logging\n@@\n-    print(f\"[executor] metrics listening on :{METRICS_PORT}\", flush=True)\n-    print(f\"[executor] engine at {ENGINE_URL}\", flush=True)\n+    logger = logging.getLogger(\"ops.executor\")\n+    logger.info(\"metrics listening\", extra={\"event\": \"executor.metrics_start\", \"port\": METRICS_PORT})\n+    logger.info(\"engine configured\", extra={\"event\": \"executor.engine_target\", \"engine_url\": ENGINE_URL})"
+    }
+  ],
+  "risk_rollup": {
+    "S0": 0,
+    "S1": 0,
+    "S2": 3,
+    "S3": 0
+  },
+  "tickets": [
+    {
+      "title": "Instrument Ops/API and support services with metrics & traces",
+      "owner": "platform",
+      "eta": "4d",
+      "blocks": [
+        "ml-service",
+        "data-ingestion"
+      ],
+      "acceptance": [
+        "Prometheus scrapes ml_service, data_ingester, param_controller",
+        "Ops API exposes /metrics with request histogram",
+        "OTel spans arrive in collector"
+      ]
+    }
+  ],
+  "state": {
+    "logs_contract": "docs/observability/logs_contract.md",
+    "slos": "ops/observability/slo.yaml",
+    "alert_examples": "docs/observability/alert_examples.yaml",
+    "instrumentation_snippets": "docs/observability/instrumentation_snippets.py"
+  }
+}

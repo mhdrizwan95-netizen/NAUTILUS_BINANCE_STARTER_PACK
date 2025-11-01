@@ -98,7 +98,9 @@ class Portfolio:
         side = side.upper()
         qty = quantity if side == "BUY" else -quantity
         venue_norm = (venue or "").upper()
-        market_norm = (market or ("margin" if venue_norm == "BINANCE_MARGIN" else "spot")).lower()
+        market_norm = (
+            market or ("margin" if venue_norm == "BINANCE_MARGIN" else "spot")
+        ).lower()
         if "." in symbol:
             symbol_key = symbol.upper()
             if not venue_norm:
@@ -109,7 +111,9 @@ class Portfolio:
             symbol_key = f"{symbol.upper()}.{venue_norm}"
         else:
             symbol_key = symbol.upper()
-        position = self._state.positions.setdefault(symbol_key, Position(symbol=symbol_key))
+        position = self._state.positions.setdefault(
+            symbol_key, Position(symbol=symbol_key)
+        )
         if venue_norm:
             position.venue = venue_norm
         if market_norm:
@@ -145,6 +149,7 @@ class Portfolio:
         # Increment filled counter for observability
         try:
             from engine.metrics import REGISTRY as _MET
+
             ctr = _MET.get("orders_filled_total")
             if ctr is not None:
                 ctr.inc()

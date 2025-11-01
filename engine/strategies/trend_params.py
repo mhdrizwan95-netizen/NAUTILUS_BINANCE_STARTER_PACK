@@ -51,18 +51,26 @@ class TrendParams:
 
 
 class TrendAutoTuner:
-    def __init__(self, cfg, params: TrendParams, *, logger: Optional[logging.Logger] = None):
+    def __init__(
+        self, cfg, params: TrendParams, *, logger: Optional[logging.Logger] = None
+    ):
         self.cfg = cfg
         self.params = params
         self.enabled = bool(cfg.auto_tune_enabled)
-        self.history: Deque[Dict] = deque(maxlen=max(10, int(cfg.auto_tune_history or 200)))
+        self.history: Deque[Dict] = deque(
+            maxlen=max(10, int(cfg.auto_tune_history or 200))
+        )
         self._trades_since_update = 0
-        self._state_path = Path(cfg.auto_tune_state_path or "data/runtime/trend_auto_tune.json")
+        self._state_path = Path(
+            cfg.auto_tune_state_path or "data/runtime/trend_auto_tune.json"
+        )
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._log = logger or logging.getLogger("engine.trend.auto_tune")
         self._load_state()
 
-    def observe_trade(self, symbol: str, pnl_pct: float, stop_bps: float, meta: Dict | None = None) -> None:
+    def observe_trade(
+        self, symbol: str, pnl_pct: float, stop_bps: float, meta: Dict | None = None
+    ) -> None:
         record = {
             "symbol": symbol,
             "pnl_pct": pnl_pct,
@@ -102,7 +110,9 @@ class TrendAutoTuner:
     def _adjust_for_losses(self) -> bool:
         changed = False
         stop = min(self.params.atr_stop_mult + 0.1, self.cfg.auto_tune_stop_max)
-        target = min(self.params.atr_target_mult + 0.15, self.cfg.auto_tune_stop_max * 1.5)
+        target = min(
+            self.params.atr_target_mult + 0.15, self.cfg.auto_tune_stop_max * 1.5
+        )
         if stop != self.params.atr_stop_mult:
             self.params.atr_stop_mult = round(stop, 3)
             changed = True
@@ -141,7 +151,7 @@ class TrendAutoTuner:
         try:
             payload = {
                 "params": self.params.to_dict(),
-                "history": list(self.history)[- self.cfg.auto_tune_history :],
+                "history": list(self.history)[-self.cfg.auto_tune_history :],
             }
             self._state_path.write_text(json.dumps(payload, indent=2))
         except Exception:
@@ -157,6 +167,12 @@ class TrendAutoTuner:
             params = data.get("params")
             if params:
                 self.params.update(**params)
-            self._log.info("[TREND-AUTO] Restored %d trades and params %s", len(self.history), self.params.to_dict())
+            self._log.info(
+                "[TREND-AUTO] Restored %d trades and params %s",
+                len(self.history),
+                self.params.to_dict(),
+            )
         except Exception:
-            self._log.warning("[TREND-AUTO] Failed to restore tuner state", exc_info=True)
+            self._log.warning(
+                "[TREND-AUTO] Failed to restore tuner state", exc_info=True
+            )

@@ -17,13 +17,14 @@ import os
 import joblib
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, Tuple, Any
 from hmmlearn import hmm
 from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import SGDClassifier
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 class MacroRegimeHMM:
     """Detects macro market regimes using Gaussian HMM on volatility and volume patterns."""
@@ -44,12 +45,12 @@ class MacroRegimeHMM:
             n_components=n_states,
             covariance_type="diag",
             n_iter=200,
-            random_state=random_state
+            random_state=random_state,
         )
         self.scaler = StandardScaler()
         self.trained = False
 
-    def fit(self, X: np.ndarray) -> 'MacroRegimeHMM':
+    def fit(self, X: np.ndarray) -> "MacroRegimeHMM":
         """
         Train the macro regime model.
 
@@ -60,7 +61,9 @@ class MacroRegimeHMM:
         Returns:
             Trained MacroRegimeHMM instance
         """
-        logger.info(f"Training MacroRegimeHMM with {len(X)} samples and {X.shape[1]} features")
+        logger.info(
+            f"Training MacroRegimeHMM with {len(X)} samples and {X.shape[1]} features"
+        )
 
         # Standardize features
         X_scaled = self.scaler.fit_transform(X)
@@ -142,14 +145,14 @@ class MacroRegimeHMM:
             regime_stats[regime] = {
                 "transitions_from": dict(zip(self.regime_names, transmat[i])),
                 "mean_state": self.model.means_[i].tolist(),
-                "std_state": np.sqrt(self.model.covars_[i]).tolist()
+                "std_state": np.sqrt(self.model.covars_[i]).tolist(),
             }
 
         return {
             "trained": True,
             "n_regimes": self.n_states,
             "regime_names": self.regime_names,
-            "regime_statistics": regime_stats
+            "regime_statistics": regime_stats,
         }
 
     def save(self, path: str) -> None:
@@ -159,12 +162,12 @@ class MacroRegimeHMM:
             "scaler": self.scaler,
             "n_states": self.n_states,
             "regime_names": self.regime_names,
-            "trained": self.trained
+            "trained": self.trained,
         }
         joblib.dump(bundle, path)
         logger.info(f"MacroRegimeHMM saved to {path}")
 
-    def load(self, path: str) -> 'MacroRegimeHMM':
+    def load(self, path: str) -> "MacroRegimeHMM":
         """Load a trained model from disk."""
         if not os.path.exists(path):
             raise FileNotFoundError(f"Model file not found: {path}")
@@ -177,6 +180,7 @@ class MacroRegimeHMM:
         self.trained = bundle["trained"]
         logger.info(f"MacroRegimeHMM loaded from {path}")
         return self
+
 
 class HierarchicalPolicy:
     """Selects and manages micro-HMM policy heads by active macro regime."""
@@ -211,10 +215,14 @@ class HierarchicalPolicy:
             fallback_fname = f"policy_v1.joblib"
             fallback_path = os.path.join(self.model_dir, fallback_fname)
             if os.path.exists(fallback_path):
-                logger.warning(f"No policy for regime {regime}, using fallback {fallback_fname}")
+                logger.warning(
+                    f"No policy for regime {regime}, using fallback {fallback_fname}"
+                )
                 path = fallback_path
             else:
-                raise FileNotFoundError(f"No policy found for regime {regime} at {path}")
+                raise FileNotFoundError(
+                    f"No policy found for regime {regime} at {path}"
+                )
 
         bundle = joblib.load(path)
         policy = bundle.get("policy", bundle)  # Handle both formats
@@ -248,7 +256,7 @@ class HierarchicalPolicy:
                 "timestamp": pd.Timestamp.now(),
                 "from_regime": old_regime,
                 "to_regime": new_regime,
-                "metadata": metadata
+                "metadata": metadata,
             }
             self.switch_log.append(switch_event)
 
@@ -273,13 +281,15 @@ class HierarchicalPolicy:
             raise RuntimeError("No active regime set - call switch() first")
 
         if self.active_regime not in self.loaded_policies:
-            raise RuntimeError(f"No policy loaded for active regime {self.active_regime}")
+            raise RuntimeError(
+                f"No policy loaded for active regime {self.active_regime}"
+            )
 
         policy, metadata = self.loaded_policies[self.active_regime]
 
         try:
             # Get decision probabilities
-            if hasattr(policy, 'predict_proba'):
+            if hasattr(policy, "predict_proba"):
                 probs = policy.predict_proba(features.reshape(1, -1))[0]
             else:
                 # Fallback for models without predict_proba
@@ -303,7 +313,7 @@ class HierarchicalPolicy:
                 "confidence": confidence,
                 "regime": self.active_regime,
                 "probabilities": probs.tolist(),
-                "metadata": metadata
+                "metadata": metadata,
             }
 
         except Exception as e:
@@ -314,7 +324,7 @@ class HierarchicalPolicy:
                 "confidence": 0.0,
                 "regime": self.active_regime,
                 "probabilities": [0.0, 0.0, 0.0],
-                "error": str(e)
+                "error": str(e),
             }
 
     def get_stats(self) -> Dict[str, Any]:
@@ -336,7 +346,7 @@ class HierarchicalPolicy:
             "loaded_regimes": list(self.loaded_policies.keys()),
             "total_switches": switch_count,
             "regime_switch_counts": regime_counts,
-            "recent_switches": self.switch_log[-10:] if self.switch_log else []
+            "recent_switches": self.switch_log[-10:] if self.switch_log else [],
         }
 
     def export_switch_log(self, path: str = "data/processed/switch_events.csv") -> None:
@@ -355,10 +365,14 @@ class HierarchicalPolicy:
         df.to_csv(path, index=False)
         logger.info(f"Switch log exported to {path}")
 
+
 # Global instance for easy access (similar to existing global logger pattern)
 _global_hierarchy = None
 
-def get_hierarchical_policy(model_dir: str = "ml_service/model_store") -> HierarchicalPolicy:
+
+def get_hierarchical_policy(
+    model_dir: str = "ml_service/model_store",
+) -> HierarchicalPolicy:
     """Get or create global hierarchical policy instance."""
     global _global_hierarchy
     if _global_hierarchy is None or _global_hierarchy.model_dir != model_dir:

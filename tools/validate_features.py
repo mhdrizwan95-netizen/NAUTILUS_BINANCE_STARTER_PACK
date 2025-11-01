@@ -17,6 +17,7 @@ import sys
 import math
 import pandas as pd
 
+
 def validate(path: str) -> int:
     df = pd.read_csv(path)
     if "timestamp" not in df.columns or "close" not in df.columns:
@@ -40,9 +41,9 @@ def validate(path: str) -> int:
     print("OK")
     return 0
 
+
 if __name__ == "__main__":
     if len(sys.argv) != 2:
         print("Usage: validate_features.py <csv>")
         sys.exit(2)
     sys.exit(validate(sys.argv[1]))
-

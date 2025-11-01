@@ -51,7 +51,9 @@ Stop the container when the simulation finishes; it writes metrics to `/results/
    - `STEP_MINUTES` – bar granularity.
    - `EXACTLY_ONCE` – if `true`, each bar is used at most once across updates.
    - `COST_BPS`, `SLIPPAGE_BPS_PER_VOL` – simple cost model.
+   - `LEDGER_DB` and `DATA_INCOMING` default to `/research/manifest.sqlite` and `/research/incoming`; keep these paths when running in CI or staging so research jobs never touch the production `/ml` mount.
    - The trainer mirrors production behaviour: ledger files are claimed atomically and requeued if the job fails, so you never “burn” research data during a crash loop.
+   - `research_scrubber` (new optional service) runs the cron defined in `ops/research_purge.cron` to delete `/research/*` directories older than 30 days; adjust the cron if compliance requires longer retention.
 
 ## Extending to your stack
 

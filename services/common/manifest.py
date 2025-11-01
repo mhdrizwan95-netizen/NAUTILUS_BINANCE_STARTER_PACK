@@ -1,10 +1,8 @@
-
 import os
 import sqlite3
 import time
 import hashlib
-from dataclasses import dataclass
-from typing import List, Optional, Tuple, Dict
+from typing import List, Optional, Tuple
 from pathlib import Path
 
 DEFAULT_DB = os.environ.get("LEDGER_DB", "/shared/manifest.sqlite")
@@ -40,10 +38,12 @@ CREATE TABLE IF NOT EXISTS locks(
 );
 """
 
+
 def _connect(db_path: str = DEFAULT_DB):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
     return conn
+
 
 def init(db_path: str = DEFAULT_DB):
     conn = _connect(db_path)
@@ -57,14 +57,23 @@ def init(db_path: str = DEFAULT_DB):
     finally:
         conn.close()
 
+
 def sha256_file(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(1<<20), b""):
+        for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()
 
-def register_file(path: str, symbol: str, timeframe: str, t_start: int, t_end: int, db_path: str = DEFAULT_DB) -> Tuple[str, bool]:
+
+def register_file(
+    path: str,
+    symbol: str,
+    timeframe: str,
+    t_start: int,
+    t_end: int,
+    db_path: str = DEFAULT_DB,
+) -> Tuple[str, bool]:
     """
     Register a downloaded file. Returns (file_id, inserted_new: bool).
     If a file with same content (sha256) already exists, we don't duplicate entries.
@@ -76,15 +85,30 @@ def register_file(path: str, symbol: str, timeframe: str, t_start: int, t_end: i
     conn = _connect(db_path)
     try:
         cur = conn.cursor()
-        cur.execute("""
+        cur.execute(
+            """
           INSERT OR IGNORE INTO files(file_id, path, symbol, timeframe, t_start, t_end, sha256, size_bytes, status, created_at)
           VALUES(?,?,?,?,?,?,?,?,?,?)
-        """, (file_id, path, symbol, timeframe, int(t_start), int(t_end), sha, st.st_size, 'downloaded', now))
+        """,
+            (
+                file_id,
+                path,
+                symbol,
+                timeframe,
+                int(t_start),
+                int(t_end),
+                sha,
+                st.st_size,
+                "downloaded",
+                now,
+            ),
+        )
         conn.commit()
         inserted = cur.rowcount > 0
         return file_id, inserted
     finally:
         conn.close()
+
 
 def claim_unprocessed(limit: int = 50, db_path: str = DEFAULT_DB) -> list:
     """
@@ -96,31 +120,44 @@ def claim_unprocessed(limit: int = 50, db_path: str = DEFAULT_DB) -> list:
     try:
         cur = conn.cursor()
         cur.execute("BEGIN IMMEDIATE")
-        cur.execute("SELECT file_id FROM files WHERE status='downloaded' ORDER BY t_start ASC LIMIT ?", (limit,))
+        cur.execute(
+            "SELECT file_id FROM files WHERE status='downloaded' ORDER BY t_start ASC LIMIT ?",
+            (limit,),
+        )
         ids = [r[0] for r in cur.fetchall()]
         if not ids:
             conn.commit()
             return []
-        cur.execute(f"UPDATE files SET status='processing' WHERE file_id IN ({','.join(['?']*len(ids))})", ids)
+        cur.execute(
+            f"UPDATE files SET status='processing' WHERE file_id IN ({','.join(['?']*len(ids))})",
+            ids,
+        )
         conn.commit()
         # fetch details
-        cur.execute(f"SELECT * FROM files WHERE file_id IN ({','.join(['?']*len(ids))})", ids)
+        cur.execute(
+            f"SELECT * FROM files WHERE file_id IN ({','.join(['?']*len(ids))})", ids
+        )
         rows = [dict(r) for r in cur.fetchall()]
         return rows
     finally:
         conn.close()
 
+
 def mark_processed(file_id: str, delete_file: bool = True, db_path: str = DEFAULT_DB):
     conn = _connect(db_path)
     try:
         cur = conn.cursor()
-        cur.execute("UPDATE files SET status='processed', processed_at=? WHERE file_id=?", (time.time(), file_id))
+        cur.execute(
+            "UPDATE files SET status='processed', processed_at=? WHERE file_id=?",
+            (time.time(), file_id),
+        )
         conn.commit()
     finally:
         conn.close()
     # delete from filesystem after marking processed
     if delete_file:
         _delete_file_by_id(file_id, db_path)
+
 
 def requeue(file_ids: List[str], db_path: str = DEFAULT_DB):
     if not file_ids:
@@ -137,6 +174,7 @@ def requeue(file_ids: List[str], db_path: str = DEFAULT_DB):
     finally:
         conn.close()
 
+
 def _delete_file_by_id(file_id: str, db_path: str = DEFAULT_DB):
     conn = _connect(db_path)
     try:
@@ -150,21 +188,31 @@ def _delete_file_by_id(file_id: str, db_path: str = DEFAULT_DB):
                     os.remove(path)
             except Exception:
                 pass
-            cur.execute("UPDATE files SET status='deleted', deleted_at=? WHERE file_id=?", (time.time(), file_id))
+            cur.execute(
+                "UPDATE files SET status='deleted', deleted_at=? WHERE file_id=?",
+                (time.time(), file_id),
+            )
             conn.commit()
     finally:
         conn.close()
+
 
 def set_watermark(name: str, value: int, db_path: str = DEFAULT_DB):
     conn = _connect(db_path)
     try:
         cur = conn.cursor()
-        cur.execute("INSERT INTO watermarks(name, value) VALUES(?, ?) ON CONFLICT(name) DO UPDATE SET value=excluded.value", (name, int(value)))
+        cur.execute(
+            "INSERT INTO watermarks(name, value) VALUES(?, ?) ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+            (name, int(value)),
+        )
         conn.commit()
     finally:
         conn.close()
 
-def get_watermark(name: str, default: Optional[int] = None, db_path: str = DEFAULT_DB) -> Optional[int]:
+
+def get_watermark(
+    name: str, default: Optional[int] = None, db_path: str = DEFAULT_DB
+) -> Optional[int]:
     conn = _connect(db_path)
     try:
         cur = conn.cursor()

@@ -11,6 +11,7 @@ Architecture:
 - Persistent state for restart resilience
 - Safe fallbacks and circuit breakers
 """
+
 from __future__ import annotations
 import os
 import json
@@ -18,7 +19,7 @@ import time
 import logging
 import asyncio
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 import httpx
 
 
@@ -33,12 +34,11 @@ EQUITY_METRIC = "portfolio_equity_usd"
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s: %(message)s"
+    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
 )
 
 
-def load_json(path: Path, default:Dict = None) -> Dict:
+def load_json(path: Path, default: Dict = None) -> Dict:
     """Safe JSON file loading with fallback."""
     if path.exists():
         try:
@@ -51,7 +51,7 @@ def load_json(path: Path, default:Dict = None) -> Dict:
 def save_json(path: Path, data: Dict) -> None:
     """Save data to JSON file atomically."""
     try:
-        temp_path = path.with_suffix('.tmp')
+        temp_path = path.with_suffix(".tmp")
         temp_path.write_text(json.dumps(data, indent=2))
         temp_path.replace(path)
     except Exception as e:
@@ -64,14 +64,11 @@ def parse_prometheus_metrics(metrics_text: str) -> Dict[str, Any]:
 
     Returns dict with 'portfolio_equity_usd' and 'models' keys.
     """
-    parsed = {
-        "portfolio_equity_usd": 0.0,
-        "models": {}
-    }
+    parsed = {"portfolio_equity_usd": 0.0, "models": {}}
 
     for line in metrics_text.splitlines():
         line = line.strip()
-        if not line or line.startswith('#'):
+        if not line or line.startswith("#"):
             continue
 
         # Portfolio equity
@@ -84,34 +81,34 @@ def parse_prometheus_metrics(metrics_text: str) -> Dict[str, Any]:
                 continue
 
         # Strategy Sharpe ratios (model-tagged)
-        elif line.startswith("strategy_sharpe{") and 'model=' in line:
+        elif line.startswith("strategy_sharpe{") and "model=" in line:
             # strategy_sharpe{model="hmm_v4_canary"} 2.31
-            parts = line.split('{', 1)
+            parts = line.split("{", 1)
             if len(parts) != 2:
                 continue
-            metric_part = parts[0]
-            labels_part = parts[1].split('}')[0]
-            value_part = parts[1].split('}')[1].strip()
+            parts[0]
+            labels_part = parts[1].split("}")[0]
+            value_part = parts[1].split("}")[1].strip()
 
             try:
                 labels = parse_labels(labels_part)
-                model = labels.get('model', 'unknown')
+                model = labels.get("model", "unknown")
                 value = float(value_part)
                 parsed["models"].setdefault(model, {})["sharpe"] = value
             except (ValueError, IndexError):
                 continue
 
         # Realized PnL (for additional context)
-        elif line.startswith("pnl_realized_total{") and 'model=' in line:
-            parts = line.split('{', 1)
+        elif line.startswith("pnl_realized_total{") and "model=" in line:
+            parts = line.split("{", 1)
             if len(parts) != 2:
                 continue
-            labels_part = parts[1].split('}')[0]
-            value_part = parts[1].split('}')[1].strip()
+            labels_part = parts[1].split("}")[0]
+            value_part = parts[1].split("}")[1].strip()
 
             try:
                 labels = parse_labels(labels_part)
-                model = labels.get('model', 'unknown')
+                model = labels.get("model", "unknown")
                 value = float(value_part)
                 parsed["models"].setdefault(model, {})["realized_pnl"] = value
             except (ValueError, IndexError):
@@ -123,10 +120,10 @@ def parse_prometheus_metrics(metrics_text: str) -> Dict[str, Any]:
 def parse_labels(labels_str: str) -> Dict[str, str]:
     """Parse Prometheus label string like 'model="hmm_v4"'."""
     labels = {}
-    for kv in labels_str.split(','):
+    for kv in labels_str.split(","):
         kv = kv.strip()
-        if '=' in kv:
-            key, value = kv.split('=', 1)
+        if "=" in kv:
+            key, value = kv.split("=", 1)
             labels[key.strip()] = value.strip('"')
     return labels
 
@@ -156,23 +153,22 @@ def fetch_registry_fallback() -> Dict[str, Any]:
     Returns simulated metrics based on stored registry data.
     """
     registry = load_json(REGISTRY_PATH, {})
-    fallback = {
-        "portfolio_equity_usd": 50000.0,  # Reasonable fallback
-        "models": {}
-    }
+    fallback = {"portfolio_equity_usd": 50000.0, "models": {}}  # Reasonable fallback
 
     for model_name, model_data in registry.items():
         if isinstance(model_data, dict):
             fallback["models"][model_name] = {
                 "sharpe": model_data.get("sharpe", 0.0),
-                "realized_pnl": model_data.get("realized", 0.0)
+                "realized_pnl": model_data.get("realized", 0.0),
             }
 
     logging.info(f"Using registry fallback metrics: {len(fallback['models'])} models")
     return fallback
 
 
-def calculate_target_allocation(policy: Dict[str, Any], equity: float, models: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def calculate_target_allocation(
+    policy: Dict[str, Any], equity: float, models: Dict[str, Any]
+) -> Dict[str, Dict[str, Any]]:
     """
     Calculate target capital quotas for each model based on current performance and policy.
 
@@ -186,7 +182,9 @@ def calculate_target_allocation(policy: Dict[str, Any], equity: float, models: D
 
     # Calculate total available capital pool
     equity_fraction = policy.get("base_equity_frac", 0.2)
-    total_pool = float(max(1000.0, equity * equity_fraction))  # Minimum $1K even with no equity
+    total_pool = float(
+        max(1000.0, equity * equity_fraction)
+    )  # Minimum $1K even with no equity
 
     # Start with even split baseline
     base_allocation = total_pool / len(enabled_models)
@@ -257,21 +255,25 @@ def calculate_target_allocation(policy: Dict[str, Any], equity: float, models: D
             "decision": decision,
             "reason": reason,
             "last_update": last_update,
-            "next_update": last_update + cooldown_sec
+            "next_update": last_update + cooldown_sec,
         }
 
         total_allocated += target_quota
 
         # Log significant decisions
         if decision in ["promote", "demote"] or target_quota != current_quota:
-            logging.info(f"[ALLOC] {model}: {decision} "
-                        f"${current_quota:.0f} -> ${target_quota:.0f} "
-                        f"(Sharpe: {sharpe:.2f}, Reason: {reason})")
+            logging.info(
+                f"[ALLOC] {model}: {decision} "
+                f"${current_quota:.0f} -> ${target_quota:.0f} "
+                f"(Sharpe: {sharpe:.2f}, Reason: {reason})"
+            )
 
     # Normalize if total exceeds pool (though bounds should prevent this)
     if total_allocated > total_pool:
         scale_factor = total_pool / total_allocated
-        logging.warning(f"[ALLOC] Oversubscribed capital ${total_allocated:.0f} > pool ${total_pool:.0f}, scaling down")
+        logging.warning(
+            f"[ALLOC] Oversubscribed capital ${total_allocated:.0f} > pool ${total_pool:.0f}, scaling down"
+        )
         for model in target_allocations:
             target_allocations[model]["target_quota"] *= scale_factor
 
@@ -285,22 +287,27 @@ async def allocation_loop():
     Runs continuously, fetching metrics and adjusting model capital quotas.
     """
     # Load policy
-    policy = load_json(POLICY_PATH, {
-        "refresh_sec": 30,
-        "base_equity_frac": 0.2,
-        "min_quota_usd": 250.0,
-        "max_quota_usd": 25000.0,
-        "step_up_pct": 0.15,
-        "step_down_pct": 0.20,
-        "sharpe_promote": 1.0,
-        "sharpe_demote": 0.3,
-        "cooldown_sec": 900,
-        "enabled": ["ma_crossover_v3", "hmm_v2_canary"],
-        "allocation_mode": "dynamic"
-    })
+    policy = load_json(
+        POLICY_PATH,
+        {
+            "refresh_sec": 30,
+            "base_equity_frac": 0.2,
+            "min_quota_usd": 250.0,
+            "max_quota_usd": 25000.0,
+            "step_up_pct": 0.15,
+            "step_down_pct": 0.20,
+            "sharpe_promote": 1.0,
+            "sharpe_demote": 0.3,
+            "cooldown_sec": 900,
+            "enabled": ["ma_crossover_v3", "hmm_v2_canary"],
+            "allocation_mode": "dynamic",
+        },
+    )
 
     # Initial state
-    allocations = load_json(ALLOCATIONS_PATH, {"capital_quota_usd": {}, "updated_at": {}})
+    allocations = load_json(
+        ALLOCATIONS_PATH, {"capital_quota_usd": {}, "updated_at": {}}
+    )
     refresh_interval = policy.get("refresh_sec", 30)
 
     logging.info("[ALLOC] Starting dynamic capital allocator")
@@ -314,7 +321,9 @@ async def allocation_loop():
             metrics = await fetch_live_metrics()
 
             if not metrics.get("models"):
-                logging.warning("[ALLOC] No model metrics available, skipping allocation")
+                logging.warning(
+                    "[ALLOC] No model metrics available, skipping allocation"
+                )
                 await asyncio.sleep(refresh_interval)
                 continue
 
@@ -331,13 +340,18 @@ async def allocation_loop():
                 new_quota_usd[model] = alloc_data["target_quota"]
 
             # Update allocations file
-            allocations.update({
-                "capital_quota_usd": new_quota_usd,
-                "updated_at": {model: alloc["last_update"] for model, alloc in target_allocations.items()},
-                "equity_usd": equity,
-                "ts": time.time(),
-                "details": target_allocations
-            })
+            allocations.update(
+                {
+                    "capital_quota_usd": new_quota_usd,
+                    "updated_at": {
+                        model: alloc["last_update"]
+                        for model, alloc in target_allocations.items()
+                    },
+                    "equity_usd": equity,
+                    "ts": time.time(),
+                    "details": target_allocations,
+                }
+            )
 
             save_json(ALLOCATIONS_PATH, allocations)
 
@@ -346,9 +360,11 @@ async def allocation_loop():
             num_models = len(new_quota_usd)
             avg_allocation = total_allocated / max(1, num_models)
 
-            logging.info(f"[ALLOC] Updated allocations: {num_models} models, "
-                        f"total=${total_allocated:,.0f}, avg=${avg_allocation:.0f} "
-                        f"(equity=${equity:,.0f})")
+            logging.info(
+                f"[ALLOC] Updated allocations: {num_models} models, "
+                f"total=${total_allocated:,.0f}, avg=${avg_allocation:.0f} "
+                f"(equity=${equity:,.0f})"
+            )
 
         except Exception as e:
             logging.error(f"[ALLOC] Loop error: {e}")
@@ -359,6 +375,7 @@ async def allocation_loop():
 
 # Convenience functions for external access
 
+
 def get_model_quota(model: str) -> float:
     """Get current capital quota for a specific model."""
     allocations = load_json(ALLOCATIONS_PATH, {})
@@ -367,15 +384,20 @@ def get_model_quota(model: str) -> float:
 
 def get_all_allocations() -> Dict[str, Any]:
     """Get complete current allocation state."""
-    return load_json(ALLOCATIONS_PATH, {
-        "capital_quota_usd": {},
-        "updated_at": {},
-        "equity_usd": 0.0,
-        "ts": time.time()
-    })
+    return load_json(
+        ALLOCATIONS_PATH,
+        {
+            "capital_quota_usd": {},
+            "updated_at": {},
+            "equity_usd": 0.0,
+            "ts": time.time(),
+        },
+    )
 
 
-async def simulate_allocation_cycle(policy: Dict = None, metrics: Dict = None) -> Dict[str, Any]:
+async def simulate_allocation_cycle(
+    policy: Dict = None, metrics: Dict = None
+) -> Dict[str, Any]:
     """
     Simulate a single allocation cycle for testing.
 
@@ -387,12 +409,21 @@ async def simulate_allocation_cycle(policy: Dict = None, metrics: Dict = None) -
         Allocation result dict
     """
     if policy is None:
-        policy = load_json(POLICY_PATH, {
-            "refresh_sec": 30, "base_equity_frac": 0.2, "min_quota_usd": 250.0,
-            "max_quota_usd": 25000.0, "step_up_pct": 0.15, "step_down_pct": 0.20,
-            "sharpe_promote": 1.0, "sharpe_demote": 0.3, "cooldown_sec": 0,  # No cooldown for testing
-            "enabled": ["ma_crossover_v3", "hmm_v2_canary"]
-        })
+        policy = load_json(
+            POLICY_PATH,
+            {
+                "refresh_sec": 30,
+                "base_equity_frac": 0.2,
+                "min_quota_usd": 250.0,
+                "max_quota_usd": 25000.0,
+                "step_up_pct": 0.15,
+                "step_down_pct": 0.20,
+                "sharpe_promote": 1.0,
+                "sharpe_demote": 0.3,
+                "cooldown_sec": 0,  # No cooldown for testing
+                "enabled": ["ma_crossover_v3", "hmm_v2_canary"],
+            },
+        )
 
     if metrics is None:
         metrics = await fetch_live_metrics()
@@ -401,7 +432,9 @@ async def simulate_allocation_cycle(policy: Dict = None, metrics: Dict = None) -
     target_allocations = calculate_target_allocation(policy, equity, metrics["models"])
 
     # Apply allocations
-    new_quota_usd = {model: alloc["target_quota"] for model, alloc in target_allocations.items()}
+    new_quota_usd = {
+        model: alloc["target_quota"] for model, alloc in target_allocations.items()
+    }
 
     result = {
         "policy": policy,
@@ -410,7 +443,7 @@ async def simulate_allocation_cycle(policy: Dict = None, metrics: Dict = None) -
         "target_allocations": target_allocations,
         "final_quotas": new_quota_usd,
         "total_allocated": sum(new_quota_usd.values()),
-        "simulation_ts": time.time()
+        "simulation_ts": time.time(),
     }
 
     return result
@@ -420,5 +453,6 @@ async def simulate_allocation_cycle(policy: Dict = None, metrics: Dict = None) -
 def integrate_with_ops():
     """Integration point for OPS API startup."""
     import ops.ops_api  # Will add startup handler
+
     logging.info("[ALLOC] Capital allocator integrated with OPS")
     return True

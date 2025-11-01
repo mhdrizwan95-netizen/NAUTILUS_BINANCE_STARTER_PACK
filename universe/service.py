@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Response
-from prometheus_client import CollectorRegistry, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import (
+    CollectorRegistry,
+    Gauge,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
 
 from .adapters import fetch_exchange_info, fetch_top24h
 from .store import UniverseStore

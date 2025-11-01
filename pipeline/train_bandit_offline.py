@@ -10,7 +10,11 @@ from typing import Dict
 import pandas as pd
 
 
-def train(pattern: str = "data/outcomes/*.parquet", c: float = 1.0, situations_path: str = "config/situations.json") -> Dict[str, float]:
+def train(
+    pattern: str = "data/outcomes/*.parquet",
+    c: float = 1.0,
+    situations_path: str = "config/situations.json",
+) -> Dict[str, float]:
     paths = sorted(glob.glob(pattern))
     if not paths:
         return {}
@@ -21,7 +25,8 @@ def train(pattern: str = "data/outcomes/*.parquet", c: float = 1.0, situations_p
     stats = g.agg(["count", "mean", "var"]).reset_index().fillna(0.0)
     N = max(float(stats["count"].sum()), 1.0)
     stats["ucb"] = stats.apply(
-        lambda r: float(r["mean"]) + float(c) * math.sqrt(max(math.log(N), 0.0) / max(float(r["count"]), 1.0)),
+        lambda r: float(r["mean"])
+        + float(c) * math.sqrt(max(math.log(N), 0.0) / max(float(r["count"]), 1.0)),
         axis=1,
     )
     lo, hi = float(stats["ucb"].min()), float(stats["ucb"].max())
@@ -46,7 +51,9 @@ def train(pattern: str = "data/outcomes/*.parquet", c: float = 1.0, situations_p
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Train UCB priorities from offline outcomes")
+    ap = argparse.ArgumentParser(
+        description="Train UCB priorities from offline outcomes"
+    )
     ap.add_argument("--pattern", default="data/outcomes/*.parquet")
     ap.add_argument("--c", type=float, default=1.0)
     args = ap.parse_args()

@@ -1,0 +1,36 @@
+groups:
+  - name: ops-api-latency
+    rules:
+      - alert: OpsApiP99LatencyHigh
+        expr: histogram_quantile(0.99, sum by (le) (rate(app_request_latency_seconds_bucket{service="ops-api"}[5m]))) > 0.75
+        for: 5m
+        labels:
+          severity: page
+          team: platform-trading
+        annotations:
+          summary: "Ops API p99 latency > 750ms"
+          runbook: "docs/runbooks/ops_api.md#p99"
+
+  - name: websocket-heartbeat
+    rules:
+      - alert: RealtimeHeartbeatStale
+        expr: realtime_heartbeat_age_seconds > 45
+        for: 90s
+        labels:
+          severity: warn
+          team: frontend
+        annotations:
+          summary: "Realtime heartbeat stale"
+          description: "No dashboard heartbeat for {{ $value }} seconds"
+
+  - name: ml-service
+    rules:
+      - alert: MlInferenceErrorSpike
+        expr: rate(ml_inference_failures_total[5m]) > 0
+        for: 3m
+        labels:
+          severity: page
+          team: ml
+        annotations:
+          summary: "Inference errors detected"
+          runbook: "docs/runbooks/ml_inference.md"

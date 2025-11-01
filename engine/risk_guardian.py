@@ -40,9 +40,9 @@ def _as_bool(v: Optional[str], default: bool) -> bool:
 class GuardianConfig:
     enabled: bool = False
     poll_sec: float = 5.0
-    cross_health_floor: float = 1.35           # Cross margin: want >= floor
-    futures_mmr_floor: float = 0.80            # Futures MMR: want <= floor
-    critical_ratio: float = 1.07               # worst-score threshold vs floor for hard action
+    cross_health_floor: float = 1.35  # Cross margin: want >= floor
+    futures_mmr_floor: float = 0.80  # Futures MMR: want <= floor
+    critical_ratio: float = 1.07  # worst-score threshold vs floor for hard action
     max_daily_loss_usd: float = 100.0
     max_open_positions: int = 5
     daily_reset_tz: str = "UTC"
@@ -77,7 +77,9 @@ class RiskGuardian:
         self.cfg = cfg or load_guardian_config()
         self._running = False
         self._task: Optional[asyncio.Task] = None
-        self._day_anchor: Optional[Tuple[int, float]] = None  # (YYYYMMDD, realized_at_anchor)
+        self._day_anchor: Optional[Tuple[int, float]] = (
+            None  # (YYYYMMDD, realized_at_anchor)
+        )
         self._paused_until_utc_reset = False
         self._tz = None
         try:
@@ -103,6 +105,7 @@ class RiskGuardian:
         from .app import router as order_router
         from .risk import RiskRails
         from .config import load_risk_config
+
         rails = RiskRails(load_risk_config())
         while self._running:
             t0 = time.time()
@@ -115,24 +118,28 @@ class RiskGuardian:
                     rails.refresh_snapshot_metrics(snap)
                 except Exception:
                     pass
-            except Exception as e:
+            except Exception:
                 # Soft-fail to avoid killing the loop
                 try:
-                    MET.get("engine_venue_errors_total").labels(venue="guard", error="LOOP_ERROR").inc()
+                    MET.get("engine_venue_errors_total").labels(
+                        venue="guard", error="LOOP_ERROR"
+                    ).inc()
                 except Exception:
                     pass
             dt = max(0.0, self.cfg.poll_sec - (time.time() - t0))
             await asyncio.sleep(dt)
 
     async def _enforce_daily_stop(self, order_router) -> None:
-        from .risk import RiskRails
-        from .config import load_risk_config
+        pass
+
         state = order_router.portfolio_service().state
         realized = float(state.realized or 0.0)
         # Anchor at first run of day based on configured timezone/hour
         now_dt = datetime.now(self._tz)
         # daily boundary hour
-        boundary = now_dt.replace(hour=self.cfg.daily_reset_hour, minute=0, second=0, microsecond=0)
+        boundary = now_dt.replace(
+            hour=self.cfg.daily_reset_hour, minute=0, second=0, microsecond=0
+        )
         if now_dt < boundary:
             # before today's boundary, use yesterday's
             boundary = boundary - timedelta(days=1)
@@ -145,6 +152,7 @@ class RiskGuardian:
             # Emit health OK
             try:
                 from engine.core.event_bus import BUS as _BUS
+
                 _BUS.fire("health.state", {"state": 0, "reason": "daily_reset"})
             except Exception:
                 pass
@@ -154,7 +162,10 @@ class RiskGuardian:
             MET.get("pnl_realized_total").set(realized)
         except Exception:
             pass
-        if pnl_day <= -abs(self.cfg.max_daily_loss_usd) and not self._paused_until_utc_reset:
+        if (
+            pnl_day <= -abs(self.cfg.max_daily_loss_usd)
+            and not self._paused_until_utc_reset
+        ):
             # Pause trading via RiskRails config gate
             # Write a single-source-of-truth flag file; RiskRails will consult it on each order
             _write_trading_flag(False)
@@ -165,7 +176,11 @@ class RiskGuardian:
             self._paused_until_utc_reset = True
             try:
                 from .core.event_bus import publish_risk_event
-                await publish_risk_event("daily_stop", {"pnl_day": pnl_day, "limit": self.cfg.max_daily_loss_usd})
+
+                await publish_risk_event(
+                    "daily_stop",
+                    {"pnl_day": pnl_day, "limit": self.cfg.max_daily_loss_usd},
+                )
             except Exception:
                 pass
 
@@ -215,7 +230,17 @@ class RiskGuardian:
         # Cancel resting entries & tighten stops — publish events for now
         try:
             from .core.event_bus import publish_risk_event
-            await publish_risk_event("cross_health_soft", {"worst_score": score, "floors": {"cross": self.cfg.cross_health_floor, "futures_mmr": self.cfg.futures_mmr_floor}})
+
+            await publish_risk_event(
+                "cross_health_soft",
+                {
+                    "worst_score": score,
+                    "floors": {
+                        "cross": self.cfg.cross_health_floor,
+                        "futures_mmr": self.cfg.futures_mmr_floor,
+                    },
+                },
+            )
         except Exception:
             pass
 
@@ -243,7 +268,12 @@ class RiskGuardian:
             )
             target = ranked[0] if ranked else None
         else:
-            target = max(positions, key=lambda p: abs(getattr(p, "quantity", 0.0) * getattr(p, "last_price", 0.0)))
+            target = max(
+                positions,
+                key=lambda p: abs(
+                    getattr(p, "quantity", 0.0) * getattr(p, "last_price", 0.0)
+                ),
+            )
         if target is None:
             return
         qty = float(getattr(target, "quantity", 0.0))
@@ -258,7 +288,15 @@ class RiskGuardian:
         try:
             await order_router.market_quantity(f"{base}.{venue}", side, reduce_qty)
             if publish_risk_event:
-                await publish_risk_event("cross_health_hard", {"worst_score": score, "symbol": base, "reduced_qty": reduce_qty, "side": side})
+                await publish_risk_event(
+                    "cross_health_hard",
+                    {
+                        "worst_score": score,
+                        "symbol": base,
+                        "reduced_qty": reduce_qty,
+                        "side": side,
+                    },
+                )
         except Exception:
             # best-effort only
             pass
@@ -285,7 +323,8 @@ def _dig(d: Optional[dict], path: list[str]):
 
 def _write_trading_flag(enabled: bool) -> None:
     try:
-        import json, os
+        import os
+
         os.makedirs("state", exist_ok=True)
         with open("state/trading_enabled.flag", "w", encoding="utf-8") as fh:
             fh.write("true" if enabled else "false")

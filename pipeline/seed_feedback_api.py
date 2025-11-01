@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 import glob
 import json
-import os
-from typing import Iterable
 
 import httpx
 import pandas as pd
@@ -40,8 +38,14 @@ def post_outcomes(pattern: str, endpoint: str, timeout: float = 2.0) -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Seed situation feedback API with offline outcomes")
-    ap.add_argument("--hits", required=True, help="File pattern for outcomes, e.g. data/outcomes/BTCUSDT_2025-10-05.parquet or data/outcomes/*.parquet")
+    ap = argparse.ArgumentParser(
+        description="Seed situation feedback API with offline outcomes"
+    )
+    ap.add_argument(
+        "--hits",
+        required=True,
+        help="File pattern for outcomes, e.g. data/outcomes/BTCUSDT_2025-10-05.parquet or data/outcomes/*.parquet",
+    )
     ap.add_argument("--endpoint", default="http://localhost:8011/feedback/outcome")
     args = ap.parse_args()
     n = post_outcomes(args.hits, args.endpoint)

@@ -32,15 +32,23 @@ class VenueOverrides:
         self.size_mult: Dict[str, Tuple[float, float]] = {}  # sym -> (mult, until)
         self.scalp_block: Dict[str, _TTLFlag] = {}
         self.maker_block: Dict[str, _TTLFlag] = {}
-        self._slip_cap_bps = float(os.getenv("AUTO_CUTBACK_SLIP_CAP_BPS", os.getenv("FUT_TAKER_MAX_SLIP_BPS", "15")))
+        self._slip_cap_bps = float(
+            os.getenv(
+                "AUTO_CUTBACK_SLIP_CAP_BPS", os.getenv("FUT_TAKER_MAX_SLIP_BPS", "15")
+            )
+        )
         self._cut_mult = float(os.getenv("AUTO_CUTBACK_SIZE_MULT", "0.5"))
         self._cut_dur = float(os.getenv("AUTO_CUTBACK_DURATION_MIN", "60")) * 60.0
         self._mute_thresh = int(float(os.getenv("AUTO_MUTE_SCALP_THRESHOLD", "3")))
         self._mute_window = float(os.getenv("AUTO_MUTE_SCALP_WINDOW_MIN", "10")) * 60.0
         self._mute_dur = float(os.getenv("AUTO_MUTE_SCALP_DURATION_MIN", "60")) * 60.0
         self._spread_thresh = int(float(os.getenv("AUTO_MAKER_SPREAD_THRESHOLD", "3")))
-        self._spread_window = float(os.getenv("AUTO_MAKER_SPREAD_WINDOW_MIN", "15")) * 60.0
-        self._spread_dur = float(os.getenv("AUTO_MAKER_SPREAD_DURATION_MIN", "30")) * 60.0
+        self._spread_window = (
+            float(os.getenv("AUTO_MAKER_SPREAD_WINDOW_MIN", "15")) * 60.0
+        )
+        self._spread_dur = (
+            float(os.getenv("AUTO_MAKER_SPREAD_DURATION_MIN", "30")) * 60.0
+        )
         self._slip_window = float(os.getenv("AUTO_CUTBACK_SLIP_WINDOW_MIN", "5")) * 60.0
         # rolling deques of timestamps
         self._skip_slippage: Dict[str, deque] = defaultdict(deque)
@@ -109,4 +117,3 @@ class VenueOverrides:
                 q2.popleft()
             if len(q2) >= self._spread_thresh:
                 self.maker_block[base] = _TTLFlag(until=now + self._spread_dur)
-

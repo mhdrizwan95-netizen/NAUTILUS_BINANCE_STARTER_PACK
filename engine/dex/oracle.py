@@ -60,7 +60,7 @@ class DexPriceOracle:
                 await asyncio.sleep(0.25 * (attempt + 1))
         else:
             raise last_exc  # propagate last error after retries
-        
+
         pairs = data.get("pairs") or []
         for pair in pairs:
             price = pair.get("priceUsd")

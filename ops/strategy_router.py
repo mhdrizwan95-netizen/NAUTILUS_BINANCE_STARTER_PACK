@@ -12,14 +12,14 @@ Architecture:
 - Comprehensive audit logging
 - Integration with OPS governance and telemetry
 """
+
 import asyncio
 import json
 import logging
 import random
 import time
-import math
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, Any, Optional
 
 import httpx
 
@@ -31,9 +31,11 @@ from ops.env import engine_endpoints
 WEIGHTS_PATH = Path("ops/strategy_weights.json")
 ENGINE_ENDPOINTS = engine_endpoints()
 
+
 # Prometheus-style metrics (would replace with actual prometheus client)
 class StrategyMetrics:
     """Simple in-memory metrics for strategy routing."""
+
     def __init__(self):
         self.signal_routed = {}  # model -> count
         self.signal_failed = {}  # model -> count
@@ -46,15 +48,18 @@ class StrategyMetrics:
         self.signal_failed[model] = self.signal_failed.get(model, 0) + 1
 
     def log_decision(self, signal_id: str, model: str, weight: float):
-        self.routing_decisions.append({
-            "timestamp": time.time(),
-            "signal_id": signal_id,
-            "model": model,
-            "weight": weight,
-            "decision_type": "weighted_routing"
-        })
+        self.routing_decisions.append(
+            {
+                "timestamp": time.time(),
+                "signal_id": signal_id,
+                "model": model,
+                "weight": weight,
+                "decision_type": "weighted_routing",
+            }
+        )
         if len(self.routing_decisions) > 1000:
             self.routing_decisions = self.routing_decisions[-1000:]
+
 
 # Global metrics
 metrics = StrategyMetrics()
@@ -71,7 +76,7 @@ def _load_weights() -> Dict[str, Any]:
             "min_live_hours": 6,
             "max_canary_weight": 0.15,
             "auto_promotion_enabled": True,
-            "manual_override_allowed": True
+            "manual_override_allowed": True,
         }
 
     try:
@@ -103,13 +108,15 @@ def choose_model(signal_id: Optional[str] = None) -> str:
     if abs(total_weight - 1.0) > 0.001:
         logging.warning(f"[ROUTER] Weights don't sum to 1.0: {total_weight}")
         # Normalize
-        weights = {k: v/total_weight for k, v in weights.items()}
+        weights = {k: v / total_weight for k, v in weights.items()}
 
     # Ensure no canary exceeds max weight
     current = config.get("current", "")
     for model, weight in list(weights.items()):
         if model != current and weight > max_canary:
-            logging.warning(f"[ROUTER] Reducing {model} weight from {weight} to {max_canary}")
+            logging.warning(
+                f"[ROUTER] Reducing {model} weight from {weight} to {max_canary}"
+            )
             weights[model] = max_canary
             # Redistribute to current model
             excess = weight - max_canary
@@ -127,7 +134,9 @@ def choose_model(signal_id: Optional[str] = None) -> str:
 
             # Is this a canary model?
             if model != current and weight > 0:
-                logging.info(f"[ROUTER] 🐤 Canary deployment: Using {model} ({weight*100:.1f}%)")
+                logging.info(
+                    f"[ROUTER] 🐤 Canary deployment: Using {model} ({weight*100:.1f}%)"
+                )
 
             return model
 
@@ -185,7 +194,9 @@ async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                 metrics.increment_signal_routed(model)
                 success = True
 
-                logging.info(f"[ROUTER] ✅ Signal routed to {model} in {result['routing_time']:.2f}s")
+                logging.info(
+                    f"[ROUTER] ✅ Signal routed to {model} in {result['routing_time']:.2f}s"
+                )
                 break
 
         except Exception as e:
@@ -197,7 +208,7 @@ async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
         result = {
             "error": f"All engines failed for model {model}",
             "model_tag": model,
-            "status": "routing_failed"
+            "status": "routing_failed",
         }
         logging.error(f"[ROUTER] ❌ Signal routing failed for {model}")
 
@@ -231,8 +242,10 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
         # Clip quote to available quota
         adjusted_quote = min(float(original_quote), quota_usd)
         signal_data["quote"] = adjusted_quote
-        logging.info(f"[ROUTER] 💰 Capital allocation: {model} quota ${quota_usd:.0f}, "
-                    f"requested ${original_quote:.0f}, adjusted to ${adjusted_quote:.0f}")
+        logging.info(
+            f"[ROUTER] 💰 Capital allocation: {model} quota ${quota_usd:.0f}, "
+            f"requested ${original_quote:.0f}, adjusted to ${adjusted_quote:.0f}"
+        )
 
     elif original_quantity is not None and quota_usd > 0:
         # Convert quantity to quote, then clip to quota, then convert back
@@ -242,9 +255,11 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
             adjusted_quote = min(quote_equivalent, quota_usd)
             adjusted_quantity = adjusted_quote / price
             signal_data["quantity"] = adjusted_quantity
-            logging.info(f"[ROUTER] 💰 Capital allocation: {model} quota ${quota_usd:.0f}, "
-                        f"requested qty {original_quantity:.6f} (${quote_equivalent:.0f}), "
-                        f"adjusted to qty {adjusted_quantity:.6f} (${adjusted_quote:.0f})")
+            logging.info(
+                f"[ROUTER] 💰 Capital allocation: {model} quota ${quota_usd:.0f}, "
+                f"requested qty {original_quantity:.6f} (${quote_equivalent:.0f}), "
+                f"adjusted to qty {adjusted_quantity:.6f} (${adjusted_quote:.0f})"
+            )
 
     # Attempt delivery to engine
     success = False
@@ -257,7 +272,7 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
                 response = await client.post(
                     f"{endpoint}/strategy/signal",
                     json=signal_data,
-                    headers={"Content-Type": "application/json"}
+                    headers={"Content-Type": "application/json"},
                 )
 
                 response.raise_for_status()
@@ -267,15 +282,18 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
                 result["original_quote"] = original_quote
                 result["original_quantity"] = original_quantity
                 result["allocation_adjusted"] = (
-                    signal_data.get("quote", original_quote) != original_quote or
-                    signal_data.get("quantity", original_quantity) != original_quantity
+                    signal_data.get("quote", original_quote) != original_quote
+                    or signal_data.get("quantity", original_quantity)
+                    != original_quantity
                 )
                 result["routing_time"] = time.time() - start_time
 
                 metrics.increment_signal_routed(model)
                 success = True
 
-                logging.info(f"[ROUTER] ✅ Signal routed to {model} with allocation in {result['routing_time']:.2f}s")
+                logging.info(
+                    f"[ROUTER] ✅ Signal routed to {model} with allocation in {result['routing_time']:.2f}s"
+                )
 
                 break  # Success, exit engine loop
 
@@ -289,7 +307,7 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
             "error": f"All engines failed for model {model}",
             "model_tag": model,
             "capital_quota_usd": quota_usd,
-            "status": "routing_failed"
+            "status": "routing_failed",
         }
         logging.error(f"[ROUTER] ❌ Signal routing failed for {model}")
 
@@ -334,7 +352,9 @@ async def fetch_price_for_symbol(symbol: str) -> float:
 
 # FastAPI Router
 from fastapi import APIRouter, HTTPException
+
 router = APIRouter()
+
 
 @router.post("/strategy/signal")
 async def strategy_signal_endpoint(signal_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -347,11 +367,15 @@ async def strategy_signal_endpoint(signal_data: Dict[str, Any]) -> Dict[str, Any
         required = ["symbol", "side"]
         for f in required:
             if not signal_data.get(f):
-                raise HTTPException(status_code=400, detail="symbol and side are required")
+                raise HTTPException(
+                    status_code=400, detail="symbol and side are required"
+                )
         q = signal_data.get("quote")
         qty = signal_data.get("quantity")
         if (q is None) == (qty is None):  # exactly one must be provided
-            raise HTTPException(status_code=400, detail="Provide exactly one of quote or quantity")
+            raise HTTPException(
+                status_code=400, detail="Provide exactly one of quote or quantity"
+            )
 
         # Route and execute signal with capital allocation
         result = await route_signal_with_allocation(signal_data)
@@ -390,7 +414,9 @@ async def set_weights_endpoint(body: Dict[str, Any]):
         total = sum(new_weights.values())
 
         if abs(total - 1.0) > 0.001:
-            raise HTTPException(status_code=400, detail=f"Weights must sum to 1.0, got {total}")
+            raise HTTPException(
+                status_code=400, detail=f"Weights must sum to 1.0, got {total}"
+            )
 
         # Validate no canary exceeds max
         max_canary = config.get("max_canary_weight", 0.15)
@@ -399,7 +425,7 @@ async def set_weights_endpoint(body: Dict[str, Any]):
             if model != current and weight > max_canary:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"Canary weight {weight} exceeds max {max_canary} for {model}"
+                    detail=f"Canary weight {weight} exceeds max {max_canary} for {model}",
                 )
 
         # Apply updates
@@ -413,11 +439,14 @@ async def set_weights_endpoint(body: Dict[str, Any]):
         # Notify governance system
         try:
             from ops import governance_daemon
+
             # Trigger governance event
-            asyncio.create_task(governance_daemon.BUS.publish(
-                "strategy.weights_updated",
-                {"new_weights": new_weights, "updated_by": "admin"}
-            ))
+            asyncio.create_task(
+                governance_daemon.BUS.publish(
+                    "strategy.weights_updated",
+                    {"new_weights": new_weights, "updated_by": "admin"},
+                )
+            )
         except ImportError:
             pass
 
@@ -456,17 +485,24 @@ async def promote_canary_endpoint(body: Dict[str, Any]):
         # Notify systems
         try:
             from ops import governance_daemon
-            asyncio.create_task(governance_daemon.BUS.publish(
-                "strategy.manual_promotion",
-                {"old_model": old_current, "new_model": candidate, "promoted_by": "admin"}
-            ))
+
+            asyncio.create_task(
+                governance_daemon.BUS.publish(
+                    "strategy.manual_promotion",
+                    {
+                        "old_model": old_current,
+                        "new_model": candidate,
+                        "promoted_by": "admin",
+                    },
+                )
+            )
         except ImportError:
             pass
 
         return {
             "status": "promoted",
             "old_current": old_current,
-            "new_current": candidate
+            "new_current": candidate,
         }
 
     except HTTPException:
@@ -489,7 +525,7 @@ def get_routing_metrics():
         model_stats[model] = {
             "routed": metrics.signal_routed.get(model, 0),
             "failed": metrics.signal_failed.get(model, 0),
-            "weight": config["weights"].get(model, 0)
+            "weight": config["weights"].get(model, 0),
         }
 
     return {
@@ -498,7 +534,7 @@ def get_routing_metrics():
         "total_failed": total_failed,
         "success_rate": total_routed / max(total_routed + total_failed, 1),
         "model_stats": model_stats,
-        "recent_decisions": metrics.routing_decisions[-10:]  # Last 10
+        "recent_decisions": metrics.routing_decisions[-10:],  # Last 10
     }
 
 
@@ -506,6 +542,7 @@ def get_routing_metrics():
 def setup_strategy_router(app):
     """Register strategy router with FastAPI app."""
     from ops.ops_api import app as ops_app
+
     ops_app.include_router(router, prefix="", tags=["strategy"])
 
     logging.info("[ROUTER] Strategy router initialized with probabilistic routing")

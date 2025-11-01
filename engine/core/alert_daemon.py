@@ -11,10 +11,10 @@ Design Philosophy:
 - Statistical anomaly detection with rolling thresholds
 - Throttling to prevent alert spam during extreme events
 """
+
 import asyncio
 import logging
 import os
-import re
 import time
 import statistics
 from typing import Dict, List, Any, Optional, Callable
@@ -28,6 +28,7 @@ from .event_bus import BUS
 @dataclass
 class AlertRule:
     """Individual alert rule configuration."""
+
     topic: str
     condition: str
     message: str
@@ -52,7 +53,7 @@ class AlertRule:
             context = {
                 **data,
                 "timestamp": time.strftime("%H:%M:%S"),
-                "priority": self.priority.upper()
+                "priority": self.priority.upper(),
             }
             return self.message.format(**context)
         except (KeyError, ValueError) as e:
@@ -63,6 +64,7 @@ class AlertRule:
 @dataclass
 class ThrottleConfig:
     """Alert throttling configuration."""
+
     enabled: bool = True
     window_seconds: int = 300
     max_alerts_per_window: int = 10
@@ -71,6 +73,7 @@ class ThrottleConfig:
 @dataclass
 class AlertChannel:
     """Notification channel configuration."""
+
     enabled: bool = True
     token_env: Optional[str] = None
     chat_id_env: Optional[str] = None
@@ -95,7 +98,9 @@ class AlertDaemon:
     """
 
     def __init__(self, config_path: Optional[str] = None):
-        self.config_path = config_path or os.getenv("ALERT_CONFIG", "engine/config/alerts.yaml")
+        self.config_path = config_path or os.getenv(
+            "ALERT_CONFIG", "engine/config/alerts.yaml"
+        )
         self.rules: List[AlertRule] = []
         self.channels: Dict[str, AlertChannel] = {}
         self.throttling = ThrottleConfig()
@@ -123,7 +128,7 @@ class AlertDaemon:
                     message=rule_data["message"],
                     channels=rule_data.get("channels", ["log"]),
                     priority=rule_data.get("priority", "medium"),
-                    cooldown=rule_data.get("cooldown", 0)
+                    cooldown=rule_data.get("cooldown", 0),
                 )
                 self.rules.append(rule)
 
@@ -132,7 +137,7 @@ class AlertDaemon:
             self.throttling = ThrottleConfig(
                 enabled=throttle_cfg.get("enabled", True),
                 window_seconds=throttle_cfg.get("window_seconds", 300),
-                max_alerts_per_window=throttle_cfg.get("max_alerts_per_window", 10)
+                max_alerts_per_window=throttle_cfg.get("max_alerts_per_window", 10),
             )
 
             # Load channels config
@@ -146,11 +151,13 @@ class AlertDaemon:
                     smtp_server=chan_cfg.get("smtp_server"),
                     smtp_port=chan_cfg.get("smtp_port"),
                     sender_env=chan_cfg.get("sender_env"),
-                    recipients=chan_cfg.get("recipients", [])
+                    recipients=chan_cfg.get("recipients", []),
                 )
                 self.channels[chan_name] = channel
 
-            logging.info(f"[ALERT] Loaded {len(self.rules)} rules for {len(self.channels)} channels")
+            logging.info(
+                f"[ALERT] Loaded {len(self.rules)} rules for {len(self.channels)} channels"
+            )
 
         except Exception as e:
             logging.error(f"[ALERT] Failed to load config: {e}")
@@ -191,15 +198,22 @@ class AlertDaemon:
 
                 # Send via configured channels
                 for channel_name in rule.channels:
-                    if channel_name in self.channels and self.channels[channel_name].enabled:
-                        await self._send_notification(channel_name, message, rule.priority)
+                    if (
+                        channel_name in self.channels
+                        and self.channels[channel_name].enabled
+                    ):
+                        await self._send_notification(
+                            channel_name, message, rule.priority
+                        )
 
                 # Record alert
                 self._record_alert(rule.topic, message)
 
         return handle_event
 
-    async def _send_notification(self, channel_name: str, message: str, priority: str) -> None:
+    async def _send_notification(
+        self, channel_name: str, message: str, priority: str
+    ) -> None:
         """Send notification via specified channel."""
         channel = self.channels.get(channel_name)
         if not channel:
@@ -236,15 +250,17 @@ class AlertDaemon:
         url = f"https://api.telegram.org/bot{token}/sendMessage"
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json={
-                "chat_id": chat_id,
-                "text": message,
-                "parse_mode": "HTML"
-            }) as response:
+            async with session.post(
+                url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
+            ) as response:
                 if response.status != 200:
-                    logging.error(f"[ALERT] Telegram send failed: {await response.text()}")
+                    logging.error(
+                        f"[ALERT] Telegram send failed: {await response.text()}"
+                    )
 
-    async def _send_webhook(self, channel: AlertChannel, message: str, priority: str) -> None:
+    async def _send_webhook(
+        self, channel: AlertChannel, message: str, priority: str
+    ) -> None:
         """Send webhook notification."""
         import aiohttp
 
@@ -255,7 +271,7 @@ class AlertDaemon:
             "timestamp": time.time(),
             "priority": priority,
             "message": message,
-            "source": "trading-engine"
+            "source": "trading-engine",
         }
 
         async with aiohttp.ClientSession() as session:
@@ -266,7 +282,9 @@ class AlertDaemon:
                 except Exception as e:
                     logging.warning(f"[ALERT] Webhook failed for {url}: {e}")
 
-    async def _send_email(self, channel: AlertChannel, message: str, priority: str) -> None:
+    async def _send_email(
+        self, channel: AlertChannel, message: str, priority: str
+    ) -> None:
         """Send email notification."""
         import smtplib
         from email.mime.text import MIMEText
@@ -277,7 +295,9 @@ class AlertDaemon:
 
         msg = MIMEText(message, "plain")
         msg["Subject"] = f"Trading Alert - {priority.upper()}"
-        msg["From"] = os.getenv(channel.sender_env or "ALERT_SENDER_EMAIL", "alerts@trading-system")
+        msg["From"] = os.getenv(
+            channel.sender_env or "ALERT_SENDER_EMAIL", "alerts@trading-system"
+        )
         msg["To"] = ", ".join(channel.recipients)
 
         try:
@@ -304,8 +324,9 @@ class AlertDaemon:
         window_start = now - self.throttling.window_seconds
 
         # Count recent alerts
-        recent_count = sum(1 for alert in self._alert_history
-                          if alert["timestamp"] > window_start)
+        recent_count = sum(
+            1 for alert in self._alert_history if alert["timestamp"] > window_start
+        )
 
         return recent_count >= self.throttling.max_alerts_per_window
 
@@ -316,19 +337,19 @@ class AlertDaemon:
 
         now = time.time()
         for alert in reversed(self._alert_history):
-            if (alert["rule_topic"] == rule.topic and
-                now - alert["timestamp"] < rule.cooldown):
+            if (
+                alert["rule_topic"] == rule.topic
+                and now - alert["timestamp"] < rule.cooldown
+            ):
                 return True
 
         return False
 
     def _record_alert(self, topic: str, message: str) -> None:
         """Record alert for throttling and analytics."""
-        self._alert_history.append({
-            "timestamp": time.time(),
-            "rule_topic": topic,
-            "message": message
-        })
+        self._alert_history.append(
+            {"timestamp": time.time(), "rule_topic": topic, "message": message}
+        )
 
     def get_stats(self) -> Dict[str, Any]:
         """Get alerting statistics."""
@@ -337,7 +358,7 @@ class AlertDaemon:
             "rules_loaded": len(self.rules),
             "channels_configured": len(self.channels),
             "throttling_enabled": self.throttling.enabled,
-            "recent_alerts": list(self._alert_history)[-5:]  # Last 5
+            "recent_alerts": list(self._alert_history)[-5:],  # Last 5
         }
 
 
@@ -354,7 +375,9 @@ class AnomalyWatcher:
         self.metric_history: Dict[str, deque] = {}
         self.anomaly_alert = AlertDaemon()
 
-        BUS.subscribe("metrics.update", lambda d: asyncio.create_task(self.on_metrics_update(d)))
+        BUS.subscribe(
+            "metrics.update", lambda d: asyncio.create_task(self.on_metrics_update(d))
+        )
 
     async def on_metrics_update(self, data: Dict[str, Any]) -> None:
         """Process metrics update and check for anomalies."""
@@ -391,19 +414,26 @@ class AnomalyWatcher:
 
         return z_score > self.sigma_threshold
 
-    async def _alert_anomaly(self, metric_name: str, value: float, history: deque) -> None:
+    async def _alert_anomaly(
+        self, metric_name: str, value: float, history: deque
+    ) -> None:
         """Send anomaly alert."""
         mean = statistics.mean(history)
         stdev = statistics.pstdev(history)
 
-        message = (f"📊 ANOMALY: {metric_name} = {value:.2f} deviates "
-                  f"{self.sigma_threshold:.1f}σ from mean {mean:.2f} "
-                  f"(stdev: {stdev:.2f})")
+        message = (
+            f"📊 ANOMALY: {metric_name} = {value:.2f} deviates "
+            f"{self.sigma_threshold:.1f}σ from mean {mean:.2f} "
+            f"(stdev: {stdev:.2f})"
+        )
 
         await self.anomaly_alert._send_notification("log", message, "high")
 
         # Also notify via telegram if configured
-        if "telegram" in self.anomaly_alert.channels and self.anomaly_alert.channels["telegram"].enabled:
+        if (
+            "telegram" in self.anomaly_alert.channels
+            and self.anomaly_alert.channels["telegram"].enabled
+        ):
             await self.anomaly_alert._send_notification("telegram", message, "high")
 
     def get_stats(self) -> Dict[str, Any]:
@@ -412,13 +442,14 @@ class AnomalyWatcher:
             "metrics_tracked": list(self.metric_history.keys()),
             "window_size": self.window_size,
             "sigma_threshold": self.sigma_threshold,
-            "anomalies_detected": "tracked via alerts"
+            "anomalies_detected": "tracked via alerts",
         }
 
 
 # Global instances
 _alert_daemon = None
 _anomaly_watcher = None
+
 
 async def initialize_alerting() -> None:
     """Initialize the alert system."""
@@ -428,6 +459,7 @@ async def initialize_alerting() -> None:
     _anomaly_watcher = AnomalyWatcher()
 
     logging.info("[ALERT] Alert system initialized with real-time monitoring")
+
 
 async def shutdown_alerting() -> None:
     """Shutdown the alert system."""

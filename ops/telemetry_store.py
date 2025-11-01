@@ -9,6 +9,7 @@ RUNTIME_DIR = DATA_DIR / "runtime"
 RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
 SNAP_PATH = RUNTIME_DIR / "metrics_snapshot.json"
 
+
 @dataclass
 class Metrics:
     pnl_realized: float = 0.0
@@ -22,12 +23,15 @@ class Metrics:
     cash_usd: float = 0.0
     gross_exposure_usd: float = 0.0
 
+
 @dataclass
 class Snapshot:
     metrics: Metrics
     ts: float
 
+
 _STORE: Snapshot | None = None
+
 
 def load() -> Snapshot:
     global _STORE
@@ -52,10 +56,13 @@ def load() -> Snapshot:
                         j = json.loads(last)
                     except JSONDecodeError:
                         j = {}
-        _STORE = Snapshot(metrics=Metrics(**j.get("metrics", {})), ts=j.get("ts", time.time()))
+        _STORE = Snapshot(
+            metrics=Metrics(**j.get("metrics", {})), ts=j.get("ts", time.time())
+        )
         return _STORE
     _STORE = Snapshot(metrics=Metrics(), ts=time.time())
     return _STORE
+
 
 def save(s: Snapshot) -> None:
     global _STORE

@@ -1,5 +1,4 @@
 import types
-import time
 
 from engine.execution.venue_overrides import VenueOverrides
 
@@ -24,4 +23,3 @@ def test_size_cutback_on_avg_slippage(monkeypatch):
         ov.record_slippage_sample(sym, bps)
     mult = ov.get_size_mult(sym)
     assert mult <= 0.5 + 1e-9  # cutback applied (default 0.5)
-

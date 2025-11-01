@@ -7,9 +7,9 @@ services:
     image: trading-app/backtest-runner:local
     env_file: [.env]
     environment:
-      - LEDGER_DB=/shared/manifest.sqlite
+      - LEDGER_DB=/research/manifest.sqlite
       - RESEARCH_DIR=/research
-      - DATA_INCOMING=/data/incoming
+      - DATA_INCOMING=/research/incoming
       - ML_SERVICE=http://ml_service:8000
       - PARAM_CONTROLLER=http://param_controller:8002
       - CHUNK_ROWS=2000
@@ -24,13 +24,18 @@ services:
       - param_controller
     volumes:
       - research:/research
-      - data:/data
-      - shared:/shared
       - results:/results
     command: ["run"]
 
+  research_scrubber:
+    image: alpine:3.20
+    container_name: hmm_research_scrubber
+    command: ["/bin/sh","-c","crond -f -l 2"]
+    volumes:
+      - research:/research
+      - ./ops/research_purge.cron:/etc/crontabs/root:ro
+    restart: unless-stopped
+
 volumes:
   research:
-  data:
-  shared:
   results:

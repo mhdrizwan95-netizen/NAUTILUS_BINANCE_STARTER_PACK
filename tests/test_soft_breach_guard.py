@@ -33,7 +33,9 @@ class DummyRouter:
         self.cancelled.append(order)
         return True
 
-    async def amend_stop_reduce_only(self, symbol: str, side: str, price: float, qty: float) -> None:
+    async def amend_stop_reduce_only(
+        self, symbol: str, side: str, price: float, qty: float
+    ) -> None:
         self.amended.append((symbol, side, price, qty))
 
 
@@ -52,7 +54,9 @@ def test_soft_breach_guard_cancels_and_tightens(monkeypatch):
         "reduceOnly": True,
     }
     router = DummyRouter([entry_order, stop_order])
-    portfolio = DummyPortfolio({"BTCUSDT.BINANCE": DummyPosition("BTCUSDT.BINANCE", 0.01, 30000.0)})
+    portfolio = DummyPortfolio(
+        {"BTCUSDT.BINANCE": DummyPosition("BTCUSDT.BINANCE", 0.01, 30000.0)}
+    )
 
     async def _noop_publish(*args, **kwargs):
         return None

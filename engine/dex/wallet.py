@@ -11,7 +11,7 @@ from dataclasses import dataclass
 import asyncio
 import functools
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
 from web3 import Web3
 from web3.contract import Contract
@@ -54,7 +54,7 @@ ERC20_ABI = [
     },
 ]
 
-MAX_ALLOWANCE = 2 ** 256 - 1
+MAX_ALLOWANCE = 2**256 - 1
 
 
 logger = logging.getLogger("engine.dex.wallet")
@@ -88,10 +88,14 @@ class DexWallet:
         self.max_gas_price_wei = max_gas_price_wei
         self._token_cache: Dict[str, TokenInfo] = {}
         self._lock = asyncio.Lock()
-        logger.info("[DEX] wallet online address=%s chain_id=%s", self.address, chain_id)
+        logger.info(
+            "[DEX] wallet online address=%s chain_id=%s", self.address, chain_id
+        )
 
     def _erc20(self, token: str) -> Contract:
-        return self.w3.eth.contract(address=Web3.to_checksum_address(token), abi=ERC20_ABI)
+        return self.w3.eth.contract(
+            address=Web3.to_checksum_address(token), abi=ERC20_ABI
+        )
 
     async def token_decimals(self, token: str) -> int:
         token_up = token.lower()
@@ -116,9 +120,17 @@ class DexWallet:
         current = await self.allowance(token, spender)
         if current >= amount:
             return
-        logger.info("[DEX] approving %s for %s (current=%s target=%s)", token, spender, current, amount)
+        logger.info(
+            "[DEX] approving %s for %s (current=%s target=%s)",
+            token,
+            spender,
+            current,
+            amount,
+        )
         contract = self._erc20(token)
-        tx = contract.functions.approve(Web3.to_checksum_address(spender), MAX_ALLOWANCE).build_transaction(
+        tx = contract.functions.approve(
+            Web3.to_checksum_address(spender), MAX_ALLOWANCE
+        ).build_transaction(
             {
                 "from": self.address,
                 "chainId": self.chain_id,
@@ -131,7 +143,9 @@ class DexWallet:
 
     async def send_transaction(self, tx: TxParams) -> TxReceipt:
         async with self._lock:
-            tx["nonce"] = tx.get("nonce", self.w3.eth.get_transaction_count(self.address))
+            tx["nonce"] = tx.get(
+                "nonce", self.w3.eth.get_transaction_count(self.address)
+            )
             tx["chainId"] = tx.get("chainId", self.chain_id)
             if "gasPrice" not in tx:
                 tx["gasPrice"] = min(self.w3.eth.gas_price, self.max_gas_price_wei)
@@ -142,7 +156,9 @@ class DexWallet:
         logger.info("[DEX] broadcast tx=%s", tx_hash.hex())
         receipt = await asyncio.get_running_loop().run_in_executor(
             None,
-            functools.partial(self.w3.eth.wait_for_transaction_receipt, tx_hash, timeout=180),
+            functools.partial(
+                self.w3.eth.wait_for_transaction_receipt, tx_hash, timeout=180
+            ),
         )
         if receipt.status != 1:
             raise RuntimeError(f"Transaction reverted: {tx_hash.hex()}")

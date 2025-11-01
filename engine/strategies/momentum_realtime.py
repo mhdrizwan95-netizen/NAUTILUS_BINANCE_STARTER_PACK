@@ -11,7 +11,7 @@ from typing import Deque, Dict, Iterable, Optional, TYPE_CHECKING
 
 from engine import metrics
 from engine.config.defaults import MOMENTUM_RT_DEFAULTS
-from engine.config.env import env_bool, env_float, env_int, env_str
+from engine.config.env import env_bool, env_float, env_int
 from engine.core.market_resolver import resolve_market_choice
 from engine.universe.effective import StrategyUniverse
 
@@ -19,6 +19,8 @@ if TYPE_CHECKING:  # pragma: no cover
     from .symbol_scanner import SymbolScanner
 
 logger = logging.getLogger("engine.momentum.realtime")
+
+
 @dataclass(frozen=True)
 class MomentumRealtimeConfig:
     enabled: bool
@@ -38,37 +40,101 @@ class MomentumRealtimeConfig:
     prefer_futures: bool
 
 
-def load_momentum_rt_config(scanner: "SymbolScanner" | None = None) -> MomentumRealtimeConfig:
+def load_momentum_rt_config(
+    scanner: "SymbolScanner" | None = None,
+) -> MomentumRealtimeConfig:
     universe = StrategyUniverse(scanner).get("momentum_rt") or []
     symbols = tuple(universe)
-    window_sec = max(10.0, env_float("MOMENTUM_RT_WINDOW_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_WINDOW_SEC"]))
-    baseline_sec = max(window_sec, env_float("MOMENTUM_RT_BASELINE_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_BASELINE_SEC"]))
-    pct_move = env_float("MOMENTUM_RT_MOVE_THRESHOLD_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_MOVE_THRESHOLD_PCT"]) / 100.0
-    volume_ratio = max(1.0, env_float("MOMENTUM_RT_VOLUME_SPIKE_RATIO", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_VOLUME_SPIKE_RATIO"]))
-    stop_loss_pct = max(0.001, env_float("MOMENTUM_RT_STOP_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_STOP_PCT"]) / 100.0)
-    trail_pct = max(0.001, env_float("MOMENTUM_RT_TRAIL_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_TRAIL_PCT"]) / 100.0)
-    take_profit_pct = max(0.0, env_float("MOMENTUM_RT_TP_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_TP_PCT"]) / 100.0)
-    prefer_futures = env_bool("MOMENTUM_RT_PREFER_FUTURES", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_PREFER_FUTURES"])
+    window_sec = max(
+        10.0,
+        env_float(
+            "MOMENTUM_RT_WINDOW_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_WINDOW_SEC"]
+        ),
+    )
+    baseline_sec = max(
+        window_sec,
+        env_float(
+            "MOMENTUM_RT_BASELINE_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_BASELINE_SEC"]
+        ),
+    )
+    pct_move = (
+        env_float(
+            "MOMENTUM_RT_MOVE_THRESHOLD_PCT",
+            MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_MOVE_THRESHOLD_PCT"],
+        )
+        / 100.0
+    )
+    volume_ratio = max(
+        1.0,
+        env_float(
+            "MOMENTUM_RT_VOLUME_SPIKE_RATIO",
+            MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_VOLUME_SPIKE_RATIO"],
+        ),
+    )
+    stop_loss_pct = max(
+        0.001,
+        env_float("MOMENTUM_RT_STOP_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_STOP_PCT"])
+        / 100.0,
+    )
+    trail_pct = max(
+        0.001,
+        env_float(
+            "MOMENTUM_RT_TRAIL_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_TRAIL_PCT"]
+        )
+        / 100.0,
+    )
+    take_profit_pct = max(
+        0.0,
+        env_float("MOMENTUM_RT_TP_PCT", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_TP_PCT"])
+        / 100.0,
+    )
+    prefer_futures = env_bool(
+        "MOMENTUM_RT_PREFER_FUTURES", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_PREFER_FUTURES"]
+    )
     return MomentumRealtimeConfig(
-        enabled=env_bool("MOMENTUM_RT_ENABLED", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_ENABLED"]),
-        dry_run=env_bool("MOMENTUM_RT_DRY_RUN", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_DRY_RUN"]),
+        enabled=env_bool(
+            "MOMENTUM_RT_ENABLED", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_ENABLED"]
+        ),
+        dry_run=env_bool(
+            "MOMENTUM_RT_DRY_RUN", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_DRY_RUN"]
+        ),
         symbols=symbols,
         window_sec=window_sec,
         baseline_sec=baseline_sec,
-        min_ticks=max(2, env_int("MOMENTUM_RT_MIN_TICKS", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_MIN_TICKS"])),
+        min_ticks=max(
+            2,
+            env_int(
+                "MOMENTUM_RT_MIN_TICKS", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_MIN_TICKS"]
+            ),
+        ),
         pct_move_threshold=pct_move,
         volume_spike_ratio=volume_ratio,
-        cooldown_sec=max(15.0, env_float("MOMENTUM_RT_COOLDOWN_SEC", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_COOLDOWN_SEC"])),
-        quote_usd=max(25.0, env_float("MOMENTUM_RT_QUOTE_USD", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_QUOTE_USD"])),
+        cooldown_sec=max(
+            15.0,
+            env_float(
+                "MOMENTUM_RT_COOLDOWN_SEC",
+                MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_COOLDOWN_SEC"],
+            ),
+        ),
+        quote_usd=max(
+            25.0,
+            env_float(
+                "MOMENTUM_RT_QUOTE_USD", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_QUOTE_USD"]
+            ),
+        ),
         stop_loss_pct=stop_loss_pct,
         trail_pct=trail_pct,
         take_profit_pct=take_profit_pct,
-        allow_shorts=env_bool("MOMENTUM_RT_ALLOW_SHORTS", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_ALLOW_SHORTS"]),
+        allow_shorts=env_bool(
+            "MOMENTUM_RT_ALLOW_SHORTS", MOMENTUM_RT_DEFAULTS["MOMENTUM_RT_ALLOW_SHORTS"]
+        ),
         prefer_futures=prefer_futures,
     )
 
 
-def _recent(points: Deque[tuple[float, float, float]], cutoff: float) -> Iterable[tuple[float, float, float]]:
+def _recent(
+    points: Deque[tuple[float, float, float]], cutoff: float
+) -> Iterable[tuple[float, float, float]]:
     for ts, price, volume in points:
         if ts >= cutoff:
             yield ts, price, volume
@@ -142,7 +208,9 @@ class MomentumStrategyModule:
         baseline_low = min(baseline_prices) if baseline_prices else lows
 
         recent_volume = sum(v for _, _, v in fast_points)
-        baseline_volumes = [v for ts_val, _, v in window if ts_val < fast_cutoff and v > 0.0]
+        baseline_volumes = [
+            v for ts_val, _, v in window if ts_val < fast_cutoff and v > 0.0
+        ]
         if baseline_volumes:
             baseline_avg_volume = sum(baseline_volumes) / max(len(baseline_volumes), 1)
         else:
@@ -154,11 +222,15 @@ class MomentumStrategyModule:
             volume_ratio = recent_volume / baseline_avg_volume
 
         try:
-            metrics.momentum_rt_volume_ratio.labels(symbol=base, venue=venue.lower()).set(
-                volume_ratio if math.isfinite(volume_ratio) else 0.0
-            )
-            metrics.momentum_rt_window_return_pct.labels(symbol=base, venue=venue.lower()).set(
-                pct_move_up * 100.0 if pct_move_up >= pct_move_down else -pct_move_down * 100.0
+            metrics.momentum_rt_volume_ratio.labels(
+                symbol=base, venue=venue.lower()
+            ).set(volume_ratio if math.isfinite(volume_ratio) else 0.0)
+            metrics.momentum_rt_window_return_pct.labels(
+                symbol=base, venue=venue.lower()
+            ).set(
+                pct_move_up * 100.0
+                if pct_move_up >= pct_move_down
+                else -pct_move_down * 100.0
             )
         except Exception:
             pass
@@ -190,27 +262,43 @@ class MomentumStrategyModule:
         cooldown_until = now + self.cfg.cooldown_sec
         self._cooldown_until[base] = cooldown_until
 
-        default_market = "futures" if (self.cfg.prefer_futures or side == "SELL") else "spot"
+        default_market = (
+            "futures" if (self.cfg.prefer_futures or side == "SELL") else "spot"
+        )
         market_choice = resolve_market_choice(symbol, default_market)
 
         if side == "BUY":
             stop_price = price * (1.0 - self.cfg.stop_loss_pct)
-            take_profit = price * (1.0 + self.cfg.take_profit_pct) if self.cfg.take_profit_pct > 0 else None
+            take_profit = (
+                price * (1.0 + self.cfg.take_profit_pct)
+                if self.cfg.take_profit_pct > 0
+                else None
+            )
         else:
             stop_price = price * (1.0 + self.cfg.stop_loss_pct)
-            take_profit = price * (1.0 - self.cfg.take_profit_pct) if self.cfg.take_profit_pct > 0 else None
+            take_profit = (
+                price * (1.0 - self.cfg.take_profit_pct)
+                if self.cfg.take_profit_pct > 0
+                else None
+            )
         trail_distance = price * self.cfg.trail_pct
 
         try:
             metrics.momentum_rt_breakouts_total.labels(
                 symbol=base, venue=venue.lower(), side=side, reason=reason
             ).inc()
-            metrics.momentum_rt_cooldown_epoch.labels(symbol=base, venue=venue.lower()).set(cooldown_until)
+            metrics.momentum_rt_cooldown_epoch.labels(
+                symbol=base, venue=venue.lower()
+            ).set(cooldown_until)
         except Exception:
             pass
 
         logger.info(
-            "[MOMO-RT] breakout %s %s move=%.2f%% vol_ratio=%.2f", base, side, pct_move_up * 100.0, volume_ratio
+            "[MOMO-RT] breakout %s %s move=%.2f%% vol_ratio=%.2f",
+            base,
+            side,
+            pct_move_up * 100.0,
+            volume_ratio,
         )
 
         meta = {
@@ -234,4 +322,3 @@ class MomentumStrategyModule:
             "meta": meta,
             "market": market_choice,
         }
-

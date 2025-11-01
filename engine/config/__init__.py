@@ -4,7 +4,6 @@ import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import List
-import asyncio
 import logging
 
 from engine.config.defaults import GLOBAL_DEFAULTS, RISK_DEFAULTS
@@ -42,7 +41,9 @@ class Settings:
             # Kraken Futures configuration
             self.mode = os.getenv("KRAKEN_MODE", "testnet").lower()
             self.is_futures = True
-            self.base_url = os.getenv("KRAKEN_BASE_URL", "https://demo-futures.kraken.com").rstrip("/")
+            self.base_url = os.getenv(
+                "KRAKEN_BASE_URL", "https://demo-futures.kraken.com"
+            ).rstrip("/")
             # Kraken API credentials (secret provided base64 encoded per Kraken docs)
             self.api_key = os.getenv("KRAKEN_API_KEY", "")
             self.api_secret = os.getenv("KRAKEN_API_SECRET", "")
@@ -68,13 +69,19 @@ class Settings:
             futures_demo_default = "https://testnet.binancefuture.com"
             futures_live_default = "https://fapi.binance.com"
 
-            self.spot_base = os.getenv("BINANCE_SPOT_BASE", os.getenv("DEMO_SPOT_BASE", spot_base_default))
-            futures_live_base = os.getenv("BINANCE_USDM_BASE") or os.getenv("BINANCE_FUTURES_BASE", futures_live_default)
+            self.spot_base = os.getenv(
+                "BINANCE_SPOT_BASE", os.getenv("DEMO_SPOT_BASE", spot_base_default)
+            )
+            futures_live_base = os.getenv("BINANCE_USDM_BASE") or os.getenv(
+                "BINANCE_FUTURES_BASE", futures_live_default
+            )
             futures_demo_base = os.getenv("DEMO_USDM_BASE", futures_demo_default)
 
             # Prefer explicit demo/testnet credentials if provided
             demo_key = os.getenv("DEMO_API_KEY") or os.getenv("DEMO_API_KEY_SPOT")
-            demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv("DEMO_API_SECRET_SPOT")
+            demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv(
+                "DEMO_API_SECRET_SPOT"
+            )
 
             live_key = os.getenv("BINANCE_API_KEY", "")
             live_secret = os.getenv("BINANCE_API_SECRET", "")
@@ -82,7 +89,9 @@ class Settings:
             if self.is_futures:
                 base_choice = futures_demo_base if is_demo_like else futures_live_base
                 self.api_key = demo_key or live_key if is_demo_like else live_key
-                self.api_secret = demo_secret or live_secret if is_demo_like else live_secret
+                self.api_secret = (
+                    demo_secret or live_secret if is_demo_like else live_secret
+                )
                 self.futures_base = base_choice
                 self.base_url = base_choice
             else:
@@ -94,9 +103,13 @@ class Settings:
                 else:
                     self.api_key = live_key
                     self.api_secret = live_secret
-                    self.base_url = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
+                    self.base_url = os.getenv(
+                        "BINANCE_SPOT_BASE", "https://api.binance.com"
+                    )
 
-            self.options_base = os.getenv("BINANCE_OPTIONS_BASE", "https://vapi.binance.com").rstrip("/")
+            self.options_base = os.getenv(
+                "BINANCE_OPTIONS_BASE", "https://vapi.binance.com"
+            ).rstrip("/")
             self.options_enabled = _as_bool(os.getenv("BINANCE_OPTIONS_ENABLED"), False)
 
             # Only require credentials for Binance venue
@@ -108,19 +121,29 @@ class Settings:
 
             # Validate futures base URL if in futures mode
             if self.is_futures and not self.futures_base:
-                raise RuntimeError(f"BINANCE_FUTURES_BASE must be set for futures mode, got: {self.futures_base}")
+                raise RuntimeError(
+                    f"BINANCE_FUTURES_BASE must be set for futures mode, got: {self.futures_base}"
+                )
 
         if venue == "KRAKEN":
             self.recv_window = 0
-            self.timeout = float(os.getenv("KRAKEN_API_TIMEOUT", os.getenv("BINANCE_API_TIMEOUT", "10")))
+            self.timeout = float(
+                os.getenv("KRAKEN_API_TIMEOUT", os.getenv("BINANCE_API_TIMEOUT", "10"))
+            )
         else:
             self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
             self.timeout = float(os.getenv("BINANCE_API_TIMEOUT", "10"))
-        self.trading_enabled = os.getenv("TRADING_ENABLED", "true").lower() not in {"0", "false", "no"}
+        self.trading_enabled = os.getenv("TRADING_ENABLED", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
         default_symbols = "BTCUSDT.BINANCE"
         if venue == "KRAKEN":
             default_symbols = "PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN"
-        trade_symbols_raw = env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS.get("TRADE_SYMBOLS", default_symbols))
+        trade_symbols_raw = env_str(
+            "TRADE_SYMBOLS", GLOBAL_DEFAULTS.get("TRADE_SYMBOLS", default_symbols)
+        )
         normalized = trade_symbols_raw.strip().lower()
         if not trade_symbols_raw.strip():
             self.allowed_symbols = _split_symbols(default_symbols)
@@ -218,7 +241,7 @@ def load_risk_config() -> RiskConfig:
 
     trading_enabled_env = os.getenv("TRADING_ENABLED")
     if trading_enabled_env is None:
-        trading_enabled = env_bool("DRY_RUN", GLOBAL_DEFAULTS["DRY_RUN"])
+        trading_enabled = not env_bool("DRY_RUN", GLOBAL_DEFAULTS["DRY_RUN"])
     else:
         trading_enabled = env_bool("TRADING_ENABLED", RISK_DEFAULTS["TRADING_ENABLED"])
     # Futures venues typically have higher min notional (e.g., 100 USDT on testnet).
@@ -227,33 +250,63 @@ def load_risk_config() -> RiskConfig:
     return RiskConfig(
         trading_enabled=trading_enabled,
         min_notional_usdt=env_float("MIN_NOTIONAL_USDT", default_min_notional),
-        max_notional_usdt=env_float("MAX_NOTIONAL_USDT", RISK_DEFAULTS["MAX_NOTIONAL_USDT"]),
-        max_orders_per_min=env_int("MAX_ORDERS_PER_MIN", RISK_DEFAULTS["MAX_ORDERS_PER_MIN"]),
+        max_notional_usdt=env_float(
+            "MAX_NOTIONAL_USDT", RISK_DEFAULTS["MAX_NOTIONAL_USDT"]
+        ),
+        max_orders_per_min=env_int(
+            "MAX_ORDERS_PER_MIN", RISK_DEFAULTS["MAX_ORDERS_PER_MIN"]
+        ),
         trade_symbols=trade_symbols,
-        dust_threshold_usd=env_float("DUST_THRESHOLD_USD", RISK_DEFAULTS["DUST_THRESHOLD_USD"]),
-        exposure_cap_symbol_usd=env_float("EXPOSURE_CAP_SYMBOL_USD", RISK_DEFAULTS["EXPOSURE_CAP_SYMBOL_USD"]),
-        exposure_cap_total_usd=env_float("EXPOSURE_CAP_TOTAL_USD", RISK_DEFAULTS["EXPOSURE_CAP_TOTAL_USD"]),
-        venue_error_breaker_pct=env_float("VENUE_ERROR_BREAKER_PCT", RISK_DEFAULTS["VENUE_ERROR_BREAKER_PCT"]),
-        venue_error_window_sec=env_int("VENUE_ERROR_WINDOW_SEC", RISK_DEFAULTS["VENUE_ERROR_WINDOW_SEC"]),
-        exposure_cap_venue_usd=env_float("EXPOSURE_CAP_VENUE_USD", RISK_DEFAULTS["EXPOSURE_CAP_VENUE_USD"]),
-        equity_floor_usd=env_float("EQUITY_FLOOR_USD", RISK_DEFAULTS["EQUITY_FLOOR_USD"]),
-        equity_drawdown_limit_pct=env_float("EQUITY_DRAWDOWN_LIMIT_PCT", RISK_DEFAULTS["EQUITY_DRAWDOWN_LIMIT_PCT"]),
-        equity_cooldown_sec=env_int("EQUITY_COOLDOWN_SEC", RISK_DEFAULTS["EQUITY_COOLDOWN_SEC"]),
+        dust_threshold_usd=env_float(
+            "DUST_THRESHOLD_USD", RISK_DEFAULTS["DUST_THRESHOLD_USD"]
+        ),
+        exposure_cap_symbol_usd=env_float(
+            "EXPOSURE_CAP_SYMBOL_USD", RISK_DEFAULTS["EXPOSURE_CAP_SYMBOL_USD"]
+        ),
+        exposure_cap_total_usd=env_float(
+            "EXPOSURE_CAP_TOTAL_USD", RISK_DEFAULTS["EXPOSURE_CAP_TOTAL_USD"]
+        ),
+        venue_error_breaker_pct=env_float(
+            "VENUE_ERROR_BREAKER_PCT", RISK_DEFAULTS["VENUE_ERROR_BREAKER_PCT"]
+        ),
+        venue_error_window_sec=env_int(
+            "VENUE_ERROR_WINDOW_SEC", RISK_DEFAULTS["VENUE_ERROR_WINDOW_SEC"]
+        ),
+        exposure_cap_venue_usd=env_float(
+            "EXPOSURE_CAP_VENUE_USD", RISK_DEFAULTS["EXPOSURE_CAP_VENUE_USD"]
+        ),
+        equity_floor_usd=env_float(
+            "EQUITY_FLOOR_USD", RISK_DEFAULTS["EQUITY_FLOOR_USD"]
+        ),
+        equity_drawdown_limit_pct=env_float(
+            "EQUITY_DRAWDOWN_LIMIT_PCT", RISK_DEFAULTS["EQUITY_DRAWDOWN_LIMIT_PCT"]
+        ),
+        equity_cooldown_sec=env_int(
+            "EQUITY_COOLDOWN_SEC", RISK_DEFAULTS["EQUITY_COOLDOWN_SEC"]
+        ),
         margin_enabled=env_bool(
             "MARGIN_ENABLED",
             env_bool("BINANCE_MARGIN_ENABLED", RISK_DEFAULTS["MARGIN_ENABLED"]),
         ),
-        margin_min_level=env_float("MARGIN_MIN_LEVEL", RISK_DEFAULTS["MARGIN_MIN_LEVEL"]),
-        margin_max_liability_usd=env_float("MARGIN_MAX_LIABILITY_USD", RISK_DEFAULTS["MARGIN_MAX_LIABILITY_USD"]),
-        margin_max_leverage=env_float("MARGIN_MAX_LEVERAGE", RISK_DEFAULTS["MARGIN_MAX_LEVERAGE"]),
+        margin_min_level=env_float(
+            "MARGIN_MIN_LEVEL", RISK_DEFAULTS["MARGIN_MIN_LEVEL"]
+        ),
+        margin_max_liability_usd=env_float(
+            "MARGIN_MAX_LIABILITY_USD", RISK_DEFAULTS["MARGIN_MAX_LIABILITY_USD"]
+        ),
+        margin_max_leverage=env_float(
+            "MARGIN_MAX_LEVERAGE", RISK_DEFAULTS["MARGIN_MAX_LEVERAGE"]
+        ),
         options_enabled=env_bool(
             "OPTIONS_ENABLED",
             env_bool("BINANCE_OPTIONS_ENABLED", RISK_DEFAULTS["OPTIONS_ENABLED"]),
         ),
     )
 
+
 # ---- Quote currency + universe helpers ----
 QUOTE_CCY = os.getenv("QUOTE_CCY", "USDT").upper()
+
 
 def norm_symbol(sym: str) -> str:
     """Ensure symbols are in BASEQUOTE (e.g., BTCUSDT) without venue suffix."""
@@ -261,6 +314,7 @@ def norm_symbol(sym: str) -> str:
     if s.endswith(QUOTE_CCY) or s.endswith("USD"):
         return s
     return f"{s}{QUOTE_CCY}"
+
 
 async def list_all_testnet_pairs() -> List[str]:
     """Fetch all tradeable spot pairs from Binance testnet."""
@@ -289,6 +343,7 @@ async def list_all_testnet_pairs() -> List[str]:
             # Fallback to a few hardcoded pairs
             return ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
 
+
 @dataclass(frozen=True)
 class VenueFeeConfig:
     taker_bps: float
@@ -300,10 +355,11 @@ def load_fee_config(venue: str) -> VenueFeeConfig:
 
 @dataclass(frozen=True)
 class IbkrFeeConfig:
-    mode: str           # "per_share" or "bps"
+    mode: str  # "per_share" or "bps"
     per_share_usd: float
     min_trade_fee_usd: float
     bps: float
+
 
 def load_ibkr_fee_config() -> IbkrFeeConfig:
     mode = os.getenv("IBKR_FEE_MODE", "per_share").lower()
@@ -314,8 +370,10 @@ def load_ibkr_fee_config() -> IbkrFeeConfig:
         bps=_as_float(os.getenv("IBKR_FEE_BPS"), 1.0),  # only used if mode == "bps"
     )
 
+
 def ibkr_min_notional_usd() -> float:
     return _as_float(os.getenv("IBKR_MIN_NOTIONAL_USD"), 5.0)
+
 
 @dataclass(frozen=True)
 class StrategyConfig:
@@ -340,6 +398,7 @@ class StrategyConfig:
     ensemble_min_conf: float
     ensemble_weights: dict[str, float]
 
+
 def load_strategy_config() -> StrategyConfig:
     # Defaults: safe and conservative
     symbols_env = os.getenv("STRATEGY_SYMBOLS")
@@ -356,7 +415,9 @@ def load_strategy_config() -> StrategyConfig:
             symbols = _as_list(trade_symbols_raw)
     try:
         settings = get_settings()
-        default_market = os.getenv("STRATEGY_DEFAULT_MARKET") or ("futures" if getattr(settings, "is_futures", False) else "spot")
+        default_market = os.getenv("STRATEGY_DEFAULT_MARKET") or (
+            "futures" if getattr(settings, "is_futures", False) else "spot"
+        )
     except Exception:
         default_market = os.getenv("STRATEGY_DEFAULT_MARKET", "spot")
     return StrategyConfig(
@@ -381,7 +442,10 @@ def load_strategy_config() -> StrategyConfig:
         ensemble_weights={
             k: float(v)
             for k, v in [
-                w.split(":") for w in os.getenv("ENSEMBLE_WEIGHTS", "hmm_v1:0.5,ma_v1:0.5").split(",")
+                w.split(":")
+                for w in os.getenv("ENSEMBLE_WEIGHTS", "hmm_v1:0.5,ma_v1:0.5").split(
+                    ","
+                )
             ]
         },
     )

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
-from typing import Any, Callable
+from typing import Any
 
 
 class BracketGovernor:
@@ -32,7 +31,11 @@ class BracketGovernor:
     def wire(self) -> None:
         try:
             self.bus.subscribe("trade.fill", self._on_fill)
-            self.log.info("BracketGovernor wired (TP_BPS=%.2f, SL_BPS=%.2f)", self.tp_bps, self.sl_bps)
+            self.log.info(
+                "BracketGovernor wired (TP_BPS=%.2f, SL_BPS=%.2f)",
+                self.tp_bps,
+                self.sl_bps,
+            )
         except Exception:
             self.log.warning("BracketGovernor failed to wire", exc_info=True)
 
@@ -54,18 +57,30 @@ class BracketGovernor:
 
             # Place TP reduce-only limit (best-effort)
             try:
-                await self.router.place_reduce_only_limit(qual, "SELL" if side == "BUY" else "BUY", abs(qty), float(tp_px))
+                await self.router.place_reduce_only_limit(
+                    qual, "SELL" if side == "BUY" else "BUY", abs(qty), float(tp_px)
+                )
             except Exception:
                 pass
 
             # Place/Amend SL reduce-only stop (obeys ALLOW_STOP_AMEND)
             try:
-                await self.router.amend_stop_reduce_only(qual, "SELL" if side == "BUY" else "BUY", float(sl_px), abs(qty))
+                await self.router.amend_stop_reduce_only(
+                    qual, "SELL" if side == "BUY" else "BUY", float(sl_px), abs(qty)
+                )
             except Exception:
                 pass
 
             try:
-                self.log.info("[BRACKET] %s side=%s qty=%.8f avg=%.6f TP=%.6f SL=%.6f", symbol, side, qty, avg, tp_px, sl_px)
+                self.log.info(
+                    "[BRACKET] %s side=%s qty=%.8f avg=%.6f TP=%.6f SL=%.6f",
+                    symbol,
+                    side,
+                    qty,
+                    avg,
+                    tp_px,
+                    sl_px,
+                )
             except Exception:
                 pass
         except Exception:
@@ -74,4 +89,3 @@ class BracketGovernor:
                 self.log.warning("BracketGovernor on_fill error", exc_info=True)
             except Exception:
                 pass
-

@@ -1,5 +1,5 @@
-
 import pandas as pd
+
 
 def embargo_split(df: pd.DataFrame, embargo: int = 0):
     """
@@ -8,7 +8,7 @@ def embargo_split(df: pd.DataFrame, embargo: int = 0):
     is provided for local models if you plug them in.
     """
     n = len(df)
-    split = int(n*0.8)
-    train = list(range(0, max(0, split-embargo)))
+    split = int(n * 0.8)
+    train = list(range(0, max(0, split - embargo)))
     val = list(range(split, n))
     return train, val

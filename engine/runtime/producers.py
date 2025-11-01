@@ -34,7 +34,9 @@ class BaseStreamProducer(StrategyProducer):
         self.endpoint = BINANCE_FUTURES_STREAM
         self._active_symbols: Tuple[str, ...] = ()
 
-    async def run(self, bus: asyncio.Queue[tuple[Signal, float]], config: RuntimeConfig) -> None:
+    async def run(
+        self, bus: asyncio.Queue[tuple[Signal, float]], config: RuntimeConfig
+    ) -> None:
         self._running = True
         version, symbols = await self.manager.current(self.name)
         while self._running:
@@ -57,7 +59,9 @@ class BaseStreamProducer(StrategyProducer):
     ) -> Optional[int]:
         self._on_universe_changed(symbols)
         stream_task = asyncio.create_task(self._stream_symbols(symbols, bus, config))
-        update_task = asyncio.create_task(self.manager.wait_for_update(self.name, version))
+        update_task = asyncio.create_task(
+            self.manager.wait_for_update(self.name, version)
+        )
         done, pending = await asyncio.wait(
             {stream_task, update_task},
             return_when=asyncio.FIRST_COMPLETED,
@@ -167,7 +171,9 @@ class TrendProducer(BaseStreamProducer):
         self.slow = 120
         self.cooldown_seconds = 90.0
         self.ttl = float(config.bus.signal_ttl_seconds)
-        self.history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=self.slow + 20))
+        self.history: Dict[str, Deque[float]] = defaultdict(
+            lambda: deque(maxlen=self.slow + 20)
+        )
         self.state: Dict[str, str] = defaultdict(lambda: "flat")
         self.cooldown: Dict[str, float] = defaultdict(float)
 
@@ -187,8 +193,8 @@ class TrendProducer(BaseStreamProducer):
             return
         if ts - self.cooldown.get(symbol, 0.0) < self.cooldown_seconds:
             return
-        fast_ma = sum(list(hist)[-self.fast:]) / self.fast
-        slow_ma = sum(list(hist)[-self.slow:]) / self.slow
+        fast_ma = sum(list(hist)[-self.fast :]) / self.fast
+        slow_ma = sum(list(hist)[-self.slow :]) / self.slow
         new_state = "long" if fast_ma > slow_ma else "short"
         if new_state == self.state.get(symbol):
             return
@@ -223,7 +229,9 @@ class MomentumProducer(BaseStreamProducer):
         self.threshold = 0.005
         self.cooldown_seconds = 75.0
         self.ttl = float(config.bus.signal_ttl_seconds)
-        self.history: Dict[str, Deque[Tuple[float, float]]] = defaultdict(lambda: deque(maxlen=600))
+        self.history: Dict[str, Deque[Tuple[float, float]]] = defaultdict(
+            lambda: deque(maxlen=600)
+        )
         self.last_signal: Dict[str, float] = defaultdict(float)
 
     def _on_universe_changed(self, symbols: Iterable[str]) -> None:
@@ -278,7 +286,9 @@ class ScalperProducer(BaseStreamProducer):
         self.long_window = 40
         self.cooldown_seconds = 25.0
         self.ttl = max(30.0, float(config.bus.signal_ttl_seconds))
-        self.history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=self.long_window))
+        self.history: Dict[str, Deque[float]] = defaultdict(
+            lambda: deque(maxlen=self.long_window)
+        )
         self.last_signal: Dict[str, float] = defaultdict(float)
 
     def _on_universe_changed(self, symbols: Iterable[str]) -> None:
@@ -300,7 +310,7 @@ class ScalperProducer(BaseStreamProducer):
         if ts - self.last_signal.get(symbol, 0.0) < self.cooldown_seconds:
             return
         long_avg = sum(hist) / len(hist)
-        short_avg = sum(list(hist)[-self.short_window:]) / self.short_window
+        short_avg = sum(list(hist)[-self.short_window :]) / self.short_window
         deviation = (price - long_avg) / max(price, 1e-9)
         if abs(deviation) < 0.0008:
             return
@@ -336,7 +346,9 @@ class VolatilityProducer(BaseStreamProducer):
         self.threshold = 0.02
         self.cooldown_seconds = 240.0
         self.ttl = max(180.0, float(config.bus.signal_ttl_seconds))
-        self.history: Dict[str, Deque[Tuple[float, float]]] = defaultdict(lambda: deque(maxlen=1800))
+        self.history: Dict[str, Deque[Tuple[float, float]]] = defaultdict(
+            lambda: deque(maxlen=1800)
+        )
         self.last_signal: Dict[str, float] = defaultdict(float)
 
     def _on_universe_changed(self, symbols: Iterable[str]) -> None:

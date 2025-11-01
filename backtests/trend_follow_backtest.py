@@ -63,7 +63,9 @@ def run_backtest(
 
     engine = BacktestEngine(
         feeds=feeds,
-        strategy_factory=lambda client, clock: TrendStrategyModule(cfg, client=client, clock=clock),
+        strategy_factory=lambda client, clock: TrendStrategyModule(
+            cfg, client=client, clock=clock
+        ),
         patch_executor=True,
     )
 
@@ -119,7 +121,9 @@ def run_backtest(
         "trades": len(trades),
         "win_rate": len(wins) / len(trades) if trades else 0.0,
         "avg_win_pct": sum(t["pnl_pct"] for t in wins) / len(wins) if wins else 0.0,
-        "avg_loss_pct": sum(t["pnl_pct"] for t in losses) / len(losses) if losses else 0.0,
+        "avg_loss_pct": (
+            sum(t["pnl_pct"] for t in losses) / len(losses) if losses else 0.0
+        ),
         "equity_end": equity,
         "equity_start": cfg.fallback_equity_usd,
         "max_drawdown_pct": dd * 100,
@@ -127,7 +131,9 @@ def run_backtest(
     }
 
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps({"summary": summary, "trades": trades, "orders": orders}, indent=2))
+    output.write_text(
+        json.dumps({"summary": summary, "trades": trades, "orders": orders}, indent=2)
+    )
     return summary
 
 
@@ -140,7 +146,9 @@ def main() -> None:
         required=True,
         help="Mapping of interval=path to CSV/Parquet klines",
     )
-    parser.add_argument("--warmup", type=int, default=200, help="Bars to skip before trading")
+    parser.add_argument(
+        "--warmup", type=int, default=200, help="Bars to skip before trading"
+    )
     parser.add_argument(
         "--output",
         type=Path,
@@ -160,4 +168,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

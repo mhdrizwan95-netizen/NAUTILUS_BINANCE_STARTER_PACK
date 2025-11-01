@@ -32,4 +32,3 @@ __all__ = [
     "compute_meme_metrics",
     "MemeMetrics",
 ]
-

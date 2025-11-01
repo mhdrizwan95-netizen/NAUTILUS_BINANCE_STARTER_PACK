@@ -18,7 +18,9 @@ from typing import Dict
 
 _BUCKET_SEC = 300.0
 _HISTORY = 6
-_buckets: Dict[str, deque[tuple[float, int]]] = defaultdict(lambda: deque(maxlen=_HISTORY + 1))
+_buckets: Dict[str, deque[tuple[float, int]]] = defaultdict(
+    lambda: deque(maxlen=_HISTORY + 1)
+)
 
 
 def _roll(symbol: str) -> None:
@@ -48,6 +50,9 @@ def roc(symbol: str) -> float:
         return 0.0
     prev_sorted = sorted(prev)
     mid = len(prev_sorted) // 2
-    median = (prev_sorted[mid] if len(prev_sorted) % 2 == 1 else (prev_sorted[mid-1] + prev_sorted[mid]) / 2.0) or 1.0
+    median = (
+        prev_sorted[mid]
+        if len(prev_sorted) % 2 == 1
+        else (prev_sorted[mid - 1] + prev_sorted[mid]) / 2.0
+    ) or 1.0
     return float(current) / float(median)
-

@@ -108,8 +108,12 @@ def main() -> None:
     global TOP_N, OUTPUT_FILE
     parser = argparse.ArgumentParser()
     parser.add_argument("--loop", action="store_true", help="Run refresh loop")
-    parser.add_argument("--interval-sec", type=int, default=3600, help="Refresh interval in seconds")
-    parser.add_argument("--top-n", type=int, default=TOP_N, help="Number of top symbols to select")
+    parser.add_argument(
+        "--interval-sec", type=int, default=3600, help="Refresh interval in seconds"
+    )
+    parser.add_argument(
+        "--top-n", type=int, default=TOP_N, help="Number of top symbols to select"
+    )
     parser.add_argument("--out", default=OUTPUT_FILE, help="Output file path")
     args = parser.parse_args()
 

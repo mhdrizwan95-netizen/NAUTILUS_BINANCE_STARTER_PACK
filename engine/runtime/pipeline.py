@@ -63,7 +63,9 @@ class ExecutionOrder:
     reduce_only: bool = False
     stop: Optional[float] = None
     take_profit: Optional[float] = None
-    client_order_id: str = field(default_factory=lambda: f"runtime:{uuid.uuid4().hex[:18]}")
+    client_order_id: str = field(
+        default_factory=lambda: f"runtime:{uuid.uuid4().hex[:18]}"
+    )
 
 
 class StrategyProducer:
@@ -78,7 +80,9 @@ class StrategyProducer:
         self.name = name
         self._running = False
 
-    async def run(self, bus: asyncio.Queue[tuple[Signal, float]], config: RuntimeConfig) -> None:
+    async def run(
+        self, bus: asyncio.Queue[tuple[Signal, float]], config: RuntimeConfig
+    ) -> None:
         raise NotImplementedError
 
     async def _publish(self, bus: asyncio.Queue, signal: Signal) -> None:
@@ -87,7 +91,9 @@ class StrategyProducer:
 
 class StrategyRegistry:
     def __init__(self) -> None:
-        self._factories: Dict[str, Callable[[RuntimeConfig, UniverseManager], StrategyProducer]] = {}
+        self._factories: Dict[
+            str, Callable[[RuntimeConfig, UniverseManager], StrategyProducer]
+        ] = {}
 
     def register(
         self,
@@ -97,7 +103,9 @@ class StrategyRegistry:
         key = name.lower()
         self._factories[key] = factory
 
-    def build_all(self, config: RuntimeConfig, manager: UniverseManager) -> Iterable[StrategyProducer]:
+    def build_all(
+        self, config: RuntimeConfig, manager: UniverseManager
+    ) -> Iterable[StrategyProducer]:
         for key, factory in self._factories.items():
             try:
                 yield factory(config, manager)
@@ -147,14 +155,18 @@ class BucketTracker:
             if budget is None:
                 continue
             try:
-                strategy_bucket_usage_fraction.labels(bucket=bucket).set(self._usage.get(bucket, 0.0))
+                strategy_bucket_usage_fraction.labels(bucket=bucket).set(
+                    self._usage.get(bucket, 0.0)
+                )
             except Exception:
                 pass
         self._initialized = True
 
     def _set_metric(self, bucket: str) -> None:
         try:
-            strategy_bucket_usage_fraction.labels(bucket=bucket).set(self._usage.get(bucket, 0.0))
+            strategy_bucket_usage_fraction.labels(bucket=bucket).set(
+                self._usage.get(bucket, 0.0)
+            )
         except Exception:
             pass
 
@@ -236,8 +248,13 @@ class RiskAllocator:
             log.info("[risk] bucket '%s' exhausted; rejecting %s", bucket, signal)
             return None
 
-        if existing_fraction <= 0 and self._open_positions[strategy_key] >= self.config.risk.max_concurrent:
-            log.info("[risk] %s at max concurrent positions; rejecting signal", strategy_key)
+        if (
+            existing_fraction <= 0
+            and self._open_positions[strategy_key] >= self.config.risk.max_concurrent
+        ):
+            log.info(
+                "[risk] %s at max concurrent positions; rejecting signal", strategy_key
+            )
             return None
 
         per_trade_fraction = self._per_trade_risk(strategy_key)
@@ -248,23 +265,33 @@ class RiskAllocator:
         margin_headroom = self.buckets.headroom(bucket)
         margin_fraction = min(desired_margin_fraction, margin_headroom)
         if margin_fraction <= 0:
-            log.info("[risk] margin headroom exhausted for %s; rejecting %s", bucket, signal)
+            log.info(
+                "[risk] margin headroom exhausted for %s; rejecting %s", bucket, signal
+            )
             return None
 
-        notional_fraction = min(per_trade_fraction, margin_fraction * effective_leverage)
+        notional_fraction = min(
+            per_trade_fraction, margin_fraction * effective_leverage
+        )
         venue = self._decide_venue(signal, bucket)
         leverage = effective_leverage if venue == "futures" else None
 
         equity = self._current_equity()
         notional_usd = notional_fraction * equity
         if notional_usd < 5.0:
-            log.debug("[risk] notional %.2f below exchange minimum; dropping %s", notional_usd, signal)
+            log.debug(
+                "[risk] notional %.2f below exchange minimum; dropping %s",
+                notional_usd,
+                signal,
+            )
             return None
 
         self.buckets.apply(bucket, margin_fraction)
         if existing_fraction <= 0:
             self._open_positions[strategy_key] += 1
-        self._active_positions[strategy_key][symbol_key] = existing_fraction + margin_fraction
+        self._active_positions[strategy_key][symbol_key] = (
+            existing_fraction + margin_fraction
+        )
 
         client_order_id = f"{self.config.execution.client_id_prefix}:{signal.strategy}:{uuid.uuid4().hex[:10]}"
         return ExecutionOrder(
@@ -357,8 +384,14 @@ class ExecutionRouter:
                 self.risk.cancel(order)
                 return False
 
-        if venue_hint == "spot" and order.side.upper() == "SELL" and not self._has_spot_inventory(symbol_base):
-            log.info("[exec] rejecting spot sell for %s; insufficient inventory", symbol_base)
+        if (
+            venue_hint == "spot"
+            and order.side.upper() == "SELL"
+            and not self._has_spot_inventory(symbol_base)
+        ):
+            log.info(
+                "[exec] rejecting spot sell for %s; insufficient inventory", symbol_base
+            )
             self.risk.cancel(order)
             return False
 
@@ -382,7 +415,9 @@ class ExecutionRouter:
                 market=venue_hint,
             )
         except Exception as exc:
-            log.warning("[exec] market order failed for %s: %s", qualified, exc, exc_info=True)
+            log.warning(
+                "[exec] market order failed for %s: %s", qualified, exc, exc_info=True
+            )
             self.risk.cancel(order)
             return False
 
@@ -410,7 +445,9 @@ class ExecutionRouter:
                         abs(qty_filled),
                     )
                 except Exception:
-                    log.warning("[exec] stop placement failed for %s", qualified, exc_info=True)
+                    log.warning(
+                        "[exec] stop placement failed for %s", qualified, exc_info=True
+                    )
             if order.take_profit:
                 try:
                     await self.router.place_reduce_only_limit(
@@ -420,7 +457,11 @@ class ExecutionRouter:
                         float(order.take_profit),
                     )
                 except Exception:
-                    log.warning("[exec] take-profit placement failed for %s", qualified, exc_info=True)
+                    log.warning(
+                        "[exec] take-profit placement failed for %s",
+                        qualified,
+                        exc_info=True,
+                    )
         self.risk.reconcile_position(order)
         return True
 
@@ -444,12 +485,16 @@ class ExecutionRouter:
         try:
             if configured is not None:
                 t0 = time.perf_counter()
-                resp = await client.futures_change_leverage(symbol=symbol, leverage=int(configured))
+                resp = await client.futures_change_leverage(
+                    symbol=symbol, leverage=int(configured)
+                )
                 applied = int(resp.get("leverage", configured))
                 order.applied_leverage = applied
                 order.leverage = applied
                 leverage_set_latency_ms.observe((time.perf_counter() - t0) * 1000.0)
-                strategy_leverage_configured.labels(strategy=strategy_key, symbol=symbol_key).set(float(configured))
+                strategy_leverage_configured.labels(
+                    strategy=strategy_key, symbol=symbol_key
+                ).set(float(configured))
                 if applied != int(configured):
                     log.warning(
                         "[exec] leverage mismatch for %s: requested=%s applied=%s",
@@ -457,25 +502,39 @@ class ExecutionRouter:
                         configured,
                         applied,
                     )
-                    strategy_leverage_mismatch_total.labels(strategy=strategy_key, symbol=symbol_key).inc()
+                    strategy_leverage_mismatch_total.labels(
+                        strategy=strategy_key, symbol=symbol_key
+                    ).inc()
                     return False
-                strategy_leverage_applied.labels(strategy=strategy_key, symbol=symbol_key).set(float(applied))
+                strategy_leverage_applied.labels(
+                    strategy=strategy_key, symbol=symbol_key
+                ).set(float(applied))
                 return True
 
             position = await self._fetch_position(symbol)
             if position:
                 try:
-                    order.applied_leverage = int(float(position.get("leverage", 0) or 0))
+                    order.applied_leverage = int(
+                        float(position.get("leverage", 0) or 0)
+                    )
                 except Exception:
                     order.applied_leverage = None
             applied = order.applied_leverage or order.effective_leverage or 1
             order.leverage = applied
-            strategy_leverage_configured.labels(strategy=strategy_key, symbol=symbol_key).set(float(order.effective_leverage or applied))
-            strategy_leverage_applied.labels(strategy=strategy_key, symbol=symbol_key).set(float(applied))
+            strategy_leverage_configured.labels(
+                strategy=strategy_key, symbol=symbol_key
+            ).set(float(order.effective_leverage or applied))
+            strategy_leverage_applied.labels(
+                strategy=strategy_key, symbol=symbol_key
+            ).set(float(applied))
             return True
         except Exception:
-            log.warning("[exec] leverage preparation failed for %s", symbol, exc_info=True)
-            strategy_leverage_mismatch_total.labels(strategy=strategy_key, symbol=symbol_key).inc()
+            log.warning(
+                "[exec] leverage preparation failed for %s", symbol, exc_info=True
+            )
+            strategy_leverage_mismatch_total.labels(
+                strategy=strategy_key, symbol=symbol_key
+            ).inc()
             return False
 
     async def _fetch_position(self, symbol: str) -> Optional[dict[str, Any]]:
@@ -518,18 +577,30 @@ class StrategyPipeline:
             signal, published_at = await self.queue.get()
             latency = max(0.0, time.time() - published_at)
             strategy_signals_total.labels(strategy=signal.strategy.lower()).inc()
-            strategy_signal_latency_seconds.labels(strategy=signal.strategy.lower()).observe(latency)
+            strategy_signal_latency_seconds.labels(
+                strategy=signal.strategy.lower()
+            ).observe(latency)
             try:
-                strategy_signal_queue_len.labels(strategy=signal.strategy.lower()).set(self.queue.qsize())
-                strategy_signal_queue_latency_sec.labels(strategy=signal.strategy.lower()).set(latency)
+                strategy_signal_queue_len.labels(strategy=signal.strategy.lower()).set(
+                    self.queue.qsize()
+                )
+                strategy_signal_queue_latency_sec.labels(
+                    strategy=signal.strategy.lower()
+                ).set(latency)
             except Exception:
                 pass
 
             if signal.ttl and latency > signal.ttl:
-                log.debug("[runtime] dropping stale signal %s (latency=%.2fs)", signal, latency)
+                log.debug(
+                    "[runtime] dropping stale signal %s (latency=%.2fs)",
+                    signal,
+                    latency,
+                )
                 continue
 
-            resolved = resolve_market(f"{signal.symbol}.BINANCE", signal.venue_hint or "")
+            resolved = resolve_market(
+                f"{signal.symbol}.BINANCE", signal.venue_hint or ""
+            )
             if resolved:
                 signal.meta["resolved_market"] = resolved
 
@@ -547,7 +618,12 @@ class StrategyPipeline:
                     ).inc()
             except Exception:
                 self.risk.cancel(order)
-                log.warning("[runtime] execution failed for %s %s", signal.strategy, signal.symbol, exc_info=True)
+                log.warning(
+                    "[runtime] execution failed for %s %s",
+                    signal.strategy,
+                    signal.symbol,
+                    exc_info=True,
+                )
 
     async def run(self) -> None:
         if self._running:
@@ -556,9 +632,13 @@ class StrategyPipeline:
         producers = list(self.registry.build_all(self.config, self.manager))
 
         for producer in producers:
-            task = asyncio.create_task(producer.run(self.queue, self.config), name=f"producer:{producer.name}")
+            task = asyncio.create_task(
+                producer.run(self.queue, self.config), name=f"producer:{producer.name}"
+            )
             self._tasks.append(task)
-        self._tasks.append(asyncio.create_task(self._consumer(), name="signal-consumer"))
+        self._tasks.append(
+            asyncio.create_task(self._consumer(), name="signal-consumer")
+        )
         await asyncio.gather(*self._tasks)
 
     def cancel(self) -> None:

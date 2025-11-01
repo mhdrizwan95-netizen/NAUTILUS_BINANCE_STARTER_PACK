@@ -100,4 +100,3 @@ __all__ = [
     "generate_meme_bracket",
     "compute_meme_metrics",
 ]
-

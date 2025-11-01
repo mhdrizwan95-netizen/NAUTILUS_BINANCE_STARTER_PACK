@@ -1,8 +1,8 @@
-
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
 from hmmlearn.hmm import GaussianHMM
+
 
 class HMMModel:
     def __init__(self, n_states: int = 4):
@@ -14,7 +14,7 @@ class HMMModel:
     def _prep(self, df: pd.DataFrame):
         close = df["close"].astype(float)
         logret = np.log(close).diff().dropna()
-        X = logret.values.reshape(-1,1).astype(np.float64)
+        X = logret.values.reshape(-1, 1).astype(np.float64)
         return X, logret.index
 
     def train(self, df: pd.DataFrame, start_ts=None):
@@ -25,7 +25,12 @@ class HMMModel:
             return
         self.scaler = StandardScaler()
         Xs = self.scaler.fit_transform(X)
-        self.hmm = GaussianHMM(n_components=self.n_states, covariance_type="full", n_iter=200, random_state=42)
+        self.hmm = GaussianHMM(
+            n_components=self.n_states,
+            covariance_type="full",
+            n_iter=200,
+            random_state=42,
+        )
         self.hmm.fit(Xs)
         self.trained_until = df.index.max()
 

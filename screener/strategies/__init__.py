@@ -1,4 +1,5 @@
 """Strategy-specific screener registry exposing end-to-end heuristics."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Mapping, Optional, Sequence

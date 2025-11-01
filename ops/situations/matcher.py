@@ -16,7 +16,9 @@ class Matcher:
         self.recent = deque(maxlen=1000)
         self.subscribers: List[Any] = []  # queues for SSE/streaming
 
-    def evaluate(self, symbol: str, feats: Dict[str, Any], ts: float | None = None) -> List[Dict[str, Any]]:
+    def evaluate(
+        self, symbol: str, feats: Dict[str, Any], ts: float | None = None
+    ) -> List[Dict[str, Any]]:
         ts = ts or time.time()
         hits: List[Dict[str, Any]] = []
         for s in self.store.active():

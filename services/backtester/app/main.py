@@ -1,12 +1,11 @@
-
-import os, time
+import os
 import pandas as pd
-import numpy as np
 from loguru import logger
 from .sim import PrequentialSim
 from .strategies import MomentumBreakout, MeanReversion
 from .costs import simple_cost_model
 from .metrics import summarize
+
 
 def load_dataset(path: str) -> pd.DataFrame:
     df = pd.read_csv(path)
@@ -18,6 +17,7 @@ def load_dataset(path: str) -> pd.DataFrame:
     df.sort_values("timestamp", inplace=True)
     df.set_index("timestamp", inplace=True, drop=False)
     return df
+
 
 def main():
     ds_path = os.getenv("DATASET", "/historical/sample.csv")
@@ -39,7 +39,7 @@ def main():
         bar_minutes=step_minutes,
         retrain_every_min=retrain_min,
         exactly_once=exactly_once,
-        cost_fn=lambda trade: simple_cost_model(trade, cost_bps, slip_bps_per_vol)
+        cost_fn=lambda trade: simple_cost_model(trade, cost_bps, slip_bps_per_vol),
     )
 
     # Attach strategies
@@ -49,9 +49,12 @@ def main():
     # Run
     ledger, trades = sim.run()
     report = summarize(trades)
-    logger.info(f"Backtest done. Net={report['net_pnl']:.4f}, Sharpe={report['sharpe']:.2f}, MaxDD={report['max_dd']:.4f}")
+    logger.info(
+        f"Backtest done. Net={report['net_pnl']:.4f}, Sharpe={report['sharpe']:.2f}, MaxDD={report['max_dd']:.4f}"
+    )
     # Print concise summary
     print("SUMMARY:", report)
+
 
 if __name__ == "__main__":
     main()

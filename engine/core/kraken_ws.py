@@ -35,6 +35,7 @@ async def _safe_call(cb, *args):
     except Exception as exc:
         logger.warning("[WS] callback error: %s", exc)
 
+
 class KrakenWS:
     def __init__(
         self,
@@ -61,7 +62,9 @@ class KrakenWS:
         self._price_hook = price_hook
 
     async def run(self):
-        logger.info("[WS] Kraken WS connecting to %s for products=%s", self.url, self.products)
+        logger.info(
+            "[WS] Kraken WS connecting to %s for products=%s", self.url, self.products
+        )
         ssl_ctx = ssl.create_default_context()
         backoff = 1.0
         while True:
@@ -75,9 +78,15 @@ class KrakenWS:
                     close_timeout=5,
                     max_queue=1000,
                 ) as ws:
-                    sub = {"event": "subscribe", "feed": "ticker", "product_ids": self.products}
+                    sub = {
+                        "event": "subscribe",
+                        "feed": "ticker",
+                        "product_ids": self.products,
+                    }
                     await ws.send(json.dumps(sub))
-                    logger.info("[WS] Kraken WS subscribed to ticker feed for %s", self.products)
+                    logger.info(
+                        "[WS] Kraken WS subscribed to ticker feed for %s", self.products
+                    )
                     backoff = 1.0
                     async for msg in ws:
                         try:
@@ -109,7 +118,9 @@ class KrakenWS:
                         self._update_upnl(sym, price_f)
                         try:
                             if self._rest_client is not None:
-                                cache_fn = getattr(self._rest_client, "cache_price", None)
+                                cache_fn = getattr(
+                                    self._rest_client, "cache_price", None
+                                )
                                 if callable(cache_fn):
                                     cache_fn(sym, price_f)
                         except Exception:
@@ -178,7 +189,12 @@ class KrakenWS:
         cb = self._on_price_cb
         if not cb and not self._price_hook:
             return
-        ts = payload.get("time") or payload.get("timestamp") or payload.get("ts") or time.time()
+        ts = (
+            payload.get("time")
+            or payload.get("timestamp")
+            or payload.get("ts")
+            or time.time()
+        )
         qual = sym if "." in sym else f"{sym}.{self.venue}"
         if self._price_hook:
             try:

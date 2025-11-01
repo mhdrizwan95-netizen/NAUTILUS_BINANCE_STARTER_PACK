@@ -5,7 +5,6 @@ from collections import deque, defaultdict
 from pathlib import Path
 from typing import Dict, Deque, Optional, Tuple, List
 from ..config import load_strategy_config
-from ..core import order_router
 from .calibration import adjust_quote, adjust_confidence, cooldown_scale
 
 S = load_strategy_config()
@@ -16,48 +15,58 @@ STATE_EDGE = {0: 0.0, 1: 1.0, 2: -1.0}
 
 # Rolling buffers per symbol
 _prices: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
-_vols:   Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
+_vols: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
 _last_signal_ts: Dict[str, float] = defaultdict(float)
 
+
 def _vwap(prices: List[float], vols: List[float]) -> float:
-    num = sum(p*v for p, v in zip(prices, vols)) or 0.0
+    num = sum(p * v for p, v in zip(prices, vols)) or 0.0
     den = sum(vols) or 1.0
-    return num/den
+    return num / den
+
 
 def _zscore(x: List[float]) -> float:
     n = len(x)
-    if n < 2: return 0.0
-    m = sum(x)/n
-    var = sum((v-m)**2 for v in x)/max(1, n-1)
+    if n < 2:
+        return 0.0
+    m = sum(x) / n
+    var = sum((v - m) ** 2 for v in x) / max(1, n - 1)
     sd = math.sqrt(max(var, 1e-12))
-    return (x[-1]-m)/sd
+    return (x[-1] - m) / sd
+
 
 def _vola(returns: List[float]) -> float:
     # simple std of 1-min returns
     n = len(returns)
-    if n < 2: return 0.0
-    m = sum(returns)/n
-    var = sum((r-m)**2 for r in returns)/max(1, n-1)
+    if n < 2:
+        return 0.0
+    m = sum(returns) / n
+    var = sum((r - m) ** 2 for r in returns) / max(1, n - 1)
     return math.sqrt(max(var, 1e-12))
+
 
 def _features(sym: str) -> Optional[List[float]]:
     P, V = _prices[sym], _vols[sym]
     if len(P) < 3:  # need minimum data
         return None
-    rets = [0.0] + [ (P[i]-P[i-1])/P[i-1] for i in range(1, len(P)) ]
-    vwap = _vwap(list(P), list(V) if len(V)==len(P) else [1.0]*len(P))
+    rets = [0.0] + [(P[i] - P[i - 1]) / P[i - 1] for i in range(1, len(P))]
+    vwap = _vwap(list(P), list(V) if len(V) == len(P) else [1.0] * len(P))
     feats = [
-        rets[-1],                 # latest return
-        _vola(rets[-20:]),        # short volatility
-        (P[-1]-vwap)/vwap,        # dev vs VWAP
-        _zscore(list(P)[-30:]),   # zscore of price
-        float(V[-1])/max(1.0, sum(list(V)[-20:])/20.0) if V else 1.0,  # volume spike ratio
+        rets[-1],  # latest return
+        _vola(rets[-20:]),  # short volatility
+        (P[-1] - vwap) / vwap,  # dev vs VWAP
+        _zscore(list(P)[-30:]),  # zscore of price
+        (
+            float(V[-1]) / max(1.0, sum(list(V)[-20:]) / 20.0) if V else 1.0
+        ),  # volume spike ratio
     ]
     return feats
 
-def ingest_tick(sym: str, price: float, volume: float=1.0) -> None:
+
+def ingest_tick(sym: str, price: float, volume: float = 1.0) -> None:
     _prices[sym].append(float(price))
     _vols[sym].append(float(volume))
+
 
 def _load_model():
     # Try active model link first, fall back to configured path
@@ -69,12 +78,16 @@ def _load_model():
     with open(model_path, "rb") as f:
         return pickle.load(f)
 
+
 _model = None
+
+
 def model():
     global _model
     if _model is None:
         _model = _load_model()
     return _model
+
 
 def decide(sym: str) -> Optional[Tuple[str, float, Dict]]:
     """Return (side, quote_usdt, meta) or None if no action."""
@@ -111,5 +124,11 @@ def decide(sym: str) -> Optional[Tuple[str, float, Dict]]:
         return None
 
     _last_signal_ts[sym] = now
-    meta = {"exp": "hmm_v1", "probs": probs, "mark": px, "conf": adj_conf, "cooldown": dynamic_cooldown}
+    meta = {
+        "exp": "hmm_v1",
+        "probs": probs,
+        "mark": px,
+        "conf": adj_conf,
+        "cooldown": dynamic_cooldown,
+    }
     return side, float(quote), meta

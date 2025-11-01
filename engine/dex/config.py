@@ -73,7 +73,9 @@ def load_dex_config() -> DexConfig:
     """Load configuration from environment with safe defaults."""
     state_path = os.getenv("DEX_STATE_PATH", "state/dex_positions.json")
     chains = os.getenv("DEX_CHAIN_WHITELIST", "ETH,BSC,BASE")
-    whitelist = tuple(sorted({c.strip().upper() for c in chains.split(",") if c.strip()}))
+    whitelist = tuple(
+        sorted({c.strip().upper() for c in chains.split(",") if c.strip()})
+    )
     rpc_url = os.getenv("DEX_RPC_URL", "").strip()
     router_address = os.getenv("DEX_ROUTER_ADDRESS", "").strip()
     stable_token = os.getenv("DEX_STABLE_TOKEN", "").strip()

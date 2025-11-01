@@ -66,7 +66,9 @@ def _sum_counter(families: Dict[str, Tuple], name: str) -> float:
     return sum(sample.value for sample in family.samples if sample.name == name)
 
 
-def _histogram_quantiles(families: Dict[str, Tuple], name: str, quantiles: Tuple[float, ...]) -> Dict[str, Dict[float, float]]:
+def _histogram_quantiles(
+    families: Dict[str, Tuple], name: str, quantiles: Tuple[float, ...]
+) -> Dict[str, Dict[float, float]]:
     family = families.get(name)
     results: Dict[str, Dict[float, float]] = defaultdict(dict)
     if not family:
@@ -99,7 +101,9 @@ def _histogram_quantiles(families: Dict[str, Tuple], name: str, quantiles: Tuple
     return results
 
 
-def _gauge_values(families: Dict[str, Tuple], name: str, label_key: str) -> Dict[str, float]:
+def _gauge_values(
+    families: Dict[str, Tuple], name: str, label_key: str
+) -> Dict[str, float]:
     family = families.get(name)
     values: Dict[str, float] = {}
     if not family:
@@ -111,7 +115,9 @@ def _gauge_values(families: Dict[str, Tuple], name: str, label_key: str) -> Dict
     return values
 
 
-def _evaluate_metrics(args: argparse.Namespace, cfg: RuntimeConfig, families: Dict[str, Tuple]) -> int:
+def _evaluate_metrics(
+    args: argparse.Namespace, cfg: RuntimeConfig, families: Dict[str, Tuple]
+) -> int:
     failures = 0
     mismatch_total = _sum_counter(families, "strategy_leverage_mismatch_total")
     if mismatch_total > args.allowed_leverage_mismatches:
@@ -134,16 +140,22 @@ def _evaluate_metrics(args: argparse.Namespace, cfg: RuntimeConfig, families: Di
         worst_p95 = max(worst_p95, p95)
         print(f"[INFO] Latency quantiles for {strategy}: p50={p50:.4f}s p95={p95:.4f}s")
     if worst_p50 > args.max_latency_p50 or worst_p95 > args.max_latency_p95:
-        print(f"[FAIL] Latency thresholds exceeded (p50={worst_p50:.4f}s, p95={worst_p95:.4f}s)")
+        print(
+            f"[FAIL] Latency thresholds exceeded (p50={worst_p50:.4f}s, p95={worst_p95:.4f}s)"
+        )
         failures += 1
     else:
-        print(f"[PASS] Latency within thresholds (p50={worst_p50:.4f}s, p95={worst_p95:.4f}s)")
+        print(
+            f"[PASS] Latency within thresholds (p50={worst_p50:.4f}s, p95={worst_p95:.4f}s)"
+        )
 
     submitted = _sum_counter(families, "orders_submitted_total")
     rejected = _sum_counter(families, "orders_rejected_total")
     failure_rate = (rejected / submitted) if submitted else 0.0
     if failure_rate > args.max_failure_rate:
-        print(f"[FAIL] Order failure rate {failure_rate:.4%} exceeds {args.max_failure_rate:.2%}")
+        print(
+            f"[FAIL] Order failure rate {failure_rate:.4%} exceeds {args.max_failure_rate:.2%}"
+        )
         failures += 1
     else:
         print(f"[PASS] Order failure rate {failure_rate:.4%} within limit")
@@ -155,10 +167,14 @@ def _evaluate_metrics(args: argparse.Namespace, cfg: RuntimeConfig, families: Di
         if budget is None:
             continue
         if usage > (budget + tolerance):
-            print(f"[FAIL] Bucket '{bucket}' usage {usage:.4f} exceeds budget {budget:.4f} + headroom {tolerance:.4f}")
+            print(
+                f"[FAIL] Bucket '{bucket}' usage {usage:.4f} exceeds budget {budget:.4f} + headroom {tolerance:.4f}"
+            )
             failures += 1
         else:
-            print(f"[PASS] Bucket '{bucket}' usage {usage:.4f} within budget {budget:.4f}")
+            print(
+                f"[PASS] Bucket '{bucket}' usage {usage:.4f} within budget {budget:.4f}"
+            )
 
     return failures
 
@@ -169,7 +185,7 @@ def _load_thresholds_file(thresholds_file: str) -> dict:
         print("[WARN] PyYAML not available, cannot load thresholds file")
         return {}
     try:
-        with open(thresholds_file, 'r') as f:
+        with open(thresholds_file, "r") as f:
             thresholds = yaml.safe_load(f)
             print(f"[INFO] Loaded thresholds from {thresholds_file}: {thresholds}")
             return thresholds or {}
@@ -179,7 +195,9 @@ def _load_thresholds_file(thresholds_file: str) -> dict:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run synthetic harness and evaluate stabilization checks.")
+    parser = argparse.ArgumentParser(
+        description="Run synthetic harness and evaluate stabilization checks."
+    )
     parser.add_argument("--config", default="config/runtime.yaml")
     parser.add_argument("--duration-seconds", type=float, default=30.0)
     parser.add_argument("--symbols-per-strategy", type=int, default=40)
@@ -194,7 +212,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-latency-p95", type=float, default=0.400)
     parser.add_argument("--max-failure-rate", type=float, default=0.005)
     parser.add_argument("--bucket-headroom", type=float, default=0.02)
-    parser.add_argument("--thresholds", default=None, help="YAML file with default thresholds")
+    parser.add_argument(
+        "--thresholds", default=None, help="YAML file with default thresholds"
+    )
     return parser.parse_args()
 
 
@@ -204,7 +224,7 @@ def _apply_threshold_defaults(args: argparse.Namespace) -> argparse.Namespace:
         thresholds = _load_thresholds_file(args.thresholds)
         # Apply YAML values as defaults, but CLI args take precedence
         for key, value in thresholds.items():
-            attr_name = key.replace('-', '_')
+            attr_name = key.replace("-", "_")
             if hasattr(args, attr_name):
                 # CLI args override YAML defaults (CLI will have non-default values)
                 current_value = getattr(args, attr_name)
@@ -219,7 +239,12 @@ def _apply_threshold_defaults(args: argparse.Namespace) -> argparse.Namespace:
     return args
 
 
-def _generate_report(args: argparse.Namespace, cfg: RuntimeConfig, families: Dict[str, Tuple], failures: int) -> dict:
+def _generate_report(
+    args: argparse.Namespace,
+    cfg: RuntimeConfig,
+    families: Dict[str, Tuple],
+    failures: int,
+) -> dict:
     """Generate JSON report with stabilization results."""
     timestamp = datetime.utcnow().isoformat()
     mismatch_total = _sum_counter(families, "strategy_leverage_mismatch_total")
@@ -234,8 +259,12 @@ def _generate_report(args: argparse.Namespace, cfg: RuntimeConfig, families: Dic
     bucket_usage = _gauge_values(families, "strategy_bucket_usage_fraction", "bucket")
 
     # Calculate worst latencies
-    worst_p50 = max((quantiles.get(0.5, 0.0) for quantiles in quantile_data.values()), default=0.0)
-    worst_p95 = max((quantiles.get(0.95, 0.0) for quantiles in quantile_data.values()), default=0.0)
+    worst_p50 = max(
+        (quantiles.get(0.5, 0.0) for quantiles in quantile_data.values()), default=0.0
+    )
+    worst_p95 = max(
+        (quantiles.get(0.95, 0.0) for quantiles in quantile_data.values()), default=0.0
+    )
 
     return {
         "timestamp": timestamp,
@@ -253,7 +282,9 @@ def _generate_report(args: argparse.Namespace, cfg: RuntimeConfig, families: Dic
             "max_failure_rate": args.max_failure_rate,
             "bucket_usage": {k: round(v, 4) for k, v in bucket_usage.items()},
             "bucket_headroom": args.bucket_headroom,
-            "config_budgets": {k: getattr(cfg.buckets, k, None) for k in bucket_usage.keys()},
+            "config_budgets": {
+                k: getattr(cfg.buckets, k, None) for k in bucket_usage.keys()
+            },
         },
         "passed": failures == 0,
         "failure_count": failures,
@@ -266,7 +297,7 @@ def _save_report(report: dict) -> None:
     filename = f"ops/reports/stabilization_{timestamp}.json"
     report_path = Path(filename)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(filename, 'w') as f:
+    with open(filename, "w") as f:
         json.dump(report, f, indent=2)
     print(f"[INFO] Report saved to {filename}")
 

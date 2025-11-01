@@ -3,6 +3,7 @@ Order Management System (OMS) data models and types.
 
 Defines the complete order lifecycle from creation to terminal state.
 """
+
 from dataclasses import dataclass, asdict
 from typing import Optional, Dict, Any, Literal
 import time
@@ -11,7 +12,9 @@ import uuid
 
 # Type definitions for better type safety
 OrderType = Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]
-OrderStatus = Literal["NEW", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED"]
+OrderStatus = Literal[
+    "NEW", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED"
+]
 OrderSide = Literal["BUY", "SELL"]
 TimeInForce = Literal["GTC", "DAY", "IOC", "FOK"]
 
@@ -23,18 +26,19 @@ class OrderRecord:
 
     Tracks an order from creation through all state changes until terminal.
     """
+
     id: str
     client_key: str  # X-Idempotency-Key or auto-generated
-    symbol: str      # BASE.VENUE format (e.g., "AAPL.IBKR")
+    symbol: str  # BASE.VENUE format (e.g., "AAPL.IBKR")
     side: OrderSide
     order_type: OrderType
     quantity: float
-    price: Optional[float] = None           # Limit price or stop-limit limit price
-    stop_price: Optional[float] = None      # Stop trigger price
-    tif: TimeInForce = "GTC"                # Time in force
+    price: Optional[float] = None  # Limit price or stop-limit limit price
+    stop_price: Optional[float] = None  # Stop trigger price
+    tif: TimeInForce = "GTC"  # Time in force
     status: OrderStatus = "NEW"
-    venue_order_id: Optional[str] = None    # Venue-specific order ID
-    oco_group_id: Optional[str] = None      # OCO (one cancels other) group identifier
+    venue_order_id: Optional[str] = None  # Venue-specific order ID
+    oco_group_id: Optional[str] = None  # OCO (one cancels other) group identifier
     filled_qty: float = 0.0
     avg_fill_price: float = 0.0
     fee_usd: float = 0.0
@@ -60,7 +64,9 @@ class OrderRecord:
         """Calculate remaining unfilled quantity."""
         return self.quantity - self.filled_qty
 
-    def update_fill(self, filled_qty: float, avg_price: float, fee: float = 0.0) -> None:
+    def update_fill(
+        self, filled_qty: float, avg_price: float, fee: float = 0.0
+    ) -> None:
         """Update order with a fill event."""
         self.filled_qty = filled_qty
         self.avg_fill_price = avg_price

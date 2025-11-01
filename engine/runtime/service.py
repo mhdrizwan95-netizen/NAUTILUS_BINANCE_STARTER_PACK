@@ -10,7 +10,12 @@ from ..core.order_router import OrderRouter
 from ..core.portfolio import Portfolio
 from .config import RuntimeConfig, load_runtime_config
 from .pipeline import StrategyPipeline, StrategyRegistry
-from .producers import MomentumProducer, ScalperProducer, TrendProducer, VolatilityProducer
+from .producers import (
+    MomentumProducer,
+    ScalperProducer,
+    TrendProducer,
+    VolatilityProducer,
+)
 from .universe import UniverseManager, UniverseScreener
 
 log = logging.getLogger("engine.runtime.service")
@@ -30,7 +35,10 @@ async def _run_pipeline(config: RuntimeConfig) -> None:
     try:
         await router.initialize_balances()
     except Exception:
-        log.info("[runtime] unable to pre-load balances; continuing with defaults", exc_info=True)
+        log.info(
+            "[runtime] unable to pre-load balances; continuing with defaults",
+            exc_info=True,
+        )
 
     registry = StrategyRegistry()
     _register_default_strategies(registry)

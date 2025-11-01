@@ -30,17 +30,18 @@ All services share the `data`, `models`, and `shared` volumes declared in the co
 
 ### `data_ingester`
 - **Inputs**: `EXCHANGE`, `SYMBOLS`, `TIMEFRAME`, `BATCH_LIMIT`, `START_TS`, `END_TS`, `SLEEP_MS` (configure via `.env`).
-- **API**: `POST /ingest_once` downloads the next OHLCV chunk since the watermark, writes a CSV under `/data/incoming/<symbol>/<tf>/`, and registers it in the ledger.
+- **API**: `POST /ingest_once` downloads the next OHLCV chunk since the watermark, writes a CSV under `/ml/incoming/<symbol>/<tf>/`, and registers it in the ledger.
 - **Retention**: files are deleted after successful training when `DELETE_AFTER_PROCESS=true` (set on the ML service).
 
 ### `ml_service`
 - **Scheduler**: the `ml_scheduler` container honours `RETRAIN_CRON` and claims new files from the ledger.
 - **Hot reload**: models are symlinked under `/models/current`; the API reloads in-process weights whenever a promotion lands.
 - **Training modes**:
-  - *Sliding window* (`EXACTLY_ONCE=false`, default): the ledger dedupes bars within the active window but allows historic data to be re-used as the window advances for higher-quality HMMs.
-  - *Strict exactly-once* (`EXACTLY_ONCE=true`): every bar is trained at most once. Use only if compliance requires non-reuse—model quality typically suffers without long look-back context.
+  - *Strict exactly-once* (`EXACTLY_ONCE=true`, production default): every bar is trained at most once, guaranteeing deterministic ledger consumption for audit/replay.
+  - *Sliding window* (`EXACTLY_ONCE=false`): optional research mode where the ledger dedupes bars within the active window but allows historic data to be re-used as the window advances for higher-quality HMMs.
 - **Window blending**: in sliding-window mode the trainer stitches together the latest claimed files with the rolling `TRAIN_WINDOW_DAYS` archive, deduping by timestamp so late-arriving bars overwrite older copies safely.
 - **Metadata**: `/train` responses expose `metadata.claimed_files` so you can alert on empty ledger runs and track how much fresh data each job consumed.
+- **Deterministic retrains**: set `TRAIN_SEED` (default `42`) to reproduce model training runs. The `metadata.json` written for each promoted version stores the seed, giving you an end-to-end audit trail of RNG state.
 
 ### `param_controller`
 - **Preset menu**: register safe presets via `POST /preset/register/{strategy}/{instrument}` with a `{ "preset_id": ..., "params": { ... } }` payload.
@@ -49,7 +50,7 @@ All services share the `data`, `models`, and `shared` volumes declared in the co
 
 ## Shared ledger & storage semantics
 
-All services mount `/shared/manifest.sqlite`, giving them consistent state:
+- Production services mount `/ml/manifest.sqlite`, giving them consistent state:
 
 - Files are **content-addressed** (SHA-256) and stored once. Duplicates are discarded before training.
 - A per-stream **watermark** (`ingest:<exchange>:<symbol>:<timeframe>`) ensures backfills and live ingestion never overlap ranges.
@@ -60,6 +61,8 @@ Recommended practice:
 
 - Keep sliding-window mode for production quality and run a secondary strict model only if auditors require “train once” semantics.
 - Run a dedicated backfill job (`compose.backfill.yml`) writing to a research volume if you need long-range historical testing—the production volumes can aggressively delete raw CSVs once features are extracted.
+- Production retrains mount `/ml` (see `docker-compose.yml`) so the ingester writes into `/ml/incoming` and the trainer reads `/ml/manifest.sqlite` without leaking into research volumes.
+- Mount research/backtest workloads to `/research` (see `compose.backtest.yml`) so they claim data into `/research/incoming` and keep their own ledger at `/research/manifest.sqlite`, isolating experiments from the production `/ml` mounts.
 
 ## Parameter schema registry
 

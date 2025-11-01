@@ -16,17 +16,25 @@ import hashlib
 import urllib.parse
 import requests
 
+
 def main():
     symbol = (sys.argv[1] if len(sys.argv) > 1 else "BTCUSDT").upper()
     mode = (os.environ.get("BINANCE_MODE") or "").lower()
     if mode.startswith("futures"):
-        base = os.environ.get("BINANCE_FUTURES_BASE") or "https://testnet.binancefuture.com"
+        base = (
+            os.environ.get("BINANCE_FUTURES_BASE")
+            or "https://testnet.binancefuture.com"
+        )
         endpoint = "/fapi/v1/userTrades"
     else:
-        base = os.environ.get("DEMO_SPOT_BASE") or os.environ.get("BINANCE_SPOT_BASE") or "https://testnet.binance.vision"
+        base = (
+            os.environ.get("DEMO_SPOT_BASE")
+            or os.environ.get("BINANCE_SPOT_BASE")
+            or "https://testnet.binance.vision"
+        )
         endpoint = "/api/v3/myTrades"
-    key  = os.environ.get("BINANCE_API_KEY")
-    sec  = os.environ.get("BINANCE_API_SECRET")
+    key = os.environ.get("BINANCE_API_KEY")
+    sec = os.environ.get("BINANCE_API_SECRET")
 
     if not key or not sec:
         print("Missing BINANCE_API_KEY / BINANCE_API_SECRET in environment.")
@@ -42,7 +50,11 @@ def main():
     url = f"{base.rstrip('/')}{endpoint}?{qs}&signature={sig}"
     # Try up to 3 times, respect Retry-After if provided
     for attempt in range(3):
-        r = requests.get(url, headers={"X-MBX-APIKEY": key}, timeout=float(os.environ.get("BINANCE_API_TIMEOUT", "10")))
+        r = requests.get(
+            url,
+            headers={"X-MBX-APIKEY": key},
+            timeout=float(os.environ.get("BINANCE_API_TIMEOUT", "10")),
+        )
         print(r.status_code, r.text[:500])
         if r.status_code == 429 and attempt < 2:
             try:
@@ -53,6 +65,7 @@ def main():
             continue
         r.raise_for_status()
         break
+
 
 if __name__ == "__main__":
     main()

@@ -17,7 +17,9 @@ class _Router:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, float]] = []
 
-    async def market_quote(self, symbol: str, side: str, notional: float, market: str | None = None) -> dict[str, float]:
+    async def market_quote(
+        self, symbol: str, side: str, notional: float, market: str | None = None
+    ) -> dict[str, float]:
         self.calls.append((symbol, side, notional, market))
         return {"avg_fill_price": 1.0, "filled_qty_base": notional}
 
@@ -26,7 +28,15 @@ class _Risk:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, float, str | None]] = []
 
-    def check_order(self, *, symbol: str, side: str, quote: float, quantity, market: str | None = None) -> tuple[bool, dict]:
+    def check_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        quote: float,
+        quantity,
+        market: str | None = None,
+    ) -> tuple[bool, dict]:
         self.calls.append((symbol, side, quote, market))
         return True, {}
 
@@ -44,7 +54,9 @@ async def test_skips_when_no_keywords():
         min_priority=0.6,
         min_expected_reward_usd=5.0,
     )
-    watcher = AirdropPromoWatcher(_Router(), _Risk(), _RestClient(), cfg, clock=_Clock())
+    watcher = AirdropPromoWatcher(
+        _Router(), _Risk(), _RestClient(), cfg, clock=_Clock()
+    )
     event = {
         "source": "binance_listings",
         "priority": 0.9,

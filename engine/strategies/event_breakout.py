@@ -53,7 +53,9 @@ def load_breakout_config() -> BreakoutConfig:
     return BreakoutConfig(
         enabled=_env_bool("EVENT_BREAKOUT_ENABLED", False),
         dry_run=_env_bool("EVENT_BREAKOUT_DRY_RUN", True),
-        half_size_minutes=int(float(os.getenv("EVENT_BREAKOUT_HALF_SIZE_MINUTES", "5"))),
+        half_size_minutes=int(
+            float(os.getenv("EVENT_BREAKOUT_HALF_SIZE_MINUTES", "5"))
+        ),
         base_risk_usd=float(os.getenv("EVENT_BREAKOUT_BASE_RISK_USD", "40")),
         size_usd=float(os.getenv("EVENT_BREAKOUT_SIZE_USD", "120")),
         prefer_futures=prefer_futures,
@@ -69,11 +71,17 @@ def load_breakout_config() -> BreakoutConfig:
         trail_atr_mult=float(os.getenv("EVENT_BREAKOUT_TRAIL_ATR_MULT", "1.2")),
         cooldown_minutes=int(float(os.getenv("EVENT_BREAKOUT_COOLDOWN_MIN", "15"))),
         max_spread_pct=float(os.getenv("EVENT_BREAKOUT_MAX_SPREAD_PCT", "0.006")),
-        late_chase_pct_30m=float(os.getenv("EVENT_BREAKOUT_LATE_CHASE_PCT_30M", "0.20")),
-        min_notional_1m_usd=float(os.getenv("EVENT_BREAKOUT_MIN_NOTIONAL_1M_USD", "500000")),
+        late_chase_pct_30m=float(
+            os.getenv("EVENT_BREAKOUT_LATE_CHASE_PCT_30M", "0.20")
+        ),
+        min_notional_1m_usd=float(
+            os.getenv("EVENT_BREAKOUT_MIN_NOTIONAL_1M_USD", "500000")
+        ),
         metrics_enabled=_env_bool("EVENT_BREAKOUT_METRICS", False),
         denylist_enabled=_env_bool("EVENT_BREAKOUT_DENYLIST_ENABLED", False),
-        denylist_path=os.getenv("EVENT_BREAKOUT_DENYLIST_PATH", "conf/event_denylist.txt"),
+        denylist_path=os.getenv(
+            "EVENT_BREAKOUT_DENYLIST_PATH", "conf/event_denylist.txt"
+        ),
     )
 
 
@@ -93,7 +101,14 @@ class BreakoutPlan:
 
 
 class EventBreakout:
-    def __init__(self, router, md=None, cfg: Optional[BreakoutConfig] = None, clock=time, logger=None):
+    def __init__(
+        self,
+        router,
+        md=None,
+        cfg: Optional[BreakoutConfig] = None,
+        clock=time,
+        logger=None,
+    ):
         self.cfg = cfg or load_breakout_config()
         self.router = router
         self.md = md  # Optional external MD adapter
@@ -102,6 +117,7 @@ class EventBreakout:
         self._cooldowns: Dict[str, float] = {}
         try:
             from engine import metrics as MET
+
             self._MET = MET
         except Exception:
             self._MET = None
@@ -110,7 +126,9 @@ class EventBreakout:
         self.denylist = self._load_denylist(self.cfg.denylist_path)
         # Entropy-based temporary denylist
         self._entropy_enabled = bool(_env_bool("ENTROPY_DENY_ENABLED", False))
-        self._entropy_reason_count = int(float(os.getenv("ENTROPY_DENY_REASON_COUNT", "3")))
+        self._entropy_reason_count = int(
+            float(os.getenv("ENTROPY_DENY_REASON_COUNT", "3"))
+        )
         self._entropy_window = float(os.getenv("ENTROPY_DENY_WINDOW_MIN", "30")) * 60.0
         self._entropy_dur = float(os.getenv("ENTROPY_DENY_DURATION_MIN", "120")) * 60.0
         self._entropy_reasons: Dict[str, Dict[str, float]] = {}
@@ -132,7 +150,9 @@ class EventBreakout:
             self.log.info("[EVENT-BO] denylist skip %s", sym)
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
-                    self._MET.event_bo_skips_total.labels(reason="denylist", symbol=sym).inc()
+                    self._MET.event_bo_skips_total.labels(
+                        reason="denylist", symbol=sym
+                    ).inc()
                 except Exception:
                     pass
             return
@@ -151,6 +171,7 @@ class EventBreakout:
             # Publish plan event for rollups
             try:
                 from engine.core.event_bus import BUS
+
                 await BUS.publish(
                     "event_bo.plan_dry",
                     {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
@@ -163,8 +184,17 @@ class EventBreakout:
         # Live execution (kept minimal; uses router wrappers; reduce-only setup optional)
         qty = await self._qty_from_notional(plan.symbol, plan.notional_usd)
         try:
-            await self.router.place_entry(plan.symbol, "BUY", qty, venue=plan.venue, intent="EVENT", market=plan.market)
-            await self.router.amend_stop_reduce_only(plan.symbol, "SELL", plan.sl_price, qty)
+            await self.router.place_entry(
+                plan.symbol,
+                "BUY",
+                qty,
+                venue=plan.venue,
+                intent="EVENT",
+                market=plan.market,
+            )
+            await self.router.amend_stop_reduce_only(
+                plan.symbol, "SELL", plan.sl_price, qty
+            )
             tp1_qty = max(0.0, qty * float(self.cfg.tp1_portion))
             tp2_qty = max(0.0, qty * float(self.cfg.tp2_portion))
             # Optional reduce-only limits if supported
@@ -176,12 +206,18 @@ class EventBreakout:
             # Emit metrics and publish open event for trailer
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
-                    self._MET.event_bo_trades_total.labels(venue=plan.venue, symbol=plan.symbol).inc()
+                    self._MET.event_bo_trades_total.labels(
+                        venue=plan.venue, symbol=plan.symbol
+                    ).inc()
                 except Exception:
                     pass
             try:
                 from engine.core.event_bus import BUS
-                await BUS.publish("strategy.event_breakout_open", {"symbol": plan.symbol, "market": plan.market})
+
+                await BUS.publish(
+                    "strategy.event_breakout_open",
+                    {"symbol": plan.symbol, "market": plan.market},
+                )
                 await BUS.publish(
                     "event_bo.trade",
                     {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
@@ -197,7 +233,9 @@ class EventBreakout:
         self._log_plan(plan, dry=False)
         self._arm_cooldown(sym)
 
-    async def _build_plan(self, sym: str, evt: Dict[str, Any]) -> Optional[BreakoutPlan]:
+    async def _build_plan(
+        self, sym: str, evt: Dict[str, Any]
+    ) -> Optional[BreakoutPlan]:
         venue = "BINANCE"  # our router determines ven/back-end; label retained for downstream
         px = await self._last(sym)
         if not px:
@@ -207,7 +245,11 @@ class EventBreakout:
         size = float(self.cfg.size_usd)
         half = bool(minutes is not None and minutes < self.cfg.half_size_minutes)
         notional = size * 0.5 if half else size
-        lev = int(self.cfg.leverage_major if sym.startswith(("BTC", "ETH")) else self.cfg.leverage_default)
+        lev = int(
+            self.cfg.leverage_major
+            if sym.startswith(("BTC", "ETH"))
+            else self.cfg.leverage_default
+        )
         sl = await self._sl_min3low_or_atr(sym, px)
         if sl is None or sl >= px:
             atr = await self._atr(sym) or 0.0
@@ -246,6 +288,7 @@ class EventBreakout:
                     pass
             try:
                 from engine.core.event_bus import BUS
+
                 await BUS.publish("event_bo.half", {"symbol": sym})
             except Exception:
                 pass
@@ -256,7 +299,9 @@ class EventBreakout:
         if not kl or len(kl) < 2:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
-                    self._MET.event_bo_skips_total.labels(reason="no_klines", symbol=sym).inc()
+                    self._MET.event_bo_skips_total.labels(
+                        reason="no_klines", symbol=sym
+                    ).inc()
                 except Exception:
                     pass
             return False
@@ -270,12 +315,17 @@ class EventBreakout:
                 self.log.info("[EVENT-BO] late-chase %s ch30=%.2f%%", sym, ch30 * 100.0)
                 if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                     try:
-                        self._MET.event_bo_skips_total.labels(reason="late_chase", symbol=sym).inc()
+                        self._MET.event_bo_skips_total.labels(
+                            reason="late_chase", symbol=sym
+                        ).inc()
                     except Exception:
                         pass
                 try:
                     from engine.core.event_bus import BUS
-                    await BUS.publish("event_bo.skip", {"symbol": sym, "reason": "late_chase"})
+
+                    await BUS.publish(
+                        "event_bo.skip", {"symbol": sym, "reason": "late_chase"}
+                    )
                 except Exception:
                     pass
                 return False
@@ -283,12 +333,17 @@ class EventBreakout:
         except Exception:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
-                    self._MET.event_bo_skips_total.labels(reason="parse_error", symbol=sym).inc()
+                    self._MET.event_bo_skips_total.labels(
+                        reason="parse_error", symbol=sym
+                    ).inc()
                 except Exception:
                     pass
             try:
                 from engine.core.event_bus import BUS
-                await BUS.publish("event_bo.skip", {"symbol": sym, "reason": "parse_error"})
+
+                await BUS.publish(
+                    "event_bo.skip", {"symbol": sym, "reason": "parse_error"}
+                )
             except Exception:
                 pass
             return False
@@ -298,14 +353,19 @@ class EventBreakout:
         mid = (bid + ask) / 2.0 if (bid and ask) else 0.0
         spread_pct = abs(ask - bid) / mid if mid else 0.0
         if spread_pct >= float(self.cfg.max_spread_pct):
-            self.log.info("[EVENT-BO] wide spread %s spread=%.4f%%", sym, spread_pct * 100.0)
+            self.log.info(
+                "[EVENT-BO] wide spread %s spread=%.4f%%", sym, spread_pct * 100.0
+            )
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
-                    self._MET.event_bo_skips_total.labels(reason="spread", symbol=sym).inc()
+                    self._MET.event_bo_skips_total.labels(
+                        reason="spread", symbol=sym
+                    ).inc()
                 except Exception:
                     pass
             try:
                 from engine.core.event_bus import BUS
+
                 await BUS.publish("event_bo.skip", {"symbol": sym, "reason": "spread"})
             except Exception:
                 pass
@@ -314,12 +374,17 @@ class EventBreakout:
             self.log.info("[EVENT-BO] low notional %s n1m=%.0f", sym, notional_1m)
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
-                    self._MET.event_bo_skips_total.labels(reason="notional", symbol=sym).inc()
+                    self._MET.event_bo_skips_total.labels(
+                        reason="notional", symbol=sym
+                    ).inc()
                 except Exception:
                     pass
             try:
                 from engine.core.event_bus import BUS
-                await BUS.publish("event_bo.skip", {"symbol": sym, "reason": "notional"})
+
+                await BUS.publish(
+                    "event_bo.skip", {"symbol": sym, "reason": "notional"}
+                )
             except Exception:
                 pass
             return False
@@ -331,7 +396,9 @@ class EventBreakout:
         return now < until
 
     def _arm_cooldown(self, sym: str) -> None:
-        self._cooldowns[sym] = float(self.clock.time() + 60.0 * self.cfg.cooldown_minutes)
+        self._cooldowns[sym] = float(
+            self.clock.time() + 60.0 * self.cfg.cooldown_minutes
+        )
 
     def _minutes_since(self, evt: Dict[str, Any]) -> Optional[float]:
         try:
@@ -348,7 +415,7 @@ class EventBreakout:
             return max(0.0, float(self.clock.time()) - base_sec) / 60.0
         except Exception:
             return None
-    
+
     def _log_plan(self, plan: BreakoutPlan, dry: bool) -> None:
         tag = "DRY" if dry else "LIVE"
         try:
@@ -367,12 +434,17 @@ class EventBreakout:
             )
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
-                    self._MET.event_bo_plans_total.labels(venue=plan.venue, symbol=plan.symbol, dry="true" if dry else "false").inc()
+                    self._MET.event_bo_plans_total.labels(
+                        venue=plan.venue,
+                        symbol=plan.symbol,
+                        dry="true" if dry else "false",
+                    ).inc()
                 except Exception:
                     pass
             # Emit rollup events (fire-and-forget)
             try:
                 from engine.core.event_bus import BUS
+
                 BUS.fire(
                     "event_bo.plan_dry" if dry else "event_bo.plan_live",
                     {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
@@ -395,13 +467,17 @@ class EventBreakout:
     async def _atr(self, sym: str) -> float:
         # Best-effort ATR from klines
         try:
-            kl = await self._klines(sym, interval=self.cfg.atr_tf, limit=max(self.cfg.atr_n + 1, 15))
+            kl = await self._klines(
+                sym, interval=self.cfg.atr_tf, limit=max(self.cfg.atr_n + 1, 15)
+            )
             if not kl or len(kl) < 2:
                 return 0.0
             prev_close = None
             trs = []
-            for row in kl[-(self.cfg.atr_n + 1):]:
-                high = float(row[2]); low = float(row[3]); close = float(row[4])
+            for row in kl[-(self.cfg.atr_n + 1) :]:
+                high = float(row[2])
+                low = float(row[3])
+                close = float(row[4])
                 if prev_close is None:
                     tr = high - low
                 else:
@@ -420,7 +496,9 @@ class EventBreakout:
             kl = await self._klines(sym, interval="1m", limit=4)
             if not kl or len(kl) < 4:
                 return None
-            l2 = float(kl[-2][3]); l3 = float(kl[-3][3]); l4 = float(kl[-4][3])
+            l2 = float(kl[-2][3])
+            l3 = float(kl[-3][3])
+            l4 = float(kl[-4][3])
             low3 = min(l2, l3, l4)
         except Exception:
             low3 = None
@@ -512,4 +590,6 @@ class EventBreakout:
                 reasons.pop(r, None)
         if len(reasons) >= self._entropy_reason_count:
             self._deny_temp[sym] = now + self._entropy_dur
-            self.log.info("[EVENT-BO] entropy deny %s for %.0f min", sym, self._entropy_dur / 60.0)
+            self.log.info(
+                "[EVENT-BO] entropy deny %s for %.0f min", sym, self._entropy_dur / 60.0
+            )

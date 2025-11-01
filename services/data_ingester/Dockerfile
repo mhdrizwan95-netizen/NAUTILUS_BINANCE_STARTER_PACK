@@ -18,8 +18,8 @@ RUN pip install --upgrade pip && pip install -c /constraints.txt -r requirements
 COPY services/data_ingester/app ./app
 COPY services/common /app/common
 
-ENV LEDGER_DB=/shared/manifest.sqlite
-ENV DATA_LANDING=/data/incoming
+ENV LEDGER_DB=/ml/manifest.sqlite
+ENV DATA_LANDING=/ml/incoming
 ENV EXCHANGE=binance
 ENV SYMBOLS=BTC/USDT,ETH/USDT
 ENV TIMEFRAME=1m
@@ -31,8 +31,8 @@ ENV LOG_LEVEL=INFO
 
 # Run as non-root user
 RUN useradd -m appuser \
-    && mkdir -p /data /shared \
-    && chown -R appuser:appuser /app /data /shared
+    && mkdir -p /ml/incoming \
+    && chown -R appuser:appuser /app /ml
 USER appuser
 
 EXPOSE 8001

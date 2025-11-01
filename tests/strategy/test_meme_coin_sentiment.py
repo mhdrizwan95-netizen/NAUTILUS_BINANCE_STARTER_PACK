@@ -30,7 +30,9 @@ class _Router:
         self._portfolio = _Portfolio(equity)
         self.calls: list[tuple[str, str, float, str | None]] = []
 
-    async def market_quote(self, symbol: str, side: str, quote: float, market: str | None = None):
+    async def market_quote(
+        self, symbol: str, side: str, quote: float, market: str | None = None
+    ):
         self.calls.append((symbol, side, quote, market))
         price = 0.1
         qty = quote / price
@@ -41,7 +43,15 @@ class _Risk:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, float, str | None]] = []
 
-    def check_order(self, *, symbol: str, side: str, quote: float, quantity, market: str | None = None):
+    def check_order(
+        self,
+        *,
+        symbol: str,
+        side: str,
+        quote: float,
+        quantity,
+        market: str | None = None,
+    ):
         self.calls.append((symbol, side, quote, market))
         return True, {}
 

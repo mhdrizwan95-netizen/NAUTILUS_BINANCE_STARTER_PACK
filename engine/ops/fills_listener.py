@@ -7,7 +7,6 @@ Safe to run alongside router's synchronous emitter; use EXEC_FILLS_LISTENER_ENAB
 to gate wiring in app. Designed against a generic Binance-like schema.
 """
 
-from typing import Any
 
 
 class FillsListener:
@@ -20,7 +19,9 @@ class FillsListener:
         async for upd in self.ws.order_updates():
             try:
                 event = getattr(upd, "event", "")
-                ex_type = getattr(upd, "execution_type", getattr(upd, "current_execution_type", ""))
+                ex_type = getattr(
+                    upd, "execution_type", getattr(upd, "current_execution_type", "")
+                )
                 if event == "executionReport" and ex_type in ("TRADE", "FILL"):
                     payload = {
                         "ts": float(getattr(upd, "event_time", 0)) / 1000.0,
@@ -29,8 +30,12 @@ class FillsListener:
                         "venue": getattr(upd, "venue", "futures"),
                         "intent": getattr(upd, "intent", "GENERIC"),
                         "order_id": getattr(upd, "order_id", None),
-                        "filled_qty": float(getattr(upd, "last_filled_qty", 0.0) or 0.0),
-                        "avg_price": float(getattr(upd, "last_filled_price", 0.0) or 0.0),
+                        "filled_qty": float(
+                            getattr(upd, "last_filled_qty", 0.0) or 0.0
+                        ),
+                        "avg_price": float(
+                            getattr(upd, "last_filled_price", 0.0) or 0.0
+                        ),
                     }
                     self.bus.fire("trade.fill", payload)
             except Exception as e:
@@ -38,4 +43,3 @@ class FillsListener:
                     self.log.warning("[FILLS-WS] update handling error: %s", e)
                 except Exception:
                     pass
-

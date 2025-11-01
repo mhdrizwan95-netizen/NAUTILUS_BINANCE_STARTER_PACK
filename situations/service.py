@@ -1,7 +1,13 @@
 from __future__ import annotations
 
 from fastapi import FastAPI, Response
-from prometheus_client import CollectorRegistry, Counter, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import (
+    CollectorRegistry,
+    Counter,
+    Gauge,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
 from .store import SituationStore
 from .matcher import Matcher
 from .events import router as events_router, publish
@@ -32,18 +38,35 @@ async def ingest_bar(body: dict):
         await publish(h)
     return {"hits": len(hits)}
 
+
 @APP.get("/health")
-def health(): return {"ok": True}
+def health():
+    return {"ok": True}
+
 
 # --- Metrics ---------------------------------------------------------------
 
 REG = CollectorRegistry()
-HITS = Counter("situation_hits_total", "Total situation matches", ["name"], registry=REG)
-EV_MEAN = Gauge("situation_ev_mean", "Online mean EV per situation (USD)", ["name"], registry=REG)
+HITS = Counter(
+    "situation_hits_total", "Total situation matches", ["name"], registry=REG
+)
+EV_MEAN = Gauge(
+    "situation_ev_mean", "Online mean EV per situation (USD)", ["name"], registry=REG
+)
 EV_CI_LOW = Gauge("situation_ev_ci_low", "95% CI low for EV", ["name"], registry=REG)
 EV_CI_HIGH = Gauge("situation_ev_ci_high", "95% CI high for EV", ["name"], registry=REG)
-NOVELTY_RATE = Gauge("situation_novelty_rate", "Fraction of hits counted as novel", ["name"], registry=REG)
-DECISIONS = Counter("situation_decisions_total", "Bandit decisions by situation", ["name", "decision"], registry=REG)
+NOVELTY_RATE = Gauge(
+    "situation_novelty_rate",
+    "Fraction of hits counted as novel",
+    ["name"],
+    registry=REG,
+)
+DECISIONS = Counter(
+    "situation_decisions_total",
+    "Bandit decisions by situation",
+    ["name", "decision"],
+    registry=REG,
+)
 
 _SYMBOL_SEEN: dict[str, set[str]] = {}
 _NOVEL_COUNTS: dict[str, dict[str, float]] = {}  # name -> {"novel": x, "total": y}
@@ -80,8 +103,8 @@ async def feedback(body: dict):
     stats["m2"] += delta * (pnl - stats["mean"])
     mean = stats["mean"]
     var = (stats["m2"] / (n - 1.0)) if n > 1 else 0.0
-    std = var ** 0.5
-    se = (std / (n ** 0.5)) if n > 0 else 0.0
+    std = var**0.5
+    se = (std / (n**0.5)) if n > 0 else 0.0
     ci_low = mean - 1.96 * se
     ci_high = mean + 1.96 * se
     EV_MEAN.labels(name=name).set(mean)
@@ -95,7 +118,7 @@ async def feedback(body: dict):
     ucb_scores = {}
     for nm, st in _EV.items():
         nn = max(st.get("n", 1.0), 1.0)
-        ucb = st.get("mean", 0.0) + c * ((max(total_n, 1) ** 0.5) / (nn ** 0.5))
+        ucb = st.get("mean", 0.0) + c * ((max(total_n, 1) ** 0.5) / (nn**0.5))
         ucb_scores[nm] = ucb
     # min-max scale
     mn = min(ucb_scores.values())

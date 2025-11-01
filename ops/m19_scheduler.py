@@ -17,12 +17,11 @@ Design Principles:
 import os
 import json
 import time
-import math
 import subprocess
 import shlex
-from datetime import datetime, timedelta
+from datetime import datetime
 import yaml
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Tuple
 
 from ops.telemetry_metrics import inc_scheduler_action
 
@@ -34,16 +33,19 @@ PROM_SNAPSHOT = os.path.join("data", "processed", "m19", "metrics_snapshot.json"
 # Ensure output directory exists
 os.makedirs(OUT_DIR, exist_ok=True)
 
+
 def now() -> str:
     """Get current timestamp in ISO format."""
     return datetime.utcnow().isoformat()
 
+
 def minutes_since(ts_iso: str) -> float:
     """Calculate minutes since the given ISO timestamp."""
     if not ts_iso:
-        return float('inf')
+        return float("inf")
     dt = datetime.fromisoformat(ts_iso)
     return (datetime.utcnow() - dt).total_seconds() / 60.0
+
 
 def load_cfg() -> Dict[str, Any]:
     """Load scheduler configuration from YAML."""
@@ -53,14 +55,28 @@ def load_cfg() -> Dict[str, Any]:
     except FileNotFoundError:
         print(f"Warning: Config file {CFG_PATH} not found, using defaults")
         return {
-            "cooldowns": {"m15_minutes": 60, "m16_minutes": 120, "m17_minutes": 360, "m18_minutes": 90},
-            "thresholds": {"drift_score_warn": 0.5, "drift_score_crit": 0.75,
-                          "winrate_crit": 0.45, "macro_entropy_bits_warn": 0.9,
-                          "cov_entropy_warn": 0.85, "feedback_stale_minutes": 30},
-            "priorities": {"m16_on_winrate_crit": 100, "m17_on_macro_entropy": 90,
-                          "noop_small_fluctuations": 0},
-            "safeguards": {"canary_require_pass": True, "max_actions_per_hour": 2}
+            "cooldowns": {
+                "m15_minutes": 60,
+                "m16_minutes": 120,
+                "m17_minutes": 360,
+                "m18_minutes": 90,
+            },
+            "thresholds": {
+                "drift_score_warn": 0.5,
+                "drift_score_crit": 0.75,
+                "winrate_crit": 0.45,
+                "macro_entropy_bits_warn": 0.9,
+                "cov_entropy_warn": 0.85,
+                "feedback_stale_minutes": 30,
+            },
+            "priorities": {
+                "m16_on_winrate_crit": 100,
+                "m17_on_macro_entropy": 90,
+                "noop_small_fluctuations": 0,
+            },
+            "safeguards": {"canary_require_pass": True, "max_actions_per_hour": 2},
         }
+
 
 def read_prom_snapshot() -> Dict[str, Any]:
     """
@@ -88,8 +104,9 @@ def read_prom_snapshot() -> Dict[str, Any]:
         "feedback_fresh_minutes": 1,
         "rollups_age_minutes": 1,
         "corr_spike": 0.0,
-        "timestamp": now()
+        "timestamp": now(),
     }
+
 
 def load_state() -> Dict[str, Any]:
     """Load scheduler state including last run times and action counts."""
@@ -106,8 +123,9 @@ def load_state() -> Dict[str, Any]:
         "actions_in_last_hour": 0,
         "last_hour_epoch": int(time.time()) // 3600,
         "decision_log": [],
-        "config_fingerprint": ""
+        "config_fingerprint": "",
     }
+
 
 def save_state(state: Dict[str, Any]) -> None:
     """Save scheduler state to disk."""
@@ -117,14 +135,17 @@ def save_state(state: Dict[str, Any]) -> None:
     except Exception as e:
         print(f"Error saving state: {e}")
 
+
 def cool_ok(state: Dict[str, Any], action_key: str, min_minutes: int) -> bool:
     """Check if enough time has passed since last run of this action."""
     last = state["last_run"].get(action_key, "")
     return minutes_since(last) >= min_minutes
 
+
 def mark_run(state: Dict[str, Any], action_key: str) -> None:
     """Mark that an action was executed."""
     state["last_run"][action_key] = now()
+
 
 def exec_shell(cmd: str) -> bool:
     """
@@ -134,7 +155,9 @@ def exec_shell(cmd: str) -> bool:
     """
     print(f"→ Executing: {cmd}")
     try:
-        result = subprocess.run(shlex.split(cmd), capture_output=True, text=True, timeout=3600)
+        result = subprocess.run(
+            shlex.split(cmd), capture_output=True, text=True, timeout=3600
+        )
 
         if result.returncode == 0:
             print("✅ Execution successful")
@@ -152,7 +175,10 @@ def exec_shell(cmd: str) -> bool:
         print(f"⚠️  Execution error: {e}")
         return False
 
-def assess_system_health(metrics: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+
+def assess_system_health(
+    metrics: Dict[str, Any], cfg: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Assess overall system health based on KPIs and determine if action is needed.
 
@@ -164,7 +190,7 @@ def assess_system_health(metrics: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
         "issues_found": [],
         "critical_count": 0,
         "warning_count": 0,
-        "diagnostics": {}
+        "diagnostics": {},
     }
 
     # Drift score assessment
@@ -226,12 +252,15 @@ def assess_system_health(metrics: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
         "cov_entropy": cov_entropy,
         "feedback_age_min": feedback_age,
         "rollups_age_min": rollups_age,
-        "correlation_spike": corr_spike
+        "correlation_spike": corr_spike,
     }
 
     return health
 
-def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str, Any]) -> Dict[str, Any]:
+
+def decide_and_act(
+    cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Core decision logic: evaluate conditions and choose lowest-risk effective action.
 
@@ -250,7 +279,7 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
         "action": None,
         "cause": None,
         "cooldown_ok": False,
-        "metrics_sample": metrics
+        "metrics_sample": metrics,
     }
 
     # Rate limiting check
@@ -260,10 +289,12 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
         state["last_hour_epoch"] = epoch_hr
 
     if state["actions_in_last_hour"] >= sg["max_actions_per_hour"]:
-        decision.update({
-            "decision": "rate_limited",
-            "reason": f"max_actions_per_hour ({sg['max_actions_per_hour']}) exceeded"
-        })
+        decision.update(
+            {
+                "decision": "rate_limited",
+                "reason": f"max_actions_per_hour ({sg['max_actions_per_hour']}) exceeded",
+            }
+        )
         return decision
 
     # Collect candidate actions with priorities
@@ -298,11 +329,15 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
     # Data freshness conditions (lower priority maintenance)
     if metrics.get("feedback_fresh_minutes", 0) > th["feedback_stale_minutes"]:
         if cool_ok(state, "m15", cd["m15_minutes"]):
-            candidates.append(("paper_seed", pri["paper_seed_on_stale"], "feedback_stale"))
+            candidates.append(
+                ("paper_seed", pri["paper_seed_on_stale"], "feedback_stale")
+            )
 
     if metrics.get("rollups_age_minutes", 0) > th["rollups_stale_minutes"]:
         if cool_ok(state, "m15", cd["m15_minutes"]):
-            candidates.append(("paper_seed", pri["paper_seed_on_stale"], "rollups_stale"))
+            candidates.append(
+                ("paper_seed", pri["paper_seed_on_stale"], "rollups_stale")
+            )
 
     # No action needed
     if not candidates:
@@ -312,13 +347,15 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
     candidates.sort(key=lambda x: x[1], reverse=True)  # Sort by priority descending
     action, priority, cause = candidates[0]
 
-    decision.update({
-        "decision": "run",
-        "action": action,
-        "priority": priority,
-        "cause": cause,
-        "cooldown_ok": True
-    })
+    decision.update(
+        {
+            "decision": "run",
+            "action": action,
+            "priority": priority,
+            "cause": cause,
+            "cooldown_ok": True,
+        }
+    )
 
     # Execute the chosen action
     success = False
@@ -334,13 +371,17 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
 
         elif action == "m17":
             # Legacy macro/micro retraining helper retired - use notebooks/pipeline.
-            print("M17 retraining helper deprecated; define M17_COMMAND to run a custom workflow if desired.")
+            print(
+                "M17 retraining helper deprecated; define M17_COMMAND to run a custom workflow if desired."
+            )
             cmd = os.getenv("M17_COMMAND")
             success = exec_shell(cmd) if cmd else True
 
         elif action == "m18":
             # Legacy covariance diagnostics retired in favor of dashboards.
-            print("M18 covariance diagnostics deprecated; define M18_COMMAND for custom tooling.")
+            print(
+                "M18 covariance diagnostics deprecated; define M18_COMMAND for custom tooling."
+            )
             cmd = os.getenv("M18_COMMAND")
             success = exec_shell(cmd) if cmd else True
 
@@ -358,7 +399,9 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
             }
             try:
                 import asyncio, aiohttp, os
+
                 DASH = os.environ.get("DASH_BASE", "http://127.0.0.1:8002")
+
                 async def push_to_dash():
                     try:
                         async with aiohttp.ClientSession() as sess:
@@ -367,6 +410,7 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
                                 await ws.send_json(payload)
                     except Exception:
                         pass
+
                 asyncio.create_task(push_to_dash())
             except Exception:
                 pass
@@ -389,6 +433,7 @@ def decide_and_act(cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str
 async def telemetry_ws_push(topic: str, payload: dict):
     """Push to dashboard WS endpoint if reachable."""
     import aiohttp
+
     DASH = os.environ.get("DASH_BASE", "http://127.0.0.1:8002")
     try:
         async with aiohttp.ClientSession() as sess:
@@ -413,14 +458,18 @@ def main():
 
         # Get current metrics
         metrics = read_prom_snapshot()
-        print(f"Metrics snapshot: {len(metrics)} keys at {metrics.get('timestamp', 'unknown')}")
+        print(
+            f"Metrics snapshot: {len(metrics)} keys at {metrics.get('timestamp', 'unknown')}"
+        )
 
         # Assess system health
         health = assess_system_health(metrics, cfg)
-        print(f"System health: {health['overall_status']} "
-              f"({health['critical_count']} critical, {health['warning_count']} warnings)")
+        print(
+            f"System health: {health['overall_status']} "
+            f"({health['critical_count']} critical, {health['warning_count']} warnings)"
+        )
 
-        if health['issues_found']:
+        if health["issues_found"]:
             print(f"Issues found: {', '.join(health['issues_found'])}")
 
         # Make decision and act
@@ -436,7 +485,7 @@ def main():
 
         # Print final result
         print(f"\n🎯 Decision: {result['decision']}")
-        if result['decision'] == 'run':
+        if result["decision"] == "run":
             print(f"   Action: {result['action']}")
             print(f"   Cause: {result['cause']}")
             print(f"   Priority: {result['priority']}")
@@ -449,8 +498,10 @@ def main():
     except Exception as e:
         print(f"❌ Scheduler error: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
+
 
 if __name__ == "__main__":
     exit(main())

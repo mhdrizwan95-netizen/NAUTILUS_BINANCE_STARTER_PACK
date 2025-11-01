@@ -1,9 +1,17 @@
 """Reusable primitives for strategy-specific screener modules."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence
+from typing import (
+    Any,
+    Dict,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+)
 
 from shared.signal_math import confidence_from_score
 

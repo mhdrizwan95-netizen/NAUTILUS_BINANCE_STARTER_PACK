@@ -2,6 +2,7 @@
 from __future__ import annotations
 import math
 
+
 def check_row(i, row, prev_ts_ns):
     issues = []
     ts = int(row["ts_ns"])
@@ -19,10 +20,11 @@ def check_row(i, row, prev_ts_ns):
         issues.append("neg_ask_sz")
     return issues, ts
 
+
 def check_spread_jump(prev_mid, prev_spread_bp, mid, spread_bp, max_jump_bp=500):
     # guards absurd jumps (e.g., symbol change, feed glitch)
     issues = []
-    if prev_mid and mid and abs(mid - prev_mid)/prev_mid > 0.05:
+    if prev_mid and mid and abs(mid - prev_mid) / prev_mid > 0.05:
         issues.append("mid_jump_>5pct")
     if prev_spread_bp is not None and spread_bp is not None:
         if spread_bp > 1e6 or spread_bp - prev_spread_bp > max_jump_bp:

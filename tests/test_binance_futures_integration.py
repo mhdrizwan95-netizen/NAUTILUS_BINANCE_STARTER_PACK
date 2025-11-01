@@ -46,9 +46,11 @@ def test_futures_demo_settings_use_testnet_base():
 async def test_ticker_price_hits_premium_index():
     from engine.core.binance import BinanceREST
 
-    route = respx.get(
-        "https://testnet.binancefuture.com/fapi/v1/premiumIndex"
-    ).mock(return_value=httpx.Response(200, json={"symbol": "BTCUSDT", "markPrice": "25000.0"}))
+    route = respx.get("https://testnet.binancefuture.com/fapi/v1/premiumIndex").mock(
+        return_value=httpx.Response(
+            200, json={"symbol": "BTCUSDT", "markPrice": "25000.0"}
+        )
+    )
 
     client = BinanceREST()
     price = await client.ticker_price("BTCUSDT")
@@ -62,9 +64,7 @@ async def test_ticker_price_hits_premium_index():
 async def test_market_order_calls_futures_endpoint():
     from engine.core.binance import BinanceREST
 
-    route = respx.post(
-        "https://testnet.binancefuture.com/fapi/v1/order"
-    ).mock(
+    route = respx.post("https://testnet.binancefuture.com/fapi/v1/order").mock(
         return_value=httpx.Response(
             200,
             json={
@@ -97,9 +97,7 @@ async def test_market_order_calls_futures_endpoint():
 async def test_account_snapshot_uses_futures_path():
     from engine.core.binance import BinanceREST
 
-    route = respx.get(
-        "https://testnet.binancefuture.com/fapi/v2/account"
-    ).mock(
+    route = respx.get("https://testnet.binancefuture.com/fapi/v2/account").mock(
         return_value=httpx.Response(
             200,
             json={

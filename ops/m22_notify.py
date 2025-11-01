@@ -33,6 +33,7 @@ SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK", "")
 INCIDENT_LOG = os.path.join("data", "processed", "m20", "incident_log.jsonl")
 RECOVERY_LOG = os.path.join("data", "processed", "m20", "recovery_actions.jsonl")
 
+
 def read_last_incident() -> Optional[Dict[str, Any]]:
     """
     Read the most recent incident from the M20 incident log.
@@ -45,7 +46,7 @@ def read_last_incident() -> Optional[Dict[str, Any]]:
         return None
 
     try:
-        with open(INCIDENT_LOG, 'r') as f:
+        with open(INCIDENT_LOG, "r") as f:
             lines = f.readlines()
             if not lines:
                 logger.info("No incidents in log")
@@ -61,13 +62,14 @@ def read_last_incident() -> Optional[Dict[str, Any]]:
 
     return None
 
+
 def read_last_recovery() -> Optional[Dict[str, Any]]:
     """Read the most recent recovery action."""
     if not os.path.exists(RECOVERY_LOG):
         return None
 
     try:
-        with open(RECOVERY_LOG, 'r') as f:
+        with open(RECOVERY_LOG, "r") as f:
             lines = f.readlines()
             if not lines:
                 return None
@@ -80,6 +82,7 @@ def read_last_recovery() -> Optional[Dict[str, Any]]:
         logger.error(f"Error reading recovery log: {e}")
 
     return None
+
 
 def format_incident_message(incident: Dict[str, Any]) -> str:
     """Format incident data into human-readable notification message."""
@@ -113,6 +116,7 @@ def format_incident_message(incident: Dict[str, Any]) -> str:
 
     return message
 
+
 def format_recovery_message(recovery: Dict[str, Any]) -> str:
     """Format recovery action data into notification message."""
     timestamp = recovery.get("timestamp", datetime.utcnow().isoformat())
@@ -131,14 +135,12 @@ def format_recovery_message(recovery: Dict[str, Any]) -> str:
 
     return message
 
-def format_custom_message(message: str, severity: str = "info", source: str = "system") -> str:
+
+def format_custom_message(
+    message: str, severity: str = "info", source: str = "system"
+) -> str:
     """Format a custom message with standard header."""
-    severity_emojis = {
-        "critical": "🚨",
-        "warning": "⚠️",
-        "info": "ℹ️",
-        "success": "✅"
-    }
+    severity_emojis = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️", "success": "✅"}
 
     emoji = severity_emojis.get(severity.lower(), "💬")
 
@@ -149,6 +151,7 @@ def format_custom_message(message: str, severity: str = "info", source: str = "s
     formatted += f"**Time:** {datetime.utcnow().isoformat()}"
 
     return formatted
+
 
 async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, bool]:
     """
@@ -190,7 +193,7 @@ async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, b
                         "chat_id": TELEGRAM_CHAT_ID,
                         "text": message,
                         "parse_mode": "Markdown",
-                        "disable_web_page_preview": True
+                        "disable_web_page_preview": True,
                     }
 
                     response = await client.post(url, json=payload)
@@ -232,23 +235,40 @@ async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, b
 
     return results
 
+
 async def main():
     """Main notification function."""
     parser = argparse.ArgumentParser(description="Trading Organism Notification Tool")
-    parser.add_argument("--message", "-m", type=str,
-                       help="Custom message to send")
-    parser.add_argument("--severity", type=str, default="info",
-                       choices=["critical", "warning", "info", "success"],
-                       help="Message severity level")
-    parser.add_argument("--source", type=str, default="notification_tool",
-                       help="Message source identifier")
-    parser.add_argument("--incident", action="store_true",
-                       help="Send notification about the most recent incident")
-    parser.add_argument("--recovery", action="store_true",
-                       help="Send notification about the most recent recovery action")
-    parser.add_argument("--platforms", nargs="+",
-                       choices=["telegram", "discord", "slack"],
-                       help="Platforms to send to (defaults to all configured)")
+    parser.add_argument("--message", "-m", type=str, help="Custom message to send")
+    parser.add_argument(
+        "--severity",
+        type=str,
+        default="info",
+        choices=["critical", "warning", "info", "success"],
+        help="Message severity level",
+    )
+    parser.add_argument(
+        "--source",
+        type=str,
+        default="notification_tool",
+        help="Message source identifier",
+    )
+    parser.add_argument(
+        "--incident",
+        action="store_true",
+        help="Send notification about the most recent incident",
+    )
+    parser.add_argument(
+        "--recovery",
+        action="store_true",
+        help="Send notification about the most recent recovery action",
+    )
+    parser.add_argument(
+        "--platforms",
+        nargs="+",
+        choices=["telegram", "discord", "slack"],
+        help="Platforms to send to (defaults to all configured)",
+    )
 
     args = parser.parse_args()
 
@@ -298,6 +318,7 @@ async def main():
 
         if not results:
             logger.warning("No platforms available for sending")
+
 
 if __name__ == "__main__":
     asyncio.run(main())

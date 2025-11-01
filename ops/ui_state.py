@@ -1,4 +1,5 @@
 """State container for Command Center UI services."""
+
 from __future__ import annotations
 
 from typing import Any, Dict

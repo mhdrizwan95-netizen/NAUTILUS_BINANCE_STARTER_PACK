@@ -28,24 +28,54 @@ class Momentum15mConfig:
 
 
 def load_momentum_15m_config() -> Momentum15mConfig:
-    symbol_raw = env_str("MOMENTUM_15M_SYMBOL", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_SYMBOL"]).strip().upper()
+    symbol_raw = (
+        env_str("MOMENTUM_15M_SYMBOL", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_SYMBOL"])
+        .strip()
+        .upper()
+    )
     if not symbol_raw:
         symbol_raw = MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_SYMBOL"]
     return Momentum15mConfig(
-        enabled=env_bool("MOMENTUM_15M_ENABLED", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_ENABLED"]),
-        dry_run=env_bool("MOMENTUM_15M_DRY_RUN", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_DRY_RUN"]),
+        enabled=env_bool(
+            "MOMENTUM_15M_ENABLED", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_ENABLED"]
+        ),
+        dry_run=env_bool(
+            "MOMENTUM_15M_DRY_RUN", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_DRY_RUN"]
+        ),
         symbol=symbol_raw,
-        lookback_ticks=max(5, env_int("MOMENTUM_15M_LOOKBACK_TICKS", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_LOOKBACK_TICKS"])),
-        quantity=max(0.0, env_float("MOMENTUM_15M_QUANTITY", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_QUANTITY"])),
-        allow_shorts=env_bool("MOMENTUM_15M_ALLOW_SHORTS", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_ALLOW_SHORTS"]),
-        rearm_sec=max(0.0, env_float("MOMENTUM_15M_REARM_SEC", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_REARM_SEC"])),
+        lookback_ticks=max(
+            5,
+            env_int(
+                "MOMENTUM_15M_LOOKBACK_TICKS",
+                MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_LOOKBACK_TICKS"],
+            ),
+        ),
+        quantity=max(
+            0.0,
+            env_float(
+                "MOMENTUM_15M_QUANTITY", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_QUANTITY"]
+            ),
+        ),
+        allow_shorts=env_bool(
+            "MOMENTUM_15M_ALLOW_SHORTS",
+            MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_ALLOW_SHORTS"],
+        ),
+        rearm_sec=max(
+            0.0,
+            env_float(
+                "MOMENTUM_15M_REARM_SEC",
+                MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_REARM_SEC"],
+            ),
+        ),
     )
 
 
 class Momentum15mStrategy:
     """Naive 15-minute momentum breakout strategy that interacts via StrategyExecutor."""
 
-    def __init__(self, router, risk, cfg: Optional[Momentum15mConfig] = None, *, clock=time) -> None:
+    def __init__(
+        self, router, risk, cfg: Optional[Momentum15mConfig] = None, *, clock=time
+    ) -> None:
         self.cfg = cfg or load_momentum_15m_config()
         self._router = router
         self._clock = clock
@@ -152,7 +182,9 @@ class Momentum15mStrategy:
             status = result.get("status")
             if status not in {"submitted", "dry_run", "backtest"}:
                 logger.info(
-                    "[MOMO15] order skipped status=%s team=%s", status, result.get("error") or result.get("message")
+                    "[MOMO15] order skipped status=%s team=%s",
+                    status,
+                    result.get("error") or result.get("message"),
                 )
             else:
                 self._last_signal_ts = now

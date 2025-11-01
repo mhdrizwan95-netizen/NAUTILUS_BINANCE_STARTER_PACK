@@ -1,4 +1,4 @@
-FROM python:3.11-slim AS builder
+FROM python:3.11.9-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -20,7 +20,7 @@ RUN python -m pip install --upgrade pip && \
       pyarrow>=14.0 \
       prometheus-client>=0.20
 
-FROM python:3.11-slim
+FROM python:3.11.9-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -36,6 +36,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=builder /install /usr/local
 COPY ops/ ./ops/
+
+RUN useradd -r -u 1000 appuser \
+ && chown -R appuser:appuser /app
+
+USER appuser
 
 ENV ENGINE_URL=http://engine_binance:8003 \
     ENABLE_EXECUTION=true \

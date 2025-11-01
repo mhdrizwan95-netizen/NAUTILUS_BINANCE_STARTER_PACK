@@ -4,17 +4,19 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
+
 @dataclass(frozen=True)
 class SymbolSpec:
     min_qty: float
     step_size: float
     min_notional: float
 
+
 # Defaults as fallback if JSON loading fails
 DEFAULT_SPECS = {
     "BTCUSDT": SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0),
-    "ETHUSDT": SymbolSpec(min_qty=0.0001,  step_size=0.0001,  min_notional=5.0),
-    "BNBUSDT": SymbolSpec(min_qty=0.01,    step_size=0.01,    min_notional=5.0),
+    "ETHUSDT": SymbolSpec(min_qty=0.0001, step_size=0.0001, min_notional=5.0),
+    "BNBUSDT": SymbolSpec(min_qty=0.01, step_size=0.01, min_notional=5.0),
 }
 
 DEFAULT_KRAKEN_SPECS = {
@@ -40,7 +42,9 @@ if SPECS_FILE.exists():
             raw = json.load(f)
         for venue, symbols in raw.items():
             SPECS[venue] = {k: SymbolSpec(**v) for k, v in symbols.items()}
-        print(f"Loaded venue specs from {SPECS_FILE}: {sum(len(v) for v in SPECS.values())} symbols")
+        print(
+            f"Loaded venue specs from {SPECS_FILE}: {sum(len(v) for v in SPECS.values())} symbols"
+        )
     except Exception as e:
         print(f"[WARN] Failed to load {SPECS_FILE}: {e}, using defaults")
 
@@ -58,5 +62,5 @@ if not SPECS["KRAKEN"]:
 # simple fee schedule (bps)
 FEES_TAKER_BPS = {
     "BINANCE": 10.0,  # 0.10% taker default; override from env if needed
-    "KRAKEN": 5.0,    # 0.05% taker default for Kraken futures (override via env)
+    "KRAKEN": 5.0,  # 0.05% taker default for Kraken futures (override via env)
 }

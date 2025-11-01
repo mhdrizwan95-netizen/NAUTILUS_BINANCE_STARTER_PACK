@@ -1,15 +1,19 @@
 # ops/pnl_collector.py
 from __future__ import annotations
 import asyncio, time, logging, httpx
-from ops.prometheus import REGISTRY, get_or_create_gauge
+from ops.prometheus import get_or_create_gauge
 from ops.env import engine_endpoints
 
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+)
+
 
 def _venue_label(base_url: str) -> str:
     host = base_url.split("//")[-1].split("/")[0]
     host = host.split(":")[0]
     return host.upper()
+
 
 # Prometheus Gauges per venue
 PNL_REALIZED = get_or_create_gauge(
@@ -30,9 +34,10 @@ PNL_LAST_REFRESH = get_or_create_gauge(
     multiprocess_mode="max",
 )
 
+
 async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
     """Prefer /portfolio to avoid venue calls; fallback to /account_snapshot."""
-    base = base_url.rstrip('/')
+    base = base_url.rstrip("/")
     try:
         r = await client.get(f"{base}/portfolio", timeout=5.0)
         r.raise_for_status()
@@ -46,6 +51,7 @@ async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
     except Exception:
         return {}
 
+
 async def pnl_collector_loop():
     """Continuously collect PnL from all engines."""
     while True:
@@ -53,7 +59,9 @@ async def pnl_collector_loop():
             endpoints = engine_endpoints()
             limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
             async with httpx.AsyncClient(limits=limits, trust_env=True) as client:
-                results = await asyncio.gather(*[_fetch_pnl(client, e) for e in endpoints], return_exceptions=True)
+                results = await asyncio.gather(
+                    *[_fetch_pnl(client, e) for e in endpoints], return_exceptions=True
+                )
 
             for e, res in zip(endpoints, results):
                 if not isinstance(res, dict):

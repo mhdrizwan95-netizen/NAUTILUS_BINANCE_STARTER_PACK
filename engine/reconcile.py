@@ -2,17 +2,21 @@ from __future__ import annotations
 import asyncio
 import inspect
 import time
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from .state import SnapshotStore
+
 try:
     from engine.metrics import REGISTRY as _METRICS
 except Exception:
     _METRICS = {}
 
+
 class ExchangeClientProto:
     """Tiny protocol the real client should satisfy."""
+
     def my_trades_since(self, symbol: str, start_ms: int) -> List[Dict[str, Any]]:
         raise NotImplementedError
+
 
 class PortfolioProto:
     """Expected minimal interface of your portfolio service."""
@@ -30,10 +34,14 @@ class PortfolioProto:
         market: str | None = None,
     ) -> None:
         raise NotImplementedError
+
     def snapshot(self) -> dict:
         raise NotImplementedError
 
-def reconcile_since_snapshot(*, portfolio: PortfolioProto, client: ExchangeClientProto, symbols: List[str]) -> dict:
+
+def reconcile_since_snapshot(
+    *, portfolio: PortfolioProto, client: ExchangeClientProto, symbols: List[str]
+) -> dict:
     """
     Idempotent: loads the last snapshot timestamp, fetches fills since then for each symbol,
     applies them in chronological order, and returns the updated snapshot.
@@ -75,17 +83,25 @@ def reconcile_since_snapshot(*, portfolio: PortfolioProto, client: ExchangeClien
             fee = float(
                 t.get("quoteFee", 0.0)
                 or t.get("commission_quote", 0.0)
-                or (t.get("commission", 0.0) if t.get("commissionAsset") in {"USDT", "USD"} else 0.0)
+                or (
+                    t.get("commission", 0.0)
+                    if t.get("commissionAsset") in {"USDT", "USD"}
+                    else 0.0
+                )
                 or 0.0
             )
         except Exception:
             fee = 0.0
         if sym and qty and px:
             venue_hint = str(t.get("venue") or "BINANCE").upper()
-            market_hint = str(t.get("market") or t.get("isIsolated") or "").strip().lower()
+            market_hint = (
+                str(t.get("market") or t.get("isIsolated") or "").strip().lower()
+            )
             if market_hint not in {"margin", "spot", "futures", "options"}:
                 market_hint = None
-            qualified_symbol = sym if "." in sym else f"{sym}.{venue_hint}" if venue_hint else sym
+            qualified_symbol = (
+                sym if "." in sym else f"{sym}.{venue_hint}" if venue_hint else sym
+            )
             # Portfolio.apply_fill expects keyword names: quantity, fee_usd
             portfolio.apply_fill(
                 symbol=qualified_symbol,
@@ -99,18 +115,21 @@ def reconcile_since_snapshot(*, portfolio: PortfolioProto, client: ExchangeClien
             # Store fill persistently
             try:
                 from engine.storage import sqlite as store
-                store.insert_fill({
-                    "id": t.get("id", str(int(time.time() * 1000000))),
-                    "order_id": t.get("orderId", ""),
-                    "venue": "binance",  # Assuming Binance for now; could be venue-agnostic later
-                    "symbol": sym,
-                    "side": side,
-                    "qty": qty,
-                    "price": px,
-                    "fee_ccy": "USDT" if fee > 0 else None,
-                    "fee": fee,
-                    "ts": int(time.time() * 1000)
-                })
+
+                store.insert_fill(
+                    {
+                        "id": t.get("id", str(int(time.time() * 1000000))),
+                        "order_id": t.get("orderId", ""),
+                        "venue": "binance",  # Assuming Binance for now; could be venue-agnostic later
+                        "symbol": sym,
+                        "side": side,
+                        "qty": qty,
+                        "price": px,
+                        "fee_ccy": "USDT" if fee > 0 else None,
+                        "fee": fee,
+                        "ts": int(time.time() * 1000),
+                    }
+                )
             except Exception:
                 pass
             # Increment venue trades counter for observability

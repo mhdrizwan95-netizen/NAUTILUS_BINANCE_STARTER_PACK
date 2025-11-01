@@ -22,7 +22,9 @@ import pyarrow.parquet as pq
 BASE = os.getenv("BINANCE_HIST_BASE", "https://api.binance.com")
 
 
-def fetch_klines(symbol: str, start_ms: int, end_ms: int, interval: str = "1m") -> pd.DataFrame:
+def fetch_klines(
+    symbol: str, start_ms: int, end_ms: int, interval: str = "1m"
+) -> pd.DataFrame:
     """Fetch klines for [start_ms, end_ms) inclusive window.
 
     Returns a DataFrame with columns:
@@ -53,9 +55,18 @@ def fetch_klines(symbol: str, start_ms: int, end_ms: int, interval: str = "1m") 
             time.sleep(0.2)  # light throttling
 
     if not out:
-        return pd.DataFrame(columns=[
-            "ts", "open", "high", "low", "close", "volume", "quote_volume", "trades"
-        ])
+        return pd.DataFrame(
+            columns=[
+                "ts",
+                "open",
+                "high",
+                "low",
+                "close",
+                "volume",
+                "quote_volume",
+                "trades",
+            ]
+        )
 
     df = pd.DataFrame(
         out,
@@ -98,7 +109,12 @@ def fetch_klines(symbol: str, start_ms: int, end_ms: int, interval: str = "1m") 
     return df
 
 
-def save_day(symbol: str, yyyy_mm_dd: str, df: pd.DataFrame, root: str = "data/raw/binance/spot/1m") -> str:
+def save_day(
+    symbol: str,
+    yyyy_mm_dd: str,
+    df: pd.DataFrame,
+    root: str = "data/raw/binance/spot/1m",
+) -> str:
     """Persist a single day file to Parquet under the partitioned hierarchy."""
     year = yyyy_mm_dd[:4]
     path = f"{root}/{symbol}/{year}/{yyyy_mm_dd}.parquet"
@@ -119,8 +135,12 @@ if __name__ == "__main__":
     import argparse
     import datetime as dt
 
-    ap = argparse.ArgumentParser(description="Download Binance klines and save Parquet by day")
-    ap.add_argument("--symbols", required=True, help="Comma-separated symbols, e.g. BTCUSDT,ETHUSDT")
+    ap = argparse.ArgumentParser(
+        description="Download Binance klines and save Parquet by day"
+    )
+    ap.add_argument(
+        "--symbols", required=True, help="Comma-separated symbols, e.g. BTCUSDT,ETHUSDT"
+    )
     g = ap.add_mutually_exclusive_group(required=True)
     g.add_argument("--day", help="Single day YYYY-MM-DD")
     g.add_argument("--range", help="Range YYYY-MM-DD..YYYY-MM-DD inclusive")

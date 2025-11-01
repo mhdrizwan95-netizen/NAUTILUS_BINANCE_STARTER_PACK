@@ -1,16 +1,23 @@
 # ops/portfolio_collector.py
 from __future__ import annotations
-import asyncio, time, math, logging, httpx
+import asyncio
+import time
+import logging
+import httpx
 from datetime import datetime, timezone
-from ops.prometheus import REGISTRY, get_or_create_gauge
+from ops.prometheus import get_or_create_gauge
 from ops.env import engine_endpoints
 
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+)
+
 
 def _venue_label(base_url: str) -> str:
     host = base_url.split("//")[-1].split("/")[0]
     host = host.split(":")[0]
     return host.upper()
+
 
 PORTFOLIO_EQUITY = get_or_create_gauge(
     "portfolio_equity_usd",
@@ -47,13 +54,15 @@ PORTFOLIO_LAST = get_or_create_gauge(
 _BASELINE_EQUITY: float | None = None
 _BASELINE_DAYKEY: str | None = None
 
+
 def _daykey_now(t: float | None = None) -> str:
     dt = datetime.fromtimestamp(t or time.time(), tz=timezone.utc)
     return dt.strftime("%Y-%m-%d")
 
+
 async def _fetch_snapshot(client: httpx.AsyncClient, base_url: str) -> dict:
     """Prefer /portfolio (cached/local) to avoid hammering the venue; fallback to /account_snapshot."""
-    base = base_url.rstrip('/')
+    base = base_url.rstrip("/")
     # 1) Try lightweight portfolio endpoint first (does not hit venue)
     try:
         r = await client.get(f"{base}/portfolio", timeout=6.0)
@@ -69,6 +78,7 @@ async def _fetch_snapshot(client: httpx.AsyncClient, base_url: str) -> dict:
     except Exception:
         return {}
 
+
 def _sumf(values):
     return float(sum(float(v or 0.0) for v in values))
 
@@ -80,6 +90,7 @@ async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
     the same import without duplicating logic.
     """
     return await _fetch_snapshot(client, base_url)
+
 
 async def portfolio_collector_loop(interval_sec: int = 10):
     """
@@ -101,11 +112,15 @@ async def portfolio_collector_loop(interval_sec: int = 10):
         try:
             endpoints = engine_endpoints()
             async with httpx.AsyncClient() as client:
-                results = await asyncio.gather(*[_fetch_snapshot(client, e) for e in endpoints], return_exceptions=True)
+                results = await asyncio.gather(
+                    *[_fetch_snapshot(client, e) for e in endpoints],
+                    return_exceptions=True,
+                )
 
             equities, cashes = [], []
             for res in results:
-                if not isinstance(res, dict): continue
+                if not isinstance(res, dict):
+                    continue
                 equities.append(res.get("equity_usd") or res.get("equity") or 0.0)
                 # prefer explicit cash if available; else derive: equity - exposure - unrealized (best-effort)
                 cash_val = res.get("cash_usd")
@@ -113,7 +128,7 @@ async def portfolio_collector_loop(interval_sec: int = 10):
                     pnl = res.get("pnl") or {}
                     unrl = float(pnl.get("unrealized", 0.0))
                     exposure = 0.0
-                    for p in (res.get("positions") or []):
+                    for p in res.get("positions") or []:
                         qty = float(p.get("qty_base") or 0.0)
                         last = float(p.get("last_price_quote") or p.get("last") or 0.0)
                         exposure += qty * last
@@ -122,7 +137,7 @@ async def portfolio_collector_loop(interval_sec: int = 10):
                 cashes.append(cash_val)
 
             total_equity = _sumf(equities)
-            total_cash   = _sumf(cashes)
+            total_cash = _sumf(cashes)
 
             PORTFOLIO_EQUITY.set(total_equity)
             PORTFOLIO_CASH.set(total_cash)
@@ -130,7 +145,11 @@ async def portfolio_collector_loop(interval_sec: int = 10):
             # Baseline logic: reset on new UTC day or if missing
             now = time.time()
             daykey = _daykey_now(now)
-            if _BASELINE_DAYKEY != daykey or _BASELINE_EQUITY is None or _BASELINE_EQUITY <= 0:
+            if (
+                _BASELINE_DAYKEY != daykey
+                or _BASELINE_EQUITY is None
+                or _BASELINE_EQUITY <= 0
+            ):
                 _BASELINE_EQUITY = total_equity
                 _BASELINE_DAYKEY = daykey
             PORTFOLIO_PREV.set(_BASELINE_EQUITY)

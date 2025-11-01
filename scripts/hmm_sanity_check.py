@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
 import pickle, numpy as np, pandas as pd
 
-with open("engine/models/hmm_policy.pkl","rb") as f:
+with open("engine/models/hmm_policy.pkl", "rb") as f:
     model = pickle.load(f)
 
 # Mock some data - you could point to actual CSV here
 import numpy as np
+
 np.random.seed(42)
 prices = 50000 + np.random.randn(1000) * 1000  # BTC-like prices
-volumes = 100 + np.random.rand(1000) * 200     # BTC-like volumes
+volumes = 100 + np.random.rand(1000) * 200  # BTC-like volumes
+
 
 # Make the rolling features to test
-def _rolling_features(price: np.ndarray, volume: np.ndarray, window: int) -> pd.DataFrame:
-    import math
+def _rolling_features(
+    price: np.ndarray, volume: np.ndarray, window: int
+) -> pd.DataFrame:
+    pass
+
     # Simple 1-step returns
     rets = np.zeros_like(price)
-    rets[1:] = (price[1:] - price[:-1]) / np.where(price[:-1]==0, 1e-12, price[:-1])
+    rets[1:] = (price[1:] - price[:-1]) / np.where(price[:-1] == 0, 1e-12, price[:-1])
 
     s = pd.DataFrame({"price": price, "volume": volume, "ret": rets})
     s["vola"] = s["ret"].rolling(20, min_periods=2).std().fillna(0.0)
@@ -43,6 +48,7 @@ def _rolling_features(price: np.ndarray, volume: np.ndarray, window: int) -> pd.
     feats = feats.replace([np.inf, -np.inf], 0.0).fillna(0.0)
     return feats
 
+
 # Generate features like training does
 feats = _rolling_features(prices, volumes, window=120)
 feats = feats.iloc[120:].reset_index(drop=True)  # Drop warmup
@@ -51,7 +57,7 @@ X = feats.values[-5:]  # Test with last 5 rows
 # Run predictions
 probs = model.predict_proba(X)
 print("Last 5 regime probabilities:")
-print("="*40)
+print("=" * 40)
 for i, p in enumerate(probs):
     print("05d")
 

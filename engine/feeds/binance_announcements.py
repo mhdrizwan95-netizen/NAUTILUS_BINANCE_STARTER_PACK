@@ -36,7 +36,12 @@ async def _fetch_announcements() -> List[Dict]:
     return []
 
 
-async def _publish(payload: Dict[str, object], *, priority: float = DEFAULT_PRIORITY, ttl_sec: float | None = None) -> None:
+async def _publish(
+    payload: Dict[str, object],
+    *,
+    priority: float = DEFAULT_PRIORITY,
+    ttl_sec: float | None = None,
+) -> None:
     meta = {"priority": priority}
     if ttl_sec is not None:
         meta["ttl_sec"] = ttl_sec
@@ -108,7 +113,11 @@ async def run() -> None:
                         seen[key] = now + ttl
                     except Exception as exc:  # noqa: BLE001
                         external_feed_errors_total.labels(EVENT_SOURCE).inc()
-                        LOGGER.debug("binance announcement publish failed: %s", exc, exc_info=True)
+                        LOGGER.debug(
+                            "binance announcement publish failed: %s",
+                            exc,
+                            exc_info=True,
+                        )
         except Exception as exc:  # noqa: BLE001
             external_feed_errors_total.labels(EVENT_SOURCE).inc()
             LOGGER.warning("binance announcement loop error: %s", exc, exc_info=True)

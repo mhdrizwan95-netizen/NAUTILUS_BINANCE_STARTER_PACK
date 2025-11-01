@@ -38,10 +38,11 @@ limits_config:
   ingestion_burst_size_mb: 6
   max_cache_freshness_per_query: 10m
   max_global_streams_per_user: 10000
+  retention_period: 336h
 
 chunk_store_config:
   max_look_back_period: 0s
 
 table_manager:
-  retention_deletes_enabled: false
-  retention_period: 0s
+  retention_deletes_enabled: true
+  retention_period: 336h

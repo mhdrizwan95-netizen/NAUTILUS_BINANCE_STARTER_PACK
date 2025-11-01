@@ -37,6 +37,8 @@ def compute_feats(klines, book):
         spread_over_atr=spread_over_atr,
         depth_usd=depth_usd,
     )
+
+
 def _atr(kl):
     trs = []
     for i in range(1, len(kl)):

@@ -4,6 +4,7 @@ Real-time Event Bus - The Nervous System of Our Trading Organism.
 Provides async pub/sub messaging for instantaneous inter-module communication,
 turning reactive components into a coordinated trading intelligence.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -25,7 +26,9 @@ def _is_async_callable(obj: Callable[[Dict[str, Any]], Any]) -> bool:
     return bool(call and inspect.iscoroutinefunction(call))
 
 
-def _call_sync(handler: Callable[[Dict[str, Any]], Any], payload: Dict[str, Any]) -> Any:
+def _call_sync(
+    handler: Callable[[Dict[str, Any]], Any], payload: Dict[str, Any]
+) -> Any:
     """Execute the synchronous handler. Runs inside the thread pool."""
     return handler(payload)
 
@@ -46,12 +49,7 @@ class EventBus:
         self._queue: Optional[asyncio.Queue] = None
         self._running = False
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._stats = {
-            "published": 0,
-            "delivered": 0,
-            "failed": 0,
-            "topics": set()
-        }
+        self._stats = {"published": 0, "delivered": 0, "failed": 0, "topics": set()}
         if max_workers is None:
             max_workers = int(os.getenv("EVENTBUS_MAX_WORKERS", "8"))
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -103,7 +101,9 @@ class EventBus:
             self._stats["topics"].add(topic)
 
         self._subscribers[topic].append(handler)
-        logging.debug(f"[BUS] Subscribed to '{topic}' - {len(self._subscribers[topic])} handlers")
+        logging.debug(
+            f"[BUS] Subscribed to '{topic}' - {len(self._subscribers[topic])} handlers"
+        )
 
     def unsubscribe(self, topic: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         """Unsubscribe from a topic."""
@@ -116,7 +116,9 @@ class EventBus:
             except ValueError:
                 pass  # Handler not found
 
-    async def publish(self, topic: str, data: Dict[str, Any], urgent: bool = False) -> None:
+    async def publish(
+        self, topic: str, data: Dict[str, Any], urgent: bool = False
+    ) -> None:
         """
         Publish an event to all subscribers.
 
@@ -126,19 +128,23 @@ class EventBus:
             urgent: If True, process immediately rather than queue
         """
         if not self._running:
-            logging.getLogger(__name__).debug("EventBus publish skipped; bus not running (topic=%s)", topic)
+            logging.getLogger(__name__).debug(
+                "EventBus publish skipped; bus not running (topic=%s)", topic
+            )
             return  # No-op if not started
 
         queue = self._queue
         if queue is None:
-            logging.getLogger(__name__).debug("EventBus publish skipped; queue not initialised (topic=%s)", topic)
+            logging.getLogger(__name__).debug(
+                "EventBus publish skipped; queue not initialised (topic=%s)", topic
+            )
             return
 
         event = {
             "topic": topic,
             "data": data,
             "timestamp": asyncio.get_event_loop().time(),
-            "source": "engine"  # Could be enhanced for multi-instance tracking
+            "source": "engine",  # Could be enhanced for multi-instance tracking
         }
 
         if urgent:
@@ -149,7 +155,12 @@ class EventBus:
         self._stats["published"] += 1
 
         # Debug logging for significant events
-        if topic in {"order.submitted", "order.filled", "risk.violation", "strategy.promoted"}:
+        if topic in {
+            "order.submitted",
+            "order.filled",
+            "risk.violation",
+            "strategy.promoted",
+        }:
             logging.info(f"[BUS] 📢 {topic}: {data}")
 
     async def _process_events(self) -> None:
@@ -182,17 +193,16 @@ class EventBus:
         data = event["data"]
 
         if topic not in self._subscribers:
-            logging.getLogger(__name__).debug("EventBus: no subscribers for topic %s", topic)
+            logging.getLogger(__name__).debug(
+                "EventBus: no subscribers for topic %s", topic
+            )
             return  # No subscribers for this topic
 
         delivered = 0
         failed = 0
         handlers = list(self._subscribers[topic])
         loop = asyncio.get_running_loop()
-        pending = [
-            self._dispatch_handler(handler, data, loop)
-            for handler in handlers
-        ]
+        pending = [self._dispatch_handler(handler, data, loop) for handler in handlers]
         results = await asyncio.gather(*pending, return_exceptions=True)
 
         for handler, result in zip(handlers, results):
@@ -204,28 +214,38 @@ class EventBus:
             delivered += 1
             if topic == "events.external_feed":
                 try:
-                    consumer = getattr(handler, "__qualname__", None) or getattr(handler, "__name__", None)
+                    consumer = getattr(handler, "__qualname__", None) or getattr(
+                        handler, "__name__", None
+                    )
                     if not consumer and hasattr(handler, "__self__"):
                         consumer = handler.__self__.__class__.__name__
                     consumer = consumer or handler.__class__.__name__
-                    metrics.events_external_feed_consumed_total.labels(consumer=consumer).inc()
+                    metrics.events_external_feed_consumed_total.labels(
+                        consumer=consumer
+                    ).inc()
                 except Exception:  # noqa: BLE001
-                    logging.getLogger(__name__).debug("EventBus metrics update failed", exc_info=True)
+                    logging.getLogger(__name__).debug(
+                        "EventBus metrics update failed", exc_info=True
+                    )
 
         self._stats["delivered"] += delivered
         self._stats["failed"] += failed
 
         if failed > 0:
-            logging.warning(f"[BUS] {topic}: {delivered}/{len(self._subscribers[topic])} handlers succeeded")
+            logging.warning(
+                f"[BUS] {topic}: {delivered}/{len(self._subscribers[topic])} handlers succeeded"
+            )
 
     def get_stats(self) -> Dict[str, Any]:
         """Get bus statistics."""
         return {
             **self._stats,
-            "active_subscriptions": sum(len(handlers) for handlers in self._subscribers.values()),
+            "active_subscriptions": sum(
+                len(handlers) for handlers in self._subscribers.values()
+            ),
             "topics_count": len(self._stats["topics"]),
             "queue_size": self._queue.qsize() if self._queue is not None else 0,
-            "running": self._running
+            "running": self._running,
         }
 
     def fire(self, topic: str, data: Dict[str, Any]) -> None:
@@ -235,11 +255,14 @@ class EventBus:
         running (rare in tests), it falls back to a best-effort direct
         call that will no-op when the bus isn't started.
         """
+
         async def _runner():
             try:
                 await self.publish(topic, data)
             except Exception as e:
-                logging.getLogger(__name__).warning("[BUS] fire error on %s: %s", topic, e)
+                logging.getLogger(__name__).warning(
+                    "[BUS] fire error on %s: %s", topic, e
+                )
 
         try:
             loop = asyncio.get_running_loop()
@@ -264,7 +287,9 @@ class EventBus:
             return await handler(dict(payload))
 
         # Offload sync handlers to thread pool; isolate via deep copy
-        return await loop.run_in_executor(self._executor, _call_sync, handler, copy.deepcopy(payload))
+        return await loop.run_in_executor(
+            self._executor, _call_sync, handler, copy.deepcopy(payload)
+        )
 
 
 # Global event bus instance - the central nervous system

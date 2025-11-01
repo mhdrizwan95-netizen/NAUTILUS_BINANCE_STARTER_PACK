@@ -60,12 +60,18 @@ def _prepare_metrics(cfg: BacktestConfig) -> tuple[pd.DataFrame, Dict[int, Dict]
 
     X = feats.values
     probs = model.predict_proba(X)
-    preds = model.model.predict(model.scaler.transform(X)) if hasattr(model, "model") else np.argmax(probs, axis=1)
+    preds = (
+        model.model.predict(model.scaler.transform(X))
+        if hasattr(model, "model")
+        else np.argmax(probs, axis=1)
+    )
 
     df_trimmed["state"] = preds
-    df_trimmed["p_bull"] = probs[:, np.argmax(probs.mean(axis=0))] if probs.size else 0.5
+    df_trimmed["p_bull"] = (
+        probs[:, np.argmax(probs.mean(axis=0))] if probs.size else 0.5
+    )
 
-    rets = df_trimmed["price"].pct_change().fillna(0)
+    df_trimmed["price"].pct_change().fillna(0)
     avg_ret = df_trimmed.groupby("state")["price"].pct_change().mean().fillna(0)
     order = np.argsort(avg_ret.values)
     state_to_regime: Dict[int, str] = {}
@@ -112,9 +118,15 @@ class EnsembleSignalGenerator:
         self.cfg = cfg
         self.metrics = metrics
 
-    def handle_tick(self, symbol: str, price: float, ts: float, volume: Optional[float] = None) -> Optional[Dict]:
+    def handle_tick(
+        self, symbol: str, price: float, ts: float, volume: Optional[float] = None
+    ) -> Optional[Dict]:
         ts_ms = int(round(ts * 1000.0))
-        row = self.metrics.get(ts_ms) or self.metrics.get(ts_ms - 1) or self.metrics.get(ts_ms + 1)
+        row = (
+            self.metrics.get(ts_ms)
+            or self.metrics.get(ts_ms - 1)
+            or self.metrics.get(ts_ms + 1)
+        )
         if not row:
             return None
 
@@ -287,21 +299,35 @@ def run_backtest(cfg: BacktestConfig, out_path: Path) -> Dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Backtest HMM+MA ensemble strategy")
-    ap.add_argument("--csv", required=True, help="Path to price CSV with ts,price,volume")
+    ap.add_argument(
+        "--csv", required=True, help="Path to price CSV with ts,price,volume"
+    )
     ap.add_argument("--hmm", required=True, help="Path to trained HMM model .pkl")
     ap.add_argument("--symbol", required=True, help="Trading symbol")
     ap.add_argument("--timeframe", default="1m", help="Label for the dataset timeframe")
     ap.add_argument("--quote", type=float, default=100, help="Quote amount per trade")
     ap.add_argument("--fast", type=int, default=9, help="Fast MA window")
     ap.add_argument("--slow", type=int, default=21, help="Slow MA window")
-    ap.add_argument("--tp-bps", type=float, default=20, help="Take profit in basis points")
-    ap.add_argument("--sl-bps", type=float, default=30, help="Stop loss in basis points")
-    ap.add_argument("--cooldown", type=int, default=30, help="Cooldown between trades (seconds)")
-    ap.add_argument("--slippage-bps", type=float, default=3, help="Trading slippage in basis points")
-    ap.add_argument("--min-conf", type=float, default=0.6, help="Minimum ensemble confidence")
+    ap.add_argument(
+        "--tp-bps", type=float, default=20, help="Take profit in basis points"
+    )
+    ap.add_argument(
+        "--sl-bps", type=float, default=30, help="Stop loss in basis points"
+    )
+    ap.add_argument(
+        "--cooldown", type=int, default=30, help="Cooldown between trades (seconds)"
+    )
+    ap.add_argument(
+        "--slippage-bps", type=float, default=3, help="Trading slippage in basis points"
+    )
+    ap.add_argument(
+        "--min-conf", type=float, default=0.6, help="Minimum ensemble confidence"
+    )
     ap.add_argument("--w-ma", type=float, default=0.4, help="Weight for MA signals")
     ap.add_argument("--w-hmm", type=float, default=0.6, help="Weight for HMM signals")
-    ap.add_argument("--out", default="reports/backtest_ensemble.json", help="Output JSON path")
+    ap.add_argument(
+        "--out", default="reports/backtest_ensemble.json", help="Output JSON path"
+    )
 
     args = ap.parse_args()
 
@@ -327,4 +353,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

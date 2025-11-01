@@ -1,4 +1,3 @@
-import os
 
 from engine.core import market_resolver
 

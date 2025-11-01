@@ -5,7 +5,12 @@ import os
 import time
 
 from fastapi import FastAPI, Response
-from prometheus_client import CollectorRegistry, Gauge, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import (
+    CollectorRegistry,
+    Gauge,
+    generate_latest,
+    CONTENT_TYPE_LATEST,
+)
 import time
 import httpx
 
@@ -18,8 +23,12 @@ APP = FastAPI(title="screener")
 REG = CollectorRegistry()
 G_SCORE = Gauge("screener_score", "score", ["symbol", "side"], registry=REG)
 SCAN_LATENCY = Gauge("scan_latency_ms", "End-to-end scan latency (ms)", registry=REG)
-SCAN_ERRORS = Gauge("scan_errors_total", "Total scan errors (best-effort)", registry=REG)
-RATE_LIMIT_429 = Gauge("binance_429_total", "Binance HTTP 429 occurrences (best-effort)", registry=REG)
+SCAN_ERRORS = Gauge(
+    "scan_errors_total", "Total scan errors (best-effort)", registry=REG
+)
+RATE_LIMIT_429 = Gauge(
+    "binance_429_total", "Binance HTTP 429 occurrences (best-effort)", registry=REG
+)
 
 UNIVERSE_URL = "http://universe:8009/universe"
 SITU_INGEST = "http://situations:8011/ingest/bar"
@@ -43,7 +52,10 @@ def scan():
     items = list(uni.items())
     cap = int(os.getenv("SCREENER_SYMBOL_CAP", "100"))
     rot = int(os.getenv("SCREENER_ROTATE", "1")) or 1
-    cycle = int((time.time() // max(1, int(os.getenv("SCREENER_SCAN_INTERVAL_SEC", "60")))) % rot)
+    cycle = int(
+        (time.time() // max(1, int(os.getenv("SCREENER_SCAN_INTERVAL_SEC", "60"))))
+        % rot
+    )
     if rot > 1:
         items = items[cycle::rot]
     if cap and len(items) > cap:
@@ -71,7 +83,11 @@ def scan():
             G_SCORE.labels(sym, "long").set(long)
             G_SCORE.labels(sym, "short").set(short)
             try:
-                httpx.post(SITU_INGEST, json={"symbol": sym, "ts": out["ts"], "features": f}, timeout=2)
+                httpx.post(
+                    SITU_INGEST,
+                    json={"symbol": sym, "ts": out["ts"], "features": f},
+                    timeout=2,
+                )
             except Exception:
                 pass
             out["long"].append({"symbol": sym, "score": long})
@@ -121,7 +137,9 @@ def candidates(limit: int = 20, strategy: str | None = None):
     if strategy:
         snapshot = _LAST_SCAN or scan()
         strat_key = strategy.strip().lower()
-        strategy_hits = snapshot.get("strategies", {}) if isinstance(snapshot, dict) else {}
+        strategy_hits = (
+            snapshot.get("strategies", {}) if isinstance(snapshot, dict) else {}
+        )
         if isinstance(strategy_hits, dict):
             for key, values in strategy_hits.items():
                 if key.lower() == strat_key:
@@ -179,7 +197,7 @@ async def _auto_scan():
             try:
                 # Run a synchronous scan; it will post hits to situations
                 before = time.time()
-                res = scan()
+                scan()
                 # crude rate-limit detection from last call
                 rl = 0
                 try:
@@ -206,11 +224,18 @@ async def _auto_scan():
 
 
 # Optional control endpoints to toggle auto-scan at runtime
-_AUTO_SCAN_CTL = {"enabled": os.getenv("SCREENER_AUTO_SCAN", "").lower() in {"1","true","yes"}}
+_AUTO_SCAN_CTL = {
+    "enabled": os.getenv("SCREENER_AUTO_SCAN", "").lower() in {"1", "true", "yes"}
+}
+
 
 @APP.get("/control/scan")
 def scan_status():
-    return {"enabled": _AUTO_SCAN_CTL["enabled"], "interval_sec": int(os.getenv("SCREENER_SCAN_INTERVAL_SEC", "60"))}
+    return {
+        "enabled": _AUTO_SCAN_CTL["enabled"],
+        "interval_sec": int(os.getenv("SCREENER_SCAN_INTERVAL_SEC", "60")),
+    }
+
 
 @APP.post("/control/scan")
 def scan_control(body: dict):

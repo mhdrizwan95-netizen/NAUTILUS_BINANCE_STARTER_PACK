@@ -9,12 +9,15 @@ from typing import Dict, Set
 class EventBreakoutTrailer:
     def __init__(self, router, interval_sec: float | None = None) -> None:
         self.router = router
-        self.interval = float(os.getenv("EVENT_BREAKOUT_TRAIL_INTERVAL_SEC", str(interval_sec or 2)))
+        self.interval = float(
+            os.getenv("EVENT_BREAKOUT_TRAIL_INTERVAL_SEC", str(interval_sec or 2))
+        )
         self.log = logging.getLogger("engine.event_breakout.trailer")
         self._tracked: Set[str] = set()  # symbols (BASEQUOTE)
         self._last_stop: Dict[str, float] = {}
         try:
             from engine import metrics as MET
+
             self._MET = MET
         except Exception:
             self._MET = None
@@ -23,6 +26,7 @@ class EventBreakoutTrailer:
         # Subscribe to open events to add symbols
         try:
             from engine.core.event_bus import BUS
+
             BUS.subscribe("strategy.event_breakout_open", self._on_open)
         except Exception:
             pass
@@ -64,7 +68,9 @@ class EventBreakoutTrailer:
             if not last:
                 continue
             atr = await self._atr(sym)
-            trail_dist = float(os.getenv("EVENT_BREAKOUT_TRAIL_ATR_MULT", "1.2")) * float(atr)
+            trail_dist = float(
+                os.getenv("EVENT_BREAKOUT_TRAIL_ATR_MULT", "1.2")
+            ) * float(atr)
             desired = max(self._last_stop.get(sym, 0.0), last - max(trail_dist, 0.0))
             # Round
             try:
@@ -74,7 +80,9 @@ class EventBreakoutTrailer:
             # Only tighten
             if desired <= (self._last_stop.get(sym, 0.0) or 0.0):
                 continue
-            await self.router.amend_stop_reduce_only(f"{sym}.BINANCE", "SELL", float(desired), float(abs(qty)))
+            await self.router.amend_stop_reduce_only(
+                f"{sym}.BINANCE", "SELL", float(desired), float(abs(qty))
+            )
             self._last_stop[sym] = float(desired)
             if getattr(self, "_MET", None) is not None:
                 try:
@@ -84,6 +92,7 @@ class EventBreakoutTrailer:
             # Publish rollup event for digest
             try:
                 from engine.core.event_bus import BUS
+
                 await BUS.publish("event_bo.trail", {"symbol": sym})
             except Exception:
                 pass
@@ -114,7 +123,11 @@ class EventBreakoutTrailer:
             client = self.router.exchange_client()
             if client is None or not hasattr(client, "klines"):
                 return 0.0
-            kl = client.klines(sym, interval=os.getenv("EVENT_BREAKOUT_ATR_TF", "1m"), limit=max(int(float(os.getenv("EVENT_BREAKOUT_ATR_N", "14"))) + 1, 15))
+            kl = client.klines(
+                sym,
+                interval=os.getenv("EVENT_BREAKOUT_ATR_TF", "1m"),
+                limit=max(int(float(os.getenv("EVENT_BREAKOUT_ATR_N", "14"))) + 1, 15),
+            )
             if hasattr(kl, "__await__"):
                 kl = await kl
             if not isinstance(kl, list) or len(kl) < 2:
@@ -122,8 +135,10 @@ class EventBreakoutTrailer:
             prev_close = None
             trs = []
             n = int(float(os.getenv("EVENT_BREAKOUT_ATR_N", "14")))
-            for row in kl[-(n + 1):]:
-                high = float(row[2]); low = float(row[3]); close = float(row[4])
+            for row in kl[-(n + 1) :]:
+                high = float(row[2])
+                low = float(row[3])
+                close = float(row[4])
                 if prev_close is None:
                     tr = high - low
                 else:

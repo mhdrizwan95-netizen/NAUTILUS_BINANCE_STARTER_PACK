@@ -1,0 +1,11 @@
+{
+  "config_issues": 4,
+  "container_risks": [
+    "hmm_deck runtime installs as root with host bind",
+    "Core trading services lack resource limits"
+  ],
+  "env_vars": {
+    "OPS_API_TOKEN": "required_secret",
+    ".env": "ignored_in_build"
+  }
+}

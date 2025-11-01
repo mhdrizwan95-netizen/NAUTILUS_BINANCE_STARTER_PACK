@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class Matcher:
     def __init__(self, store):
         self.store = store
@@ -30,13 +31,15 @@ class Matcher:
             if feats.get("depth_usd", 0.0) < s.min_depth_usdt:
                 continue
             if all(self._ok(p, feats) for p in s.predicates):
-                hits.append({
-                    "event_id": f"{symbol}:{s.name}:{ts}",
-                    "ts": ts,
-                    "symbol": symbol,
-                    "situation": s.name,
-                    "features": feats,
-                    "priority": s.priority,
-                })
+                hits.append(
+                    {
+                        "event_id": f"{symbol}:{s.name}:{ts}",
+                        "ts": ts,
+                        "symbol": symbol,
+                        "situation": s.name,
+                        "features": feats,
+                        "priority": s.priority,
+                    }
+                )
                 self.cool[key] = ts + s.cooldown_sec
         return hits

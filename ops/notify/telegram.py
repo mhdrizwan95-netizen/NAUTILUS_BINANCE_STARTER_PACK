@@ -21,7 +21,11 @@ class Telegram:
             "disable_web_page_preview": True,
         }
         # Optional IPv4-only connector to avoid IPv6-only resolution in Docker
-        force_ipv4 = os.getenv("TELEGRAM_FORCE_IPV4", "").lower() in {"1", "true", "yes"}
+        force_ipv4 = os.getenv("TELEGRAM_FORCE_IPV4", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
         connector = None
         try:
             if force_ipv4:
@@ -30,7 +34,9 @@ class Telegram:
             connector = None
         try:
             async with aiohttp.ClientSession(connector=connector) as s:
-                async with s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as r:
+                async with s.post(
+                    url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
+                ) as r:
                     if r.status != 200:
                         try:
                             body = await r.text()

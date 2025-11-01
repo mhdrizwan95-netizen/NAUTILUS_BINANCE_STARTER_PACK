@@ -1,4 +1,3 @@
-
 import os
 from pathlib import Path
 import pandas as pd
@@ -6,17 +5,25 @@ from loguru import logger
 from common import manifest
 from .config import settings
 
+
 class HistoricalDriver:
     """
     Feeds the ledger as if bars are arriving in real-time,
     by slicing CSVs in RESEARCH_DIR into chunks and copying them into DATA_INCOMING.
     """
+
     def __init__(self, symbol: str, timeframe: str):
         self.symbol = symbol
         self.timeframe = timeframe
-        self.src_files = sorted((Path(settings.RESEARCH_DIR)/symbol.replace("/","_")/timeframe).glob("*.csv"))
+        self.src_files = sorted(
+            (Path(settings.RESEARCH_DIR) / symbol.replace("/", "_") / timeframe).glob(
+                "*.csv"
+            )
+        )
         if not self.src_files:
-            logger.warning(f"No research files at {settings.RESEARCH_DIR}/{symbol}/{timeframe}")
+            logger.warning(
+                f"No research files at {settings.RESEARCH_DIR}/{symbol}/{timeframe}"
+            )
         self.src_idx = 0
         self.offset = 0  # row index within current file
 
@@ -33,7 +40,7 @@ class HistoricalDriver:
             src = self.src_files[self.src_idx]
             df = pd.read_csv(src)
             if "timestamp" not in df.columns:
-                df.rename(columns={df.columns[0]:"timestamp"}, inplace=True)
+                df.rename(columns={df.columns[0]: "timestamp"}, inplace=True)
             # optional START/END cuts
             if settings.START_TS and settings.START_TS > 0:
                 df = df[df["timestamp"] >= settings.START_TS]
@@ -46,22 +53,40 @@ class HistoricalDriver:
                 continue
 
             end = min(self.offset + chunk_rows, len(df))
-            part = df.iloc[self.offset:end].copy()
+            part = df.iloc[self.offset : end].copy()
             if part.empty:
-                self.src_idx += 1; self.offset = 0; continue
+                self.src_idx += 1
+                self.offset = 0
+                continue
 
             t_start = int(part["timestamp"].min())
             t_end = int(part["timestamp"].max())
-            dst_dir = Path(settings.DATA_INCOMING)/self.symbol.replace("/","_")/self.timeframe
+            dst_dir = (
+                Path(settings.DATA_INCOMING)
+                / self.symbol.replace("/", "_")
+                / self.timeframe
+            )
             dst_dir.mkdir(parents=True, exist_ok=True)
-            dst = dst_dir/f"{self.symbol.replace('/','_')}__{self.timeframe}__{t_start}_{t_end}.csv"
+            dst = (
+                dst_dir
+                / f"{self.symbol.replace('/','_')}__{self.timeframe}__{t_start}_{t_end}.csv"
+            )
             part.to_csv(dst, index=False)
 
             # register with ledger (dedup by sha256)
-            file_id, inserted = manifest.register_file(str(dst), self.symbol, self.timeframe, t_start, t_end, db_path=settings.LEDGER_DB)
+            file_id, inserted = manifest.register_file(
+                str(dst),
+                self.symbol,
+                self.timeframe,
+                t_start,
+                t_end,
+                db_path=settings.LEDGER_DB,
+            )
             if not inserted:
-                try: os.remove(dst)
-                except FileNotFoundError: pass
+                try:
+                    os.remove(dst)
+                except FileNotFoundError:
+                    pass
             else:
                 self.offset = end
                 return part

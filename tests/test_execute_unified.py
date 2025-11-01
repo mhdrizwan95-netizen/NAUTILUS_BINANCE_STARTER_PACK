@@ -32,16 +32,22 @@ class DummyRouter:
 def test_executor_dry_run():
     risk = DummyRisk()
     router = DummyRouter()
-    executor = StrategyExecutor(risk=risk, router=router, default_dry_run=True, source="test")
-    result = asyncio.run(executor.execute({
-        "strategy": "test",
-        "symbol": "BTCUSDT.BINANCE",
-        "side": "BUY",
-        "quote": 50.0,
-        "market": "spot",
-        "tag": "demo",
-        "ts": 123.0,
-    }))
+    executor = StrategyExecutor(
+        risk=risk, router=router, default_dry_run=True, source="test"
+    )
+    result = asyncio.run(
+        executor.execute(
+            {
+                "strategy": "test",
+                "symbol": "BTCUSDT.BINANCE",
+                "side": "BUY",
+                "quote": 50.0,
+                "market": "spot",
+                "tag": "demo",
+                "ts": 123.0,
+            }
+        )
+    )
     assert result["status"] == "dry_run"
     assert not router.calls
 
@@ -49,16 +55,22 @@ def test_executor_dry_run():
 def test_executor_submits_order():
     risk = DummyRisk(ok=True)
     router = DummyRouter()
-    executor = StrategyExecutor(risk=risk, router=router, default_dry_run=False, source="test")
-    result = asyncio.run(executor.execute({
-        "strategy": "test",
-        "symbol": "ETHUSDT.BINANCE",
-        "side": "BUY",
-        "quote": 100.0,
-        "market": "spot",
-        "tag": "demo",
-        "ts": 999.0,
-    }))
+    executor = StrategyExecutor(
+        risk=risk, router=router, default_dry_run=False, source="test"
+    )
+    result = asyncio.run(
+        executor.execute(
+            {
+                "strategy": "test",
+                "symbol": "ETHUSDT.BINANCE",
+                "side": "BUY",
+                "quote": 100.0,
+                "market": "spot",
+                "tag": "demo",
+                "ts": 999.0,
+            }
+        )
+    )
     assert result["status"] == "submitted"
     assert router.calls == [("ETHUSDT.BINANCE", "BUY", 100.0, "spot")]
     order = result["order"]
@@ -68,20 +80,27 @@ def test_executor_submits_order():
 def test_executor_rejects_via_risk():
     risk = DummyRisk(ok=False)
     router = DummyRouter()
-    executor = StrategyExecutor(risk=risk, router=router, default_dry_run=False, source="test")
-    result = asyncio.run(executor.execute({
-        "strategy": "test",
-        "symbol": "XRPUSDT.BINANCE",
-        "side": "BUY",
-        "quote": 25.0,
-        "market": "spot",
-        "tag": "demo",
-        "ts": 1.0,
-    }))
+    executor = StrategyExecutor(
+        risk=risk, router=router, default_dry_run=False, source="test"
+    )
+    result = asyncio.run(
+        executor.execute(
+            {
+                "strategy": "test",
+                "symbol": "XRPUSDT.BINANCE",
+                "side": "BUY",
+                "quote": 25.0,
+                "market": "spot",
+                "tag": "demo",
+                "ts": 1.0,
+            }
+        )
+    )
     assert result["status"] == "rejected"
     assert not router.calls
+
+
 def setup_function() -> None:
     CACHE.cache.clear()
     with contextlib.suppress(FileNotFoundError):
         os.remove(CACHE_PATH)
-

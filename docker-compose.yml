@@ -185,7 +185,8 @@ services:
       # Optional: point API to on-disk data (mounted below)
       OPS_DATA_DIR: /app/data
       # LIVE-3: Environment variables for live metrics
-      OPS_API_TOKEN: "dev-token"  # Set to actual token for production
+      OPS_API_TOKEN: ${OPS_API_TOKEN:?OPS_API_TOKEN must be provided via secrets manager}
+      OPS_API_TOKEN_FILE: ${OPS_API_TOKEN_FILE:-}
 
       ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS:-http://engine_binance:8003}"
 
@@ -377,16 +378,15 @@ services:
     logging: *default-logging
     profiles: ["ml"]
     environment:
-      - LEDGER_DB=/shared/manifest.sqlite
-      - DATA_LANDING=/data/incoming
+      - LEDGER_DB=/ml/manifest.sqlite
+      - DATA_LANDING=/ml/incoming
       - EXCHANGE=binance
       - SYMBOLS=BTC/USDT,ETH/USDT
       - TIMEFRAME=1m
       - BATCH_LIMIT=1000
       - START_TS=0
     volumes:
-      - ml_data_volume:/data
-      - ml_shared_volume:/shared
+      - ml_data_volume:/ml
     ports:
       - "8013:8001"
     restart: unless-stopped
@@ -409,21 +409,20 @@ services:
     env_file:
       - .env
     environment:
-      - DATA_DIR=/data
+      - DATA_DIR=/ml/data
       - MODEL_DIR=/models
       - REGISTRY_DIR=/models/registry
       - CURRENT_SYMLINK=/models/current
-      - LEDGER_DB=/shared/manifest.sqlite
-      - EXACTLY_ONCE=false
+      - LEDGER_DB=/ml/manifest.sqlite
+      - EXACTLY_ONCE=true
       - DELETE_AFTER_PROCESS=true
       - LOG_LEVEL=INFO
     depends_on:
       data_ingester:
         condition: service_started
     volumes:
-      - ml_data_volume:/data
+      - ml_data_volume:/ml
       - ml_models_volume:/models
-      - ml_shared_volume:/shared
     ports:
       - "8015:8000"
     healthcheck:
@@ -447,20 +446,19 @@ services:
     env_file:
       - .env
     environment:
-      - DATA_DIR=/data
+      - DATA_DIR=/ml/data
       - MODEL_DIR=/models
       - REGISTRY_DIR=/models/registry
       - CURRENT_SYMLINK=/models/current
-      - LEDGER_DB=/shared/manifest.sqlite
-      - EXACTLY_ONCE=false
+      - LEDGER_DB=/ml/manifest.sqlite
+      - EXACTLY_ONCE=true
       - DELETE_AFTER_PROCESS=true
       - LOG_LEVEL=INFO
       - RETRAIN_CRON=0 */6 * * *
     command: ["python", "-m", "app.scheduler"]
     volumes:
-      - ml_data_volume:/data
+      - ml_data_volume:/ml
       - ml_models_volume:/models
-      - ml_shared_volume:/shared
     restart: unless-stopped
     networks:
       - trading_net
@@ -500,9 +498,9 @@ services:
     env_file:
       - .env
     environment:
-      - LEDGER_DB=/shared/manifest.sqlite
+      - LEDGER_DB=/research/manifest.sqlite
       - RESEARCH_DIR=/research
-      - DATA_INCOMING=/data/incoming
+      - DATA_INCOMING=/research/incoming
       - ML_SERVICE=http://ml_service:8000
       - PARAM_CONTROLLER=http://param_controller:8002
       - CHUNK_ROWS=2000
@@ -519,10 +517,21 @@ services:
         condition: service_healthy
     volumes:
       - backtest_research_volume:/research
-      - ml_data_volume:/data
-      - ml_shared_volume:/shared
       - backtest_results_volume:/results
     command: ["run"]
+    restart: unless-stopped
+    networks:
+      - trading_net
+
+  research_scrubber:
+    image: alpine:3.20
+    container_name: hmm_research_scrubber
+    logging: *default-logging
+    profiles: ["ml"]
+    command: ["/bin/sh","-c","crond -f -l 2"]
+    volumes:
+      - backtest_research_volume:/research
+      - ./ops/research_purge.cron:/etc/crontabs/root:ro
     restart: unless-stopped
     networks:
       - trading_net
@@ -547,8 +556,7 @@ services:
       - SLEEP_MS=500
     command: ["python", "-m", "app.backfill"]
     volumes:
-      - ml_data_volume:/data
-      - ml_shared_volume:/shared
+      - ml_data_volume:/ml
     depends_on:
       data_ingester:
         condition: service_started

@@ -62,3 +62,5 @@ jobs:
               raise SystemExit(1)
           print("Env template matches defaults")
           PY
+      - name: Validate config env vs docker compose
+        run: python scripts/validate_config_env.py

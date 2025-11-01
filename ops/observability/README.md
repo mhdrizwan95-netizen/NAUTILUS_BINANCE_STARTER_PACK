@@ -18,7 +18,7 @@ How to run
 1) Start Prometheus + Grafana (observability stack):
    - `docker compose -f ops/observability/docker-compose.observability.yml up -d`
 2) Access Grafana: http://localhost:3000 (anonymous disabled by default)
-   - Credentials via env: `GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD`.
+   - Credentials via env: set `GF_SECURITY_ADMIN_USER` and either `GF_SECURITY_ADMIN_PASSWORD__FILE` (preferred; e.g. `${SECRETS_DIR}/grafana_admin_password`) or `GF_SECURITY_ADMIN_PASSWORD` for direct injection.
 3) Dashboards auto-provision under folder "HMM" via `ops/observability/grafana/provisioning/dashboards/dashboards.yml`.
 
 Verification (manual)

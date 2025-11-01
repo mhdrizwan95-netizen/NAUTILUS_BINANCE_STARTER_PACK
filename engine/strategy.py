@@ -1,15 +1,15 @@
 from __future__ import annotations
 import asyncio, inspect, logging, os
-import threading, time, uuid
+import threading
+import time
 from collections import deque, defaultdict
 from typing import Any, Callable, Deque, Dict, List, Optional
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from .config import load_strategy_config, load_risk_config
 from .risk import RiskRails
 from . import metrics
-from .core import order_router
 from .core.market_resolver import resolve_market_choice
 from .core.event_bus import BUS
 from .telemetry.publisher import record_tick_latency
@@ -18,11 +18,14 @@ from .strategies import policy_hmm, ensemble_policy
 from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
 from .strategies.trend_follow import TrendStrategyModule, load_trend_config
 from .strategies.scalping import ScalpStrategyModule, load_scalp_config
-from .telemetry.publisher import record_latency
 from .state.cooldown import Cooldowns
 from .strategies.scalp.brackets import ScalpBracketManager
+
 try:
-    from .strategies.momentum_realtime import MomentumStrategyModule, load_momentum_rt_config
+    from .strategies.momentum_realtime import (
+        MomentumStrategyModule,
+        load_momentum_rt_config,
+    )
 except Exception:  # pragma: no cover - optional component
     MomentumStrategyModule = None  # type: ignore
     load_momentum_rt_config = None  # type: ignore
@@ -66,11 +69,17 @@ except Exception:
 
 MOMENTUM_RT_CFG = None
 MOMENTUM_RT_MODULE: Optional[MomentumStrategyModule] = None
-if 'MomentumStrategyModule' in globals() and MomentumStrategyModule and load_momentum_rt_config:
+if (
+    "MomentumStrategyModule" in globals()
+    and MomentumStrategyModule
+    and load_momentum_rt_config
+):
     try:
         MOMENTUM_RT_CFG = load_momentum_rt_config(SYMBOL_SCANNER)
         if MOMENTUM_RT_CFG.enabled:
-            MOMENTUM_RT_MODULE = MomentumStrategyModule(MOMENTUM_RT_CFG, scanner=SYMBOL_SCANNER)
+            MOMENTUM_RT_MODULE = MomentumStrategyModule(
+                MOMENTUM_RT_CFG, scanner=SYMBOL_SCANNER
+            )
             logging.getLogger(__name__).info(
                 "Momentum RT module enabled (window=%.1fs, move>=%.2f%%, vol>=%.2fx)",
                 MOMENTUM_RT_CFG.window_sec,
@@ -93,7 +102,9 @@ def _wire_scalp_fill_handler() -> None:
         _SCALP_BUS_WIRED = True
         logging.getLogger(__name__).info("Scalping fill handler wired")
     except Exception:
-        logging.getLogger(__name__).warning("Scalping fill handler wiring failed", exc_info=True)
+        logging.getLogger(__name__).warning(
+            "Scalping fill handler wiring failed", exc_info=True
+        )
 
 
 async def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
@@ -117,7 +128,9 @@ async def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
     target_px = float(meta.get("take_profit") or 0.0)
     if stop_px <= 0.0 or target_px <= 0.0:
         return
-    order_id = str(evt.get("order_id") or "") or f"{symbol}:{evt.get('ts', time.time())}"
+    order_id = (
+        str(evt.get("order_id") or "") or f"{symbol}:{evt.get('ts', time.time())}"
+    )
     qualified = symbol if "." in symbol else f"{symbol}.{venue}"
     tag_prefix = tag or "scalp"
     _start_scalp_bracket_watch(
@@ -174,6 +187,7 @@ def _start_scalp_bracket_watch(
 if SCALP_MODULE and getattr(SCALP_MODULE, "enabled", False):
     _wire_scalp_fill_handler()
 
+
 class _MACross:
     def __init__(self, fast: int, slow: int):
         assert fast < slow, "fast MA must be < slow MA"
@@ -189,13 +203,14 @@ class _MACross:
             w.popleft()
         if len(w) < self.slow:
             return None
-        fast_ma = sum(list(w)[-self.fast:]) / self.fast
+        fast_ma = sum(list(w)[-self.fast :]) / self.fast
         slow_ma = sum(w) / len(w)
         if fast_ma > slow_ma:
             return "BUY"
         if fast_ma < slow_ma:
             return "SELL"
         return None
+
 
 # Global variables for scheduler
 _loop_thread: Optional[threading.Thread] = None
@@ -240,7 +255,9 @@ async def _on_market_tick_event(event: Dict[str, Any]) -> None:
 try:
     BUS.subscribe("market.tick", _on_market_tick_event)
 except Exception:
-    logging.getLogger(__name__).warning("Failed to subscribe strategy to market.tick", exc_info=True)
+    logging.getLogger(__name__).warning(
+        "Failed to subscribe strategy to market.tick", exc_info=True
+    )
 
 
 async def _on_market_book_event(event: Dict[str, Any]) -> None:
@@ -264,13 +281,18 @@ async def _on_market_book_event(event: Dict[str, Any]) -> None:
     try:
         SCALP_MODULE.handle_book(symbol, bid, ask, bid_qty, ask_qty, ts_val)
     except Exception:
-        logging.getLogger(__name__).debug("Failed to process book for %s", symbol, exc_info=True)
+        logging.getLogger(__name__).debug(
+            "Failed to process book for %s", symbol, exc_info=True
+        )
 
 
 try:
     BUS.subscribe("market.book", _on_market_book_event)
 except Exception:
-    logging.getLogger(__name__).warning("Failed to subscribe strategy to market.book", exc_info=True)
+    logging.getLogger(__name__).warning(
+        "Failed to subscribe strategy to market.book", exc_info=True
+    )
+
 
 class StrategySignal(BaseModel):
     symbol: str = Field(..., description="e.g. BTCUSDT.BINANCE")
@@ -279,8 +301,13 @@ class StrategySignal(BaseModel):
     quantity: Optional[float] = Field(None, description="Base qty (alternative)")
     dry_run: Optional[bool] = Field(None, description="Override STRATEGY_DRY_RUN")
     tag: Optional[str] = Field(None, description="Optional label (e.g. 'ma_cross')")
-    meta: Optional[Dict[str, Any]] = Field(None, description="Optional strategy metadata (e.g. stops, targets)")
-    market: Optional[str] = Field(None, description="Preferred Binance market (spot, futures, margin)")
+    meta: Optional[Dict[str, Any]] = Field(
+        None, description="Optional strategy metadata (e.g. stops, targets)"
+    )
+    market: Optional[str] = Field(
+        None, description="Preferred Binance market (spot, futures, margin)"
+    )
+
 
 @router.post("/strategy/signal")
 def post_strategy_signal(sig: StrategySignal, request: Request):
@@ -355,7 +382,9 @@ def _present_strategy_result(result: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-async def _execute_strategy_signal_async(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict[str, Any]:
+async def _execute_strategy_signal_async(
+    sig: StrategySignal, *, idem_key: Optional[str] = None
+) -> Dict[str, Any]:
     executor = _get_executor()
     result = await executor.execute(_signal_payload(sig), idem_key=idem_key)
     if result.get("status") == "submitted":
@@ -363,7 +392,9 @@ async def _execute_strategy_signal_async(sig: StrategySignal, *, idem_key: Optio
     return _present_strategy_result(result)
 
 
-def _execute_strategy_signal(sig: StrategySignal, *, idem_key: Optional[str] = None) -> Dict[str, Any]:
+def _execute_strategy_signal(
+    sig: StrategySignal, *, idem_key: Optional[str] = None
+) -> Dict[str, Any]:
     executor = _get_executor()
     result = executor.execute_sync(_signal_payload(sig), idem_key=idem_key)
     if result.get("status") == "submitted":
@@ -395,7 +426,9 @@ def _notify_listeners(symbol: str, price: float, ts: float) -> None:
             continue
 
 
-def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | None = None) -> None:
+def on_tick(
+    symbol: str, price: float, ts: float | None = None, volume: float | None = None
+) -> None:
     """Tick-driven strategy loop entrypoint."""
     ts_val = float(ts if ts is not None else time.time())
     venue = symbol.split(".")[1] if "." in symbol else "BINANCE"
@@ -421,7 +454,9 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
             scalp_side = str(scalp_decision.get("side") or "BUY")
             scalp_quote = float(scalp_decision.get("quote") or S_CFG.quote_usdt)
             scalp_tag = str(scalp_decision.get("tag") or "scalp")
-            default_market = scalp_decision.get("market") or ("futures" if getattr(SCALP_CFG, "allow_shorts", True) else "spot")
+            default_market = scalp_decision.get("market") or (
+                "futures" if getattr(SCALP_CFG, "allow_shorts", True) else "spot"
+            )
             resolved_market = resolve_market_choice(scalp_symbol, default_market)
             sig = StrategySignal(
                 symbol=scalp_symbol,
@@ -436,10 +471,15 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
             result = _execute_strategy_signal(sig)
             if result.get("status") == "submitted":
                 scalp_base = scalp_symbol.split(".")[0]
-                scalp_venue = scalp_symbol.split(".")[1] if "." in scalp_symbol else "BINANCE"
+                scalp_venue = (
+                    scalp_symbol.split(".")[1] if "." in scalp_symbol else "BINANCE"
+                )
                 try:
                     metrics.strategy_orders_total.labels(
-                        symbol=scalp_base, venue=scalp_venue, side=scalp_side, source=scalp_tag
+                        symbol=scalp_base,
+                        venue=scalp_venue,
+                        side=scalp_side,
+                        source=scalp_tag,
                     ).inc()
                 except Exception:
                     pass
@@ -448,7 +488,9 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
     if MOMENTUM_RT_MODULE and getattr(MOMENTUM_RT_MODULE, "enabled", False):
         momentum_decision = None
         try:
-            momentum_decision = MOMENTUM_RT_MODULE.handle_tick(qualified, price, ts_val, volume)
+            momentum_decision = MOMENTUM_RT_MODULE.handle_tick(
+                qualified, price, ts_val, volume
+            )
         except Exception:
             momentum_decision = None
         if momentum_decision:
@@ -458,7 +500,10 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
             momentum_tag = str(momentum_decision.get("tag") or "momentum_rt")
             momentum_meta = momentum_decision.get("meta")
             default_market = momentum_decision.get("market") or (
-                "futures" if getattr(MOMENTUM_RT_CFG, "prefer_futures", True) or momentum_side == "SELL" else "spot"
+                "futures"
+                if getattr(MOMENTUM_RT_CFG, "prefer_futures", True)
+                or momentum_side == "SELL"
+                else "spot"
             )
             resolved_market = resolve_market_choice(momentum_symbol, default_market)
             sig = StrategySignal(
@@ -476,7 +521,11 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
                 try:
                     metrics.strategy_orders_total.labels(
                         symbol=momentum_symbol.split(".")[0],
-                        venue=momentum_symbol.split(".")[1] if "." in momentum_symbol else "BINANCE",
+                        venue=(
+                            momentum_symbol.split(".")[1]
+                            if "." in momentum_symbol
+                            else "BINANCE"
+                        ),
                         side=momentum_side,
                         source=momentum_tag,
                     ).inc()
@@ -495,9 +544,15 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
             trend_side = str(trend_decision.get("side") or "BUY")
             trend_quote = float(trend_decision.get("quote") or S_CFG.quote_usdt)
             trend_tag = str(trend_decision.get("tag") or "trend_follow")
-            default_market = trend_decision.get("market") if isinstance(trend_decision, dict) else None
+            default_market = (
+                trend_decision.get("market")
+                if isinstance(trend_decision, dict)
+                else None
+            )
             if not default_market:
-                default_market = "futures" if getattr(TREND_CFG, "allow_shorts", False) else "spot"
+                default_market = (
+                    "futures" if getattr(TREND_CFG, "allow_shorts", False) else "spot"
+                )
             resolved_market = resolve_market_choice(trend_symbol, default_market)
             sig = StrategySignal(
                 symbol=trend_symbol,
@@ -511,7 +566,9 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
             result = _execute_strategy_signal(sig)
             if result.get("status") == "submitted":
                 try:
-                    metrics.strategy_orders_total.labels(symbol=base, venue=venue, side=trend_side, source=trend_tag).inc()
+                    metrics.strategy_orders_total.labels(
+                        symbol=base, venue=venue, side=trend_side, source=trend_tag
+                    ).inc()
                 except Exception:
                     pass
             return
@@ -596,7 +653,9 @@ def on_tick(symbol: str, price: float, ts: float | None = None, volume: float | 
         result = _execute_strategy_signal(sig)
         if result.get("status") == "submitted":
             try:
-                metrics.strategy_orders_total.labels(symbol=base, venue=venue, side=signal_side, source=source_tag).inc()
+                metrics.strategy_orders_total.labels(
+                    symbol=base, venue=venue, side=signal_side, source=source_tag
+                ).inc()
             except Exception:
                 pass
 
@@ -644,7 +703,9 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
     if not _SYMBOL_COOLDOWNS.allow(symbol, now=now):
         try:
             remaining = _SYMBOL_COOLDOWNS.remaining(symbol, now=now)
-            metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(remaining)
+            metrics.strategy_cooldown_window_seconds.labels(
+                symbol=base_symbol, venue=venue
+            ).set(remaining)
         except Exception:
             pass
         return False
@@ -652,7 +713,9 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
     _SYMBOL_COOLDOWNS.hit(symbol, ttl=dynamic_window, now=now)
     _last_trade_price[symbol] = price
     try:
-        metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(dynamic_window)
+        metrics.strategy_cooldown_window_seconds.labels(
+            symbol=base_symbol, venue=venue
+        ).set(dynamic_window)
     except Exception:
         pass
     return True
@@ -667,15 +730,21 @@ def _latest_price(symbol: str) -> Optional[float]:
     try:
         import httpx
         from .config import get_settings
+
         clean = symbol.split(".")[0]
         s = get_settings()
         base = s.base_url.rstrip("/")
-        path = "/fapi/v1/ticker/price" if getattr(s, "is_futures", False) else "/api/v3/ticker/price"
+        path = (
+            "/fapi/v1/ticker/price"
+            if getattr(s, "is_futures", False)
+            else "/api/v3/ticker/price"
+        )
         r = httpx.get(f"{base}{path}", params={"symbol": clean}, timeout=5.0)
         r.raise_for_status()
         return float(r.json().get("price"))
     except Exception:
         return None
+
 
 def _tick_once():
     symbols = S_CFG.symbols or []
@@ -690,6 +759,7 @@ def _tick_once():
             continue
         on_tick(symbol, px, time.time())
 
+
 # --- Simple bracket watcher (SL/TP emulation) ---
 def _schedule_bracket_watch(symbol: str, side: str, entry_px: float):
     if not S_CFG.hmm_enabled:
@@ -697,8 +767,9 @@ def _schedule_bracket_watch(symbol: str, side: str, entry_px: float):
     # TP/SL in basis points
     tp = S_CFG.tp_bps / 10000.0
     sl = S_CFG.sl_bps / 10000.0
-    up  = entry_px * (1 + tp)
-    dn  = entry_px * (1 - sl)
+    up = entry_px * (1 + tp)
+    dn = entry_px * (1 - sl)
+
     def _watch():
         # light, best-effort loop
         for _ in range(120):  # ~2h at 60s; adjust if you poll faster
@@ -708,24 +779,54 @@ def _schedule_bracket_watch(symbol: str, side: str, entry_px: float):
                 continue
             if side == "BUY":
                 if px >= up:
-                    sig = StrategySignal(symbol=symbol, side="SELL", quote=S_CFG.quote_usdt, quantity=None, dry_run=None, tag="tp")
+                    sig = StrategySignal(
+                        symbol=symbol,
+                        side="SELL",
+                        quote=S_CFG.quote_usdt,
+                        quantity=None,
+                        dry_run=None,
+                        tag="tp",
+                    )
                     _execute_strategy_signal(sig)
                     break
                 if px <= dn:
-                    sig = StrategySignal(symbol=symbol, side="SELL", quote=S_CFG.quote_usdt, quantity=None, dry_run=None, tag="sl")
+                    sig = StrategySignal(
+                        symbol=symbol,
+                        side="SELL",
+                        quote=S_CFG.quote_usdt,
+                        quantity=None,
+                        dry_run=None,
+                        tag="sl",
+                    )
                     _execute_strategy_signal(sig)
                     break
             else:  # short on futures/perp only; if spot, this will be ignored by router/rails
                 if px <= dn:
-                    sig = StrategySignal(symbol=symbol, side="BUY", quote=S_CFG.quote_usdt, quantity=None, dry_run=None, tag="tp")
+                    sig = StrategySignal(
+                        symbol=symbol,
+                        side="BUY",
+                        quote=S_CFG.quote_usdt,
+                        quantity=None,
+                        dry_run=None,
+                        tag="tp",
+                    )
                     _execute_strategy_signal(sig)
                     break
                 if px >= up:
-                    sig = StrategySignal(symbol=symbol, side="BUY", quote=S_CFG.quote_usdt, quantity=None, dry_run=None, tag="sl")
+                    sig = StrategySignal(
+                        symbol=symbol,
+                        side="BUY",
+                        quote=S_CFG.quote_usdt,
+                        quantity=None,
+                        dry_run=None,
+                        tag="sl",
+                    )
                     _execute_strategy_signal(sig)
                     break
             time.sleep(S_CFG.interval_sec)
+
     threading.Thread(target=_watch, daemon=True).start()
+
 
 def start_scheduler():
     global _loop_thread
@@ -734,6 +835,7 @@ def start_scheduler():
     if _loop_thread and _loop_thread.is_alive():
         return
     _stop_flag.clear()
+
     def loop():
         while not _stop_flag.is_set():
             t0 = time.time()
@@ -743,15 +845,20 @@ def start_scheduler():
                 pass
             dt = max(0.0, S_CFG.interval_sec - (time.time() - t0))
             _stop_flag.wait(dt)
+
     _loop_thread = threading.Thread(target=loop, name="strategy-ma-cross", daemon=True)
     _loop_thread.start()
+
 
 def stop_scheduler():
     _stop_flag.set()
 
+
 def block_entries_for(seconds: float) -> None:
     global _entry_block_until
     _entry_block_until = max(_entry_block_until, time.time() + float(seconds))
+
+
 def _ensure_scalp_bracket_manager() -> ScalpBracketManager:
     global _SCALP_BRACKET_MANAGER
     if _SCALP_BRACKET_MANAGER is None:
@@ -795,6 +902,8 @@ async def _submit_scalp_exit(payload: Dict[str, Any]) -> None:
 
     base = symbol.split(".")[0]
     try:
-        metrics.scalp_bracket_exits_total.labels(symbol=base, venue=venue, mode=tag).inc()
+        metrics.scalp_bracket_exits_total.labels(
+            symbol=base, venue=venue, mode=tag
+        ).inc()
     except Exception:
         pass

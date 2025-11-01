@@ -5,7 +5,9 @@ from prometheus_client import Gauge
 from ops.prometheus import REGISTRY
 from ops.aggregate_exposure import aggregate_exposure, _parse_endpoints
 
-logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
+)
 
 EXPOSURE_GAUGE = Gauge(
     "exposure_usd",
@@ -21,8 +23,11 @@ LAST_REFRESH = Gauge(
     multiprocess_mode="max",
 )
 
+
 def _engine_endpoints() -> list[str]:
-    raw = os.getenv("ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005")
+    raw = os.getenv(
+        "ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005"
+    )
     return _parse_endpoints(raw)
 
 
@@ -43,8 +48,12 @@ async def exposure_collector_loop():
                 EXPOSURE_GAUGE.labels(symbol=sym).set(vals["exposure_usd"])
             LAST_REFRESH.set(ts)
             try:
-                total = sum(float(v.get("exposure_usd", 0.0)) for v in agg.by_symbol.values())
-                logging.info(f"Exposure updated: symbols={len(agg.by_symbol)} total={total:.2f} USD")
+                total = sum(
+                    float(v.get("exposure_usd", 0.0)) for v in agg.by_symbol.values()
+                )
+                logging.info(
+                    f"Exposure updated: symbols={len(agg.by_symbol)} total={total:.2f} USD"
+                )
             except Exception:
                 pass
         except Exception as e:

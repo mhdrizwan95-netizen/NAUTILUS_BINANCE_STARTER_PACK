@@ -9,14 +9,15 @@ Writes Parquet under:
 Requires a running TWS or IB Gateway and ib_insync installed.
 """
 
-from typing import Optional
 import os
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 
-def fetch_1m(ticker: str = "AAPL", endDateTime: str = "", durationStr: str = "2 W") -> pd.DataFrame:
+def fetch_1m(
+    ticker: str = "AAPL", endDateTime: str = "", durationStr: str = "2 W"
+) -> pd.DataFrame:
     try:
         from ib_insync import IB, Stock, util
     except Exception as exc:  # pragma: no cover - optional dependency
@@ -39,13 +40,18 @@ def fetch_1m(ticker: str = "AAPL", endDateTime: str = "", durationStr: str = "2 
         formatDate=1,
     )
     df = util.df(bars)  # date, open, high, low, close, volume, barCount, WAP
-    df["ts"] = pd.to_datetime(df["date"]).astype("int64") // 10 ** 9
+    df["ts"] = pd.to_datetime(df["date"]).astype("int64") // 10**9
     df.rename(columns={"WAP": "vwap", "barCount": "trades"}, inplace=True)
     df = df[["ts", "open", "high", "low", "close", "volume", "trades"]]
     return df
 
 
-def save_day(symbol: str, yyyy_mm_dd: str, df: pd.DataFrame, root: str = "data/raw/ibkr/equities/1m") -> str:
+def save_day(
+    symbol: str,
+    yyyy_mm_dd: str,
+    df: pd.DataFrame,
+    root: str = "data/raw/ibkr/equities/1m",
+) -> str:
     year = yyyy_mm_dd[:4]
     path = f"{root}/{symbol}/{year}/{yyyy_mm_dd}.parquet"
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -61,11 +67,20 @@ if __name__ == "__main__":
     import argparse
     import datetime as dt
 
-    ap = argparse.ArgumentParser(description="Download IBKR 1m bars and save Parquet by day")
-    ap.add_argument("--symbols", required=True, help="Comma-separated tickers, e.g. AAPL,NVDA")
+    ap = argparse.ArgumentParser(
+        description="Download IBKR 1m bars and save Parquet by day"
+    )
+    ap.add_argument(
+        "--symbols", required=True, help="Comma-separated tickers, e.g. AAPL,NVDA"
+    )
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument("--day", help="Single day YYYY-MM-DD (downloads a window covering that day)")
-    g.add_argument("--duration", help="IBKR durationStr, e.g. '2 W' (mutually exclusive with --day)")
+    g.add_argument(
+        "--day", help="Single day YYYY-MM-DD (downloads a window covering that day)"
+    )
+    g.add_argument(
+        "--duration",
+        help="IBKR durationStr, e.g. '2 W' (mutually exclusive with --day)",
+    )
     args = ap.parse_args()
 
     syms = [s.strip() for s in args.symbols.split(",") if s.strip()]

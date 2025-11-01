@@ -1,6 +1,7 @@
 """
 Example script: emit mock metrics to the Deck API for testing dashboards.
 """
+
 from __future__ import annotations
 
 import random

@@ -11,7 +11,10 @@ from backtests.engine import BacktestEngine, FeedConfig
 from engine.core.event_bus import BUS
 from engine.idempotency import CACHE
 from engine.strategy import get_executor_override
-from engine.strategies.momentum_realtime import MomentumRealtimeConfig, MomentumStrategyModule
+from engine.strategies.momentum_realtime import (
+    MomentumRealtimeConfig,
+    MomentumStrategyModule,
+)
 
 
 def _write_feed(
@@ -171,7 +174,10 @@ class RapidVolStrategy:
                         "quote": None,
                         "dry_run": False,
                         "tag": tag,
-                        "meta": {"stop_price": price * 0.95, "take_profit": price * 1.02},
+                        "meta": {
+                            "stop_price": price * 0.95,
+                            "take_profit": price * 1.02,
+                        },
                         "market": "spot",
                         "ts": ts,
                     }
@@ -356,9 +362,9 @@ def test_momentum_signal_emits_fill(tmp_path):
     tags = {evt["strategy_tag"] for evt in captured}
     assert any(tag.startswith("momentum_rt") for tag in tags)
 
+
 @pytest.fixture(autouse=True)
 def _clear_idempotency_cache():
     CACHE.cache.clear()
     yield
     CACHE.cache.clear()
-

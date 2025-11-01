@@ -2,8 +2,10 @@
 import os, hmac, hashlib, time, urllib.parse, httpx
 from typing import Dict, Any
 
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
 
 class BinanceAccountProvider:
     """
@@ -12,13 +14,20 @@ class BinanceAccountProvider:
       - BINANCE_MODE=live  -> api.binance.com, fapi.binance.com, dapi.binance.com
       - BINANCE_MODE=demo  -> testnet bases from .env
     """
+
     def __init__(self):
         mode = os.getenv("BINANCE_MODE", "live").lower()
 
         if mode == "demo":
-            self.spot_base  = os.getenv("DEMO_SPOT_BASE",  "https://testnet.binance.vision")
-            self.usdm_base  = os.getenv("DEMO_USDM_BASE",  "https://testnet.binancefuture.com")
-            self.coinm_base = os.getenv("DEMO_COINM_BASE", "https://testnet.binancefuture.com")
+            self.spot_base = os.getenv(
+                "DEMO_SPOT_BASE", "https://testnet.binance.vision"
+            )
+            self.usdm_base = os.getenv(
+                "DEMO_USDM_BASE", "https://testnet.binancefuture.com"
+            )
+            self.coinm_base = os.getenv(
+                "DEMO_COINM_BASE", "https://testnet.binancefuture.com"
+            )
             key_candidates = [
                 os.getenv("DEMO_API_KEY_SPOT"),
                 os.getenv("DEMO_API_KEY_USDM"),
@@ -32,9 +41,11 @@ class BinanceAccountProvider:
                 os.getenv("BINANCE_API_SECRET", ""),
             ]
         else:
-            self.spot_base  = os.getenv("BINANCE_SPOT_BASE",  "https://api.binance.com")
-            self.usdm_base  = os.getenv("BINANCE_USDM_BASE",  "https://fapi.binance.com")
-            self.coinm_base = os.getenv("BINANCE_COINM_BASE", "https://dapi.binance.com")
+            self.spot_base = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
+            self.usdm_base = os.getenv("BINANCE_USDM_BASE", "https://fapi.binance.com")
+            self.coinm_base = os.getenv(
+                "BINANCE_COINM_BASE", "https://dapi.binance.com"
+            )
             key_candidates = [os.getenv("BINANCE_API_KEY", "")]
             secret_candidates = [os.getenv("BINANCE_API_SECRET", "")]
 
@@ -49,9 +60,17 @@ class BinanceAccountProvider:
 
     def _sign(self, params: Dict[str, Any]) -> str:
         query = urllib.parse.urlencode(params, doseq=True)
-        return hmac.new(self.api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
+        return hmac.new(
+            self.api_secret.encode(), query.encode(), hashlib.sha256
+        ).hexdigest()
 
-    async def _get(self, base: str, path: str, auth: bool = True, params: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    async def _get(
+        self,
+        base: str,
+        path: str,
+        auth: bool = True,
+        params: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         params = dict(params or {})
         if auth:
             params["timestamp"] = _now_ms()
@@ -112,7 +131,9 @@ class BinanceAccountProvider:
         # COIN-M: sum wallet balances across assets (approx in their asset terms; left as 0 for simplicity)
         def coinm_equity_est(cm: Dict[str, Any]) -> float:
             try:
-                return sum(float(x.get("walletBalance", 0)) for x in cm.get("assets", []))
+                return sum(
+                    float(x.get("walletBalance", 0)) for x in cm.get("assets", [])
+                )
             except Exception:
                 return 0.0
 
@@ -126,7 +147,7 @@ class BinanceAccountProvider:
             "order_fill_ratio": 0.0,
             "policy_confidence": 0.0,
             "drift_score": 0.0,
-            "venue_latency_ms": 0.0
+            "venue_latency_ms": 0.0,
         }
         return metrics
 

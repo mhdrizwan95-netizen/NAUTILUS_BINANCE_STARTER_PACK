@@ -22,7 +22,9 @@ class _DummyRouter:
         self.orders = []
         self._portfolio = _DummyPortfolio()
 
-    def place_market_order(self, *, symbol: str, side: str, quote, quantity, market=None):
+    def place_market_order(
+        self, *, symbol: str, side: str, quote, quantity, market=None
+    ):
         base = symbol.split(".")[0].upper()
         quantity = float(quantity or 0.0)
         if quantity <= 0:
@@ -40,7 +42,11 @@ class _DummyRouter:
                 self._portfolio.state.positions[base] = pos
             pos.quantity = max(0.0, float(pos.quantity) - quantity)
         self.orders.append({"symbol": symbol, "side": side, "quantity": quantity})
-        return {"status": "submitted", "filled_qty_base": quantity, "avg_fill_price": 1.0}
+        return {
+            "status": "submitted",
+            "filled_qty_base": quantity,
+            "avg_fill_price": 1.0,
+        }
 
     def portfolio_service(self):
         return self._portfolio

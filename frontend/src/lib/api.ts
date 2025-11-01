@@ -2,21 +2,71 @@ import type { BacktestResult, StrategySummary } from '@/types/trading';
 
 const BASE = '';
 
-async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(`${BASE}${path}`, {
-    ...init,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
-    signal,
-  });
+const DEFAULT_TIMEOUT_MS = 10_000;
 
-  if (!response.ok) {
-    throw new Error(await response.text());
+interface TimeoutSignal {
+  signal: AbortSignal;
+  cleanup: () => void;
+}
+
+const createTimeoutSignal = (signal?: AbortSignal, timeoutMs: number = DEFAULT_TIMEOUT_MS): TimeoutSignal => {
+  if (signal?.aborted) {
+    return { signal, cleanup: () => {} };
   }
 
-  return response.json() as Promise<T>;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => {
+    controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError'));
+  }, timeoutMs);
+
+  let relayAbort: (() => void) | undefined;
+
+  if (signal) {
+    relayAbort = () => {
+      controller.abort(signal.reason);
+    };
+    signal.addEventListener('abort', relayAbort, { once: true });
+  }
+
+  const cleanup = () => {
+    window.clearTimeout(timeoutId);
+    if (signal && relayAbort) {
+      signal.removeEventListener('abort', relayAbort);
+    }
+  };
+
+  return { signal: controller.signal, cleanup };
+};
+
+async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
+  const { signal: timeoutSignal, cleanup } = createTimeoutSignal(signal);
+
+  try {
+    const response = await fetch(`${BASE}${path}`, {
+      ...init,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(init?.headers ?? {}),
+      },
+      signal: timeoutSignal,
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      const error = new Error(body || `Request to ${path} failed with ${response.status}`);
+      (error as Error & { status?: number }).status = response.status;
+      throw error;
+    }
+
+    return response.json() as Promise<T>;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'TimeoutError') {
+      throw new Error(`Request to ${path} timed out after ${DEFAULT_TIMEOUT_MS}ms`);
+    }
+    throw error;
+  } finally {
+    cleanup();
+  }
 }
 
 // Strategies

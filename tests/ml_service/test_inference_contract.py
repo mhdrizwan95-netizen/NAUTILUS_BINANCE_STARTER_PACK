@@ -1,4 +1,3 @@
-import json
 from fastapi.testclient import TestClient
 from sklearn.preprocessing import StandardScaler
 import numpy as np
@@ -37,4 +36,3 @@ def test_predict_contract(monkeypatch):
     body = r.json()
     assert "regime_proba" in body and isinstance(body["regime_proba"], list)
     assert "model_meta" in body and body["model_meta"]["version_id"] == "test-1"
-

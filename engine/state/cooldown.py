@@ -18,7 +18,9 @@ class Cooldowns:
         resume_at = self._expires.get(key, 0.0)
         return now_ts >= resume_at
 
-    def hit(self, key: Hashable, *, ttl: Optional[float] = None, now: Optional[float] = None) -> None:
+    def hit(
+        self, key: Hashable, *, ttl: Optional[float] = None, now: Optional[float] = None
+    ) -> None:
         """Record an action for *key*, starting (or resetting) the cooldown."""
         now_ts = time.time() if now is None else float(now)
         ttl_val = self.default_ttl if ttl is None else max(0.0, float(ttl))

@@ -36,7 +36,9 @@ from engine.metrics import (
 logger = logging.getLogger(__name__)
 
 EXTERNAL_EVENT_TOPIC = "events.external_feed"
-DEFAULT_CONFIG_PATH = Path(os.getenv("EXTERNAL_FEEDS_CONFIG", "config/external_feeds.yaml"))
+DEFAULT_CONFIG_PATH = Path(
+    os.getenv("EXTERNAL_FEEDS_CONFIG", "config/external_feeds.yaml")
+)
 
 
 @dataclass
@@ -113,7 +115,9 @@ class ExternalFeedConnector:
 
     async def run(self) -> None:
         """Start the polling loop."""
-        self._log.info("External feed '%s' online (poll=%ss)", self.source, self.poll_interval)
+        self._log.info(
+            "External feed '%s' online (poll=%ss)", self.source, self.poll_interval
+        )
         while self._running:
             started = time.perf_counter()
             try:
@@ -131,13 +135,17 @@ class ExternalFeedConnector:
                     )
                     published += 1
                 if published:
-                    self._log.debug("Published %d event(s) for %s", published, self.source)
+                    self._log.debug(
+                        "Published %d event(s) for %s", published, self.source
+                    )
             except asyncio.CancelledError:
                 self._log.info("External feed '%s' cancelled", self.source)
                 break
             except Exception as exc:
                 external_feed_errors_total.labels(self.source).inc()
-                self._log.warning("External feed '%s' failed: %s", self.source, exc, exc_info=True)
+                self._log.warning(
+                    "External feed '%s' failed: %s", self.source, exc, exc_info=True
+                )
             await asyncio.sleep(self.poll_interval)
 
     def stop(self) -> None:
@@ -157,11 +165,17 @@ class _SeededConnectorMixin:
         if not self._seed_events:
             return None
         raw = self._seed_events.popleft() or {}
-        payload = raw.get("payload") or {k: v for k, v in raw.items() if k not in {"asset_hints", "priority", "ttl_sec"}}
+        payload = raw.get("payload") or {
+            k: v
+            for k, v in raw.items()
+            if k not in {"asset_hints", "priority", "ttl_sec"}
+        }
         asset_hints = raw.get("asset_hints") or []
         priority = raw.get("priority")
         ttl_sec = raw.get("ttl_sec")
-        return self.build_event(payload, asset_hints=asset_hints, priority=priority, ttl_sec=ttl_sec)
+        return self.build_event(
+            payload, asset_hints=asset_hints, priority=priority, ttl_sec=ttl_sec
+        )
 
 
 class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
@@ -171,7 +185,9 @@ class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
         cfg = config or {}
         poll = cfg.get("poll_interval", 5.0)
         priority = cfg.get("priority", 0.9)
-        super().__init__(source, poll_interval=poll, default_priority=priority, config=cfg)
+        super().__init__(
+            source, poll_interval=poll, default_priority=priority, config=cfg
+        )
         self.bearer_token = str(cfg.get("bearer_token") or "").strip()
         self.query = cfg.get("query")
         keywords = cfg.get("keywords")
@@ -190,7 +206,9 @@ class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
     async def collect(self) -> List[ExternalFeedEvent]:
         if not self.bearer_token:
             if not self._warned_token:
-                self._log.warning("Bearer token missing for twitter feed '%s'; skipping", self.source)
+                self._log.warning(
+                    "Bearer token missing for twitter feed '%s'; skipping", self.source
+                )
                 self._warned_token = True
             return []
         event = self._drain_seed()
@@ -212,7 +230,9 @@ class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 resp = await client.get(url, params=params, headers=headers)
                 if resp.status_code == 429:
-                    self._log.warning("Twitter rate limited for %s, backing off", self.source)
+                    self._log.warning(
+                        "Twitter rate limited for %s, backing off", self.source
+                    )
                     return events
                 resp.raise_for_status()
                 data = resp.json() or {}
@@ -287,14 +307,21 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
         cfg = config or {}
         poll = cfg.get("poll_interval", 45.0)
         priority = cfg.get("priority", 0.88)
-        super().__init__(source, poll_interval=poll, default_priority=priority, config=cfg)
+        super().__init__(
+            source, poll_interval=poll, default_priority=priority, config=cfg
+        )
         self.languages = cfg.get("languages") or ["en"]
-        self.url = cfg.get("rss_url") or "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageSize=20"
+        self.url = (
+            cfg.get("rss_url")
+            or "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageSize=20"
+        )
         self.asset_suffixes = cfg.get("asset_suffixes") or ["USDT"]
         self.ttl_sec = float(cfg.get("ttl_sec", 1800))
         self._seen_ids: Set[str] = set()
 
-    def _first_nonempty_text(self, article: Dict[str, Any], keys: Iterable[str]) -> Optional[str]:
+    def _first_nonempty_text(
+        self, article: Dict[str, Any], keys: Iterable[str]
+    ) -> Optional[str]:
         for key in keys:
             value = article.get(key)
             if isinstance(value, str) and value.strip():
@@ -488,9 +515,14 @@ class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
         self.min_volume = cfg.get("min_volume_usd", 400_000)
         self.chains = cfg.get("chains") or ["eth", "bsc", "base"]
         self.change_threshold = float(cfg.get("change_m5_threshold", 6.0))
-        self.api_url = cfg.get("dex_api") or "https://api.dexscreener.com/latest/dex/search?q=trending"
+        self.api_url = (
+            cfg.get("dex_api")
+            or "https://api.dexscreener.com/latest/dex/search?q=trending"
+        )
         self.ttl_sec = float(cfg.get("ttl_sec", 600))
-        super().__init__(source, poll_interval=poll, default_priority=priority, config=cfg)
+        super().__init__(
+            source, poll_interval=poll, default_priority=priority, config=cfg
+        )
         self._seen_pairs: Set[str] = set()
 
     async def collect(self) -> List[ExternalFeedEvent]:
@@ -512,7 +544,9 @@ class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
         pairs = self._extract_pairs(data)
         now = time.time()
         for item in pairs:
-            addr = str(item.get("pairAddress") or item.get("address") or item.get("id") or "")
+            addr = str(
+                item.get("pairAddress") or item.get("address") or item.get("id") or ""
+            )
             chain = str(item.get("chainId") or item.get("chain") or "?")
             key = f"{chain}:{addr}"
             if not addr or key in self._seen_pairs:
@@ -520,7 +554,9 @@ class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
             liquidity = self._as_float(self._nested(item, ("liquidity", "usd")))
             vol_24h = self._as_float(self._nested(item, ("volume", "h24")))
             vol_1h = self._as_float(self._nested(item, ("volume", "h1")))
-            change_5m = self._as_float(self._nested(item, ("priceChange", "m5")) or item.get("change5m"))
+            change_5m = self._as_float(
+                self._nested(item, ("priceChange", "m5")) or item.get("change5m")
+            )
             if liquidity < self.min_liquidity or vol_24h < self.min_volume:
                 continue
             if change_5m < self.change_threshold:
@@ -586,10 +622,14 @@ class MacroCalendarConnector(_SeededConnectorMixin, ExternalFeedConnector):
         cfg = config or {}
         poll = cfg.get("poll_interval", 1800.0)
         priority = cfg.get("priority", 0.4)
-        super().__init__(source, poll_interval=poll, default_priority=priority, config=cfg)
+        super().__init__(
+            source, poll_interval=poll, default_priority=priority, config=cfg
+        )
         self.lookahead_hours = float(cfg.get("lookahead_hours", 72))
         self.ics_url = cfg.get("ics_url")
-        self.include_keywords = [kw.lower() for kw in (cfg.get("include_keywords") or [])]
+        self.include_keywords = [
+            kw.lower() for kw in (cfg.get("include_keywords") or [])
+        ]
         self.ttl_sec = float(cfg.get("ttl_sec", 86400))
         self._seen_events: Set[str] = set()
 
@@ -620,7 +660,9 @@ class MacroCalendarConnector(_SeededConnectorMixin, ExternalFeedConnector):
                 continue
             if start < now or start > horizon:
                 continue
-            if self.include_keywords and not any(kw in title.lower() for kw in self.include_keywords):
+            if self.include_keywords and not any(
+                kw in title.lower() for kw in self.include_keywords
+            ):
                 continue
             self._seen_events.add(uid)
             events.append(
@@ -713,14 +755,18 @@ def build_connectors(feeds_cfg: Dict[str, Any]) -> List[ExternalFeedConnector]:
         feed_type = (cfg.get("type") or name).lower()
         cls = CONNECTOR_TYPES.get(feed_type)
         if not cls:
-            logger.warning("No connector registered for type '%s' (feed=%s)", feed_type, name)
+            logger.warning(
+                "No connector registered for type '%s' (feed=%s)", feed_type, name
+            )
             continue
         instance = cls(source=cfg.get("source") or name, config=cfg)
         connectors.append(instance)
     return connectors
 
 
-async def spawn_external_feeds_from_config(path: Optional[Path | str] = None) -> List[str]:
+async def spawn_external_feeds_from_config(
+    path: Optional[Path | str] = None,
+) -> List[str]:
     """
     Build connectors from config and start their run loops.
 

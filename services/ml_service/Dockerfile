@@ -24,12 +24,12 @@ RUN pip install --upgrade pip && pip install -c /constraints.txt -r requirements
 COPY services/ml_service/app ./app
 COPY services/common /app/common
 
-ENV DATA_DIR=/data     MODEL_DIR=/models     REGISTRY_DIR=/models/registry     CURRENT_SYMLINK=/models/current     LEDGER_DB=/shared/manifest.sqlite     EXACTLY_ONCE=false     DELETE_AFTER_PROCESS=true     LOG_LEVEL=INFO     UVICORN_HOST=0.0.0.0     UVICORN_PORT=8000
+ENV DATA_DIR=/ml/data     MODEL_DIR=/models     REGISTRY_DIR=/models/registry     CURRENT_SYMLINK=/models/current     LEDGER_DB=/ml/manifest.sqlite     EXACTLY_ONCE=true     DELETE_AFTER_PROCESS=true     LOG_LEVEL=INFO     UVICORN_HOST=0.0.0.0     UVICORN_PORT=8000
 
 # Run as non-root user
 RUN useradd -m appuser \
-    && mkdir -p /data /models /shared \
-    && chown -R appuser:appuser /app /data /models /shared
+    && mkdir -p /ml/data /models \
+    && chown -R appuser:appuser /app /ml /models
 USER appuser
 
 EXPOSE 8000

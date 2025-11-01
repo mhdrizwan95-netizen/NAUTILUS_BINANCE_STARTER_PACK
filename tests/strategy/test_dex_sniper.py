@@ -10,11 +10,15 @@ class StubExecutor:
     def __init__(self):
         self.calls = []
 
-    async def buy(self, *, symbol: str, token_address: str, notional_usd: float) -> DexExecutionResult:
+    async def buy(
+        self, *, symbol: str, token_address: str, notional_usd: float
+    ) -> DexExecutionResult:
         self.calls.append((symbol, token_address, notional_usd))
         price = 0.001
         qty = notional_usd / price
-        return DexExecutionResult(symbol=symbol, qty=qty, price=price, notional=notional_usd, side="BUY")
+        return DexExecutionResult(
+            symbol=symbol, qty=qty, price=price, notional=notional_usd, side="BUY"
+        )
 
 
 def _mk_cfg(tmp_path, *, exec_enabled=True):

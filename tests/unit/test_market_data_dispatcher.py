@@ -24,7 +24,9 @@ def test_dispatcher_routes_events_and_enriches_payload() -> None:
     dispatcher = MarketDataDispatcher(bus, source="unit", venue="BINANCE")
     counter = metrics.market_data_events_total.labels(source="unit", type="tick")
     before = counter._value.get()
-    dispatcher.handle_stream_event({"type": "tick", "symbol": "BTCUSDT.BINANCE", "price": 123.45, "ts": 1.0})
+    dispatcher.handle_stream_event(
+        {"type": "tick", "symbol": "BTCUSDT.BINANCE", "price": 123.45, "ts": 1.0}
+    )
     assert bus.events, "dispatcher should publish to bus"
     topic, data = bus.events[-1]
     assert topic == "market.tick"
@@ -38,13 +40,15 @@ def test_dispatcher_routes_events_and_enriches_payload() -> None:
 def test_dispatcher_classifies_trade_events() -> None:
     bus = DummyBus()
     dispatcher = MarketDataDispatcher(bus, source="unit", venue="BINANCE")
-    dispatcher.handle_stream_event({
-        "type": "trade",
-        "symbol": "ETHUSDT.BINANCE",
-        "price": 10.0,
-        "ts": 2.0,
-        "quantity": 0.1,
-    })
+    dispatcher.handle_stream_event(
+        {
+            "type": "trade",
+            "symbol": "ETHUSDT.BINANCE",
+            "price": 10.0,
+            "ts": 2.0,
+            "quantity": 0.1,
+        }
+    )
     topic, data = bus.events[-1]
     assert topic == "market.trade"
     assert data["symbol"] == "ETHUSDT.BINANCE"
@@ -67,7 +71,9 @@ def test_market_data_logger_subscribes_and_logs(caplog) -> None:
                 self.handlers[topic].remove(handler)
 
     bus = LoggerBus()
-    mdl = MarketDataLogger(bus, sample_rate_hz=1000.0, logger=logging.getLogger("test-md"))
+    mdl = MarketDataLogger(
+        bus, sample_rate_hz=1000.0, logger=logging.getLogger("test-md")
+    )
     mdl.start()
     assert "market.tick" in bus.handlers
     handler = bus.handlers["market.tick"][0]

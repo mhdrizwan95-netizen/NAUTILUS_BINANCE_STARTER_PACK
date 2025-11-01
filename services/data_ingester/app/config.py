@@ -9,8 +9,8 @@ def _split_symbols(raw: str) -> List[str]:
 
 
 class Settings(BaseSettings):
-    LEDGER_DB: str = Field("/shared/manifest.sqlite")
-    DATA_LANDING: str = Field("/data/incoming")
+    LEDGER_DB: str = Field("/ml/manifest.sqlite")
+    DATA_LANDING: str = Field("/ml/incoming")
     EXCHANGE: str = Field("binance")
     SYMBOLS: str = Field("BTC/USDT,ETH/USDT")
     TIMEFRAME: str = Field("1m")

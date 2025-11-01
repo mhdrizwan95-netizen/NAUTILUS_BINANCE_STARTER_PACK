@@ -9,7 +9,9 @@ log = logging.getLogger(__name__)
 _TASKS: Set[asyncio.Task[Any]] = set()
 
 
-def spawn(coro: Coroutine[Any, Any, Any], *, name: Optional[str] = None) -> asyncio.Task[Any]:
+def spawn(
+    coro: Coroutine[Any, Any, Any], *, name: Optional[str] = None
+) -> asyncio.Task[Any]:
     """Create and track an asyncio task, logging exceptions centrally."""
     try:
         loop = asyncio.get_running_loop()
@@ -49,4 +51,8 @@ async def shutdown(cancel_timeout: float = 5.0) -> None:
             continue
         exc = task.exception()
         if exc:
-            log.debug("Background task %r finished with exception during shutdown: %s", task.get_name(), exc)
+            log.debug(
+                "Background task %r finished with exception during shutdown: %s",
+                task.get_name(),
+                exc,
+            )

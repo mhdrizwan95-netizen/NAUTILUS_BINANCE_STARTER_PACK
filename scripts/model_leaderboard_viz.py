@@ -15,6 +15,7 @@ from tabulate import tabulate
 
 REPORTS_DIR = Path("reports")
 
+
 def load_reports() -> pd.DataFrame:
     """Load all backtest reports from reports directory."""
     rows = []
@@ -30,17 +31,21 @@ def load_reports() -> pd.DataFrame:
         raise SystemExit(f"No reports found in {REPORTS_DIR}")
     return pd.DataFrame(rows)
 
+
 def load_equity_csv(json_path: Path) -> pd.DataFrame | None:
     """Load corresponding equity CSV for a JSON report."""
     csv_path = json_path.with_suffix(".csv")
     if not csv_path.exists():
         return None
     try:
-        df = pd.read_csv(csv_path, parse_dates=["date"], date_format="%Y-%m-%d %H:%M:%S")
+        df = pd.read_csv(
+            csv_path, parse_dates=["date"], date_format="%Y-%m-%d %H:%M:%S"
+        )
         return df
     except Exception as e:
         print(f"⚠️ Failed to load equity CSV {csv_path}: {e}", file=os.sys.stderr)
         return None
+
 
 def visualize(metric: str = "sharpe", top: int = 3) -> None:
     """Generate leaderboard and create visualizations."""
@@ -82,7 +87,7 @@ def visualize(metric: str = "sharpe", top: int = 3) -> None:
     # ---- Equity Curves Plot ----
     plt.figure(figsize=(12, 8))
     curve_labels = []
-    colors = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd', '#8c564b']
+    colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b"]
 
     for i, fname in enumerate(top_files):
         json_path = REPORTS_DIR / fname
@@ -95,21 +100,29 @@ def visualize(metric: str = "sharpe", top: int = 3) -> None:
         label = fname.replace("backtest_", "").replace(".json", "")
         curve_labels.append(label)
 
-        plt.plot(equity_df["date"], equity_df["equity_usd"],
-                linewidth=2.5, alpha=0.9, color=color,
-                label=f"{label} ({df_sorted.iloc[i][metric]:.3f})")
+        plt.plot(
+            equity_df["date"],
+            equity_df["equity_usd"],
+            linewidth=2.5,
+            alpha=0.9,
+            color=color,
+            label=f"{label} ({df_sorted.iloc[i][metric]:.3f})",
+        )
 
     if curve_labels:
-        plt.title(f"Equity Curves - Top {len(curve_labels)} Models by {metric.capitalize()}",
-                 fontsize=14, pad=20)
+        plt.title(
+            f"Equity Curves - Top {len(curve_labels)} Models by {metric.capitalize()}",
+            fontsize=14,
+            pad=20,
+        )
         plt.xlabel("Date", fontsize=12)
         plt.ylabel("Equity (USD)", fontsize=12)
-        plt.legend(loc='upper left', fontsize=10)
+        plt.legend(loc="upper left", fontsize=10)
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
 
         equity_plot_path = REPORTS_DIR / f"leaderboard_equity_top{top}_{metric}.png"
-        plt.savefig(equity_plot_path, dpi=150, bbox_inches='tight')
+        plt.savefig(equity_plot_path, dpi=150, bbox_inches="tight")
         print(f"📈 Equity curves saved → {equity_plot_path}")
         plt.close()
 
@@ -119,27 +132,42 @@ def visualize(metric: str = "sharpe", top: int = 3) -> None:
     pnl_data = df_sorted.head(top).copy()
     pnl_files = pnl_data["file"].str.replace("backtest_", "").str.replace(".json", "")
 
-    bars = plt.bar(range(len(pnl_data)), pnl_data["pnl_usd"],
-                  color='#4C72B0', alpha=0.8, edgecolor='black', linewidth=0.5)
+    bars = plt.bar(
+        range(len(pnl_data)),
+        pnl_data["pnl_usd"],
+        color="#4C72B0",
+        alpha=0.8,
+        edgecolor="black",
+        linewidth=0.5,
+    )
 
-    plt.title(f"PnL Comparison - Top {top} Models by {metric.capitalize()}",
-             fontsize=14, pad=20)
+    plt.title(
+        f"PnL Comparison - Top {top} Models by {metric.capitalize()}",
+        fontsize=14,
+        pad=20,
+    )
     plt.xlabel("Model", fontsize=12)
     plt.ylabel("Realized PnL (USD)", fontsize=12)
-    plt.xticks(range(len(pnl_data)), pnl_files, rotation=30, ha='right', fontsize=10)
+    plt.xticks(range(len(pnl_data)), pnl_files, rotation=30, ha="right", fontsize=10)
 
     # Add value labels on bars
     for bar, pnl in zip(bars, pnl_data["pnl_usd"]):
         height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2., height + (abs(height) * 0.02),
-                ".2f",
-                ha='center', va='bottom', fontsize=10, fontweight='bold')
+        plt.text(
+            bar.get_x() + bar.get_width() / 2.0,
+            height + (abs(height) * 0.02),
+            ".2f",
+            ha="center",
+            va="bottom",
+            fontsize=10,
+            fontweight="bold",
+        )
 
-    plt.grid(True, alpha=0.3, axis='y')
+    plt.grid(True, alpha=0.3, axis="y")
     plt.tight_layout()
 
     pnl_plot_path = REPORTS_DIR / f"leaderboard_pnl_top{top}_{metric}.png"
-    plt.savefig(pnl_plot_path, dpi=150, bbox_inches='tight')
+    plt.savefig(pnl_plot_path, dpi=150, bbox_inches="tight")
     print(f"📊 PnL histogram saved → {pnl_plot_path}")
     plt.close()
 
@@ -152,8 +180,11 @@ def visualize(metric: str = "sharpe", top: int = 3) -> None:
     print(".2f")
     print(f"   PnL: ${winner.get('pnl_usd', 0):.2f}")
 
+
 def main():
-    ap = argparse.ArgumentParser(description="Visualize leaderboard with equity curves and PnL")
+    ap = argparse.ArgumentParser(
+        description="Visualize leaderboard with equity curves and PnL"
+    )
     ap.add_argument("--metric", default="sharpe", help="Metric to rank by")
     ap.add_argument("--top", type=int, default=3, help="Number of top models to plot")
     args = ap.parse_args()
@@ -166,6 +197,8 @@ def main():
 
     return 0
 
+
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

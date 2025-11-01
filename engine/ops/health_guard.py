@@ -33,10 +33,14 @@ class SoftBreachGuard:
 
     def __init__(self, router: Any, portfolio: Any | None = None) -> None:
         self.router = router
-        self.portfolio = portfolio or getattr(router, "portfolio_service", lambda: None)()
+        self.portfolio = (
+            portfolio or getattr(router, "portfolio_service", lambda: None)()
+        )
         self.cfg = SoftBreachConfig(
             enabled=env_bool("SOFT_BREACH_ENABLED", True),
-            tighten_mult=max(0.0, min(1.0, env_float("SOFT_BREACH_TIGHTEN_SL_PCT", 0.6))),
+            tighten_mult=max(
+                0.0, min(1.0, env_float("SOFT_BREACH_TIGHTEN_SL_PCT", 0.6))
+            ),
             breakeven_ok=env_bool("SOFT_BREACH_BREAKEVEN_OK", True),
             cancel_entries=env_bool("SOFT_BREACH_CANCEL_ENTRIES", True),
             log_orders=env_bool("SOFT_BREACH_LOG_ORDERS", True),
@@ -58,7 +62,10 @@ class SoftBreachGuard:
         try:
             await BUS.publish(
                 "events.external_feed",
-                {"source": "soft_breach_guard", "payload": {"kind": kind, "details": details}},
+                {
+                    "source": "soft_breach_guard",
+                    "payload": {"kind": kind, "details": details},
+                },
             )
         except Exception:  # noqa: BLE001
             # best-effort emit; guard actions already executed
@@ -115,7 +122,9 @@ class SoftBreachGuard:
             except Exception:  # noqa: BLE001
                 _LOG.exception("SOFT-BREACH: tighten failed for %s", pos.get("symbol"))
 
-    async def _tighten_position(self, pos: Dict[str, Any], orders: Iterable[Dict[str, Any]] | None) -> None:
+    async def _tighten_position(
+        self, pos: Dict[str, Any], orders: Iterable[Dict[str, Any]] | None
+    ) -> None:
         qty = float(pos.get("quantity") or pos.get("qty") or pos.get("qty_base") or 0.0)
         if abs(qty) <= 0:
             return
@@ -131,7 +140,9 @@ class SoftBreachGuard:
             _LOG.info("SOFT-BREACH: %s has no active stop order", symbol)
             return
 
-        current_stop = float(protective.get("stopPrice") or protective.get("price") or 0.0)
+        current_stop = float(
+            protective.get("stopPrice") or protective.get("price") or 0.0
+        )
         if current_stop <= 0:
             return
 
@@ -215,7 +226,10 @@ class SoftBreachGuard:
     @staticmethod
     def _is_entry_order(order: Dict[str, Any]) -> bool:
         meta = order.get("meta") or {}
-        if isinstance(meta, dict) and str(meta.get("kind", "")).lower() in {"entry", "open"}:
+        if isinstance(meta, dict) and str(meta.get("kind", "")).lower() in {
+            "entry",
+            "open",
+        }:
             return True
 
         tag = str(order.get("tag") or order.get("clientOrderId") or "").lower()
@@ -234,7 +248,9 @@ class SoftBreachGuard:
         return True
 
     @staticmethod
-    def _matching_stop(symbol: str, orders: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _matching_stop(
+        symbol: str, orders: Iterable[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
         base = symbol.split(".")[0].upper()
         for order in orders:
             sym = str(order.get("symbol") or "").upper()
@@ -246,7 +262,10 @@ class SoftBreachGuard:
             if _truthy(order.get("reduceOnly")):
                 return order
             meta = order.get("meta")
-            if isinstance(meta, dict) and str(meta.get("kind", "")).lower() in {"stop", "protection"}:
+            if isinstance(meta, dict) and str(meta.get("kind", "")).lower() in {
+                "stop",
+                "protection",
+            }:
                 return order
         return None
 

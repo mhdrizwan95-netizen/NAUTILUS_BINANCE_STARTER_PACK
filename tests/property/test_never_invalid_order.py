@@ -34,7 +34,14 @@ class _StubBinanceClient:
             tick_size=0.0,
         )
 
-    async def submit_market_order(self, symbol: str, side: str, quantity: float, market: str | None = None, reduce_only: bool = False):
+    async def submit_market_order(
+        self,
+        symbol: str,
+        side: str,
+        quantity: float,
+        market: str | None = None,
+        reduce_only: bool = False,
+    ):
         # capture for assertions
         self.last_submitted_qty = float(quantity)
         self.last_symbol = symbol
@@ -49,7 +56,9 @@ class _StubBinanceClient:
 
 @hyp_settings(deadline=None, max_examples=50)
 @given(
-    quote_usd=st.floats(min_value=0.0, max_value=10_000.0, allow_nan=False, allow_infinity=False),
+    quote_usd=st.floats(
+        min_value=0.0, max_value=10_000.0, allow_nan=False, allow_infinity=False
+    ),
     step=st.sampled_from([1e-6, 1e-5, 1e-4, 1e-3]),
     min_qty=st.sampled_from([0.0, 1e-6, 1e-5, 1e-4, 1e-3]),
     min_notional=st.sampled_from([0.0, 5.0, 10.0, 50.0]),
@@ -57,7 +66,9 @@ class _StubBinanceClient:
 def test_never_submit_invalid_size_for_symbol(quote_usd, step, min_qty, min_notional):
     """Property: router never submits a qty below min_qty nor below min_notional."""
     px = 50_000.0  # stable price for BTCUSDT
-    spec = SymbolSpec(min_qty=float(min_qty), step_size=float(step), min_notional=float(min_notional))
+    spec = SymbolSpec(
+        min_qty=float(min_qty), step_size=float(step), min_notional=float(min_notional)
+    )
     client = _StubBinanceClient(px=px, spec=spec)
     set_exchange_client("BINANCE", client)
 
@@ -79,4 +90,3 @@ def test_never_submit_invalid_size_for_symbol(quote_usd, step, min_qty, min_noti
         assert (q * px) >= spec.min_notional - 1e-6
 
     asyncio.run(run())
-

@@ -1,4 +1,5 @@
 """Background tasks feeding Command Center WebSocket streams."""
+
 from __future__ import annotations
 
 import asyncio
@@ -26,34 +27,44 @@ async def price_stream(symbols: Sequence[str], interval: float = 2.0) -> None:
         while True:
             for symbol in upper_symbols:
                 try:
-                    response = await client.get(BINANCE_PRICE_URL, params={"symbol": symbol})
+                    response = await client.get(
+                        BINANCE_PRICE_URL, params={"symbol": symbol}
+                    )
                     response.raise_for_status()
                     payload = response.json()
                     price = float(payload.get("price", 0.0))
-                    await broadcast_price({
-                        "type": "price",
-                        "symbol": symbol,
-                        "price": price,
-                    })
+                    await broadcast_price(
+                        {
+                            "type": "price",
+                            "symbol": symbol,
+                            "price": price,
+                        }
+                    )
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug("price_stream: failed to fetch %s price: %s", symbol, exc)
+                    logger.debug(
+                        "price_stream: failed to fetch %s price: %s", symbol, exc
+                    )
             await asyncio.sleep(interval)
 
 
-async def account_broadcaster(portfolio: PortfolioService, interval: float = 2.0) -> None:
+async def account_broadcaster(
+    portfolio: PortfolioService, interval: float = 2.0
+) -> None:
     while True:
         try:
             snapshot = await portfolio.snapshot()
             if snapshot:
-                await broadcast_account({
-                    "type": "account",
-                    "equity": snapshot.get("equity"),
-                    "cash": snapshot.get("cash"),
-                    "exposure": snapshot.get("exposure"),
-                    "pnl": snapshot.get("pnl", {}),
-                    "positions": snapshot.get("positions", []),
-                    "ts": snapshot.get("ts"),
-                })
+                await broadcast_account(
+                    {
+                        "type": "account",
+                        "equity": snapshot.get("equity"),
+                        "cash": snapshot.get("cash"),
+                        "exposure": snapshot.get("exposure"),
+                        "pnl": snapshot.get("pnl", {}),
+                        "positions": snapshot.get("positions", []),
+                        "ts": snapshot.get("ts"),
+                    }
+                )
         except Exception as exc:  # noqa: BLE001
             logger.debug("account_broadcaster: failed to publish snapshot: %s", exc)
         await asyncio.sleep(interval)

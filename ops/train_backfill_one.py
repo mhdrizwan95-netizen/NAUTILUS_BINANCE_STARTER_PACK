@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess as sp
-import sys
 import datetime as dt
 from pathlib import Path
 from typing import Dict, List
@@ -79,20 +77,28 @@ def main() -> None:
     run(f'python adapters/binance_hist.py --symbols "{syms_arg}" --day "{day_str}"')
 
     # Step 2: Build features (uses --range day..day)
-    run(f'python pipeline/build_features.py --symbols "{syms_arg}" --range "{day_str}..{day_str}"')
+    run(
+        f'python pipeline/build_features.py --symbols "{syms_arg}" --range "{day_str}..{day_str}"'
+    )
 
     # Step 3: Replay situations
-    run(f'python pipeline/replay_situations.py --symbols "{syms_arg}" --range "{day_str}..{day_str}"')
+    run(
+        f'python pipeline/replay_situations.py --symbols "{syms_arg}" --range "{day_str}..{day_str}"'
+    )
 
     # Step 4: Simulate
-    run(f'python pipeline/sim_exec.py --symbols "{syms_arg}" --range "{day_str}..{day_str}" --model quarantine')
+    run(
+        f'python pipeline/sim_exec.py --symbols "{syms_arg}" --range "{day_str}..{day_str}" --model quarantine'
+    )
 
     # Step 5: Seed live learner: post each outcome row to situations /feedback/outcome
     endpoint = os.getenv("SITU_ENDPOINT", "http://situations:8011/feedback/outcome")
     for s in symbols:
         out_file = ROOT / f"data/outcomes/{s}_{day_str}.parquet"
         if out_file.exists():
-            run(f'python pipeline/seed_feedback_api.py --hits "{out_file}" --endpoint "{endpoint}" || true')
+            run(
+                f'python pipeline/seed_feedback_api.py --hits "{out_file}" --endpoint "{endpoint}" || true'
+            )
 
     # Step 6: Cleanup the day to save disk
     cleanup_day(day, symbols)

@@ -46,3 +46,27 @@ scrape_configs:
   static_configs:
   - targets:
       - hmm_executor:9102
+
+- job_name: ml_service
+  scrape_interval: 15s
+  static_configs:
+  - targets:
+      - hmm_ml_service:8000
+    labels:
+      team: ml
+
+- job_name: data_ingester
+  scrape_interval: 30s
+  static_configs:
+  - targets:
+      - hmm_data_ingester:8001
+    labels:
+      team: data
+
+- job_name: param_controller
+  scrape_interval: 30s
+  static_configs:
+  - targets:
+      - hmm_param_controller:8002
+    labels:
+      team: ml

@@ -1,5 +1,6 @@
-import os, importlib, json
-from fastapi.testclient import TestClient
+import os
+import importlib
+
 
 def test_hmm_loop_respects_cooldown(monkeypatch):
     os.environ["STRATEGY_ENABLED"] = "true"
@@ -9,12 +10,17 @@ def test_hmm_loop_respects_cooldown(monkeypatch):
     os.environ["COOLDOWN_SEC"] = "9999"  # very long cooldown to test
     # Stub model
     from engine.strategies import policy_hmm as hmm
+
     def fake_model():
         class M:
-            def predict_proba(self, X): return [[0.7, 0.2, 0.1]]
+            def predict_proba(self, X):
+                return [[0.7, 0.2, 0.1]]
+
         return M()
+
     hmm._model = fake_model()
     from engine import strategy
+
     importlib.reload(strategy)
     # Reset HMM state for test
     hmm._prices.clear()
@@ -27,4 +33,4 @@ def test_hmm_loop_respects_cooldown(monkeypatch):
     hmm.ingest_tick("BTCUSDT", 50002, 1)
     # Only first decide() call should return a decision
     assert hmm.decide("BTCUSDT") is not None  # first call succeeds
-    assert hmm.decide("BTCUSDT") is None      # subsequent calls blocked by cooldown
+    assert hmm.decide("BTCUSDT") is None  # subsequent calls blocked by cooldown

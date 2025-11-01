@@ -63,7 +63,11 @@ def on_binance_listing(router):
     MIN_NOTIONAL_1M = _as_float(os.getenv("MIN_NOTIONAL_1M_USD", "500000"), 500000.0)
     HALF_MIN = int(_as_float(os.getenv("EVENT_BREAKOUT_HALF_SIZE_MINUTES", "5"), 5))
 
-    allowed_sources = {"binance_announcements", "binance_listings", "listing_sniper_bridge"}
+    allowed_sources = {
+        "binance_announcements",
+        "binance_listings",
+        "listing_sniper_bridge",
+    }
 
     async def handler(evt: Dict[str, Any]):
         if not isinstance(evt, dict):
@@ -96,6 +100,7 @@ def on_binance_listing(router):
             # fail closed if no data
             try:
                 from engine import metrics as MET
+
                 MET.event_bo_skips_total.labels(reason="no_klines", symbol=sym).inc()
             except Exception:
                 pass
@@ -103,6 +108,7 @@ def on_binance_listing(router):
         if metrics["chg_30m"] >= LATE_CHASE:
             try:
                 from engine import metrics as MET
+
                 MET.event_bo_skips_total.labels(reason="late_chase", symbol=sym).inc()
             except Exception:
                 pass
@@ -110,6 +116,7 @@ def on_binance_listing(router):
         if metrics["spread_pct"] >= MAX_SPREAD:
             try:
                 from engine import metrics as MET
+
                 MET.event_bo_skips_total.labels(reason="spread", symbol=sym).inc()
             except Exception:
                 pass
@@ -117,6 +124,7 @@ def on_binance_listing(router):
         if metrics["notional_1m"] < MIN_NOTIONAL_1M:
             try:
                 from engine import metrics as MET
+
                 MET.event_bo_skips_total.labels(reason="notional", symbol=sym).inc()
             except Exception:
                 pass
@@ -143,13 +151,20 @@ def on_binance_listing(router):
 
         # Relay with meta sizing hint
         from engine.core.event_bus import BUS
+
         try:
             from engine import metrics as MET
-            MET.event_bo_plans_total.labels(venue="BINANCE", symbol=sym, dry="true").inc()
+
+            MET.event_bo_plans_total.labels(
+                venue="BINANCE", symbol=sym, dry="true"
+            ).inc()
             if half:
                 MET.event_bo_half_size_applied_total.labels(symbol=sym).inc()
         except Exception:
             pass
-        await BUS.publish("strategy.event_breakout", {"symbol": sym, "reason": "binance_listing", "half_size": bool(half)})
+        await BUS.publish(
+            "strategy.event_breakout",
+            {"symbol": sym, "reason": "binance_listing", "half_size": bool(half)},
+        )
 
     return handler

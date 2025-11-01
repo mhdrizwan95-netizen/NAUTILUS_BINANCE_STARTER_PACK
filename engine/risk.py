@@ -7,7 +7,7 @@ import collections
 from collections import deque, defaultdict
 from typing import Any, Callable, Deque, Dict, Literal, Optional
 
-from .config import RiskConfig, load_risk_config
+from .config import RiskConfig
 from .core.market_resolver import resolve_market_choice
 from .metrics import (
     breaker_rejections,
@@ -23,18 +23,22 @@ from .metrics import (
     risk_exposure_headroom_usd,
 )
 
+
 class RiskError(Exception):
     def __init__(self, code: str, message: str):
         self.code = code
         self.message = message
         super().__init__(message)
 
+
 Side = Literal["BUY", "SELL"]
+
 
 class OrderRateLimiter:
     """
     Per-minute sliding window rate limiter across all symbols.
     """
+
     def __init__(self, max_per_min: int):
         self.max_per_min = max_per_min
         self.events: Deque[float] = deque()
@@ -48,6 +52,7 @@ class OrderRateLimiter:
             return False
         self.events.append(now)
         return True
+
 
 class RiskRails:
     def __init__(self, cfg: RiskConfig):
@@ -94,7 +99,7 @@ class RiskRails:
             return False, {
                 "error": "TRADING_DISABLED",
                 "message": "Trading is disabled by configuration.",
-                "hint": "Set TRADING_ENABLED=true to enable."
+                "hint": "Set TRADING_ENABLED=true to enable.",
             }
 
         # Symbol allowlist (USDT universe)
@@ -111,6 +116,7 @@ class RiskRails:
         # Symbol quarantine (soft gate): two recent stops -> temporary block
         try:
             from . import risk_quarantine as _rq  # lazy import to avoid cycles
+
             q, remain = _rq.is_quarantined(symbol)
         except Exception:
             q, remain = (False, 0.0)
@@ -122,7 +128,9 @@ class RiskRails:
             }
 
         # Exactly one of quote or quantity
-        if (quote is None and quantity is None) or (quote is not None and quantity is not None):
+        if (quote is None and quantity is None) or (
+            quote is not None and quantity is not None
+        ):
             return False, {
                 "error": "ORDER_SHAPE_INVALID",
                 "message": "Specify exactly one of {'quote','quantity'}.",
@@ -163,9 +171,12 @@ class RiskRails:
             exch_fn = getattr(router_mod, "exchange_client", None)
             if callable(exch_fn):
                 client = exch_fn()
-            get_price = getattr(client, "get_last_price", None) if client is not None else None
+            get_price = (
+                getattr(client, "get_last_price", None) if client is not None else None
+            )
 
             if callable(get_price):
+
                 def _price_lookup(sym: str) -> float:
                     try:
                         res = get_price(sym)
@@ -214,7 +225,9 @@ class RiskRails:
             except Exception:
                 return 0.0
 
-        base_symbol = symbol_base if symbol_base.endswith("USD") else f"{symbol_base}USD"
+        base_symbol = (
+            symbol_base if symbol_base.endswith("USD") else f"{symbol_base}USD"
+        )
         primary_lookup = symbol if "." in symbol else f"{symbol_base}.BINANCE"
         last_price = _resolve_price(primary_lookup)
         if last_price == 0.0:
@@ -222,11 +235,21 @@ class RiskRails:
 
         qty = float(quantity) if quantity else 0.0
         quote_amt = float(quote) if quote else 0.0
+        if quote_amt <= 0 and qty > 0 and last_price <= 0:
+            breaker_rejections.inc()
+            return False, {
+                "error": "PRICE_UNAVAILABLE",
+                "message": f"Unable to price {symbol} for risk checks; retry when market data is available.",
+            }
         side_mult = 1.0 if side.upper() == "BUY" else -1.0
-        delta_signed = side_mult * (quote_amt if quote_amt else qty * float(last_price or 0.0))
+        delta_signed = side_mult * (
+            quote_amt if quote_amt else qty * float(last_price or 0.0)
+        )
 
         raw_positions = snap.get("positions") if isinstance(snap, dict) else None
-        positions = list(raw_positions) if isinstance(raw_positions, (list, tuple)) else []
+        positions = (
+            list(raw_positions) if isinstance(raw_positions, (list, tuple)) else []
+        )
         sym_expo = 0.0
         total_expo = 0.0
         venue_exposures: Dict[str, float] = defaultdict(float)
@@ -240,7 +263,9 @@ class RiskRails:
                 if not pos_symbol:
                     continue
                 pos_base = pos_symbol.split(".")[0]
-                pos_venue = pos_symbol.split(".")[1].upper() if "." in pos_symbol else "BINANCE"
+                pos_venue = (
+                    pos_symbol.split(".")[1].upper() if "." in pos_symbol else "BINANCE"
+                )
                 qty_base = float(pos.get("qty_base", 0.0) or 0.0)
                 mark_px = pos.get("last_price_quote")
                 if not mark_px:
@@ -282,13 +307,21 @@ class RiskRails:
             }
 
         if resolved_market == "margin" and self.cfg.margin_enabled:
-            margin_level_val = self._sanitize_float(getattr(portfolio_state, "margin_level", None))
-            if margin_level_val is not None and margin_level_val > 0 and margin_level_val < self.cfg.margin_min_level:
+            margin_level_val = self._sanitize_float(
+                getattr(portfolio_state, "margin_level", None)
+            )
+            if (
+                margin_level_val is not None
+                and margin_level_val > 0
+                and margin_level_val < self.cfg.margin_min_level
+            ):
                 return False, {
                     "error": "MARGIN_LEVEL_LOW",
                     "message": f"Margin level {margin_level_val:.2f} below configured floor {self.cfg.margin_min_level:.2f}",
                 }
-            margin_liability_val = self._sanitize_float(getattr(portfolio_state, "margin_liability_usd", None))
+            margin_liability_val = self._sanitize_float(
+                getattr(portfolio_state, "margin_liability_usd", None)
+            )
             if (
                 self.cfg.margin_max_liability_usd > 0
                 and margin_liability_val is not None
@@ -298,7 +331,9 @@ class RiskRails:
                     "error": "MARGIN_LIABILITY_LIMIT",
                     "message": f"Cross-margin liability {margin_liability_val:.2f} exceeds limit {self.cfg.margin_max_liability_usd:.2f}",
                 }
-            equity_val = self._sanitize_float(getattr(portfolio_state, "equity", None)) or 0.0
+            equity_val = (
+                self._sanitize_float(getattr(portfolio_state, "equity", None)) or 0.0
+            )
             max_leverage = max(self.cfg.margin_max_leverage, 0.0)
             if max_leverage > 0 and equity_val > 0:
                 current_abs_expo = abs(sym_expo)
@@ -333,11 +368,15 @@ class RiskRails:
     class SnapshotMetricsState:
         __slots__ = ("breaker_active", "breaker_payload")
 
-        def __init__(self, breaker_active: bool, breaker_payload: dict[str, Any] | None = None) -> None:
+        def __init__(
+            self, breaker_active: bool, breaker_payload: dict[str, Any] | None = None
+        ) -> None:
             self.breaker_active = breaker_active
             self.breaker_payload = breaker_payload or {}
 
-    def refresh_snapshot_metrics(self, snap: dict[str, Any] | None, venue: str | None = None) -> "RiskRails.SnapshotMetricsState":
+    def refresh_snapshot_metrics(
+        self, snap: dict[str, Any] | None, venue: str | None = None
+    ) -> "RiskRails.SnapshotMetricsState":
         """Refresh risk gauges from a portfolio snapshot.
 
         Snapshot contract (best-effort):
@@ -390,7 +429,9 @@ class RiskRails:
             if floor_breach or drawdown_breach:
                 breaker_active = True
                 self._equity_breaker_active = True
-                self._equity_breaker_until = max(self._equity_breaker_until, now + self.cfg.equity_cooldown_sec)
+                self._equity_breaker_until = max(
+                    self._equity_breaker_until, now + self.cfg.equity_cooldown_sec
+                )
                 try:
                     risk_equity_floor_breach.set(1)
                 except Exception:
@@ -418,7 +459,9 @@ class RiskRails:
                 except Exception:
                     pass
 
-        return RiskRails.SnapshotMetricsState(breaker_active=breaker_active, breaker_payload=breaker_payload)
+        return RiskRails.SnapshotMetricsState(
+            breaker_active=breaker_active, breaker_payload=breaker_payload
+        )
 
     def _extract_equity(self, snap: dict[str, Any] | None) -> Optional[float]:
         snap_dict = snap if isinstance(snap, dict) else None
@@ -472,7 +515,9 @@ class RiskRails:
         except Exception:
             pass
 
-    def _update_exposures_from_snapshot(self, snap: dict[str, Any] | None, venue_default: str | None) -> None:
+    def _update_exposures_from_snapshot(
+        self, snap: dict[str, Any] | None, venue_default: str | None
+    ) -> None:
         if not isinstance(snap, dict):
             if venue_default is not None:
                 self._update_exposure_gauges({venue_default: 0.0})
@@ -492,8 +537,10 @@ class RiskRails:
             if not isinstance(symbol_raw, str) or not symbol_raw:
                 continue
             parts = symbol_raw.split(".")
-            pos_base = parts[0]
-            pos_venue = (parts[1] if len(parts) > 1 else venue_default or "binance").lower()
+            parts[0]
+            pos_venue = (
+                parts[1] if len(parts) > 1 else venue_default or "binance"
+            ).lower()
             qty = self._sanitize_float(pos.get("qty_base")) or 0.0
             last_px = self._sanitize_float(pos.get("last_price_quote"))
             if last_px is None:
@@ -568,12 +615,18 @@ class RiskRails:
     def check_breaker(self):
         """Check if circuit breaker is tripped."""
         if self._breaker_tripped:
-            raise RiskError("VENUE_BREAKER_OPEN", "Venue error-rate breaker is open; strategy paused.")
+            raise RiskError(
+                "VENUE_BREAKER_OPEN",
+                "Venue error-rate breaker is open; strategy paused.",
+            )
         if self._equity_breaker_active:
             now = time.time()
             if now < self._equity_breaker_until:
                 remaining = self._equity_breaker_until - now
-                raise RiskError("EQUITY_BREAKER_OPEN", f"Equity breaker cooling down ({remaining:.0f}s remaining)")
+                raise RiskError(
+                    "EQUITY_BREAKER_OPEN",
+                    f"Equity breaker cooling down ({remaining:.0f}s remaining)",
+                )
             # Cooldown expired but equity breaker still flagged; reset.
             self._equity_breaker_active = False
             try:
@@ -604,6 +657,7 @@ class RiskRails:
 def _trading_disabled_via_flag() -> bool:
     try:
         import os
+
         path = "state/trading_enabled.flag"
         if not os.path.exists(path):
             return False

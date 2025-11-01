@@ -1,7 +1,7 @@
-
 import numpy as np
-from typing import Dict, Any, List, Tuple
+
 # Simple per-preset linear bandit with Thompson Sampling using ridge posterior.
+
 
 class LinTS:
     def __init__(self, d: int, l2: float = 1.0):

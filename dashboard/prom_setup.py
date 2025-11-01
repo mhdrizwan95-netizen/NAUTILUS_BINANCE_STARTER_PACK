@@ -1,6 +1,7 @@
 import os, pathlib
 from prometheus_client import CollectorRegistry, multiprocess, REGISTRY
 
+
 def get_registry():
     mp = os.getenv("PROMETHEUS_MULTIPROC_DIR")
     if mp:

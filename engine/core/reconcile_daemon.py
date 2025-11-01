@@ -4,10 +4,10 @@ State Synchronization & Recovery Layer.
 Maintains fidelity between local OMS state and live venue truth.
 Reconciles discrepancies automatically on boot and continuously during runtime.
 """
+
 import asyncio
 import logging
-from typing import Dict, List, Any, Optional
-import time
+from typing import Dict, Any
 
 from .oms_store import OMSStore
 from .venues import list_venues, get_venue
@@ -15,9 +15,15 @@ from .oms_models import OrderRecord, new_order_id
 from ..metrics import REGISTRY
 
 _oms = OMSStore()
-_reconcile_runs = REGISTRY.metric("reconcile_runs_total", "Total reconciliation runs", "counter")
-_reconcile_imported = REGISTRY.metric("reconcile_imported_total", "Orders imported during reconciliation", "counter")
-_reconcile_closed = REGISTRY.metric("reconcile_closed_total", "Orders closed during reconciliation", "counter")
+_reconcile_runs = REGISTRY.metric(
+    "reconcile_runs_total", "Total reconciliation runs", "counter"
+)
+_reconcile_imported = REGISTRY.metric(
+    "reconcile_imported_total", "Orders imported during reconciliation", "counter"
+)
+_reconcile_closed = REGISTRY.metric(
+    "reconcile_closed_total", "Orders closed during reconciliation", "counter"
+)
 
 
 async def reconcile_loop(interval: int = 30) -> None:
@@ -60,7 +66,9 @@ async def _perform_reconciliation() -> None:
                 remote_orders = ven_client.list_open_orders()
 
                 # Create lookup maps
-                remote_by_id = {str(order["order_id"]): order for order in remote_orders}
+                remote_by_id = {
+                    str(order["order_id"]): order for order in remote_orders
+                }
 
                 # Process local orders for this venue
                 for order_rec in local_open:
@@ -75,8 +83,10 @@ async def _perform_reconciliation() -> None:
                     else:
                         # Try to find by symbol/side match (more heuristic)
                         for remote in remote_orders:
-                            if (remote.get("symbol") == order_rec.symbol.split(".")[0] and
-                                remote.get("side") == order_rec.side):
+                            if (
+                                remote.get("symbol") == order_rec.symbol.split(".")[0]
+                                and remote.get("side") == order_rec.side
+                            ):
                                 remote_match = remote
                                 break
 
@@ -84,11 +94,16 @@ async def _perform_reconciliation() -> None:
                         # Local order missing remotely - likely filled or canceled
                         _oms.close(order_rec.id, "FILLED")  # Assume filled for safety
                         _reconcile_closed.inc()
-                        logging.info("[SYNC] Closed %s (missing remotely)", order_rec.symbol)
+                        logging.info(
+                            "[SYNC] Closed %s (missing remotely)", order_rec.symbol
+                        )
 
                 # Check for remote orders not in local OMS (import them)
-                local_venue_orders = {ord.venue_order_id: ord for ord in local_open
-                                     if ord.symbol.split(".")[1] == venue}
+                local_venue_orders = {
+                    ord.venue_order_id: ord
+                    for ord in local_open
+                    if ord.symbol.split(".")[1] == venue
+                }
 
                 for remote_order in remote_orders:
                     remote_id = str(remote_order["order_id"])
@@ -97,7 +112,9 @@ async def _perform_reconciliation() -> None:
                         await _import_remote_order(remote_order, venue)
 
             except Exception as ven_e:
-                logging.warning("[SYNC] Venue %s reconciliation failed: %s", venue, ven_e)
+                logging.warning(
+                    "[SYNC] Venue %s reconciliation failed: %s", venue, ven_e
+                )
 
         # Persist updated OMS state
         _oms._persist()
@@ -140,18 +157,25 @@ async def _import_remote_order(remote_order: Dict[str, Any], venue: str) -> None
             status=remote_order.get("status", "NEW").upper(),
             venue_order_id=str(remote_order["order_id"]),
             filled_qty=executed_qty,
-            avg_fill_price=float(remote_order.get("avg_fill_price", 0.0)) or None
+            avg_fill_price=float(remote_order.get("avg_fill_price", 0.0)) or None,
         )
 
         _oms.upsert(record, "SYNC_IMPORT")
         _reconcile_imported.inc()
 
-        logging.info("[SYNC] Imported remote order: %s (%s) for %s",
-                    remote_order["order_id"], record.side, symbol)
+        logging.info(
+            "[SYNC] Imported remote order: %s (%s) for %s",
+            remote_order["order_id"],
+            record.side,
+            symbol,
+        )
 
     except Exception as e:
-        logging.error("[SYNC] Failed to import remote order %s: %s",
-                     remote_order.get("order_id"), e)
+        logging.error(
+            "[SYNC] Failed to import remote order %s: %s",
+            remote_order.get("order_id"),
+            e,
+        )
 
 
 async def reconcile_once() -> Dict[str, int]:
@@ -171,7 +195,7 @@ async def reconcile_once() -> Dict[str, int]:
 
     return {
         "imported": int(after_imported - before_imported),
-        "closed": int(after_closed - before_closed)
+        "closed": int(after_closed - before_closed),
     }
 
 

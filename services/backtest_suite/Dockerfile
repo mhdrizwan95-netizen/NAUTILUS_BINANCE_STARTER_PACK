@@ -18,11 +18,11 @@ RUN pip install --upgrade pip && pip install -c /constraints.txt -r requirements
 COPY services/backtest_suite/app ./app
 COPY services/common /app/common
 
-ENV LEDGER_DB=/shared/manifest.sqlite     RESEARCH_DIR=/research     DATA_INCOMING=/data/incoming     ML_SERVICE=http://ml_service:8000     PARAM_CONTROLLER=http://param_controller:8002     LOG_LEVEL=INFO
+ENV LEDGER_DB=/research/manifest.sqlite     RESEARCH_DIR=/research     DATA_INCOMING=/research/incoming     ML_SERVICE=http://ml_service:8000     PARAM_CONTROLLER=http://param_controller:8002     LOG_LEVEL=INFO
 
 # Run as non-root user
 RUN useradd -m appuser \
-    && mkdir -p /research /data /shared \
+    && mkdir -p /research /research/incoming /data /shared \
     && chown -R appuser:appuser /app /research /data /shared
 USER appuser
 

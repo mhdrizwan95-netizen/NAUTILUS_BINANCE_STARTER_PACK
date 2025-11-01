@@ -27,7 +27,9 @@ class UniverseStore:
     def merge(self, listed: list[str], ranks: dict) -> None:
         now = int(time.time())
         for s in listed:
-            ent = self.state.get(s, {"bucket": "quarantine", "first_seen": now, "stats": {}})
+            ent = self.state.get(
+                s, {"bucket": "quarantine", "first_seen": now, "stats": {}}
+            )
             ent["stats"].update(ranks.get(s, {}))
             self.state[s] = ent
         # retire missing
@@ -38,8 +40,10 @@ class UniverseStore:
 
     def promote_demote(self) -> None:
         for s, ent in self.state.items():
-            stats = ent.get("stats", {})
-            age_hours = (int(time.time()) - ent.get("first_seen", int(time.time()))) / 3600.0
+            ent.get("stats", {})
+            age_hours = (
+                int(time.time()) - ent.get("first_seen", int(time.time()))
+            ) / 3600.0
             if ent.get("bucket") == "quarantine" and age_hours >= 6:
                 ent["bucket"] = "candidate"
         self.save()

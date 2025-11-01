@@ -1,4 +1,4 @@
-from engine.risk_var import estimate_var_usd, sort_positions_by_var_desc
+from engine.risk_var import sort_positions_by_var_desc
 
 
 class P:
@@ -28,4 +28,3 @@ def test_var_atr_fallback():
     ranked = sort_positions_by_var_desc([p3, p4], MD())
     # Both compute to 10; order can be either but both should be top two
     assert {ranked[0].symbol, ranked[1].symbol} == {"CCCUSDT", "DDUSDT"}
-

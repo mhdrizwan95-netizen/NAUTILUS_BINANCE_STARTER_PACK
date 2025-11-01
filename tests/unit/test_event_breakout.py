@@ -45,21 +45,28 @@ class _RouterStub:
 @pytest.mark.asyncio
 async def test_event_breakout_half_size_logs(caplog):
     caplog.set_level(logging.INFO)
-    cfg = BreakoutConfig(enabled=True, dry_run=True, size_usd=120.0, half_size_minutes=5)
+    cfg = BreakoutConfig(
+        enabled=True, dry_run=True, size_usd=120.0, half_size_minutes=5
+    )
     md = _MD(price=10.0, quote_last=600000.0, spread_bps=60.0, ch30=0.0)
     router = _RouterStub()
     bo = EventBreakout(router, md=md, cfg=cfg)
     now_ms = time_ms()
     await bo.on_event({"symbol": "ABCUSDT", "time": now_ms})
     # Look for notional=$60 in logs
-    assert any("[EVENT-BO:DRY] ABCUSDT" in r.message and "notional=$60" in r.message for r in caplog.records)
+    assert any(
+        "[EVENT-BO:DRY] ABCUSDT" in r.message and "notional=$60" in r.message
+        for r in caplog.records
+    )
 
 
 @pytest.mark.asyncio
 async def test_event_breakout_guardrails_late_chase(caplog):
     caplog.set_level(logging.INFO)
     cfg = BreakoutConfig(enabled=True, dry_run=True)
-    md = _MD(price=10.0, quote_last=600000.0, spread_bps=20.0, ch30=0.25)  # 25% 30m change
+    md = _MD(
+        price=10.0, quote_last=600000.0, spread_bps=20.0, ch30=0.25
+    )  # 25% 30m change
     router = _RouterStub()
     bo = EventBreakout(router, md=md, cfg=cfg)
     await bo.on_event({"symbol": "XYZUSDT", "time": time_ms()})
@@ -69,5 +76,5 @@ async def test_event_breakout_guardrails_late_chase(caplog):
 
 def time_ms():
     import time as _t
-    return int(_t.time() * 1000)
 
+    return int(_t.time() * 1000)

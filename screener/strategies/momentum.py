@@ -1,4 +1,5 @@
 """Momentum breakout screener aligned with the event-driven lifecycle."""
+
 from __future__ import annotations
 
 from typing import Any, Mapping, MutableMapping, Optional, Sequence
@@ -52,7 +53,11 @@ class MomentumBreakoutScreener(StrategyScreener):
             return None
         if depth < 200_000.0:
             return None
-        score = move_15 * 420.0 + max(0.0, long_term * 220.0) + max(0.0, vol_boost - 1.0) * 30.0
+        score = (
+            move_15 * 420.0
+            + max(0.0, long_term * 220.0)
+            + max(0.0, vol_boost - 1.0) * 30.0
+        )
         ctx_payload: MutableMapping[str, Any] = {
             "r15_pct": round(move_15 * 100.0, 3),
             "r60_pct": round(long_term * 100.0, 3),
@@ -62,11 +67,24 @@ class MomentumBreakoutScreener(StrategyScreener):
         context = freeze_mapping(ctx_payload)
         last_px = float(features.get("last", 0.0))
         avg_true_range = atr(klines, length=10) or 0.0
-        stop = round(last_px - max(last_px * 0.008, avg_true_range * 1.2), 6) if last_px else None
-        target = round(last_px + max(last_px * 0.02, avg_true_range * 2.5), 6) if last_px else None
+        stop = (
+            round(last_px - max(last_px * 0.008, avg_true_range * 1.2), 6)
+            if last_px
+            else None
+        )
+        target = (
+            round(last_px + max(last_px * 0.02, avg_true_range * 2.5), 6)
+            if last_px
+            else None
+        )
         confidence = confidence_from_score(score, scale=500.0)
         breakout = swing_high(klines, 12)
-        metadata = freeze_mapping({**dict(context), **({"breakout_level": round(breakout, 6)} if breakout else {})})
+        metadata = freeze_mapping(
+            {
+                **dict(context),
+                **({"breakout_level": round(breakout, 6)} if breakout else {}),
+            }
+        )
         signal = StrategySignal(
             strategy_id=self.strategy_id,
             symbol=symbol,

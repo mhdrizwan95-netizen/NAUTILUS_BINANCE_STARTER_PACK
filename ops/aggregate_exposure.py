@@ -1,15 +1,16 @@
 # ops/aggregate_exposure.py
 from __future__ import annotations
 import os, math, asyncio
-from typing import Dict, List, Tuple
+from typing import Dict, List
 import httpx
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 from ops.env import engine_endpoints
 
+
 @dataclass
 class Position:
-    symbol: str          # "BTCUSDT.BINANCE" | "AAPL.IBKR"
+    symbol: str  # "BTCUSDT.BINANCE" | "AAPL.IBKR"
     qty_base: float
     last_price_usd: float
 
@@ -17,17 +18,25 @@ class Position:
     def exposure_usd(self) -> float:
         return float(self.qty_base) * float(self.last_price_usd)
 
+
 @dataclass
 class AggregateExposure:
-    by_symbol: Dict[str, Dict]   # symbol → {qty_base, last_price_usd, exposure_usd}
-    totals: Dict[str, float]     # {"exposure_usd": x, "count": n, "venues": m}
+    by_symbol: Dict[str, Dict]  # symbol → {qty_base, last_price_usd, exposure_usd}
+    totals: Dict[str, float]  # {"exposure_usd": x, "count": n, "venues": m}
+
 
 def _parse_endpoints(raw: str | None) -> List[str]:
     parsed = [p.strip().rstrip("/") for p in (raw or "").split(",") if p.strip()]
     return parsed or engine_endpoints()
 
+
 def _venue_from_symbol(symbol: str) -> str:
-    return symbol.split(".")[1].upper() if "." in symbol else ("BINANCE" if symbol.endswith("USDT") else "IBKR")
+    return (
+        symbol.split(".")[1].upper()
+        if "." in symbol
+        else ("BINANCE" if symbol.endswith("USDT") else "IBKR")
+    )
+
 
 def _symbol_key(sym: str) -> str:
     # Normalize to "BASE.VENUE" (e.g., "BTCUSDT.BINANCE", "AAPL.IBKR")
@@ -37,6 +46,7 @@ def _symbol_key(sym: str) -> str:
     base = sym.upper()
     return f"{base}.BINANCE" if base.endswith("USDT") else f"{base}.IBKR"
 
+
 async def _fetch_portfolio(client: httpx.AsyncClient, base_url: str) -> dict:
     try:
         r = await client.get(f"{base_url.rstrip('/')}/portfolio", timeout=5.0)
@@ -44,6 +54,7 @@ async def _fetch_portfolio(client: httpx.AsyncClient, base_url: str) -> dict:
         return r.json()
     except Exception:
         return {}
+
 
 def _price_from_port_pos(p: dict) -> float | None:
     # try common fields
@@ -53,12 +64,15 @@ def _price_from_port_pos(p: dict) -> float | None:
             return float(v)
     return None
 
+
 def _maybe_fill_price_from_ibkr(symbol: str) -> float | None:
     import sys
+
     module = sys.modules.get("ops.ibkr_prices")
     if module is None:
         try:
             from importlib import import_module
+
             module = import_module("ops.ibkr_prices")
         except Exception:
             return None
@@ -74,17 +88,25 @@ def _maybe_fill_price_from_ibkr(symbol: str) -> float | None:
     except Exception:
         return None
 
-async def aggregate_exposure(engine_endpoints_env: str | None = None,
-                             include_watchlist_env: str | None = None) -> AggregateExposure:
+
+async def aggregate_exposure(
+    engine_endpoints_env: str | None = None, include_watchlist_env: str | None = None
+) -> AggregateExposure:
     endpoints = _parse_endpoints(engine_endpoints_env)
-    watchlist = [s.strip().upper() for s in (include_watchlist_env or os.getenv("OPS_IBKR_TICKERS", "")).split(",") if s.strip()]
+    watchlist = [
+        s.strip().upper()
+        for s in (include_watchlist_env or os.getenv("OPS_IBKR_TICKERS", "")).split(",")
+        if s.strip()
+    ]
 
     by_symbol: Dict[str, Position] = {}
     venue_set = set()
 
     limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
     async with httpx.AsyncClient(limits=limits, trust_env=True) as client:
-        results = await asyncio.gather(*[_fetch_portfolio(client, e) for e in endpoints], return_exceptions=True)
+        results = await asyncio.gather(
+            *[_fetch_portfolio(client, e) for e in endpoints], return_exceptions=True
+        )
 
     for res in results:
         if not isinstance(res, dict):
@@ -110,14 +132,18 @@ async def aggregate_exposure(engine_endpoints_env: str | None = None,
                 if last and not pos.last_price_usd:
                     pos.last_price_usd = float(last)
             else:
-                by_symbol[sym] = Position(symbol=sym, qty_base=qty, last_price_usd=float(last or 0.0))
+                by_symbol[sym] = Position(
+                    symbol=sym, qty_base=qty, last_price_usd=float(last or 0.0)
+                )
 
     # Add watchlist symbols (qty 0) so they appear in exposure heatmap with live IBKR prices
     for base in watchlist:
         sym = _symbol_key(base if "." in base else f"{base}.IBKR")
         if sym not in by_symbol:
             last = _maybe_fill_price_from_ibkr(sym) or 0.0
-            by_symbol[sym] = Position(symbol=sym, qty_base=0.0, last_price_usd=float(last))
+            by_symbol[sym] = Position(
+                symbol=sym, qty_base=0.0, last_price_usd=float(last)
+            )
 
     # Build output
     out_map: Dict[str, Dict] = {}

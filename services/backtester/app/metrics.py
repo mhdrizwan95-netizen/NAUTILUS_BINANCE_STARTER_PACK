@@ -1,5 +1,6 @@
-
 import numpy as np
+
+
 def summarize(trades):
     if not trades:
         return {"net_pnl": 0.0, "sharpe": 0.0, "max_dd": 0.0, "n": 0}

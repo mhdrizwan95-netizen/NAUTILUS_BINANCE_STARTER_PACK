@@ -187,4 +187,6 @@ class ScalpBracketManager:
         try:
             await self._exit_callback(payload)
         except Exception:
-            self._log.warning("[SCALP] exit submission failed for %s", symbol, exc_info=True)
+            self._log.warning(
+                "[SCALP] exit submission failed for %s", symbol, exc_info=True
+            )

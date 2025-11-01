@@ -8,12 +8,17 @@ ALLOC_BETA = 0.2
 ALLOC_SMOOTH = 0.5
 
 alloc_weight_g = Gauge("alloc_weight", "Normalized weight per model", ["model"])
-alloc_usd_g    = Gauge("alloc_usd", "Allocated USD per model", ["model"])
+alloc_usd_g = Gauge("alloc_usd", "Allocated USD per model", ["model"])
+
 
 class Allocator:
-    def __init__(self, total_usd: float = TOTAL_ALLOC_USD,
-                 alpha: float = ALLOC_ALPHA, beta: float = ALLOC_BETA,
-                 smooth: float = ALLOC_SMOOTH):
+    def __init__(
+        self,
+        total_usd: float = TOTAL_ALLOC_USD,
+        alpha: float = ALLOC_ALPHA,
+        beta: float = ALLOC_BETA,
+        smooth: float = ALLOC_SMOOTH,
+    ):
         self.total_usd = total_usd
         self.alpha, self.beta, self.smooth = alpha, beta, smooth
         self.weights = {}

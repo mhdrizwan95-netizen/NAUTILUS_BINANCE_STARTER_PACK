@@ -1,0 +1,5 @@
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Purge research artifacts older than 30 days (runs daily at 03:15 UTC)
+15 3 * * * find /research -mindepth 1 -maxdepth 1 -mtime +30 -print -exec rm -rf {} +

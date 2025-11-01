@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+
 class NotifyBridge:
     """Relay BUS 'notify.telegram' events to Telegram sender."""
 
@@ -27,4 +28,3 @@ class NotifyBridge:
                 self.log.warning("[TG-BRIDGE] send failed: %s", e)
             except Exception:
                 pass
-

@@ -11,6 +11,7 @@ _LOCK = threading.Lock()
 
 CACHE_PATH = Path("engine/state/idempotency_cache.json")
 
+
 class IdempotencyCache:
     """Simple in-memory cache with TTL to deduplicate order requests."""
 
@@ -68,12 +69,15 @@ class IdempotencyCache:
         except Exception:
             pass  # Silent failure on save
 
+
 # Global cache
 CACHE = IdempotencyCache()
 CACHE.load()
 
+
 def _flush_cache():
     CACHE.save()
+
 
 atexit.register(_flush_cache)
 for sig in (signal.SIGINT, signal.SIGTERM):
@@ -82,6 +86,7 @@ for sig in (signal.SIGINT, signal.SIGTERM):
 # --- Audit Logging ---
 LOG_DIR = Path("engine/logs")
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def append_jsonl(filename: str, payload: dict):
     path = LOG_DIR / filename

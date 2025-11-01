@@ -1,17 +1,26 @@
 from fastapi import FastAPI, HTTPException, Request, WebSocket
 from starlette.middleware.base import BaseHTTPMiddleware
 import uuid, contextvars
-from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 from pathlib import Path
 from pathlib import Path as Path2
 import json, time, httpx, os, glob, subprocess, shlex, logging
 import asyncio
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
+try:
+    from prometheus_fastapi_instrumentator import Instrumentator
+except ModuleNotFoundError:  # pragma: no cover - exercised in minimal envs
+    Instrumentator = None  # type: ignore[assignment]
 
-from ops.prometheus import REGISTRY, render_latest, get_or_create_counter
+try:
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+except ModuleNotFoundError:  # pragma: no cover - optional in minimal envs
+    FastAPIInstrumentor = None  # type: ignore[assignment]
+
+from ops.prometheus import REGISTRY, get_or_create_counter, render_latest
 from ops.pnl_collector import PNL_REALIZED, PNL_UNREALIZED
 from ops.env import engine_endpoints
 from ops.portfolio_collector import (
@@ -52,12 +61,18 @@ EXPOSURE_CHECK_INTERVAL = int(os.getenv("EXPOSURE_CHECK_INTERVAL_SEC", "30"))
 # Do not resolve endpoints at import time; tests mutate env per case.
 
 # --- metrics snapshot surface -----------------------------------------------
-from ops.telemetry_store import load as _load_snap, save as _save_snap, Metrics as _Metrics, Snapshot as _Snapshot
+from ops.telemetry_store import (
+    load as _load_snap,
+    save as _save_snap,
+    Metrics as _Metrics,
+    Snapshot as _Snapshot,
+)
 from ops.routes.orders import router as orders_router
 from ops.strategy_router import router as strategy_router
 from ops.pnl_dashboard import router as pnl_router
 from ops.situations.router import router as situations_router
 import time
+
 
 class MetricsIn(BaseModel):
     pnl_realized: float | None = None
@@ -71,8 +86,31 @@ class MetricsIn(BaseModel):
     cash_usd: float | None = None
     gross_exposure_usd: float | None = None
 
+
 APP = FastAPI(title="Ops API")
-_REQ_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar("REQ_ID", default=None)
+if Instrumentator:
+    PROM_INSTRUMENTATOR = Instrumentator(registry=REGISTRY)
+    PROM_INSTRUMENTATOR.instrument(APP).expose(
+        APP, include_in_schema=False, endpoint="/metrics"
+    )
+else:
+    PROM_INSTRUMENTATOR = None
+
+    @APP.get("/metrics", include_in_schema=False)
+    def _metrics_fallback():
+        payload, content_type = render_latest()
+        return Response(payload, media_type=content_type)
+
+    logging.getLogger(__name__).warning(
+        "prometheus_fastapi_instrumentator not installed; using fallback /metrics route"
+    )
+
+if FastAPIInstrumentor:
+    FastAPIInstrumentor.instrument_app(APP)
+_REQ_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "REQ_ID", default=None
+)
+
 
 class _RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -85,6 +123,7 @@ class _RequestIDMiddleware(BaseHTTPMiddleware):
             pass
         return response
 
+
 APP.add_middleware(_RequestIDMiddleware)
 APP.include_router(orders_router)
 APP.include_router(strategy_router)
@@ -92,10 +131,6 @@ APP.include_router(pnl_router)
 APP.include_router(situations_router)
 APP.include_router(ui_router)
 
-@APP.get("/metrics")
-def metrics_endpoint():
-    payload, content_type = render_latest()
-    return Response(payload, media_type=content_type)
 
 @APP.get("/readyz")
 async def readyz():
@@ -108,7 +143,23 @@ async def readyz():
 
 
 # T6: Auth token for control actions
-EXPECTED_TOKEN = os.getenv("OPS_API_TOKEN", "dev-token")  # Change in production
+def _load_ops_token() -> str:
+    token = os.getenv("OPS_API_TOKEN")
+    token_file = os.getenv("OPS_API_TOKEN_FILE")
+    if token_file:
+        try:
+            secret = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE ({token_file})") from exc
+        if secret:
+            token = secret
+    if not token or token == "dev-token":
+        raise RuntimeError("Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Ops API")
+    return token
+
+
+EXPECTED_TOKEN = _load_ops_token()
+
 
 def _check_auth(request):
     """Check X-OPS-TOKEN header for control actions."""
@@ -116,10 +167,12 @@ def _check_auth(request):
     if not auth_header or auth_header != EXPECTED_TOKEN:
         raise HTTPException(401, "Invalid or missing X-OPS-TOKEN")
 
+
 @APP.get("/metrics_snapshot")
 def get_metrics_snapshot():
     s = _load_snap()
     return {"metrics": s.metrics.__dict__, "ts": s.ts}
+
 
 @APP.post("/metrics_snapshot")
 def post_metrics_snapshot(m: MetricsIn):
@@ -132,6 +185,8 @@ def post_metrics_snapshot(m: MetricsIn):
     new = _Snapshot(metrics=_Metrics(**d), ts=time.time())
     _save_snap(new)
     return {"ok": True, "ts": new.ts}
+
+
 # ---------------------------------------------------------------------------
 
 # Enable CORS for React frontend integration
@@ -151,8 +206,11 @@ APP.add_middleware(
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
 ML_URL = os.getenv("HMM_URL", "http://127.0.0.1:8010")
 
+
 # --- network helpers (timeouts/retries) --------------------------------------
-def _http_retry_get(url: str, *, timeout: float = 1.0, attempts: int = 3, backoff: float = 0.2):
+def _http_retry_get(
+    url: str, *, timeout: float = 1.0, attempts: int = 3, backoff: float = 0.2
+):
     for i in range(max(1, attempts)):
         try:
             headers = {}
@@ -168,7 +226,15 @@ def _http_retry_get(url: str, *, timeout: float = 1.0, attempts: int = 3, backof
             time.sleep(backoff * (i + 1))
     return {}
 
-def _http_retry_post(url: str, *, json: dict, timeout: float = 5.0, attempts: int = 3, backoff: float = 0.2):
+
+def _http_retry_post(
+    url: str,
+    *,
+    json: dict,
+    timeout: float = 5.0,
+    attempts: int = 3,
+    backoff: float = 0.2,
+):
     for i in range(max(1, attempts)):
         try:
             headers = {}
@@ -183,12 +249,15 @@ def _http_retry_post(url: str, *, json: dict, timeout: float = 5.0, attempts: in
                 raise
             time.sleep(backoff * (i + 1))
 
+
 class KillReq(BaseModel):
     enabled: bool
+
 
 class RetrainReq(BaseModel):
     feature_sequences: list
     labels: list[int] | None = None
+
 
 @APP.get("/status")
 async def status():
@@ -237,12 +306,14 @@ async def status():
 
     return {"ok": True, "state": st}
 
+
 @APP.post("/kill")
 def kill(req: KillReq, request: Request):
     _check_auth(request)
     state = {"trading_enabled": bool(req.enabled)}
     STATE_FILE.write_text(json.dumps(state))
     return {"ok": True, "state": state}
+
 
 @APP.post("/retrain")
 def retrain(req: RetrainReq, request: Request):
@@ -251,7 +322,11 @@ def retrain(req: RetrainReq, request: Request):
     try:
         r = _http_retry_post(
             f"{ML_URL}/train",
-            json={"symbol":"BTCUSDT","feature_sequences": req.feature_sequences, "labels": req.labels or []},
+            json={
+                "symbol": "BTCUSDT",
+                "feature_sequences": req.feature_sequences,
+                "labels": req.labels or [],
+            },
             timeout=10.0,
             attempts=2,
             backoff=0.2,
@@ -260,11 +335,13 @@ def retrain(req: RetrainReq, request: Request):
     except Exception as e:
         raise HTTPException(500, f"ML retrain failed: {e}")
 
+
 # ---------- New: mode metadata for dashboard ----------
 @APP.get("/meta")
 def meta():
     """Return metadata including trading mode."""
     from adapters.account_provider import BinanceAccountProvider
+
     mode = os.getenv("BINANCE_MODE", "live")
     exchanges = []
     provider = BinanceAccountProvider()
@@ -276,6 +353,7 @@ def meta():
         exchanges.append("COIN-M")
     return {"ok": True, "mode": mode, "exchanges": exchanges}
 
+
 # ---------- New: artifacts + lineage ----------
 @APP.get("/artifacts/m15")
 def list_artifacts_m15():
@@ -283,6 +361,7 @@ def list_artifacts_m15():
     base = os.path.join("data", "processed", "calibration")
     files = sorted(glob.glob(os.path.join(base, "*.png")))
     return {"ok": True, "files": files}
+
 
 @APP.get("/lineage")
 def get_lineage():
@@ -295,9 +374,11 @@ def get_lineage():
         j = json.load(f)
     return {"ok": True, "index": j, "graph": graph if os.path.exists(graph) else None}
 
+
 # ---------- New: canary promote ----------
 class PromoteReq(BaseModel):
     target_tag: str
+
 
 @APP.post("/canary_promote")
 def canary_promote(req: PromoteReq, request: Request) -> dict:
@@ -310,6 +391,7 @@ def canary_promote(req: PromoteReq, request: Request) -> dict:
     except Exception as e:
         raise HTTPException(500, f"promotion failed: {e}")
 
+
 # ---------- Optional: flush guardrails ----------
 @APP.post("/flush_guardrails")
 def flush_guardrails():
@@ -320,6 +402,7 @@ def flush_guardrails():
     except Exception as e:
         raise HTTPException(500, f"flush failed: {e}")
 
+
 # ---------- T3: Health & readiness endpoints ----------
 @APP.get("/healthz")
 def healthz():
@@ -327,11 +410,11 @@ def healthz():
     return {"ok": True}
 
 
-
-
 @APP.get("/health")
 def health():
     return {"ops": "ok"}
+
+
 # ---------------------------------------------------------------------------
 
 SNAP_DIR = Path2("data/ops_snapshots")
@@ -355,7 +438,9 @@ PORTFOLIO_SERVICE = PortfolioService()
 ORDERS_SERVICE = OrdersService()
 STRATEGY_SERVICE = StrategyGovernanceService(Path("ops/strategy_weights.json"))
 SCANNER_SERVICE = ScannerService(Path("ops/universe_state.json"))
-CONFIG_SERVICE = ConfigService(Path("config/runtime.yaml"), Path("ops/runtime_overrides.json"))
+CONFIG_SERVICE = ConfigService(
+    Path("config/runtime.yaml"), Path("ops/runtime_overrides.json")
+)
 RISK_SERVICE = RiskGuardService()
 FEEDS_SERVICE = FeedsGovernanceService()
 OPS_SERVICE = OpsGovernanceService(STATE_FILE, engine_health, PORTFOLIO_SERVICE)
@@ -371,7 +456,14 @@ ui_state.configure(
     ops=OPS_SERVICE,
 )
 
-def _update_metrics_account_fields(equity: float, cash: float, exposure: float, realized_pnl: float, unrealized_pnl: float) -> None:
+
+def _update_metrics_account_fields(
+    equity: float,
+    cash: float,
+    exposure: float,
+    realized_pnl: float,
+    unrealized_pnl: float,
+) -> None:
     try:
         snap = _load_snap()
         metrics = snap.metrics.__dict__.copy()
@@ -391,11 +483,14 @@ def _update_metrics_account_fields(equity: float, cash: float, exposure: float, 
     except Exception as exc:
         print("account metrics update failed:", exc, flush=True)
 
+
 def _publish_account_snapshot(state: dict) -> None:
     ACCOUNT_CACHE["equity"] = float(state.get("equity", 0.0))
     ACCOUNT_CACHE["cash"] = float(state.get("cash", 0.0))
     ACCOUNT_CACHE["exposure"] = float(state.get("exposure", 0.0))
-    ACCOUNT_CACHE["pnl"] = state.get("pnl", {"realized": 0.0, "unrealized": 0.0, "fees": 0.0})
+    ACCOUNT_CACHE["pnl"] = state.get(
+        "pnl", {"realized": 0.0, "unrealized": 0.0, "fees": 0.0}
+    )
     ACCOUNT_CACHE["balances"] = {
         "equity": ACCOUNT_CACHE["equity"],
         "cash": ACCOUNT_CACHE["cash"],
@@ -425,7 +520,7 @@ def _publish_account_snapshot(state: dict) -> None:
         ACCOUNT_CACHE["cash"],
         ACCOUNT_CACHE["exposure"],
         ACCOUNT_CACHE["pnl"]["realized"],
-        ACCOUNT_CACHE["pnl"]["unrealized"]
+        ACCOUNT_CACHE["pnl"]["unrealized"],
     )
 
 
@@ -498,9 +593,7 @@ async def _risk_monitor_iteration() -> None:
                 except Exception:
                     value_usd = 0.0
                 if value_usd > RISK_LIMIT_USD:
-                    alert_msg = (
-                        f"🚨 RISK LIMIT BREACH: {symbol} exposure ${value_usd:.2f} > ${RISK_LIMIT_USD}"
-                    )
+                    alert_msg = f"🚨 RISK LIMIT BREACH: {symbol} exposure ${value_usd:.2f} > ${RISK_LIMIT_USD}"
                     break
 
             if alert_msg:
@@ -508,7 +601,9 @@ async def _risk_monitor_iteration() -> None:
                 if ALERT_WEBHOOK_URL:
                     webhook_payload = {"text": alert_msg, "timestamp": time.time()}
                     try:
-                        await client.post(ALERT_WEBHOOK_URL, json=webhook_payload, timeout=3)
+                        await client.post(
+                            ALERT_WEBHOOK_URL, json=webhook_payload, timeout=3
+                        )
                     except Exception as webhook_exc:
                         print(f"[RISK] Webhook failed: {webhook_exc}")
 
@@ -525,6 +620,7 @@ async def _risk_monitoring_loop(run_once: bool = False):
     while True:
         await _risk_monitor_iteration()
         await asyncio.sleep(EXPOSURE_CHECK_INTERVAL)
+
 
 from ops.portfolio_collector import portfolio_collector_loop
 from ops.strategy_tracker import strategy_tracker_loop
@@ -550,7 +646,7 @@ def _acquire_singleton_lock(name: str) -> bool:
         return True
     except BlockingIOError:
         try:
-            if 'fd' in locals():
+            if "fd" in locals():
                 _os.close(fd)
         except Exception:
             pass
@@ -569,7 +665,11 @@ async def _start_poll():
 
     # Start strategy tracker in a single worker only (Option B)
     # Gate via env flag and file lock to ensure one-of-N under multiprocess uvicorn
-    tracker_env_ok = _os.getenv("OPS_TRACKER_LEADER", "1").lower() in {"1", "true", "yes"}
+    tracker_env_ok = _os.getenv("OPS_TRACKER_LEADER", "1").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     if tracker_env_ok and _acquire_singleton_lock("hmm_strategy_tracker"):
         asyncio.create_task(strategy_tracker_loop())
         print(f"[StrategyTracker] started in PID {_os.getpid()} (leader)")
@@ -584,25 +684,30 @@ async def _start_ui_streams():
     if symbols:
         asyncio.create_task(price_stream(symbols))
 
+
 @APP.on_event("startup")
 async def _start_canary_manager():
     """Start the canary deployment evaluation daemon."""
     try:
         from ops.canary_manager import canary_evaluation_loop
+
         asyncio.create_task(canary_evaluation_loop())
         print("[CANARY] Canary manager started - continuous model evaluation active")
     except Exception as e:
         print(f"[WARN] Canary manager startup failed: {e}")
+
 
 @APP.on_event("startup")
 async def _start_capital_allocator():
     """Start the dynamic capital allocation daemon."""
     try:
         from ops.capital_allocator import allocation_loop
+
         asyncio.create_task(allocation_loop())
         print("[ALLOC] Capital allocator started - dynamic capital optimization active")
     except Exception as e:
         print(f"[WARN] Capital allocator startup failed: {e}")
+
 
 @APP.on_event("startup")
 async def _start_strategy_governance():
@@ -610,7 +715,12 @@ async def _start_strategy_governance():
     async def promotion_loop():
         await asyncio.sleep(5)  # Let system warm up
         import os
-        enabled = os.getenv("GOVERNANCE_PROMOTE_ENABLED", "true").lower() not in {"0", "false", "no"}
+
+        enabled = os.getenv("GOVERNANCE_PROMOTE_ENABLED", "true").lower() not in {
+            "0",
+            "false",
+            "no",
+        }
         while True:
             try:
                 if enabled:
@@ -622,16 +732,20 @@ async def _start_strategy_governance():
 
     asyncio.create_task(promotion_loop())
 
+
 # expose account endpoints
 @APP.get("/account_snapshot")
 def account_snapshot():
     return ACCOUNT_CACHE
 
+
 @APP.get("/positions")
 def positions():
     return {"positions": ACCOUNT_CACHE.get("positions", [])}
 
+
 ACC = None  # Remove legacy BinanceAccountProvider instantiation to prevent import-time crash
+
 
 # ---------- Multi-Venue Aggregation Endpoints ----------
 async def _fetch_json(client: httpx.AsyncClient, url: str) -> Dict[str, Any]:
@@ -645,16 +759,19 @@ async def _fetch_json(client: httpx.AsyncClient, url: str) -> Dict[str, Any]:
         logging.debug("aggregate fetch failed for %s: %s", url, exc)
         return {}
 
+
 async def _fetch_many(paths: List[str]) -> List[Dict[str, Any]]:
     limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
     async with httpx.AsyncClient(limits=limits, trust_env=True) as client:
         return await asyncio.gather(*[_fetch_json(client, p) for p in paths])
+
 
 @APP.get("/aggregate/health")
 async def aggregate_health():
     endpoints = engine_endpoints()
     results = await _fetch_many([f"{e}/health" for e in endpoints])
     return {"venues": results}
+
 
 @APP.get("/aggregate/portfolio")
 async def aggregate_portfolio():
@@ -669,11 +786,13 @@ async def aggregate_portfolio():
         **metrics_view,
     }
 
+
 # Use the new comprehensive exposure aggregator
 from ops.aggregate_exposure import aggregate_exposure
 from ops.exposure_collector import exposure_collector_loop
 from ops.pnl_collector import pnl_collector_loop
 from ops.portfolio_collector import portfolio_collector_loop
+
 
 @APP.get("/aggregate/exposure")
 async def get_aggregate_exposure():
@@ -687,11 +806,13 @@ async def get_aggregate_exposure():
         "by_symbol": agg.by_symbol,
     }
 
+
 @APP.get("/aggregate/metrics")
 async def aggregate_metrics():
     endpoints = engine_endpoints()
     metrics = await _fetch_many([f"{e}/metrics" for e in endpoints])
     return {"venues": metrics}
+
 
 @APP.get("/aggregate/pnl")
 def get_pnl_snapshot():
@@ -708,6 +829,7 @@ def get_pnl_snapshot():
             out["unrealized"][sample.labels["venue"]] = float(sample.value)
     return out
 
+
 @APP.get("/aggregate/portfolio")
 def get_portfolio_snapshot():
     """
@@ -720,13 +842,17 @@ def get_portfolio_snapshot():
         "gain_usd": float(PORTFOLIO_GAIN._value.get()),
         "return_pct": float(PORTFOLIO_RET._value.get()),
         "baseline_equity_usd": float(PORTFOLIO_PREV._value.get()),
-        "last_refresh_epoch": float(PORTFOLIO_LAST._value.get()) if PORTFOLIO_LAST._value.get() else None,
+        "last_refresh_epoch": (
+            float(PORTFOLIO_LAST._value.get()) if PORTFOLIO_LAST._value.get() else None
+        ),
     }
+
 
 # ---------- Strategy Governance Dashboard Endpoints ----------
 
 # Import strategy governance functions
 from ops.strategy_selector import get_leaderboard
+
 
 # Leaderboard endpoint - core governance API
 @APP.get("/strategy/leaderboard")
@@ -737,6 +863,7 @@ def get_strategy_leaderboard():
         return {"ok": True, "leaderboard": leaderboard}
     except Exception as e:
         return {"error": str(e)}
+
 
 # Status endpoint with full registry
 @APP.get("/strategy/status")
@@ -750,11 +877,8 @@ def get_strategy_status():
     except Exception:
         return {"error": "invalid registry format"}
 
-    return {
-        "registry": registry,
-        "leaderboard": get_leaderboard(),
-        "ts": time.time()
-    }
+    return {"registry": registry, "leaderboard": get_leaderboard(), "ts": time.time()}
+
 
 # Promotion history endpoint
 @APP.get("/strategy/history")
@@ -769,14 +893,17 @@ def get_promotion_history():
     except Exception as e:
         return {"error": str(e)}
 
+
 @APP.get("/strategy/ui")
 def get_strategy_ui():
     """Return HTML dashboard for strategy governance visualization."""
     from ops.strategy_ui import get_strategy_ui_html
+
     try:
         return get_strategy_ui_html()
     except Exception as e:
         return f"<html><body><h1>Error Loading Dashboard</h1><p>{str(e)[:200]}</p></body></html>"
+
 
 @APP.post("/strategy/promote")
 def manual_promote_strategy(req: dict, request: Request):
@@ -788,13 +915,22 @@ def manual_promote_strategy(req: dict, request: Request):
         return {"error": "model_tag required"}
 
     from ops.strategy_selector import load_registry, save_registry
+
     min_t = 3  # Require at least 3 trades for promotion when not manual
 
     try:
         registry = load_registry()
         stats = registry.get(model_tag)
         if stats is None:
-            stats = {"sharpe": 0.0, "drawdown": 0.0, "realized": 0.0, "trades": 0, "manual": True, "last_pnl": 0.0, "samples": []}
+            stats = {
+                "sharpe": 0.0,
+                "drawdown": 0.0,
+                "realized": 0.0,
+                "trades": 0,
+                "manual": True,
+                "last_pnl": 0.0,
+                "samples": [],
+            }
             registry[model_tag] = stats
 
         # Manual override defaults to True for this endpoint
@@ -810,11 +946,13 @@ def manual_promote_strategy(req: dict, request: Request):
         # Broadcast to engines
         import asyncio
         from ops.strategy_selector import push_model_update
+
         asyncio.run(push_model_update(model_tag))
 
         return {"ok": True, "promoted": model_tag, "trades_required": min_t}
     except Exception as e:
         return {"error": str(e)}
+
 
 # WebSocket proxies for the Command Center UI
 
@@ -860,7 +998,10 @@ SSE_COUNTER = get_or_create_counter(
 async def _start_situations_consumer():
     async def _run():
         import httpx
-        url = os.getenv("SITUATIONS_SSE_URL", "http://hmm_situations:8011/events/stream")
+
+        url = os.getenv(
+            "SITUATIONS_SSE_URL", "http://hmm_situations:8011/events/stream"
+        )
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 async with client.stream("GET", url) as r:
@@ -879,10 +1020,12 @@ async def _start_situations_consumer():
 
     asyncio.create_task(_run())
 
+
 # FastAPI expects `app` attribute in some tests/utilities.
 app = APP
 
 # ---- Multiplexed WebSocket aggregator for UI (Option A) ----
+
 
 @APP.websocket("/ws")
 async def ws_multiplex(websocket: WebSocket):
@@ -918,7 +1061,7 @@ async def ws_multiplex(websocket: WebSocket):
                 async with httpx.AsyncClient(timeout=3.0) as client:
                     r = await client.get("http://127.0.0.1:8002/api/metrics/summary")
                     j = r.json() if r.status_code == 200 else {}
-                kpis = (j.get("kpis") or {})
+                kpis = j.get("kpis") or {}
 
                 # Portfolio return_pct/gain via direct registry snapshot
                 try:
@@ -934,7 +1077,11 @@ async def ws_multiplex(websocket: WebSocket):
                     "activePositions": int(kpis.get("openPositions") or 0),
                     "dailyTradeCount": 0,
                 }
-                msg = {"type": "metrics", "data": data, "timestamp": int(_time.time() * 1000)}
+                msg = {
+                    "type": "metrics",
+                    "data": data,
+                    "timestamp": int(_time.time() * 1000),
+                }
                 if "metrics" in channels:
                     await websocket.send_json(msg)
             except Exception:
@@ -949,15 +1096,25 @@ async def ws_multiplex(websocket: WebSocket):
                 venues = []
                 for v in h.get("venues", []) or []:
                     status = str(v.get("status") or "warn").lower()
-                    mapped = "connected" if status == "ok" else ("degraded" if status == "warn" else "offline")
-                    venues.append({
-                        "id": str(v.get("name") or "engine").lower(),
-                        "name": v.get("name") or "engine",
-                        "type": "crypto",
-                        "status": mapped,
-                        "latency": int(float(v.get("latencyMs") or 0)),
-                    })
-                msg = {"type": "venues", "data": venues, "timestamp": int(_time.time() * 1000)}
+                    mapped = (
+                        "connected"
+                        if status == "ok"
+                        else ("degraded" if status == "warn" else "offline")
+                    )
+                    venues.append(
+                        {
+                            "id": str(v.get("name") or "engine").lower(),
+                            "name": v.get("name") or "engine",
+                            "type": "crypto",
+                            "status": mapped,
+                            "latency": int(float(v.get("latencyMs") or 0)),
+                        }
+                    )
+                msg = {
+                    "type": "venues",
+                    "data": venues,
+                    "timestamp": int(_time.time() * 1000),
+                }
                 if "venues" in channels:
                     await websocket.send_json(msg)
             except Exception:
@@ -973,10 +1130,14 @@ async def ws_multiplex(websocket: WebSocket):
                     req = set(incoming.get("channels") or [])
                     # Only allow known channels
                     channels.clear()
-                    channels.update({c for c in req if c in {"metrics", "venues", "performances"}})
+                    channels.update(
+                        {c for c in req if c in {"metrics", "venues", "performances"}}
+                    )
                     # Ack optional
                 elif t == "heartbeat":
-                    await websocket.send_json({"type": "heartbeat", "timestamp": int(_time.time() * 1000)})
+                    await websocket.send_json(
+                        {"type": "heartbeat", "timestamp": int(_time.time() * 1000)}
+                    )
                 else:
                     # Ignore unknown message types
                     pass

@@ -28,7 +28,12 @@ def _load_situations(path: str = "config/situations.json") -> Dict[str, Situatio
     return {s["name"]: Situation(**s) for s in data}
 
 
-def replay(symbol: str, day: str, feats_root: str = "data/features/1m", out_root: str = "data/hits") -> str | None:
+def replay(
+    symbol: str,
+    day: str,
+    feats_root: str = "data/features/1m",
+    out_root: str = "data/hits",
+) -> str | None:
     src = f"{feats_root}/{symbol}/{day}.parquet"
     if not os.path.exists(src):
         return None

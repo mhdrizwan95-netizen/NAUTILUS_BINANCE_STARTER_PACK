@@ -7,8 +7,10 @@ from engine.ops.health_notify import HealthNotifier
 class FakeBus:
     def __init__(self):
         self.handlers = []
+
     def on(self, topic, fn):
         self.handlers.append(fn)
+
     def subscribe(self, topic, fn):
         self.on(topic, fn)
 
@@ -17,19 +19,25 @@ class FakeMetrics:
     class _C:
         def labels(self, *a):
             return self
+
         def inc(self, *a):
             return None
+
     health_transitions_total = _C()
 
 
 class FakeClock:
-    def __init__(self, t): self._t = float(t)
-    def time(self): return self._t
+    def __init__(self, t):
+        self._t = float(t)
+
+    def time(self):
+        return self._t
 
 
 class _TG:
     def __init__(self):
         self._count = 0
+
     async def send(self, text, parse_mode="Markdown"):
         self._count += 1
 

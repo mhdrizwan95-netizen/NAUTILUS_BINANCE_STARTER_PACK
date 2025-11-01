@@ -18,6 +18,7 @@ Usage::
 Environment::
     DECK_URL  Base URL for the Deck API (default http://hmm_deck:8002 inside docker-compose)
 """
+
 from __future__ import annotations
 
 import os
@@ -37,7 +38,9 @@ def _headers() -> Dict[str, str]:
 
 
 def _post(path: str, payload: Dict) -> None:
-    response = requests.post(f"{DECK_URL}{path}", json=payload, headers=_headers(), timeout=5)
+    response = requests.post(
+        f"{DECK_URL}{path}", json=payload, headers=_headers(), timeout=5
+    )
     response.raise_for_status()
 
 

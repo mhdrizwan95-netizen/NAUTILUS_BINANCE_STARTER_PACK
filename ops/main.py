@@ -11,6 +11,8 @@ Use: `python -u ops/main.py trade` to start the trading loop.
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 import os
 import random
 import time
@@ -34,6 +36,18 @@ from ops.auto_probe import (
 )
 
 
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+LOGGER = logging.getLogger("ops.executor")
+
+
+def log_event(event: str, level: str = "info", **fields: Any) -> None:
+    payload = json.dumps({"event": event, **fields}, default=str)
+    log_fn = getattr(LOGGER, level.lower(), LOGGER.info)
+    log_fn(payload)
+
+
 ENGINE_URL = os.getenv("ENGINE_URL", "http://engine_binance:8003").rstrip("/")
 METRICS_PORT = int(os.getenv("EXEC_METRICS_PORT", "9102"))
 PING_INTERVAL_SEC = int(os.getenv("EXEC_PING_INTERVAL_SEC", "5"))
@@ -42,7 +56,9 @@ EXEC_INTERVAL_SEC = int(os.getenv("EXEC_INTERVAL_SEC", "2"))
 # Basic executor metrics
 EXECUTOR_UP = Gauge("executor_up", "Executor process up (set to 1 on start)")
 LAST_PING_EPOCH = Gauge("executor_last_ping_epoch", "Unix time of last engine ping")
-ENGINE_SNAPSHOT_LOADED = Gauge("engine_snapshot_loaded", "Engine snapshot_loaded flag (1/0)")
+ENGINE_SNAPSHOT_LOADED = Gauge(
+    "engine_snapshot_loaded", "Engine snapshot_loaded flag (1/0)"
+)
 PING_ERRORS = Counter("executor_ping_errors_total", "Total engine ping errors")
 
 # Trade loop metrics (coarse)
@@ -51,7 +67,9 @@ PROBES_FILLED = Counter("probe_filled_total", "Total probes filled")
 PROBE_ERRORS = Counter("probe_errors_total", "Total probe errors")
 
 # Symbol feed metric
-EXEC_SYMBOLS_SAMPLED = Gauge("exec_symbols_sampled", "Symbols probed this round", labelnames=["job"])
+EXEC_SYMBOLS_SAMPLED = Gauge(
+    "exec_symbols_sampled", "Symbols probed this round", labelnames=["job"]
+)
 
 
 async def ping_engine(client: httpx.AsyncClient) -> None:
@@ -70,10 +88,15 @@ async def main() -> None:
     # Start metrics server
     start_http_server(METRICS_PORT)
     EXECUTOR_UP.set(1)
-    print(f"[executor] metrics listening on :{METRICS_PORT}", flush=True)
-    print(f"[executor] engine at {ENGINE_URL}", flush=True)
+    log_event("executor.metrics_start", port=METRICS_PORT)
+    log_event("executor.engine_target", engine_url=ENGINE_URL)
 
-    async with httpx.AsyncClient() as client:
+    client_limits = httpx.Limits(max_connections=8, max_keepalive_connections=4)
+    client_timeout = httpx.Timeout(connect=3.0, read=5.0, write=5.0, pool=5.0)
+
+    async with httpx.AsyncClient(
+        timeout=client_timeout, limits=client_limits, trust_env=True
+    ) as client:
         # Initial ping fast, then settle into interval
         while True:
             await ping_engine(client)
@@ -95,8 +118,8 @@ async def trade() -> None:
     # Metrics server (shared)
     start_http_server(METRICS_PORT)
     EXECUTOR_UP.set(1)
-    print(f"[executor] metrics listening on :{METRICS_PORT}", flush=True)
-    print(f"[executor] engine at {ENGINE_URL}", flush=True)
+    log_event("executor.metrics_start", port=METRICS_PORT)
+    log_event("executor.engine_target", engine_url=ENGINE_URL)
 
     # Config with storm-proof defaults
     dry_run = env_b("DRY_RUN", False)
@@ -116,10 +139,15 @@ async def trade() -> None:
             symbols = await get_universe(ENGINE_URL)
 
     if not symbols:
-        print("[executor] No symbols configured; exiting.")
+        log_event("executor.no_symbols", level="warning")
         return
 
-    print(f"[executor] storm-proof trade loop starting; dry_run={dry_run} symbols={len(symbols)}")
+    log_event(
+        "executor.trade_start",
+        dry_run=dry_run,
+        symbol_count=len(symbols),
+        probe_usdt=probe_usdt,
+    )
 
     # Initialize storm-proof components
     limiter = RateLimiter(max_per_min)
@@ -129,7 +157,7 @@ async def trade() -> None:
     # Circuit breaker with environment-configurable thresholds
     breaker = CircuitBreaker(
         err_threshold=env_i("EXEC_ERR_THRESHOLD", 3),  # Trip on 3 errors
-        window_sec=env_i("EXEC_ERR_WINDOW_SEC", 20),   # In 20 second window
+        window_sec=env_i("EXEC_ERR_WINDOW_SEC", 20),  # In 20 second window
         cooldown_sec=env_i("EXEC_COOLDOWN_SEC", 180),  # Cool down for 3 minutes
     )
 
@@ -138,7 +166,9 @@ async def trade() -> None:
     timeout = httpx.Timeout(connect=6.0, read=12.0, write=12.0, pool=12.0)
 
     try:
-        async with httpx.AsyncClient(timeout=timeout, limits=limits) as client:
+        async with httpx.AsyncClient(
+            timeout=timeout, limits=limits, trust_env=True
+        ) as client:
             for r in range(99999):  # Infinite rounds, will be interrupted
                 # Step 1: Fetch ALL prices in one round-trip (O(1) vs O(symbols))
                 price_map = await fetch_all_prices(ENGINE_URL, client)
@@ -178,14 +208,15 @@ async def trade() -> None:
                 ok = sum(1 for r in results if r.get("status") == "FILLED")
                 errs = sum(1 for r in results if "error" in r)
                 skipped = sum(1 for r in results if r.get("skipped"))
-                print({
-                    "round": r + 1,
-                    "symbols": len(pick),
-                    "filled": ok,
-                    "errors": errs,
-                    "skipped": skipped,
-                    "breaker": "open" if breaker.open else "closed"
-                })
+                log_event(
+                    "executor.round_summary",
+                    round=r + 1,
+                    symbols=len(pick),
+                    filled=ok,
+                    errors=errs,
+                    skipped=skipped,
+                    breaker="open" if breaker.open else "closed",
+                )
 
                 # Step 5: Pace rounds with jitter (prevents synchronization)
                 base_interval = env_i("EXEC_INTERVAL_SEC", 12)
@@ -194,18 +225,18 @@ async def trade() -> None:
                 await asyncio.sleep(interval)
 
     except KeyboardInterrupt:
-        print("[executor] storm-proof trade loop shutdown", file=sys.stderr)
+        log_event("executor.trade_interrupt", level="warning")
         return
 
 
 if __name__ == "__main__":
     # Mode select: default heartbeat; `trade` starts the trading loop
-    mode = (sys.argv[1].lower() if len(sys.argv) > 1 else "heartbeat")
+    mode = sys.argv[1].lower() if len(sys.argv) > 1 else "heartbeat"
     try:
         if mode == "trade":
             asyncio.run(trade())
         else:
             asyncio.run(main())
     except KeyboardInterrupt:
-        print("[executor] shutdown", file=sys.stderr)
+        log_event("executor.shutdown", level="warning")
         sys.exit(0)

@@ -49,4 +49,3 @@ class CooldownTracker:
         ts = float(now if now is not None else time.time())
         until = self._until.get(key, 0.0)
         return max(0.0, until - ts)
-
