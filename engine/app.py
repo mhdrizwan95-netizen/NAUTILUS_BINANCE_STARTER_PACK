@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Literal, Optional, Any, Callable, cast
 
 from fastapi import FastAPI, Header, HTTPException, Request, Query
+from starlette.middleware.base import BaseHTTPMiddleware
+import uuid
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict, ValidationError
 import hmac
@@ -60,7 +62,19 @@ from engine.telemetry.publisher import (
 )
 from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
 
+class _RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        request.state.request_id = req_id
+        response = await call_next(request)
+        try:
+            response.headers["X-Request-ID"] = req_id
+        except Exception:
+            pass
+        return response
+
 app = FastAPI(title="HMM Engine", version="0.1.0")
+app.add_middleware(_RequestIDMiddleware)
 
 def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
@@ -1259,11 +1273,11 @@ async def _start_guardian_and_feeds():
                 private_key=dex_cfg.wallet_private_key,
                 max_gas_price_wei=dex_cfg.max_gas_price_wei,
             )
-            router = DexRouter(web3=wallet.w3, router_address=dex_cfg.router_address)
+            dex_router = DexRouter(web3=wallet.w3, router_address=dex_cfg.router_address)
             state = DexState(dex_cfg.state_path)
             executor = DexExecutor(
                 wallet=wallet,
-                router=router,
+                router=dex_router,
                 stable_token=dex_cfg.stable_token,
                 wrapped_native=dex_cfg.wrapped_native_token,
                 gas_limit=dex_cfg.gas_limit,

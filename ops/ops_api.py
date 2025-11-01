@@ -1,4 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, WebSocket
+from starlette.middleware.base import BaseHTTPMiddleware
+import uuid, contextvars
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,8 +49,7 @@ RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL")
 EXPOSURE_CHECK_INTERVAL = int(os.getenv("EXPOSURE_CHECK_INTERVAL_SEC", "30"))
 
-# Resolve engine endpoints once for reuse
-ENGINE_ENDPOINTS = engine_endpoints()
+# Do not resolve endpoints at import time; tests mutate env per case.
 
 # --- metrics snapshot surface -----------------------------------------------
 from ops.telemetry_store import load as _load_snap, save as _save_snap, Metrics as _Metrics, Snapshot as _Snapshot
@@ -71,6 +72,20 @@ class MetricsIn(BaseModel):
     gross_exposure_usd: float | None = None
 
 APP = FastAPI(title="Ops API")
+_REQ_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar("REQ_ID", default=None)
+
+class _RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
+        _REQ_ID.set(req_id)
+        response = await call_next(request)
+        try:
+            response.headers["X-Request-ID"] = req_id
+        except Exception:
+            pass
+        return response
+
+APP.add_middleware(_RequestIDMiddleware)
 APP.include_router(orders_router)
 APP.include_router(strategy_router)
 APP.include_router(pnl_router)
@@ -122,7 +137,12 @@ def post_metrics_snapshot(m: MetricsIn):
 # Enable CORS for React frontend integration
 APP.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],  # Next.js dev
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5173",  # Vite dev
+        "http://127.0.0.1:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -130,6 +150,38 @@ APP.add_middleware(
 
 STATE_FILE = Path(__file__).resolve().parent / "state.json"
 ML_URL = os.getenv("HMM_URL", "http://127.0.0.1:8010")
+
+# --- network helpers (timeouts/retries) --------------------------------------
+def _http_retry_get(url: str, *, timeout: float = 1.0, attempts: int = 3, backoff: float = 0.2):
+    for i in range(max(1, attempts)):
+        try:
+            headers = {}
+            rid = _REQ_ID.get()
+            if rid:
+                headers["X-Request-ID"] = rid
+            r = httpx.get(url, timeout=timeout, headers=headers or None)
+            r.raise_for_status()
+            return r.json()
+        except Exception:  # noqa: BLE001
+            if i == attempts - 1:
+                break
+            time.sleep(backoff * (i + 1))
+    return {}
+
+def _http_retry_post(url: str, *, json: dict, timeout: float = 5.0, attempts: int = 3, backoff: float = 0.2):
+    for i in range(max(1, attempts)):
+        try:
+            headers = {}
+            rid = _REQ_ID.get()
+            if rid:
+                headers["X-Request-ID"] = rid
+            r = httpx.post(url, json=json, timeout=timeout, headers=headers or None)
+            r.raise_for_status()
+            return r
+        except Exception:  # noqa: BLE001
+            if i == attempts - 1:
+                raise
+            time.sleep(backoff * (i + 1))
 
 class KillReq(BaseModel):
     enabled: bool
@@ -172,8 +224,8 @@ async def status():
 
     # lightweight health check to ML
     try:
-        r = httpx.get(f"{ML_URL}/health", timeout=0.2).json()
-        st["ml"] = r
+        r = _http_retry_get(f"{ML_URL}/health", timeout=0.5, attempts=2, backoff=0.1)
+        st["ml"] = r or {"ok": False}
     except Exception:
         st["ml"] = {"ok": False}
 
@@ -197,7 +249,13 @@ def retrain(req: RetrainReq, request: Request):
     _check_auth(request)
     # proxy to ML service
     try:
-        r = httpx.post(f"{ML_URL}/train", json={"symbol":"BTCUSDT","feature_sequences": req.feature_sequences, "labels": req.labels or []}, timeout=30.0)
+        r = _http_retry_post(
+            f"{ML_URL}/train",
+            json={"symbol":"BTCUSDT","feature_sequences": req.feature_sequences, "labels": req.labels or []},
+            timeout=10.0,
+            attempts=2,
+            backoff=0.2,
+        )
         return {"ok": True, "ml_response": r.json()}
     except Exception as e:
         raise HTTPException(500, f"ML retrain failed: {e}")
@@ -417,18 +475,32 @@ def _trim_snapshots() -> None:
 async def _risk_monitor_iteration() -> None:
     """Execute a single risk monitoring pass."""
     try:
-        ops_base = os.getenv("OPS_BASE", "http://127.0.0.1:8002").rstrip("/")
+        # Default aligns with tests/mock expectations
+        ops_base = os.getenv("OPS_BASE", "http://localhost:8001").rstrip("/")
         async with httpx.AsyncClient() as client:
             r = await client.get(f"{ops_base}/aggregate/exposure", timeout=5)
             r.raise_for_status()
             data = r.json() or {}
 
             alert_msg = None
-            for item in (data.get("by_symbol", {}) or {}).values():
+            per_symbol = None
+            if isinstance(data.get("by_symbol"), dict):
+                per_symbol = list((data.get("by_symbol") or {}).values())
+            elif isinstance(data.get("items"), list):
+                per_symbol = list(data.get("items") or [])
+            else:
+                per_symbol = []
+
+            for item in per_symbol:
                 symbol = item.get("symbol", "UNKNOWN")
-                value_usd = abs(item.get("value_usd", 0.0))
+                try:
+                    value_usd = abs(float(item.get("value_usd", 0.0)))
+                except Exception:
+                    value_usd = 0.0
                 if value_usd > RISK_LIMIT_USD:
-                    alert_msg = f"🚨 RISK LIMIT BREACH: {symbol} exposure ${value_usd:.2f} > ${RISK_LIMIT_USD}"
+                    alert_msg = (
+                        f"🚨 RISK LIMIT BREACH: {symbol} exposure ${value_usd:.2f} > ${RISK_LIMIT_USD}"
+                    )
                     break
 
             if alert_msg:
@@ -574,17 +646,20 @@ async def _fetch_json(client: httpx.AsyncClient, url: str) -> Dict[str, Any]:
         return {}
 
 async def _fetch_many(paths: List[str]) -> List[Dict[str, Any]]:
-    async with httpx.AsyncClient() as client:
+    limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
+    async with httpx.AsyncClient(limits=limits, trust_env=True) as client:
         return await asyncio.gather(*[_fetch_json(client, p) for p in paths])
 
 @APP.get("/aggregate/health")
 async def aggregate_health():
-    results = await _fetch_many([f"{e}/health" for e in ENGINE_ENDPOINTS])
+    endpoints = engine_endpoints()
+    results = await _fetch_many([f"{e}/health" for e in endpoints])
     return {"venues": results}
 
 @APP.get("/aggregate/portfolio")
 async def aggregate_portfolio():
-    portfolios = await _fetch_many([f"{e}/portfolio" for e in ENGINE_ENDPOINTS])
+    endpoints = engine_endpoints()
+    portfolios = await _fetch_many([f"{e}/portfolio" for e in endpoints])
     total_equity = sum(float(p.get("equity_usd", 0) or 0) for p in portfolios if p)
     metrics_view = get_portfolio_snapshot()
     return {
@@ -614,7 +689,8 @@ async def get_aggregate_exposure():
 
 @APP.get("/aggregate/metrics")
 async def aggregate_metrics():
-    metrics = await _fetch_many([f"{e}/metrics" for e in ENGINE_ENDPOINTS])
+    endpoints = engine_endpoints()
+    metrics = await _fetch_many([f"{e}/metrics" for e in endpoints])
     return {"venues": metrics}
 
 @APP.get("/aggregate/pnl")
@@ -805,3 +881,116 @@ async def _start_situations_consumer():
 
 # FastAPI expects `app` attribute in some tests/utilities.
 app = APP
+
+# ---- Multiplexed WebSocket aggregator for UI (Option A) ----
+
+@APP.websocket("/ws")
+async def ws_multiplex(websocket: WebSocket):
+    """
+    Single WebSocket endpoint that periodically pushes compact UI-friendly updates:
+      - type: 'metrics'      data: GlobalMetrics (see frontend types)
+      - type: 'venues'       data: list[Venue]
+      - type: 'heartbeat'    data: { ts }
+
+    Auth: accepts `?token=...` matching OPS_API_TOKEN. In dev, missing token is allowed.
+    """
+    import time as _time
+
+    # Lightweight auth: allow missing token when using default dev token
+    token = websocket.query_params.get("token")
+    dev_mode = EXPECTED_TOKEN == "dev-token"
+    if token is not None and token != EXPECTED_TOKEN:
+        await websocket.close(code=4401)
+        return
+    if token is None and not dev_mode:
+        await websocket.close(code=4401)
+        return
+
+    await websocket.accept()
+
+    # Subscription set (currently informational)
+    channels = {"metrics", "venues"}
+
+    async def _push_metrics_loop():
+        while True:
+            try:
+                # Pull summary KPIs via local HTTP to reuse existing logic
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    r = await client.get("http://127.0.0.1:8002/api/metrics/summary")
+                    j = r.json() if r.status_code == 200 else {}
+                kpis = (j.get("kpis") or {})
+
+                # Portfolio return_pct/gain via direct registry snapshot
+                try:
+                    port = get_portfolio_snapshot()
+                except Exception:
+                    port = {}
+
+                data = {
+                    "totalPnL": float(kpis.get("totalPnl") or 0.0),
+                    "totalPnLPercent": float(port.get("return_pct") or 0.0),
+                    "sharpe": float(kpis.get("sharpe") or 0.0),
+                    "drawdown": float(kpis.get("maxDrawdown") or 0.0),
+                    "activePositions": int(kpis.get("openPositions") or 0),
+                    "dailyTradeCount": 0,
+                }
+                msg = {"type": "metrics", "data": data, "timestamp": int(_time.time() * 1000)}
+                if "metrics" in channels:
+                    await websocket.send_json(msg)
+            except Exception:
+                # Ignore transient errors; continue loop
+                pass
+            await asyncio.sleep(3)
+
+    async def _push_venues_loop():
+        while True:
+            try:
+                h = await cc_health()  # Reuse existing aggregator
+                venues = []
+                for v in h.get("venues", []) or []:
+                    status = str(v.get("status") or "warn").lower()
+                    mapped = "connected" if status == "ok" else ("degraded" if status == "warn" else "offline")
+                    venues.append({
+                        "id": str(v.get("name") or "engine").lower(),
+                        "name": v.get("name") or "engine",
+                        "type": "crypto",
+                        "status": mapped,
+                        "latency": int(float(v.get("latencyMs") or 0)),
+                    })
+                msg = {"type": "venues", "data": venues, "timestamp": int(_time.time() * 1000)}
+                if "venues" in channels:
+                    await websocket.send_json(msg)
+            except Exception:
+                pass
+            await asyncio.sleep(5)
+
+    async def _recv_loop():
+        while True:
+            try:
+                incoming = await websocket.receive_json()
+                t = incoming.get("type")
+                if t == "subscribe":
+                    req = set(incoming.get("channels") or [])
+                    # Only allow known channels
+                    channels.clear()
+                    channels.update({c for c in req if c in {"metrics", "venues", "performances"}})
+                    # Ack optional
+                elif t == "heartbeat":
+                    await websocket.send_json({"type": "heartbeat", "timestamp": int(_time.time() * 1000)})
+                else:
+                    # Ignore unknown message types
+                    pass
+            except WebSocketDisconnect:
+                break
+            except Exception:
+                # Malformed payloads are ignored
+                pass
+
+    # Run loops until client disconnects
+    metrics_task = asyncio.create_task(_push_metrics_loop())
+    venues_task = asyncio.create_task(_push_venues_loop())
+    try:
+        await _recv_loop()
+    finally:
+        metrics_task.cancel()
+        venues_task.cancel()

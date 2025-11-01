@@ -1,3 +1,6 @@
+## DEPRECATED: Use ops/observability/prometheus/prometheus.yml instead.
+## This file is retained for reference and will not be used by the
+## observability compose bundle.
 global: { scrape_interval: 5s }
 rule_files: ["./alerts.rules.yml"]
 scrape_configs:

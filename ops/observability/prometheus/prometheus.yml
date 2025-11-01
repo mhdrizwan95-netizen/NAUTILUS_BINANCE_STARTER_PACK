@@ -11,7 +11,6 @@ rule_files:
   - rules/trading.rules.yml
   - rules/alerts.rules.yml
   - rules/binance_alerts.yml
-  - rules/trading.yml   # your existing rules
 
 scrape_configs:
 - job_name: engines
@@ -19,12 +18,12 @@ scrape_configs:
   scrape_timeout: 10s
   static_configs:
   - targets:
-      - engine_binance:8003
+      - hmm_engine_binance:8003
     labels:
       role: trader
       venue: binance
   - targets:
-      - engine_binance_exporter:8003
+      - hmm_engine_binance_exporter:8003
     labels:
       role: exporter
       venue: binance
@@ -33,3 +32,17 @@ scrape_configs:
     regex: '([^:]+)(?::\d+)?'
     target_label: job
     replacement: '$1'
+
+# Ops API metrics
+- job_name: hmm_ops
+  scrape_interval: 15s
+  static_configs:
+  - targets:
+      - hmm_ops:8002
+
+# Executor metrics
+- job_name: hmm_executor
+  scrape_interval: 15s
+  static_configs:
+  - targets:
+      - hmm_executor:9102

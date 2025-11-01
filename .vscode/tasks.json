@@ -5,7 +5,9 @@
       "label": "Calibrate Policy (M15)",
       "type": "shell",
       "command": "${workspaceFolder}/.venv/bin/python",
-      "args": ["ops/calibrate_policy.py"],
+      "args": [
+        "ops/calibrate_policy.py"
+      ],
       "group": "build",
       "problemMatcher": []
     },
@@ -20,7 +22,9 @@
       "label": "Calibrate (PAPER 15m)",
       "type": "shell",
       "command": "${workspaceFolder}/ops/calibrate_paper.sh",
-      "args": ["900"],
+      "args": [
+        "900"
+      ],
       "problemMatcher": [],
       "group": "build"
     },
@@ -42,7 +46,9 @@
       "label": "M19 — Meta Scheduler (daemon 5m)",
       "type": "shell",
       "command": "${workspaceFolder}/ops/m19_daemon.sh",
-      "args": ["300"],
+      "args": [
+        "300"
+      ],
       "problemMatcher": [],
       "group": "build"
     },
@@ -50,7 +56,9 @@
       "label": "M23 — Heartbeat Daemon",
       "type": "shell",
       "command": "${workspaceFolder}/.venv/bin/python",
-      "args": ["ops/m23_heartbeat.py"],
+      "args": [
+        "ops/m23_heartbeat.py"
+      ],
       "problemMatcher": [],
       "group": "build"
     },
@@ -58,15 +66,43 @@
       "label": "Frontend — Next.js Dev",
       "type": "shell",
       "command": "cd",
-      "args": ["${workspaceFolder}/frontend", "&&", "npm", "run", "dev"],
+      "args": [
+        "${workspaceFolder}/frontend",
+        "&&",
+        "npm",
+        "run",
+        "dev"
+      ],
       "group": "build"
     },
     {
       "label": "Frontend — Next.js Build",
       "type": "shell",
       "command": "cd",
-      "args": ["${workspaceFolder}/frontend", "&&", "npm", "run", "build"],
+      "args": [
+        "${workspaceFolder}/frontend",
+        "&&",
+        "npm",
+        "run",
+        "build"
+      ],
       "group": "build"
+    },
+    {
+      "label": "Audit and Fix Nautilus Codebase",
+      "type": "shell",
+      "command": "bash",
+      "args": [
+        "-c",
+        "echo \"🔍 Installing/Updating dev tools...\" && \\\n        pip install -U black isort flake8 autoflake pytest && \\\n        echo \"✅ Tools installed. Formatting code with Black and isort...\" && \\\n        black . && isort . && \\\n        echo \"✅ Code formatted. Running flake8 for quality checks...\" && \\\n        flake8 . || true && \\\n        echo \"📝 Removing unused imports/variables...\" && \\\n        autoflake --remove-all-unused-imports --remove-unused-variables -i -r . && \\\n        echo \"🔄 Re-running flake8 after cleanup...\" && \\\n        flake8 . || true && \\\n        echo \"🚀 Running unit tests...\" && \\\n        pytest; TEST_STATUS=$? && \\\n        if [ $TEST_STATUS -eq 0 ]; then echo \"✅ All tests passed.\"; else echo \"❗ Some tests failed. See above for details.\"; fi && \\\n        echo \"🐳 Building and starting all services (docker compose up)...\" && \\\n        make autopilot && \\\n        echo \"⌛ Waiting a few seconds for services to stabilize...\" && sleep 5 && \\\n        echo \"🔎 Checking container statuses...\" && \\\n        docker compose ps -a && \\\n        UNHEALTHY=$(docker compose ps | grep -E 'Exit|unhealthy' || true) && \\\n        if [ -n \"$UNHEALTHY\" ]; then \\\n            echo \"❗ Some services failed to stay healthy:\"; echo \"$UNHEALTHY\"; \\\n            echo \"📜 Fetching logs for unhealthy services:\"; \\\n            while read -r line; do svc=$(echo $line | awk '{print $1}'); echo \"\\n--- Logs for $svc ---\"; docker compose logs --tail=30 $svc; done <<< \"$UNHEALTHY\"; \\\n        else \\\n            echo \"✅ All services are running and reported healthy.\"; \\\n        fi && \\\n        echo \"🌐 Verifying key service endpoints...\" && \\\n        curl -fsS http://localhost:8003/health && echo \"Engine trader /health OK\" || echo \"Engine trader /health FAILED\" && \\\n        curl -fsS http://localhost:9103/metrics && echo \"Exporter /metrics OK\" || echo \"Exporter /metrics FAILED\" && \\\n        curl -fsS http://localhost:8002/readyz && echo \"Ops /readyz OK\" || echo \"Ops /readyz FAILED\" && \\\n        curl -fsS http://localhost:8015/health && echo \"ML service /health OK\" || echo \"ML service /health FAILED\" && \\\n        echo \"🛑 Bringing down services...\" && \\\n        make down-all && \\\n        echo \"✅ Audit and fix task completed. Review the log above for any issues or warnings.\" && \\\n        echo \"\\n📋 Next Steps: After this automated fix, run the outlined staging tests to fully validate the system.\" && \\\n        echo \"1. Deploy updated stack to staging and check all services' health endpoints.\" && \\\n        echo \"2. Verify metrics in Prometheus/Grafana and enable Telegram alerts for testing.\" && \\\n        echo \"3. Run dry-run and small live trade tests to confirm end-to-end trade execution.\" && \\\n        echo \"4. Execute backtesting and ML retraining in staging to ensure those pipelines work.\" && \\\n        echo \"5. Monitor logs and restart the system to test persistence and recovery.\""
+      ],
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared"
+      },
+      "problemMatcher": []
     }
   ]
 }

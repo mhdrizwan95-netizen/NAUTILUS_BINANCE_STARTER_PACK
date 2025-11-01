@@ -11,8 +11,10 @@ def _conn(db_path: str) -> sqlite3.Connection:
     global _DB
     if _DB is None:
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-        _DB = sqlite3.connect(db_path, check_same_thread=False)
+        # Increase busy timeout to reduce 'database is locked' errors under WAL
+        _DB = sqlite3.connect(db_path, timeout=10.0, check_same_thread=False)
         _DB.execute("PRAGMA journal_mode=WAL")
+        _DB.execute("PRAGMA busy_timeout=5000")
     return _DB
 
 def init(db_path="data/runtime/trades.db", schema="engine/storage/schema.sql"):

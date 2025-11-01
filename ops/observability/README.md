@@ -4,8 +4,8 @@ This directory contains Prometheus + Grafana configs and production dashboards f
 
 Dashboards (provisioned)
 - HMM • Venue – Binance: `ops/observability/grafana/dashboards/venue_binance.json` (uid: `hmm-venue-binance`)
-- HMM • Venue – IBKR: `ops/observability/grafana/dashboards/venue_ibkr.json` (uid: `hmm-venue-ibkr`)
 - HMM • Command Center (All Venues): `ops/observability/grafana/dashboards/command_center.json` (uid: `hmm-command-center`)
+- IBKR/other venues: optional dashboards not included by default; add your own if the venue is enabled and exporting metrics.
 
 Conventions
 - Datasource UID: `prometheus`
@@ -17,7 +17,8 @@ Conventions
 How to run
 1) Start Prometheus + Grafana (observability stack):
    - `docker compose -f ops/observability/docker-compose.observability.yml up -d`
-2) Access Grafana: http://localhost:3000 (admin/admin by default in compose)
+2) Access Grafana: http://localhost:3000 (anonymous disabled by default)
+   - Credentials via env: `GF_SECURITY_ADMIN_USER` / `GF_SECURITY_ADMIN_PASSWORD`.
 3) Dashboards auto-provision under folder "HMM" via `ops/observability/grafana/provisioning/dashboards/dashboards.yml`.
 
 Verification (manual)
@@ -44,3 +45,4 @@ Common gotchas
 - Counter resets after restarts can cause negative deltas; all panels use `clamp_min` to avoid this, but very short windows can still look noisy.
 - If a metric isn’t exported by a venue (e.g., `ibkr_commission_usd_total`), the corresponding panel will be empty.
 - Ensure each engine exports with the correct `job` label: `engine_binance`, `engine_ibkr`.
+ - Alertmanager uses `${ALERTMANAGER_TELEGRAM_BOT_TOKEN}` and `${ALERTMANAGER_TELEGRAM_CHAT_ID}` (set env + `--config.expand-env`).

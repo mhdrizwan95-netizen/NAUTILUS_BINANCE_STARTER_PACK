@@ -717,23 +717,16 @@ def set_max_notional(value: float) -> None:
 
 @router.get("/metrics")
 def get_metrics():
-    """Expose Prometheus metrics (multiprocess-safe)."""
-    mp_dir = os.getenv("PROMETHEUS_MULTIPROC_DIR")
-    use_multiproc = False
-    if mp_dir:
-        path = Path(mp_dir)
-        try:
-            use_multiproc = path.exists() and any(path.iterdir())
-        except Exception:
-            use_multiproc = False
+    """Expose Prometheus metrics.
 
-    if use_multiproc:
-        try:
-            registry = CollectorRegistry()
-            multiprocess.MultiProcessCollector(registry)
-            payload = generate_latest(registry)
-        except Exception:
-            payload = generate_latest()
-    else:
+    The engine runs with a single uvicorn worker in this stack, so the
+    multiprocess collector is unnecessary and can cause hangs if stale shard
+    files exist. Export a standard, process-local registry instead.
+    """
+    try:
         payload = generate_latest()
+    except Exception:
+        # Fallback defensively in case registry state is transient
+        registry = CollectorRegistry()
+        payload = generate_latest(registry)
     return Response(payload, media_type=CONTENT_TYPE_LATEST)

@@ -82,7 +82,8 @@ async def aggregate_exposure(engine_endpoints_env: str | None = None,
     by_symbol: Dict[str, Position] = {}
     venue_set = set()
 
-    async with httpx.AsyncClient() as client:
+    limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
+    async with httpx.AsyncClient(limits=limits, trust_env=True) as client:
         results = await asyncio.gather(*[_fetch_portfolio(client, e) for e in endpoints], return_exceptions=True)
 
     for res in results:

@@ -1,44 +1,60 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "🔧 BATCH-FIXING DASHBOARD LABEL MISMATCHES"
-echo "=========================================="
+echo "🔧 Dashboard label consistency check (non-destructive by default)"
+echo "================================================================"
 
 # Function to backup and fix a dashboard file
 fix_dashboard() {
     local file="$1"
     local backup="${file}.bkup"
     local output="${file%.json}.fixed.json"
-    
+
     if [[ ! -f "${file}" ]]; then
         echo "⚠️  Skipping: ${file} not found"
         return
     fi
-    
-    echo "📝 Fixing: ${file}"
-    
-    # Create backup (if not exists)
-    if [[ ! -f "${backup}" ]]; then
-        cp "${file}" "${backup}"
-        echo "💾 Backup created: ${backup}"
+
+    echo "🔍 Scanning: ${file}"
+    # Show common mismatches (does not modify)
+    if grep -q 'job=\"engine_\(ibkr\|bybit\)\"' "${file}" 2>/dev/null; then
+        echo "  • Found hardcoded job labels for other venues (engine_ibkr/engine_bybit)."
     fi
-    
-    # Apply label corrections
-    sed -E \
-        -e 's/job="engine_binance"/job="engines"/g' \
-        -e 's/job="engine_ibkr"/job="engines"/g' \
-        -e 's/job="engine_bybit"/job="engines"/g' \
-        -e 's/\$venue/"engines"/g' \
-        -e 's/"venue"\s*:\s*"[^"]*"/"venue": "engines"/g' \
-        -e 's/\$\{__all_instances\}/\{job="engines"\}/g' \
-         < "${file}" > "${output}"
-    
-    echo "✅ Fixed: ${output}"
+    if grep -q '\$venue' "${file}" 2>/dev/null; then
+        echo "  • Found templated \$venue; verify your labels match Prometheus jobs."
+    fi
+    # Detect static venue labels using POSIX classes (portable)
+    if grep -Eq '"venue"[[:space:]]*:[[:space:]]*"[^"]+"' "${file}" 2>/dev/null; then
+        echo "  • Found static 'venue' values; confirm they match exported labels."
+    fi
+
+    if [[ "${APPLY:-0}" == "1" ]]; then
+        echo "🛠  APPLY=1 set — generating fixed file ${output} (non-destructive)."
+        # Create backup (if not exists)
+        if [[ ! -f "${backup}" ]]; then
+            cp "${file}" "${backup}"
+            echo "  💾 Backup created: ${backup}"
+        fi
+        # Apply sample label normalizations cautiously to a new file
+        sed -E \
+            -e 's/job="engine_(ibkr|bybit|binance)"/job="hmm_engine_binance"/g' \
+            -e 's/job="engine_binance_exporter"/job="hmm_engine_binance_exporter"/g' \
+            -e 's/\$\{__all_instances\}/\{job="hmm_engine_binance"\}/g' \
+             < "${file}" > "${output}"
+        echo "  ✅ Wrote: ${output} (review before importing to Grafana)"
+    else
+        echo "  (Dry run: set APPLY=1 to generate a candidate .fixed.json)"
+    fi
     echo "---"
 }
 
 # Process all JSON files
-cd ops/observability/grafana/dashboards/
+if [[ -d ops/observability/grafana/dashboards/ ]]; then
+  cd ops/observability/grafana/dashboards/
+else
+  echo "⚠️  dashboards directory not found; skipping."
+  exit 0
+fi
 
 echo "🔍 Finding dashboard files..."
 for file in *.json; do
@@ -48,12 +64,8 @@ for file in *.json; do
 done
 
 echo ""
-echo "📋 APPLYING FIXES TO GRAFANA:"
-echo "1. Manual Import: Go to Grafana → Dashboards → Import"
-echo "2. Upload each .fixed.json file"  
-echo "3. Delete old dashboards"
-echo "4. Or use API: curl -X DELETE \"http://localhost:3000/api/dashboards/uid/<uid>\""
+echo "📋 Next steps:"
+echo "1. If needed, re-run with APPLY=1 to generate .fixed.json candidates."
+echo "2. Import .fixed.json in Grafana (Dashboards → Import) or adjust panels manually."
+echo "3. Prefer aligning exporters/labels over mass-rewriting dashboard queries."
 echo ""
-echo "🎯 RESULT: All dashboards will now show LIVE trading data!"
-echo ""
-

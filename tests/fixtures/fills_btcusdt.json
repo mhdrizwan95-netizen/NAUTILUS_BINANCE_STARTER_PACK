@@ -1,0 +1,4 @@
+[
+  {"symbol": "BTCUSDT.BINANCE", "side": "BUY",  "qty": 0.001, "price": 50000.0, "fee_usd": 0.05},
+  {"symbol": "BTCUSDT.BINANCE", "side": "SELL", "qty": 0.001, "price": 50500.0, "fee_usd": 0.05}
+]

@@ -56,6 +56,10 @@ class EventBus:
             max_workers = int(os.getenv("EVENTBUS_MAX_WORKERS", "8"))
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._worker: Optional[asyncio.Task[Any]] = None
+        try:
+            self._queue_max: int = max(0, int(os.getenv("EVENTBUS_QUEUE_MAX", "2000")))
+        except Exception:
+            self._queue_max = 2000
 
     async def start(self) -> None:
         """Start the event processing loop."""
@@ -64,7 +68,8 @@ class EventBus:
 
         loop = asyncio.get_running_loop()
         self._loop = loop
-        self._queue = asyncio.Queue()
+        # Bounded queue provides backpressure under bursty load instead of RAM growth
+        self._queue = asyncio.Queue(maxsize=self._queue_max or 0)
         self._running = True
         logging.info("[BUS] Event bus started - ready for real-time coordination")
         self._worker = asyncio.create_task(self._process_events())
@@ -254,11 +259,12 @@ class EventBus:
         loop: asyncio.AbstractEventLoop,
     ) -> Any:
         """Dispatch handler execution via async/await or executor offloading."""
-        payload_copy = copy.deepcopy(payload)
         if _is_async_callable(handler):
-            return await handler(payload_copy)
+            # Async handlers are expected to be non-blocking; avoid deep-copy overhead
+            return await handler(dict(payload))
 
-        return await loop.run_in_executor(self._executor, _call_sync, handler, payload_copy)
+        # Offload sync handlers to thread pool; isolate via deep copy
+        return await loop.run_in_executor(self._executor, _call_sync, handler, copy.deepcopy(payload))
 
 
 # Global event bus instance - the central nervous system

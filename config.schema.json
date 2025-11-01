@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Nautilus Starter Pack Configuration",
+  "type": "object",
+  "properties": {
+    "engine": {
+      "type": "object",
+      "properties": {
+        "TRADING_ENABLED": {"type": "boolean", "default": false},
+        "TRADE_SYMBOLS": {"type": "string", "default": "*"},
+        "MIN_NOTIONAL_USDT": {"type": "number", "default": 10},
+        "MAX_NOTIONAL_USDT": {"type": "number", "default": 1000},
+        "MAX_ORDERS_PER_MIN": {"type": "integer", "default": 30},
+        "DUST_THRESHOLD_USD": {"type": "number", "default": 2},
+        "BINANCE_MODE": {"type": "string", "enum": ["demo","test","usdm","coinm","spot","paper"], "default": "demo"},
+        "BINANCE_API_KEY": {"type": "string"},
+        "BINANCE_API_SECRET": {"type": "string"},
+        "BINANCE_SPOT_BASE": {"type": "string", "default": "https://api.binance.com"},
+        "BINANCE_FUTURES_BASE": {"type": "string", "default": "https://fapi.binance.com"},
+        "BINANCE_USDM_BASE": {"type": "string"},
+        "BINANCE_COINM_BASE": {"type": "string"},
+        "BINANCE_RECV_WINDOW": {"type": "integer", "default": 5000},
+        "BINANCE_API_TIMEOUT": {"type": "number", "default": 10}
+      },
+      "required": ["TRADING_ENABLED","TRADE_SYMBOLS"]
+    },
+    "ops": {
+      "type": "object",
+      "properties": {
+        "OPS_PORT": {"type": "integer", "default": 8002},
+        "OPS_API_TOKEN": {"type": "string"},
+        "ENGINE_ENDPOINTS": {"type": "string", "default": "http://engine_binance:8003"},
+        "HMM_URL": {"type": "string", "default": "http://ml_service:8000"}
+      }
+    },
+    "ml_service": {
+      "type": "object",
+      "properties": {
+        "DATA_DIR": {"type": "string", "default": "/data"},
+        "MODEL_DIR": {"type": "string", "default": "/models"},
+        "REGISTRY_DIR": {"type": "string", "default": "/models/registry"},
+        "CURRENT_SYMLINK": {"type": "string", "default": "/models/current"},
+        "LEDGER_DB": {"type": "string", "default": "/shared/manifest.sqlite"},
+        "EXACTLY_ONCE": {"type": "boolean", "default": false},
+        "DELETE_AFTER_PROCESS": {"type": "boolean", "default": true}
+      }
+    },
+    "data_ingester": {
+      "type": "object",
+      "properties": {
+        "LEDGER_DB": {"type": "string", "default": "/shared/manifest.sqlite"},
+        "DATA_LANDING": {"type": "string", "default": "/data/incoming"},
+        "EXCHANGE": {"type": "string", "default": "binance"},
+        "SYMBOLS": {"type": "string", "default": "BTC/USDT,ETH/USDT"},
+        "TIMEFRAME": {"type": "string", "default": "1m"},
+        "BATCH_LIMIT": {"type": "integer", "default": 1000},
+        "SLEEP_MS": {"type": "integer", "default": 500}
+      }
+    },
+    "param_controller": {
+      "type": "object",
+      "properties": {
+        "PC_DB": {"type": "string", "default": "/shared/param_controller.sqlite"}
+      }
+    }
+  }
+}
+

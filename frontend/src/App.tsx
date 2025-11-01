@@ -1,18 +1,35 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { TopHUD } from './components/TopHUD';
 import { TabbedInterface } from './components/TabbedInterface';
 import { Toaster } from './components/ui/sonner';
-import { toast } from 'sonner@2.0.3';
-import { venues, generatePerformanceData, getGlobalMetrics } from './lib/mockData';
-import type { ModeType } from './types/trading';
+import { toast } from 'sonner';
+import { generatePerformanceData, getGlobalMetrics } from './lib/mockData';
+import { useAppStore, useModeActions, useRealTimeActions } from './lib/store';
+import { useWebSocket } from './lib/websocket';
 import { motion } from 'motion/react';
 
 export default function App() {
-  const [mode, setMode] = useState<ModeType>('paper');
-  const [performances, setPerformances] = useState(generatePerformanceData());
   const [isBooting, setIsBooting] = useState(true);
+  const mode = useAppStore((state) => state.mode);
+  const realTimeData = useAppStore((state) => state.realTimeData);
+  const { setMode } = useModeActions();
+  const { updatePerformances, updateGlobalMetrics: updateStoreMetrics } = useRealTimeActions();
 
-  const globalMetrics = getGlobalMetrics(performances);
+  // WebSocket connection for real-time updates
+  const { isConnected } = useWebSocket();
+
+  // Memoize derived data to prevent unnecessary recalculations
+  const performances = useMemo(() =>
+    realTimeData.performances.length > 0
+      ? realTimeData.performances
+      : generatePerformanceData(),
+    [realTimeData.performances]
+  );
+
+  const globalMetrics = useMemo(() =>
+    realTimeData.globalMetrics || getGlobalMetrics(performances),
+    [realTimeData.globalMetrics, performances]
+  );
 
   // Boot sequence animation
   useEffect(() => {
@@ -25,18 +42,21 @@ export default function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  // Simulate live updates
+  // Simulate live updates - use refs to avoid dependency issues
   useEffect(() => {
     if (isBooting) return;
 
     const interval = setInterval(() => {
-      setPerformances(generatePerformanceData());
+      const newPerformances = generatePerformanceData();
+      const newMetrics = getGlobalMetrics(newPerformances);
+      updatePerformances(newPerformances);
+      updateStoreMetrics(newMetrics);
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [isBooting]);
+  }, [isBooting]); // Only depend on isBooting
 
-  const handleModeChange = (newMode: ModeType) => {
+  const handleModeChange = (newMode: typeof mode) => {
     setMode(newMode);
     toast.success(`Switched to ${newMode.toUpperCase()} mode`, {
       description: newMode === 'live' ? 'Real capital at risk' : 'Simulated trading active',
@@ -92,13 +112,7 @@ export default function App() {
   return (
     <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden dark">
       {/* Top HUD */}
-      <TopHUD
-        mode={mode}
-        onModeChange={handleModeChange}
-        metrics={globalMetrics}
-        venues={venues}
-        onKillSwitch={handleKillSwitch}
-      />
+      <TopHUD isConnected={isConnected} />
 
       {/* Tabbed Interface */}
       <TabbedInterface />

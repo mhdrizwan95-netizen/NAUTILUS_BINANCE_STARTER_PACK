@@ -1,3 +1,5 @@
+## DEPRECATED: Observability stack reads from ops/observability/prometheus/prometheus.yml
+## This file is kept for legacy setups only.
 global: { scrape_interval: 5s }
 rule_files: ["./alerts.rules.yml"]
 scrape_configs:

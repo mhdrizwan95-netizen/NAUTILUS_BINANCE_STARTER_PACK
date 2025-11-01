@@ -1,5 +1,5 @@
 # Builder stage: install deps with build tooling
-FROM python:3.11-slim AS builder
+FROM python:3.11.9-slim AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -13,8 +13,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+COPY constraints.txt /constraints.txt
 RUN python -m pip install --upgrade pip \
- && pip install --prefix=/install -r requirements.txt
+ && pip install --prefix=/install -c /constraints.txt -r requirements.txt
 
 # Build the React/TypeScript Command Center bundle
 FROM node:20-bookworm-slim AS frontend_builder
@@ -27,7 +28,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # Runtime stage
-FROM python:3.11-slim
+FROM python:3.11.9-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

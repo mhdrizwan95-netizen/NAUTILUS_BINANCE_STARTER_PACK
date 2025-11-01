@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11.9-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
@@ -17,13 +17,20 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY services/ml_service/requirements.txt ./requirements.txt
+COPY constraints.txt /constraints.txt
 # hadolint ignore=DL3013
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && pip install -c /constraints.txt -r requirements.txt
 
 COPY services/ml_service/app ./app
 COPY services/common /app/common
 
 ENV DATA_DIR=/data     MODEL_DIR=/models     REGISTRY_DIR=/models/registry     CURRENT_SYMLINK=/models/current     LEDGER_DB=/shared/manifest.sqlite     EXACTLY_ONCE=false     DELETE_AFTER_PROCESS=true     LOG_LEVEL=INFO     UVICORN_HOST=0.0.0.0     UVICORN_PORT=8000
+
+# Run as non-root user
+RUN useradd -m appuser \
+    && mkdir -p /data /models /shared \
+    && chown -R appuser:appuser /app /data /models /shared
+USER appuser
 
 EXPOSE 8000
 

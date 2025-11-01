@@ -87,7 +87,7 @@ export function StrategyTab() {
   const appliedStrategies = useMemo(() => strategies, [strategies]);
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="mx-auto max-w-6xl space-y-4 p-6">
       {loading && strategies.length === 0 ? (
         <div className="text-sm text-muted-foreground">Loading strategies…</div>
       ) : null}

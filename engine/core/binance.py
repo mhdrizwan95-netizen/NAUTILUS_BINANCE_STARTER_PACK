@@ -930,13 +930,24 @@ class BinanceREST:
         settings = get_settings()
         clean = self._clean_symbol(symbol)
         market_key, base_url, is_futures = self._resolve_market(market)
+        # Enforce tick-size rounding to avoid exchange rejections
+        try:
+            filt = await self.exchange_filter(clean, market=market_key)
+            tick = float(getattr(filt, "tick_size", 0.0) or 0.0)
+        except Exception:
+            tick = 0.0
+        safe_price = float(price)
+        if tick and tick > 0.0:
+            # Round to the nearest valid tick downwards for conservatism
+            steps = max(int(safe_price / tick), 0)
+            safe_price = steps * tick
         base_params = {
             "symbol": clean,
             "side": side,
             "type": "LIMIT",
             "timeInForce": time_in_force,
             "quantity": f"{quantity:.8f}",
-            "price": f"{price:.8f}",
+            "price": f"{safe_price:.8f}",
             "newOrderRespType": self._default_resp_type(market_key),
             "recvWindow": settings.recv_window,
         }

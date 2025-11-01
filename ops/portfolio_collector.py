@@ -97,10 +97,9 @@ async def portfolio_collector_loop(interval_sec: int = 10):
     _BASELINE_EQUITY = None
     _BASELINE_DAYKEY = None
 
-    endpoints = engine_endpoints()
-
     while True:
         try:
+            endpoints = engine_endpoints()
             async with httpx.AsyncClient() as client:
                 results = await asyncio.gather(*[_fetch_snapshot(client, e) for e in endpoints], return_exceptions=True)
 

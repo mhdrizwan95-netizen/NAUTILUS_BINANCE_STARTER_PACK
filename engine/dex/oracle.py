@@ -47,9 +47,20 @@ class DexPriceOracle:
 
     async def _dexscreener_price(self, token_identifier: str) -> Optional[float]:
         url = DEXSCREENER_TOKEN_URL.format(token=token_identifier)
-        resp = await self._client.get(url)
-        resp.raise_for_status()
-        data = resp.json() or {}
+        # Simple retry with exponential backoff on transient failures
+        last_exc = None
+        for attempt in range(3):
+            try:
+                resp = await self._client.get(url)
+                resp.raise_for_status()
+                data = resp.json() or {}
+                break
+            except (httpx.HTTPError, Exception) as exc:  # noqa: BLE001
+                last_exc = exc
+                await asyncio.sleep(0.25 * (attempt + 1))
+        else:
+            raise last_exc  # propagate last error after retries
+        
         pairs = data.get("pairs") or []
         for pair in pairs:
             price = pair.get("priceUsd")

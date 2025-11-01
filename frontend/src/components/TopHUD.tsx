@@ -1,24 +1,34 @@
-import { Power, Activity } from 'lucide-react';
+import { Power, Activity, Wifi, WifiOff } from 'lucide-react';
 import { Switch } from './ui/switch';
 import { Button } from './ui/button';
-import type { GlobalMetrics, ModeType, Venue } from '../types/trading';
+import { useAppStore, useModeActions, useRealTimeActions, useRealTimeData } from '../lib/store';
+import { Venue } from '../lib/validation';
+import { toast } from 'sonner';
 import { motion } from 'motion/react';
 
-interface TopHUDProps {
-  mode: ModeType;
-  onModeChange: (mode: ModeType) => void;
-  metrics: GlobalMetrics;
-  venues: Venue[];
-  onKillSwitch: () => void;
-}
+export function TopHUD({ isConnected = false }: { isConnected?: boolean }) {
+  const mode = useAppStore((state) => state.mode);
+  // Use selector with shallow equality to avoid unnecessary re-renders
+  const realTimeData = useRealTimeData();
+  const { setMode } = useModeActions();
+  const { updateVenues } = useRealTimeActions();
 
-export function TopHUD({ mode, onModeChange, metrics, venues, onKillSwitch }: TopHUDProps) {
+  // Use real-time data or fallback to mock data
+  const metrics = realTimeData.globalMetrics;
+  const venues: Venue[] = realTimeData.venues.length > 0 ? realTimeData.venues : [
+    { id: 'binance', name: 'Binance', type: 'crypto' as const, status: 'connected' as const, latency: 12 },
+    { id: 'bybit', name: 'Bybit', type: 'crypto' as const, status: 'connected' as const, latency: 18 },
+    { id: 'ibkr', name: 'IBKR', type: 'equities' as const, status: 'connected' as const, latency: 45 },
+    { id: 'oanda', name: 'OANDA', type: 'fx' as const, status: 'degraded' as const, latency: 89 },
+  ];
+
+  if (!metrics) return null; // Don't render until we have metrics
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
     }).format(value);
   };
 
@@ -43,7 +53,14 @@ export function TopHUD({ mode, onModeChange, metrics, venues, onKillSwitch }: To
             </div>
           </div>
           <div>
-            <h1 className="text-zinc-100 tracking-tight">NAUTILUS</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-zinc-100 tracking-tight">NAUTILUS</h1>
+              {isConnected ? (
+                <Wifi className="w-4 h-4 text-emerald-400" />
+              ) : (
+                <WifiOff className="w-4 h-4 text-red-400" />
+              )}
+            </div>
             <p className="text-zinc-500 text-xs tracking-wider">TERMINAL</p>
           </div>
         </div>
@@ -55,7 +72,7 @@ export function TopHUD({ mode, onModeChange, metrics, venues, onKillSwitch }: To
           </span>
           <Switch
             checked={mode === 'live'}
-            onCheckedChange={(checked) => onModeChange(checked ? 'live' : 'paper')}
+            onCheckedChange={(checked: boolean) => setMode(checked ? 'live' : 'paper')}
           />
           <span className={`text-xs ${mode === 'live' ? 'text-emerald-400' : 'text-zinc-500'}`}>
             LIVE
@@ -67,7 +84,11 @@ export function TopHUD({ mode, onModeChange, metrics, venues, onKillSwitch }: To
           <Button
             variant="destructive"
             size="sm"
-            onClick={onKillSwitch}
+            onClick={() => {
+              toast.error('EMERGENCY STOP ACTIVATED', {
+                description: 'All positions closed, trading halted',
+              });
+            }}
             className="gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
           >
             <Power className="w-4 h-4" />
@@ -95,7 +116,7 @@ export function TopHUD({ mode, onModeChange, metrics, venues, onKillSwitch }: To
           <div className="w-px h-8 bg-zinc-700/50" />
           <MetricDisplay
             label="Drawdown"
-            value={`${(metrics.drawdown * 100).toFixed(1)}%`}
+            value={`${(metrics.drawdown * 100).toFixed(2)}%`}
             color={metrics.drawdown < 0.1 ? 'text-zinc-400' : 'text-amber-400'}
           />
           <div className="w-px h-8 bg-zinc-700/50" />

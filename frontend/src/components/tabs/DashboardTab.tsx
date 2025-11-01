@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { DateRange } from 'react-day-picker';
 import { Calendar as CalendarIcon, Filter, RefreshCcw } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Calendar } from '@/components/ui/calendar';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { Label } from '@/components/ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Separator } from '@/components/ui/separator';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Calendar } from '../ui/calendar';
+import { Button } from '../ui/button';
+import { Card } from '../ui/card';
+import { Badge } from '../ui/badge';
+import { Label } from '../ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Checkbox } from '../ui/checkbox';
+import { Separator } from '../ui/separator';
+import { ScrollArea } from '../ui/scroll-area';
 import {
   Table,
   TableBody,
@@ -19,11 +20,11 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import { Skeleton } from '@/components/ui/skeleton';
-import { EquityCurves } from '@/components/charts/EquityCurves';
-import { PnlBySymbol } from '@/components/charts/PnlBySymbol';
-import { ReturnsHistogram } from '@/components/charts/ReturnsHistogram';
+} from '../ui/table';
+import { Skeleton } from '../ui/skeleton';
+import { EquityCurves } from '../charts/EquityCurves';
+import { PnlBySymbol } from '../charts/PnlBySymbol';
+import { ReturnsHistogram } from '../charts/ReturnsHistogram';
 import {
   getAlerts,
   getDashboardSummary,
@@ -31,14 +32,18 @@ import {
   getPositions,
   getRecentTrades,
   getStrategies,
-} from '@/lib/api';
-import type { StrategySummary } from '@/types/trading';
-
-type DashboardSummary = Awaited<ReturnType<typeof getDashboardSummary>>;
-type PositionsResponse = Awaited<ReturnType<typeof getPositions>>;
-type TradesResponse = Awaited<ReturnType<typeof getRecentTrades>>;
-type AlertsResponse = Awaited<ReturnType<typeof getAlerts>>;
-type HealthResponse = Awaited<ReturnType<typeof getHealth>>;
+} from '../../lib/api';
+import { queryKeys } from '../../lib/queryClient';
+import { validateApiResponse } from '../../lib/validation';
+import {
+  dashboardSummarySchema,
+  strategySummarySchema,
+  positionSchema,
+  tradeSchema,
+  alertSchema,
+  healthCheckSchema
+} from '../../lib/validation';
+import type { StrategySummary } from '../../types/trading';
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-US', {
@@ -60,14 +65,6 @@ const getDefaultRange = (): DateRange => {
 };
 
 export function DashboardTab() {
-  const [strategies, setStrategies] = useState<StrategySummary[]>([]);
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [positions, setPositions] = useState<PositionsResponse>([]);
-  const [trades, setTrades] = useState<TradesResponse>([]);
-  const [alerts, setAlertsData] = useState<AlertsResponse>([]);
-  const [health, setHealth] = useState<HealthResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
   const [appliedStrategies, setAppliedStrategies] = useState<string[]>([]);
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
@@ -75,80 +72,67 @@ export function DashboardTab() {
   const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() => getDefaultRange());
   const [activeRange, setActiveRange] = useState<DateRange | undefined>(() => getDefaultRange());
 
-  const abortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    getStrategies(controller.signal)
-      .then(setStrategies)
-      .catch((error) => {
-        if (!controller.signal.aborted) {
-          console.warn('Failed to load strategies', error);
-        }
-      });
-    return () => controller.abort();
-  }, []);
-
-  const load = useCallback(async () => {
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setLoading(true);
-
+  // Build query parameters
+  const queryParams = useMemo(() => {
     const params = new URLSearchParams();
     if (activeRange?.from) params.set('from', activeRange.from.toISOString());
     if (activeRange?.to) params.set('to', activeRange.to.toISOString());
     appliedStrategies.forEach((strategyId) => params.append('strategies[]', strategyId));
     appliedSymbols.forEach((symbol) => params.append('symbols[]', symbol));
-
-    try {
-      const [summaryPayload, positionsPayload, tradesPayload, alertsPayload, healthPayload] =
-        await Promise.all([
-          getDashboardSummary(params, controller.signal),
-          getPositions(controller.signal),
-          getRecentTrades(controller.signal),
-          getAlerts(controller.signal),
-          getHealth(controller.signal),
-        ]);
-
-      if (!controller.signal.aborted) {
-        setSummary(summaryPayload);
-        setPositions(positionsPayload);
-        setTrades(tradesPayload);
-        setAlertsData(alertsPayload);
-        setHealth(healthPayload);
-      }
-    } catch (error) {
-      if (!controller.signal.aborted && error instanceof Error) {
-        toast.error('Failed to refresh dashboard', { description: error.message });
-      }
-    } finally {
-      if (!controller.signal.aborted) {
-        setLoading(false);
-      }
-    }
+    return params;
   }, [activeRange, appliedStrategies, appliedSymbols]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
+  // React Query hooks for data fetching
+  const strategiesQuery = useQuery({
+    queryKey: queryKeys.strategies.list(),
+    queryFn: () => getStrategies().then(data => validateApiResponse(strategySummarySchema.array(), data)),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+  });
 
-  useEffect(() => () => abortRef.current?.abort(), []);
+  const summaryQuery = useQuery({
+    queryKey: queryKeys.dashboard.summary(Object.fromEntries(queryParams.entries())),
+    queryFn: () => getDashboardSummary(queryParams).then(data => validateApiResponse(dashboardSummarySchema, data)),
+    staleTime: 30 * 1000, // 30 seconds for real-time data
+  });
+
+  const positionsQuery = useQuery({
+    queryKey: queryKeys.dashboard.positions(),
+    queryFn: () => getPositions().then(data => validateApiResponse(positionSchema.array(), data)),
+    staleTime: 10 * 1000, // 10 seconds
+  });
+
+  const tradesQuery = useQuery({
+    queryKey: queryKeys.dashboard.trades(),
+    queryFn: () => getRecentTrades().then(data => validateApiResponse(tradeSchema.array(), data)),
+    staleTime: 10 * 1000, // 10 seconds
+  });
+
+  const alertsQuery = useQuery({
+    queryKey: queryKeys.dashboard.alerts(),
+    queryFn: () => getAlerts().then(data => validateApiResponse(alertSchema.array(), data)),
+    staleTime: 10 * 1000, // 10 seconds
+  });
+
+  const healthQuery = useQuery({
+    queryKey: queryKeys.dashboard.health(),
+    queryFn: () => getHealth().then(data => validateApiResponse(healthCheckSchema, data)),
+    staleTime: 10 * 1000, // 10 seconds
+  });
 
   const symbolOptions = useMemo(() => {
     const symbols = new Set<string>();
-    strategies.forEach((strategy) => strategy.symbols.forEach((symbol) => symbols.add(symbol)));
-    summary?.pnlBySymbol.forEach((row) => symbols.add(row.symbol));
+    strategiesQuery.data?.forEach((strategy) => strategy.symbols.forEach((symbol) => symbols.add(symbol)));
+    summaryQuery.data?.pnlBySymbol.forEach((row) => symbols.add(row.symbol));
     return Array.from(symbols).sort();
-  }, [strategies, summary]);
+  }, [strategiesQuery.data, summaryQuery.data]);
 
   const equitySeriesKeys = useMemo(() => {
-    if (!summary?.equityByStrategy?.length) return [];
-    const first = summary.equityByStrategy[0];
+    if (!summaryQuery.data?.equityByStrategy?.length) return [];
+    const first = summaryQuery.data.equityByStrategy[0];
     return Object.keys(first)
       .filter((key) => key !== 't')
       .map((key) => ({ key, label: key }));
-  }, [summary]);
+  }, [summaryQuery.data]);
 
   const handleApplyFilters = () => {
     setActiveRange(pendingRange);
@@ -180,8 +164,18 @@ export function DashboardTab() {
     );
   };
 
+  const handleRefresh = () => {
+    // Invalidate and refetch all queries
+    strategiesQuery.refetch();
+    summaryQuery.refetch();
+    positionsQuery.refetch();
+    tradesQuery.refetch();
+    alertsQuery.refetch();
+    healthQuery.refetch();
+  };
+
   return (
-    <div className="space-y-6 p-6">
+    <div className="mx-auto max-w-7xl space-y-6 p-6">
       <Card className="p-4">
         <div className="flex flex-wrap items-end gap-4">
           <div className="space-y-2">
@@ -222,7 +216,7 @@ export function DashboardTab() {
                 <div className="p-3">
                   <ScrollArea className="max-h-64">
                     <div className="space-y-2">
-                      {strategies.map((strategy) => (
+                      {strategiesQuery.data?.map((strategy) => (
                         <label key={strategy.id} className="flex items-center gap-2 text-sm">
                           <Checkbox
                             checked={selectedStrategies.includes(strategy.id)}
@@ -231,7 +225,7 @@ export function DashboardTab() {
                           <span>{strategy.name}</span>
                         </label>
                       ))}
-                      {strategies.length === 0 && (
+                      {strategiesQuery.data?.length === 0 && (
                         <p className="text-xs text-muted-foreground">No strategies available</p>
                       )}
                     </div>
@@ -276,14 +270,14 @@ export function DashboardTab() {
           </div>
 
           <div className="flex gap-2">
-            <Button size="sm" onClick={handleApplyFilters} disabled={loading}>
+            <Button size="sm" onClick={handleApplyFilters} disabled={strategiesQuery.isLoading || summaryQuery.isLoading}>
               Apply Filters
             </Button>
-            <Button size="sm" variant="ghost" onClick={handleResetFilters} disabled={loading}>
+            <Button size="sm" variant="ghost" onClick={handleResetFilters} disabled={strategiesQuery.isLoading || summaryQuery.isLoading}>
               Reset
             </Button>
-            <Button size="icon" variant="outline" onClick={() => load()} disabled={loading}>
-              <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            <Button size="icon" variant="outline" onClick={handleRefresh} disabled={strategiesQuery.isLoading || summaryQuery.isLoading}>
+              <RefreshCcw className={`h-4 w-4 ${strategiesQuery.isLoading || summaryQuery.isLoading ? 'animate-spin' : ''}`} />
             </Button>
           </div>
         </div>
@@ -291,7 +285,7 @@ export function DashboardTab() {
         {(selectedStrategies.length > 0 || selectedSymbols.length > 0) && (
           <div className="mt-4 flex flex-wrap gap-2">
             {selectedStrategies.map((strategyId) => {
-              const strategy = strategies.find((item) => item.id === strategyId);
+              const strategy = strategiesQuery.data?.find((item) => item.id === strategyId);
               return (
                 <Badge key={strategyId} variant="outline">
                   {strategy?.name ?? strategyId}
@@ -311,31 +305,31 @@ export function DashboardTab() {
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Total PnL</div>
           <div className="text-lg font-semibold">
-            {summary ? formatCurrency(summary.kpis.totalPnl) : <Skeleton className="h-6 w-32" />}
+            {summaryQuery.data ? formatCurrency(summaryQuery.data.kpis.totalPnl) : <Skeleton className="h-6 w-32" />}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Win Rate</div>
           <div className="text-lg font-semibold">
-            {summary ? formatPercent(summary.kpis.winRate) : <Skeleton className="h-6 w-24" />}
+            {summaryQuery.data ? formatPercent(summaryQuery.data.kpis.winRate) : <Skeleton className="h-6 w-24" />}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Sharpe</div>
           <div className="text-lg font-semibold">
-            {summary ? summary.kpis.sharpe.toFixed(2) : <Skeleton className="h-6 w-16" />}
+            {summaryQuery.data ? summaryQuery.data.kpis.sharpe.toFixed(2) : <Skeleton className="h-6 w-16" />}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Max Drawdown</div>
           <div className="text-lg font-semibold">
-            {summary ? formatPercent(summary.kpis.maxDrawdown) : <Skeleton className="h-6 w-24" />}
+            {summaryQuery.data ? formatPercent(summaryQuery.data.kpis.maxDrawdown) : <Skeleton className="h-6 w-24" />}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Open Positions</div>
           <div className="text-lg font-semibold">
-            {summary ? summary.kpis.openPositions : <Skeleton className="h-6 w-12" />}
+            {summaryQuery.data ? summaryQuery.data.kpis.openPositions : <Skeleton className="h-6 w-12" />}
           </div>
         </Card>
       </div>
@@ -344,17 +338,17 @@ export function DashboardTab() {
         <div className="flex items-center justify-between">
           <h3 className="font-medium">Equity Curves</h3>
         </div>
-        <EquityCurves data={summary?.equityByStrategy ?? []} series={equitySeriesKeys} />
+        <EquityCurves data={summaryQuery.data?.equityByStrategy as any ?? []} series={equitySeriesKeys} />
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="space-y-4 p-4">
           <h3 className="font-medium">PnL by Symbol</h3>
-          <PnlBySymbol data={summary?.pnlBySymbol ?? []} />
+          <PnlBySymbol data={summaryQuery.data?.pnlBySymbol ?? []} />
         </Card>
         <Card className="space-y-4 p-4">
           <h3 className="font-medium">Distribution of Returns</h3>
-          <ReturnsHistogram returns={summary?.returns ?? []} />
+          <ReturnsHistogram returns={summaryQuery.data?.returns ?? []} />
         </Card>
       </div>
 
@@ -372,7 +366,7 @@ export function DashboardTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {positions.map((position) => (
+              {positionsQuery.data?.map((position) => (
                 <TableRow key={position.symbol}>
                   <TableCell>{position.symbol}</TableCell>
                   <TableCell>{position.qty}</TableCell>
@@ -384,7 +378,7 @@ export function DashboardTab() {
                 </TableRow>
               ))}
             </TableBody>
-            <TableCaption>{positions.length === 0 ? 'No open positions' : undefined}</TableCaption>
+            <TableCaption>{positionsQuery.data?.length === 0 ? 'No open positions' : undefined}</TableCaption>
           </Table>
         </Card>
 
@@ -402,14 +396,14 @@ export function DashboardTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {trades.map((trade) => (
-                <TableRow key={`${trade.time}-${trade.symbol}-${trade.side}`}>
-                  <TableCell>{new Date(trade.time).toLocaleTimeString()}</TableCell>
+              {tradesQuery.data?.map((trade) => (
+                <TableRow key={`${trade.timestamp}-${trade.symbol}-${trade.side}`}>
+                  <TableCell>{new Date(trade.timestamp).toLocaleTimeString()}</TableCell>
                   <TableCell>{trade.symbol}</TableCell>
                   <TableCell className={trade.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}>
                     {trade.side.toUpperCase()}
                   </TableCell>
-                  <TableCell>{trade.qty}</TableCell>
+                  <TableCell>{trade.quantity}</TableCell>
                   <TableCell>{formatCurrency(trade.price)}</TableCell>
                   <TableCell className="text-right">
                     {trade.pnl !== undefined ? formatCurrency(trade.pnl) : '—'}
@@ -417,7 +411,7 @@ export function DashboardTab() {
                 </TableRow>
               ))}
             </TableBody>
-            <TableCaption>{trades.length === 0 ? 'No recent trades' : undefined}</TableCaption>
+            <TableCaption>{tradesQuery.data?.length === 0 ? 'No recent trades' : undefined}</TableCaption>
           </Table>
         </Card>
 
@@ -425,27 +419,27 @@ export function DashboardTab() {
           <h3 className="mb-3 font-medium">Alerts</h3>
           <ScrollArea className="h-64 pr-2">
             <div className="space-y-3">
-              {alerts.map((alert) => (
-                <div key={`${alert.time}-${alert.text}`} className="rounded-md border border-border p-3">
+              {alertsQuery.data?.map((alert) => (
+                <div key={`${alert.timestamp}-${alert.message}`} className="rounded-md border border-border p-3">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{new Date(alert.time).toLocaleTimeString()}</span>
+                    <span>{new Date(alert.timestamp).toLocaleTimeString()}</span>
                     <Badge
                       variant={
-                        alert.level === 'error'
+                        alert.type === 'error'
                           ? 'destructive'
-                          : alert.level === 'warn'
+                          : alert.type === 'warning'
                           ? 'secondary'
                           : 'outline'
                       }
                     >
-                      {alert.level.toUpperCase()}
+                      {alert.type.toUpperCase()}
                     </Badge>
                   </div>
                   <Separator className="my-2" />
-                  <p className="text-sm leading-tight text-muted-foreground">{alert.text}</p>
+                  <p className="text-sm leading-tight text-muted-foreground">{alert.message}</p>
                 </div>
               ))}
-              {alerts.length === 0 && <p className="text-xs text-muted-foreground">No alerts</p>}
+              {alertsQuery.data?.length === 0 && <p className="text-xs text-muted-foreground">No alerts</p>}
             </div>
           </ScrollArea>
         </Card>
@@ -453,7 +447,7 @@ export function DashboardTab() {
         <Card className="p-4">
           <h3 className="mb-3 font-medium">Venue Health</h3>
           <div className="space-y-3">
-            {health?.venues.map((venue) => (
+            {healthQuery.data?.venues.map((venue) => (
               <div key={venue.name} className="rounded-md border border-border p-3 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{venue.name}</span>
@@ -475,7 +469,7 @@ export function DashboardTab() {
                 </div>
               </div>
             ))}
-            {!health?.venues?.length && <p className="text-xs text-muted-foreground">No venue data</p>}
+            {!healthQuery.data?.venues?.length && <p className="text-xs text-muted-foreground">No venue data</p>}
           </div>
         </Card>
       </div>

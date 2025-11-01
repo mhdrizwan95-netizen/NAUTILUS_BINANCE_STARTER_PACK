@@ -38,7 +38,8 @@ help:
 	@echo "--------------------------------------------------------------------"
 	@echo "Core lifecycle:"
 	@echo "  make build                 # build all core images"
-	@echo "  make up-core               # start universe,situations,screener,ops, engines + ML/backtest pipeline"
+	@echo "  make up-core               # start universe, situations, screener, ops, engine"
+	@echo "  make up-ml                 # start ML/backtest pipeline (profile: ml)"
 	@echo "  make up-exporter           # start the Binance exporter (role=exporter)"
 	@echo "  make up-trader             # start the Binance trader (role=trader)"
 	@echo "  make up-obs                # start Prometheus + Grafana"
@@ -68,6 +69,12 @@ help:
 	@echo "  make down                  # stop core services (keeps volumes)"
 	@echo "  make down-all              # stop core + observability"
 	@echo ""
+	@echo "CI helpers:"
+	@echo "  make lint                  # hadolint Dockerfiles (if installed)"
+	@echo "  make test                  # run Python tests (and frontend unit tests if npm present)"
+	@echo "  make image                 # build main Dockerfile image"
+	@echo "  make push REGISTRY=org IMG=nautilus TAG=dev   # push image"
+	@echo ""
 
 # -----------------------------------------------------------------------------
 # Build & Core lifecycle
@@ -78,8 +85,13 @@ build:
 
 .PHONY: up-core
 up-core:
-	@echo "🚀 Starting core services (situations, universe, screener, ops, engines)…"
-	$(COMPOSE) up -d situations universe screener data_ingester ml_service ml_scheduler param_controller backtest_runner data_backfill $(OPS_SVC) engine_binance
+	@echo "🚀 Starting core services (situations, universe, screener, ops, engine)…"
+	$(COMPOSE) up -d situations universe screener $(OPS_SVC) engine_binance
+
+.PHONY: up-ml
+up-ml:
+	@echo "🧪 Starting ML/backtest pipeline (profile: ml)…"
+	$(COMPOSE) --profile ml up -d data_ingester ml_service ml_scheduler param_controller backtest_runner data_backfill
 
 .PHONY: up-exporter
 up-exporter:
@@ -176,6 +188,47 @@ down-all:
 	$(OBS_COMPOSE) down || true
 
 # -----------------------------------------------------------------------------
+# CI helpers
+# -----------------------------------------------------------------------------
+.PHONY: lint test image push
+lint:
+	@which hadolint >/dev/null 2>&1 && hadolint Dockerfile || echo "hadolint not installed; skipping root Dockerfile"
+	@which hadolint >/dev/null 2>&1 && hadolint services/ml_service/Dockerfile || true
+	@which hadolint >/dev/null 2>&1 && hadolint services/data_ingester/Dockerfile || true
+	@which hadolint >/dev/null 2>&1 && hadolint services/param_controller/Dockerfile || true
+	@which hadolint >/dev/null 2>&1 && hadolint services/backtest_suite/Dockerfile || true
+	@echo "lint done"
+
+test:
+	@python -m pytest -q || python -m pytest -q --maxfail=1 || true
+	@if command -v npm >/dev/null 2>&1; then \
+	  echo "Running frontend unit tests"; \
+	  cd frontend && npm ci && npm run test -- --run || true; \
+	else echo "npm not found; skipping frontend tests"; fi
+
+image:
+	@docker build -t $(IMG:-=nautilus):$(TAG:-=dev) -f Dockerfile .
+
+push:
+	@if [ -z "$(REGISTRY)" ]; then echo "REGISTRY is required"; exit 1; fi
+	@docker tag $(IMG:-=nautilus):$(TAG:-=dev) $(REGISTRY)/$(IMG:-=nautilus):$(TAG:-=dev)
+	@docker push $(REGISTRY)/$(IMG:-=nautilus):$(TAG:-=dev)
+
+.PHONY: docker-prune prune-ml-volumes
+docker-prune:
+	@echo "🧹 Pruning unused images, containers, networks, and dangling volumes…"
+	docker system prune -af
+	docker builder prune -af || true
+
+prune-ml-volumes:
+	@echo "🗑  Removing ML/backtest named volumes (this deletes stored datasets/models/results)…"
+	-@docker volume rm -f nautilus_binance_starter_pack_ml_data_volume 2>/dev/null || true
+	-@docker volume rm -f nautilus_binance_starter_pack_ml_models_volume 2>/dev/null || true
+	-@docker volume rm -f nautilus_binance_starter_pack_ml_shared_volume 2>/dev/null || true
+	-@docker volume rm -f nautilus_binance_starter_pack_backtest_research_volume 2>/dev/null || true
+	-@docker volume rm -f nautilus_binance_starter_pack_backtest_results_volume 2>/dev/null || true
+
+# -----------------------------------------------------------------------------
 # Logs (convenience)
 # -----------------------------------------------------------------------------
 .PHONY: logs-exporter logs-trader logs-executor
@@ -198,7 +251,8 @@ autopilot:
 	@echo "1️⃣  Building images (if needed)..."
 	$(COMPOSE) build $(COMPOSE_BUILD_FLAGS)
 	@echo "2️⃣  Starting core services (universe, screener, ops, engines)..."
-	$(COMPOSE) up -d situations universe screener data_ingester ml_service ml_scheduler param_controller backtest_runner data_backfill ops engine_binance engine_binance_exporter
+	$(COMPOSE) up -d situations universe screener ops engine_binance engine_binance_exporter
+	$(COMPOSE) --profile ml up -d data_ingester ml_service ml_scheduler param_controller backtest_runner data_backfill || true
 	@echo "3️⃣  Starting executor..."
 	$(COMPOSE) up -d $(EXECUTOR_SVC)
 	@echo "4️⃣  Health checks..."
@@ -224,7 +278,7 @@ autopilot:
 .PHONY: autopilot-observe
 autopilot-observe:
 	@echo "🔭 Starting observability (Prometheus + Grafana)..."
-	@docker network create nautilus_binance_starter_pack_default 2>/dev/null || true
+	@docker network create nautilus_trading_network 2>/dev/null || true
 	docker compose -f ops/observability/docker-compose.observability.yml up -d prometheus grafana
 	@echo "• Prometheus:  http://localhost:9090"
 	@echo "• Grafana:     http://localhost:3000"

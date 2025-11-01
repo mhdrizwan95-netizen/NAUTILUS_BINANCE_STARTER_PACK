@@ -72,16 +72,22 @@ def _load_window_from_disk(days: int) -> pd.DataFrame:
     return df
 
 def _train_hmm(X: np.ndarray, n_states: int) -> Tuple[GaussianHMM, StandardScaler, Dict[str, Any]]:
-    scaler = StandardScaler()
-    Xs = scaler.fit_transform(X)
-    n = len(Xs)
+    """Train HMM with time-aware split and no leakage.
+
+    - Split first (80/20 in order) to respect temporal ordering.
+    - Fit scaler on training only; transform both train/val with same scaler.
+    """
+    n = len(X)
     if n < 100:
         raise RuntimeError("not enough points to train")
-    split = int(n*0.8)
-    Xtr, Xval = Xs[:split], Xs[split:]
+    split = int(n * 0.8)
+    Xtr_raw, Xval_raw = X[:split], X[split:]
+    scaler = StandardScaler()
+    Xtr = scaler.fit_transform(Xtr_raw)
+    Xval = scaler.transform(Xval_raw)
     hmm = GaussianHMM(n_components=n_states, covariance_type="full", n_iter=200, random_state=42)
     hmm.fit(Xtr)
-    val_ll = float(hmm.score(Xval) / max(len(Xval),1))
+    val_ll = float(hmm.score(Xval) / max(len(Xval), 1))
     meta = {"metric_name":"val_log_likelihood","metric_value":val_ll,"n_obs":n,"n_states":n_states}
     return hmm, scaler, meta
 

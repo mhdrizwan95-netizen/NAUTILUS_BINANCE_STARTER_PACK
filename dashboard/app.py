@@ -39,7 +39,8 @@ import re
 
 # basic http helper (for proxy routes below)
 async def _get_json(url: str) -> Any:
-    async with httpx.AsyncClient(timeout=2.5) as client:
+    limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
+    async with httpx.AsyncClient(timeout=2.5, limits=limits, trust_env=True) as client:
         r = await client.get(url)
         r.raise_for_status()
         return r.json()
@@ -110,7 +111,8 @@ def _parse_prometheus_text(text: str) -> dict[str, float]:
 
 async def _get_prometheus_metrics(base: str) -> dict[str, float] | None:
     try:
-        async with httpx.AsyncClient(timeout=2.5) as c:
+        limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
+        async with httpx.AsyncClient(timeout=2.5, limits=limits, trust_env=True) as c:
             r = await c.get(f"{base}/metrics")
             r.raise_for_status()
             raw = r.text

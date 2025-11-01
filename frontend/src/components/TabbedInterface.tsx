@@ -1,11 +1,15 @@
+import { Suspense, lazy } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { LayoutDashboard, Target, Wallet, Brain, Settings } from 'lucide-react';
-import { DashboardTab } from './tabs/DashboardTab';
-import { StrategyTab } from './tabs/StrategyTab';
-import { FundingTab } from './tabs/FundingTab';
-import { BacktestingTab } from './tabs/BacktestingTab';
-import { SettingsTab } from './tabs/SettingsTab';
+import { Skeleton } from './ui/skeleton';
 import { motion } from 'motion/react';
+
+// Lazy load tab components for better performance
+const DashboardTab = lazy(() => import('./tabs/DashboardTab').then(module => ({ default: module.DashboardTab })));
+const StrategyTab = lazy(() => import('./tabs/StrategyTab').then(module => ({ default: module.StrategyTab })));
+const FundingTab = lazy(() => import('./tabs/FundingTab').then(module => ({ default: module.FundingTab })));
+const BacktestingTab = lazy(() => import('./tabs/BacktestingTab').then(module => ({ default: module.BacktestingTab })));
+const SettingsTab = lazy(() => import('./tabs/SettingsTab').then(module => ({ default: module.SettingsTab })));
 
 export function TabbedInterface() {
   return (
@@ -56,26 +60,70 @@ export function TabbedInterface() {
 
         <div className="flex-1 overflow-auto">
           <TabsContent value="dashboard" className="m-0 h-full">
-            <DashboardTab />
+            <Suspense fallback={<TabSkeleton />}>
+              <DashboardTab />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="strategy" className="m-0 h-full">
-            <StrategyTab />
+            <Suspense fallback={<TabSkeleton />}>
+              <StrategyTab />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="funding" className="m-0 h-full">
-            <FundingTab />
+            <Suspense fallback={<TabSkeleton />}>
+              <FundingTab />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="backtesting" className="m-0 h-full">
-            <BacktestingTab />
+            <Suspense fallback={<TabSkeleton />}>
+              <BacktestingTab />
+            </Suspense>
           </TabsContent>
 
           <TabsContent value="settings" className="m-0 h-full">
-            <SettingsTab />
+            <Suspense fallback={<TabSkeleton />}>
+              <SettingsTab />
+            </Suspense>
           </TabsContent>
         </div>
       </Tabs>
     </motion.div>
+  );
+}
+
+function TabSkeleton() {
+  return (
+    <div className="mx-auto max-w-7xl space-y-6 p-6">
+      {/* Header skeleton */}
+      <div className="flex flex-wrap items-end gap-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-10 w-32" />
+        <Skeleton className="h-10 w-40" />
+        <Skeleton className="h-10 w-24" />
+      </div>
+
+      {/* KPI cards skeleton */}
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-20" />
+        ))}
+      </div>
+
+      {/* Charts skeleton */}
+      <div className="grid gap-4 md:grid-cols-2">
+        <Skeleton className="h-80" />
+        <Skeleton className="h-80" />
+      </div>
+
+      {/* Tables skeleton */}
+      <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <Skeleton key={i} className="h-64" />
+        ))}
+      </div>
+    </div>
   );
 }

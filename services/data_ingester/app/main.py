@@ -78,4 +78,11 @@ def ingest_once():
                     pass
         except Exception as e:
             logger.exception(f"ingest error for {sym}: {e}")
+        # Respect extra delay to avoid rate limits
+        try:
+            delay = max(int(settings.SLEEP_MS), 0) / 1000.0
+            if delay > 0:
+                time.sleep(delay)
+        except Exception:
+            pass
     return out

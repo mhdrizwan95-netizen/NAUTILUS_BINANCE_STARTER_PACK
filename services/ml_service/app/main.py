@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from loguru import logger
 from .config import settings
 from .auth import require_role
-from .schemas import TrainRequest, TrainResponse, ModelInfo
+from .schemas import TrainRequest, TrainResponse, ModelInfo, PredictRequest, PredictResponse
 from .trainer import train_once
 from .inference import start_watchdog, predict_proba
 from . import model_store
@@ -40,7 +40,7 @@ def train(req: TrainRequest):
         message=res.get("message","ok")
     )
 
-@app.post("/predict")
-def predict(payload: dict):
-    post = predict_proba(payload.get("logret", []))
+@app.post("/predict", response_model=PredictResponse)
+def predict(req: PredictRequest):
+    post = predict_proba(req.logret)
     return JSONResponse(post)

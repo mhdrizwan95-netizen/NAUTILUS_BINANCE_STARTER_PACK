@@ -48,11 +48,11 @@ async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
 
 async def pnl_collector_loop():
     """Continuously collect PnL from all engines."""
-    endpoints = engine_endpoints()
-
     while True:
         try:
-            async with httpx.AsyncClient() as client:
+            endpoints = engine_endpoints()
+            limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
+            async with httpx.AsyncClient(limits=limits, trust_env=True) as client:
                 results = await asyncio.gather(*[_fetch_pnl(client, e) for e in endpoints], return_exceptions=True)
 
             for e, res in zip(endpoints, results):
@@ -66,7 +66,10 @@ async def pnl_collector_loop():
                 PNL_UNREALIZED.labels(venue=venue).set(unrealized)
 
             PNL_LAST_REFRESH.set(time.time())
-            logging.info(f"PnL updated for {len(endpoints)} venues")
+            try:
+                logging.info(f"PnL updated for {len(endpoints)} venues")
+            except Exception:
+                pass
         except Exception as e:
             logging.warning(f"PnL collector error: {e}")
         await asyncio.sleep(10)

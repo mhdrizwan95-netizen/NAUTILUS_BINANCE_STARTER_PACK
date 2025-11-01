@@ -1,11 +1,19 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   prometheus:
     image: prom/prometheus:v2.54.1
     container_name: hmm_prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
-      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.time=${PROM_RETENTION_DAYS:-7}d
       - --web.enable-lifecycle
+    logging: *default-logging
+    restart: unless-stopped
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./prometheus/rules:/etc/prometheus/rules:ro
@@ -18,11 +26,12 @@ services:
   grafana:
     image: grafana/grafana:11.2.2
     container_name: hmm_grafana
+    logging: *default-logging
     environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_AUTH_ANONYMOUS_ENABLED=true
-      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD:-admin}
+      - GF_AUTH_ANONYMOUS_ENABLED=${GF_AUTH_ANONYMOUS_ENABLED:-false}
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=${GF_AUTH_ANONYMOUS_ORG_ROLE:-Viewer}
       - GF_SECURITY_ALLOW_EMBEDDING=true
     volumes:
       - grafana_data:/var/lib/grafana
@@ -35,23 +44,31 @@ services:
       - prometheus
     networks:
       - trading_net
+    restart: unless-stopped
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: hmm_alertmanager
     command:
       - --config.file=/etc/alertmanager/alertmanager.yml
+      - --config.expand-env
+    logging: *default-logging
+    environment:
+      - ALERTMANAGER_TELEGRAM_BOT_TOKEN
+      - ALERTMANAGER_TELEGRAM_CHAT_ID
     volumes:
       - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     ports:
       - "9093:9093"
     networks:
       - trading_net
+    restart: unless-stopped
 
   loki:
     image: grafana/loki:2.9.7
     container_name: hmm_loki
     command: -config.file=/etc/loki/local-config.yaml
+    logging: *default-logging
     ports:
       - "3100:3100"
     volumes:
@@ -59,11 +76,13 @@ services:
       - ./loki/config.yml:/etc/loki/local-config.yaml:ro
     networks:
       - trading_net
+    restart: unless-stopped
 
   promtail:
     image: grafana/promtail:2.9.7
     container_name: hmm_promtail
     command: -config.file=/etc/promtail/config.yml
+    logging: *default-logging
     volumes:
       - /var/log:/var/log:ro
       - ./promtail/config.yml:/etc/promtail/config.yml:ro
@@ -71,6 +90,7 @@ services:
       - loki
     networks:
       - trading_net
+    restart: unless-stopped
 
 networks:
   trading_net:
