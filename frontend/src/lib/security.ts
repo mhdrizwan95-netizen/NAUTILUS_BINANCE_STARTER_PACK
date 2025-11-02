@@ -4,16 +4,39 @@
 export const CSP_HEADERS = {
   'Content-Security-Policy': [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval'", // Allow inline scripts for React
-    "style-src 'self' 'unsafe-inline'", // Allow inline styles
-    "img-src 'self' data: https:", // Allow data URLs and HTTPS images
-    "font-src 'self' data:", // Allow data URLs for fonts
-    "connect-src 'self' ws: wss: https:", // Allow WebSocket and HTTPS connections
-    "object-src 'none'", // Block plugins
+    "script-src 'self' 'nonce-__CSP_NONCE__'",
+    "style-src 'self' 'nonce-__CSP_NONCE__'",
+    "img-src 'self' data: https:",
+    "font-src 'self' data:",
+    "connect-src 'self' https: wss:",
+    "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    "frame-ancestors 'none'", // Prevent clickjacking
+    "frame-ancestors 'none'",
   ].join('; '),
+};
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
+
+const isCryptoAvailable = () => typeof window !== 'undefined' && !!window.crypto?.subtle;
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  bytes.forEach((b) => {
+    binary += String.fromCharCode(b);
+  });
+  return btoa(binary);
+};
+
+const base64ToArrayBuffer = (value: string): ArrayBuffer => {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes.buffer;
 };
 
 // Input sanitization utilities
@@ -136,6 +159,7 @@ export class RequestSigner {
   private static instance: RequestSigner;
   private apiKey: string | null = null;
   private apiSecret: string | null = null;
+  private keyPromise: Promise<CryptoKey> | null = null;
 
   static getInstance(): RequestSigner {
     if (!RequestSigner.instance) {
@@ -144,56 +168,142 @@ export class RequestSigner {
     return RequestSigner.instance;
   }
 
-  setCredentials(apiKey: string, apiSecret: string): void {
+  async setCredentials(apiKey: string, apiSecret: string): Promise<void> {
     this.apiKey = apiKey;
     this.apiSecret = apiSecret;
+    this.keyPromise = null;
+    if (isCryptoAvailable()) {
+      const keyMaterial = encoder.encode(apiSecret);
+      this.keyPromise = window.crypto.subtle.importKey(
+        'raw',
+        keyMaterial,
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign'],
+      );
+    }
   }
 
   // Generate HMAC signature for request
-  signRequest(method: string, endpoint: string, body?: any): string {
+  async signRequest(method: string, endpoint: string, body: any, timestamp: string): Promise<string> {
     if (!this.apiSecret) {
       throw new Error('API credentials not set');
     }
 
-    const timestamp = Date.now().toString();
     const message = `${method}${endpoint}${timestamp}${body ? JSON.stringify(body) : ''}`;
 
-    // Simple HMAC implementation (in production, use crypto.subtle)
-    // This is a placeholder - implement proper HMAC-SHA256
-    return btoa(message + this.apiSecret).slice(0, 64);
+    if (isCryptoAvailable()) {
+      const key = this.keyPromise ?? window.crypto.subtle.importKey(
+        'raw',
+        encoder.encode(this.apiSecret),
+        { name: 'HMAC', hash: 'SHA-256' },
+        false,
+        ['sign'],
+      );
+      this.keyPromise = key;
+      const cryptoKey = await key;
+      const signatureBuffer = await window.crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
+      return arrayBufferToBase64(signatureBuffer);
+    }
+
+    // Fallback: deterministic base64 encoding (less secure but ensures compatibility)
+    return arrayBufferToBase64(encoder.encode(`${message}${this.apiSecret}`).buffer).slice(0, 64);
   }
 
   // Add authentication headers to request
-  addAuthHeaders(headers: Headers, method: string, endpoint: string, body?: any): void {
+  async addAuthHeaders(headers: Headers, method: string, endpoint: string, body?: any): Promise<void> {
     if (!this.apiKey) {
       return; // No auth if credentials not set
     }
 
+    const timestamp = Date.now().toString();
     headers.set('X-API-Key', this.apiKey);
-    headers.set('X-Timestamp', Date.now().toString());
-    headers.set('X-Signature', this.signRequest(method, endpoint, body));
+    headers.set('X-Timestamp', timestamp);
+    const signature = await this.signRequest(method, endpoint, body, timestamp);
+    headers.set('X-Signature', signature);
   }
 }
 
 // Secure storage utilities
 export class SecureStorage {
   private static readonly PREFIX = 'nautilus_secure_';
+  private static readonly SECRET = 'nautilus-secure-storage-key';
+  private static keyPromise: Promise<CryptoKey> | null = null;
 
-  // Store sensitive data (encrypted in production)
-  static setItem(key: string, value: string): void {
+  private static async getKey(): Promise<CryptoKey | null> {
+    if (!isCryptoAvailable()) {
+      return null;
+    }
+    if (!this.keyPromise) {
+      this.keyPromise = window.crypto.subtle.importKey(
+        'raw',
+        await window.crypto.subtle.digest('SHA-256', encoder.encode(this.SECRET)),
+        { name: 'AES-GCM' },
+        false,
+        ['encrypt', 'decrypt'],
+      );
+    }
+    return this.keyPromise;
+  }
+
+  // Store sensitive data (encrypted when Web Crypto is available)
+  static async setItem(key: string, value: string): Promise<void> {
     try {
-      const encrypted = this.encrypt(value); // Placeholder encryption
-      localStorage.setItem(this.PREFIX + key, encrypted);
+      const storageKey = await this.getKey();
+      if (!storageKey) {
+        localStorage.setItem(this.PREFIX + key, value);
+        return;
+      }
+
+      const iv = window.crypto.getRandomValues(new Uint8Array(12));
+      const cipherBuffer = await window.crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        storageKey,
+        encoder.encode(value),
+      );
+
+      const payload = JSON.stringify({
+        iv: arrayBufferToBase64(iv.buffer),
+        value: arrayBufferToBase64(cipherBuffer),
+      });
+
+      localStorage.setItem(this.PREFIX + key, payload);
     } catch (error) {
       console.error('Failed to store secure item:', error);
     }
   }
 
   // Retrieve sensitive data
-  static getItem(key: string): string | null {
+  static async getItem(key: string): Promise<string | null> {
     try {
-      const encrypted = localStorage.getItem(this.PREFIX + key);
-      return encrypted ? this.decrypt(encrypted) : null; // Placeholder decryption
+      const stored = localStorage.getItem(this.PREFIX + key);
+      if (!stored) {
+        return null;
+      }
+
+      const storageKey = await this.getKey();
+      if (!storageKey) {
+        return stored;
+      }
+
+      try {
+        const parsed = JSON.parse(stored) as { iv?: string; value?: string };
+        if (!parsed.iv || !parsed.value) {
+          throw new Error('Invalid payload');
+        }
+        const decrypted = await window.crypto.subtle.decrypt(
+          { name: 'AES-GCM', iv: base64ToArrayBuffer(parsed.iv) },
+          storageKey,
+          base64ToArrayBuffer(parsed.value),
+        );
+        return decoder.decode(decrypted);
+      } catch {
+        try {
+          return decoder.decode(base64ToArrayBuffer(stored));
+        } catch {
+          return stored;
+        }
+      }
     } catch (error) {
       console.error('Failed to retrieve secure item:', error);
       return null;
@@ -208,21 +318,11 @@ export class SecureStorage {
   // Clear all secure data
   static clear(): void {
     const keys = Object.keys(localStorage);
-    keys.forEach(key => {
-      if (key.startsWith(this.PREFIX)) {
-        localStorage.removeItem(key);
+    keys.forEach((itemKey) => {
+      if (itemKey.startsWith(this.PREFIX)) {
+        localStorage.removeItem(itemKey);
       }
     });
-  }
-
-  // Placeholder encryption (implement proper encryption in production)
-  private static encrypt(value: string): string {
-    return btoa(value); // Base64 encoding as placeholder
-  }
-
-  // Placeholder decryption
-  private static decrypt(value: string): string {
-    return atob(value);
   }
 }
 

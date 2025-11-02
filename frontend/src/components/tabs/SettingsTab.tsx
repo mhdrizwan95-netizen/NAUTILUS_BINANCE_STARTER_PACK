@@ -1,569 +1,365 @@
-import { Shield, AlertTriangle, Lock, Zap, Database, Bell } from 'lucide-react';
-import { Label } from '../ui/label';
-import { Input } from '../ui/input';
-import { Switch } from '../ui/switch';
-import { Slider } from '../ui/slider';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
+import { Copy, Download, RefreshCw } from 'lucide-react';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../ui/card';
+import { Badge } from '../ui/badge';
+import { Skeleton } from '../ui/skeleton';
 import { Button } from '../ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { useState } from 'react';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Textarea } from '../ui/textarea';
+import { queryKeys } from '../../lib/queryClient';
+import { getConfigEffective, updateConfig } from '../../lib/api';
+import {
+  configEffectiveSchema,
+  validateApiResponse,
+} from '../../lib/validation';
+
+const CONFIG_FLAGS = [
+  {
+    key: 'DRY_RUN' as const,
+    label: 'Dry Run',
+    description: 'Route execution in simulation mode without placing real orders.',
+  },
+  {
+    key: 'SYMBOL_SCANNER_ENABLED' as const,
+    label: 'Symbol Scanner',
+    description: 'Continuously refresh the universe scanner feed.',
+  },
+  {
+    key: 'SOFT_BREACH_ENABLED' as const,
+    label: 'Soft Breach Guard',
+    description: 'Alerts and guard-rail for risk rails before hard stops trigger.',
+  },
+  {
+    key: 'SOFT_BREACH_BREAKEVEN_OK' as const,
+    label: 'Breakeven Allowed',
+    description: 'Permit breakeven exits when a soft breach fires.',
+  },
+  {
+    key: 'SOFT_BREACH_CANCEL_ENTRIES' as const,
+    label: 'Cancel Entries',
+    description: 'Cancel outstanding entry orders when a soft breach triggers.',
+  },
+];
 
 export function SettingsTab() {
+  const queryClient = useQueryClient();
+  const [opsToken, setOpsToken] = useState('');
+  const [overrideDraft, setOverrideDraft] = useState('{}');
+  const [overrideTouched, setOverrideTouched] = useState(false);
+
+  const configQuery = useQuery({
+    queryKey: queryKeys.settings.config(),
+    queryFn: () =>
+      getConfigEffective().then((data) =>
+        validateApiResponse(configEffectiveSchema, data, 'Runtime config')
+      ),
+    refetchInterval: 60_000,
+  });
+
+  useEffect(() => {
+    if (!configQuery.data || overrideTouched) return;
+    setOverrideDraft(JSON.stringify(configQuery.data.overrides ?? {}, null, 2));
+  }, [configQuery.data, overrideTouched]);
+
+  const tightenPct = useMemo(() => {
+    const raw =
+      configQuery.data?.effective?.SOFT_BREACH_TIGHTEN_SL_PCT ??
+      configQuery.data?.overrides?.SOFT_BREACH_TIGHTEN_SL_PCT;
+    return typeof raw === 'number' ? raw : null;
+  }, [configQuery.data]);
+
+  const updateMutation = useMutation({
+    mutationFn: async ({
+      patch,
+      token,
+    }: {
+      patch: Record<string, unknown>;
+      token: string;
+    }) => {
+      const response = await updateConfig(patch, token);
+      return validateApiResponse(
+        configEffectiveSchema,
+        response,
+        'Updated runtime config'
+      );
+    },
+    onSuccess: (data) => {
+      toast.success('Runtime configuration updated');
+      setOverrideTouched(false);
+      setOverrideDraft(JSON.stringify(data.overrides ?? {}, null, 2));
+      queryClient.setQueryData(queryKeys.settings.config(), data);
+    },
+    onError: (error: unknown) => {
+      toast.error('Failed to update configuration', {
+        description:
+          error instanceof Error ? error.message : 'Unknown error occurred',
+      });
+    },
+  });
+
+  const overridesInvalid = useMemo(() => {
+    try {
+      const parsed = JSON.parse(overrideDraft || '{}');
+      return !(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
+    } catch {
+      return true;
+    }
+  }, [overrideDraft]);
+
+  const handleSubmit = () => {
+    if (!opsToken.trim()) {
+      toast.error('Provide an OPS API token to update configuration');
+      return;
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(overrideDraft || '{}');
+    } catch (error) {
+      toast.error('Overrides JSON is invalid', {
+        description: error instanceof Error ? error.message : undefined,
+      });
+      return;
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      toast.error('Overrides must be a JSON object');
+      return;
+    }
+    updateMutation.mutate({
+      patch: parsed as Record<string, unknown>,
+      token: opsToken.trim(),
+    });
+  };
+
+  const handleCopy = async (payload: unknown, label: string) => {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      toast.success(`${label} copied to clipboard`);
+    } catch (error) {
+      toast.error(`Unable to copy ${label}`, {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  };
+
+  const handleDownload = (payload: unknown, filename: string) => {
+    try {
+      const blob = new Blob([JSON.stringify(payload, null, 2)], {
+        type: 'application/json',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error('Download failed', {
+        description: error instanceof Error ? error.message : undefined,
+      });
+    }
+  };
+
   return (
-    <div className="p-6">
-      <Tabs defaultValue="engine" className="w-full">
-        <TabsList className="bg-zinc-800/50 border border-zinc-700/50 mb-6">
-          <TabsTrigger value="engine" className="gap-2">
-            <Zap className="w-4 h-4" />
-            Engine
-          </TabsTrigger>
-          <TabsTrigger value="risk" className="gap-2">
-            <Shield className="w-4 h-4" />
-            Risk & Guardrails
-          </TabsTrigger>
-          <TabsTrigger value="policy" className="gap-2">
-            <Lock className="w-4 h-4" />
-            Policy
-          </TabsTrigger>
-          <TabsTrigger value="notifications" className="gap-2">
-            <Bell className="w-4 h-4" />
-            Notifications
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="engine">
-          <EngineSettings />
-        </TabsContent>
-
-        <TabsContent value="risk">
-          <RiskSettings />
-        </TabsContent>
-
-        <TabsContent value="policy">
-          <PolicySettings />
-        </TabsContent>
-
-        <TabsContent value="notifications">
-          <NotificationSettings />
-        </TabsContent>
-      </Tabs>
-    </div>
-  );
-}
-
-function EngineSettings() {
-  return (
-    <div className="grid grid-cols-2 gap-6">
-      <SettingsSection
-        title="Execution Engine"
-        icon={<Zap className="w-5 h-5 text-cyan-400" />}
-      >
-        <SettingRow label="Order Router">
-          <Select defaultValue="smart">
-            <SelectTrigger className="bg-zinc-800/50 border-zinc-700">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="smart">Smart Router</SelectItem>
-              <SelectItem value="aggressive">Aggressive Fill</SelectItem>
-              <SelectItem value="passive">Passive Queue</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingRow>
-
-        <SettingRow label="Max Order Rate (per sec)">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[10]}
-              max={50}
-              step={1}
-              className="[&_[role=slider]]:bg-cyan-400 [&_[role=slider]]:border-cyan-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">10 orders/sec</span>
+    <div className="space-y-6 p-6">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle>OPS API Token</CardTitle>
+            <CardDescription>
+              Provide the bearer token required by the Ops API. The value stays in memory only.
+            </CardDescription>
           </div>
-        </SettingRow>
-
-        <SettingRow label="Default Order Type">
-          <Select defaultValue="limit">
-            <SelectTrigger className="bg-zinc-800/50 border-zinc-700">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="limit">Limit</SelectItem>
-              <SelectItem value="market">Market</SelectItem>
-              <SelectItem value="stop-limit">Stop Limit</SelectItem>
-              <SelectItem value="iceberg">Iceberg</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingRow>
-
-        <SettingRow label="Enable Post-Only Mode">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Auto-Cancel Timeout (sec)">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => configQuery.refetch()}
+            disabled={configQuery.isRefetching}
+          >
+            <RefreshCw className="mr-2 h-4 w-4" />
+            Refresh config
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Label htmlFor="ops-token">X-Ops-Token header</Label>
           <Input
-            type="number"
-            defaultValue="60"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Performance"
-        icon={<Database className="w-5 h-5 text-emerald-400" />}
-      >
-        <SettingRow label="Data Refresh Rate (ms)">
-          <Select defaultValue="100">
-            <SelectTrigger className="bg-zinc-800/50 border-zinc-700">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="50">50ms (High CPU)</SelectItem>
-              <SelectItem value="100">100ms (Recommended)</SelectItem>
-              <SelectItem value="250">250ms (Low CPU)</SelectItem>
-              <SelectItem value="500">500ms (Minimal)</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingRow>
-
-        <SettingRow label="Websocket Compression">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Historical Data Cache (GB)">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[5]}
-              max={20}
-              step={1}
-              className="[&_[role=slider]]:bg-emerald-400 [&_[role=slider]]:border-emerald-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">5 GB</span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label="Log Level">
-          <Select defaultValue="info">
-            <SelectTrigger className="bg-zinc-800/50 border-zinc-700">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="debug">Debug</SelectItem>
-              <SelectItem value="info">Info</SelectItem>
-              <SelectItem value="warning">Warning</SelectItem>
-              <SelectItem value="error">Error Only</SelectItem>
-            </SelectContent>
-          </Select>
-        </SettingRow>
-      </SettingsSection>
-    </div>
-  );
-}
-
-function RiskSettings() {
-  return (
-    <div className="grid grid-cols-2 gap-6">
-      <SettingsSection
-        title="Position Limits"
-        icon={<Shield className="w-5 h-5 text-amber-400" />}
-      >
-        <SettingRow label="Max Position Size ($)">
-          <Input
-            type="number"
-            defaultValue="50000"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Max Leverage">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[5]}
-              max={20}
-              step={1}
-              className="[&_[role=slider]]:bg-amber-400 [&_[role=slider]]:border-amber-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">5x</span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label="Max Positions per Strategy">
-          <Input
-            type="number"
-            defaultValue="10"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Max Open Positions Total">
-          <Input
-            type="number"
-            defaultValue="25"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Concentration Limit (%)">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[20]}
-              max={100}
-              step={5}
-              className="[&_[role=slider]]:bg-amber-400 [&_[role=slider]]:border-amber-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">20%</span>
-          </div>
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Circuit Breakers"
-        icon={<AlertTriangle className="w-5 h-5 text-red-400" />}
-      >
-        <SettingRow label="Enable Circuit Breaker">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Daily Loss Limit (%)">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[10]}
-              max={50}
-              step={1}
-              className="[&_[role=slider]]:bg-red-400 [&_[role=slider]]:border-red-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">10%</span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label="Max Drawdown Threshold (%)">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[15]}
-              max={50}
-              step={1}
-              className="[&_[role=slider]]:bg-red-400 [&_[role=slider]]:border-red-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">15%</span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label="Consecutive Loss Limit">
-          <Input
-            type="number"
-            defaultValue="5"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Cooldown Period (minutes)">
-          <Input
-            type="number"
-            defaultValue="30"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Auto-Resume After Cooldown">
-          <Switch />
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Stop Loss & Take Profit"
-        icon={<Shield className="w-5 h-5 text-violet-400" />}
-      >
-        <SettingRow label="Default Stop Loss (%)">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[3]}
-              max={20}
-              step={0.5}
-              className="[&_[role=slider]]:bg-violet-400 [&_[role=slider]]:border-violet-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">3%</span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label="Default Take Profit (%)">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[8]}
-              max={50}
-              step={1}
-              className="[&_[role=slider]]:bg-violet-400 [&_[role=slider]]:border-violet-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">8%</span>
-          </div>
-        </SettingRow>
-
-        <SettingRow label="Enable Trailing Stop">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Trailing Distance (%)">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[2]}
-              max={10}
-              step={0.5}
-              className="[&_[role=slider]]:bg-violet-400 [&_[role=slider]]:border-violet-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">2%</span>
-          </div>
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Venue Specific Limits"
-        icon={<Database className="w-5 h-5 text-cyan-400" />}
-      >
-        <SettingRow label="Binance Max Position ($)">
-          <Input
-            type="number"
-            defaultValue="100000"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="IBKR Max Position ($)">
-          <Input
-            type="number"
-            defaultValue="200000"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Per-Venue Leverage Cap">
-          <div className="space-y-2">
-            <Slider
-              defaultValue={[3]}
-              max={10}
-              step={1}
-              className="[&_[role=slider]]:bg-cyan-400 [&_[role=slider]]:border-cyan-400"
-            />
-            <span className="text-xs text-zinc-500 font-mono">3x</span>
-          </div>
-        </SettingRow>
-      </SettingsSection>
-    </div>
-  );
-}
-
-function PolicySettings() {
-  return (
-    <div className="grid grid-cols-2 gap-6">
-      <SettingsSection
-        title="Trading Hours"
-        icon={<Lock className="w-5 h-5 text-violet-400" />}
-      >
-        <SettingRow label="Enable Trading Hours">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Start Time (UTC)">
-          <Input
-            type="time"
-            defaultValue="00:00"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="End Time (UTC)">
-          <Input
-            type="time"
-            defaultValue="23:59"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Trade on Weekends">
-          <Switch defaultChecked />
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Compliance"
-        icon={<Shield className="w-5 h-5 text-amber-400" />}
-      >
-        <SettingRow label="Require Manual Approval for Live">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Enable Audit Trail">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Max Daily Trade Volume ($)">
-          <Input
-            type="number"
-            defaultValue="1000000"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Prohibited Symbols">
-          <Input
-            placeholder="SYMBOL1, SYMBOL2..."
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection
-        title="API Keys & Secrets"
-        icon={<Lock className="w-5 h-5 text-red-400" />}
-      >
-        <SettingRow label="Binance API Key">
-          <Input
+            id="ops-token"
             type="password"
-            placeholder="••••••••••••••••"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
+            value={opsToken}
+            onChange={(event) => setOpsToken(event.target.value)}
+            placeholder="Paste OPS_API_TOKEN value"
+            autoComplete="off"
           />
-        </SettingRow>
+          <p className="text-xs text-zinc-500">
+            When running locally, export <code>OPS_API_TOKEN</code> or <code>OPS_API_TOKEN_FILE</code> and reuse that value here for authenticated updates.
+          </p>
+        </CardContent>
+      </Card>
 
-        <SettingRow label="IBKR Username">
-          <Input
-            type="text"
-            placeholder="Username"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle>Protection & Automation Flags</CardTitle>
+            <CardDescription>
+              Values reflect <code>config/runtime.yaml</code> merged with overrides.
+            </CardDescription>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                handleCopy(configQuery.data?.overrides ?? {}, 'Overrides JSON')
+              }
+              disabled={configQuery.isLoading}
+            >
+              <Copy className="mr-2 h-4 w-4" />
+              Copy overrides
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                handleDownload(
+                  configQuery.data?.effective ?? {},
+                  'runtime-config.json'
+                )
+              }
+              disabled={configQuery.isLoading}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              Download config
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {configQuery.isLoading ? (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {Array.from({ length: 5 }).map((_, idx) => (
+                <Skeleton key={idx} className="h-24 rounded-xl" />
+              ))}
+            </div>
+          ) : (
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {CONFIG_FLAGS.map((flag) => {
+                const value =
+                  configQuery.data?.effective?.[flag.key] ??
+                  configQuery.data?.overrides?.[flag.key];
+                const enabled = value === true;
+                return (
+                  <div
+                    key={flag.key}
+                    className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-4"
+                  >
+                    <div className="flex items-center justify-between pb-2">
+                      <p className="text-sm font-medium text-zinc-200">
+                        {flag.label}
+                      </p>
+                      <Badge
+                        variant={enabled ? 'secondary' : 'outline'}
+                        className={enabled ? 'bg-emerald-500/10 text-emerald-300' : ''}
+                      >
+                        {enabled ? 'ENABLED' : 'DISABLED'}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-zinc-500">{flag.description}</p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div className="mt-6 rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-4">
+            <p className="text-sm font-medium text-zinc-200">
+              Soft Breach tighten stop-loss
+            </p>
+            <p className="text-xs text-zinc-500">
+              Percentage applied to tighten the stop-loss when a soft breach occurs.
+            </p>
+            <div className="mt-3 text-lg font-semibold text-zinc-100">
+              {tightenPct !== null ? `${(tightenPct * 100).toFixed(1)}%` : '—'}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-        <SettingRow label="OANDA Token">
-          <Input
-            type="password"
-            placeholder="••••••••••••••••"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle>Runtime Overrides</CardTitle>
+            <CardDescription>
+              Edit the JSON payload sent to <code>PUT /api/config</code>.
+            </CardDescription>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleSubmit}
+            disabled={
+              updateMutation.isPending || overridesInvalid || !overrideTouched
+            }
+          >
+            {updateMutation.isPending ? 'Saving…' : 'Save overrides'}
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {configQuery.isLoading ? (
+            <Skeleton className="h-48 w-full" />
+          ) : (
+            <div className="rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-4 space-y-3">
+              <Textarea
+                value={overrideDraft}
+                onChange={(event) => {
+                  setOverrideDraft(event.target.value);
+                  setOverrideTouched(true);
+                }}
+                className="h-64 font-mono text-xs"
+              />
+              <p className="text-xs text-zinc-500">
+                Example: <code>{'{"DRY_RUN": false, "SOFT_BREACH_ENABLED": true}'}</code>
+              </p>
+              {overridesInvalid && (
+                <p className="text-xs text-amber-400">
+                  Overrides must be valid JSON representing an object.
+                </p>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-        <Button variant="outline" className="w-full">
-          Rotate All Keys
-        </Button>
-      </SettingsSection>
+      <Card>
+        <CardHeader>
+          <CardTitle>Effective Configuration</CardTitle>
+          <CardDescription>
+            Resulting payload served to clients (<code>config/runtime.yaml</code> merged with overrides).
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {configQuery.isLoading ? (
+            <Skeleton className="h-64 w-full" />
+          ) : (
+            <div className="rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-4">
+              <pre className="max-h-80 overflow-auto text-xs leading-6 text-zinc-300">
+                {JSON.stringify(configQuery.data?.effective ?? {}, null, 2)}
+              </pre>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
-      <SettingsSection
-        title="Emergency Contacts"
-        icon={<AlertTriangle className="w-5 h-5 text-red-400" />}
-      >
-        <SettingRow label="Primary Email">
-          <Input
-            type="email"
-            placeholder="trader@example.com"
-            className="bg-zinc-800/50 border-zinc-700"
-          />
-        </SettingRow>
-
-        <SettingRow label="SMS Number">
-          <Input
-            type="tel"
-            placeholder="+1 234 567 8900"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-
-        <SettingRow label="Slack Webhook">
-          <Input
-            type="url"
-            placeholder="https://hooks.slack.com/..."
-            className="bg-zinc-800/50 border-zinc-700 text-xs"
-          />
-        </SettingRow>
-      </SettingsSection>
-    </div>
-  );
-}
-
-function NotificationSettings() {
-  return (
-    <div className="grid grid-cols-2 gap-6">
-      <SettingsSection
-        title="Alert Preferences"
-        icon={<Bell className="w-5 h-5 text-cyan-400" />}
-      >
-        <SettingRow label="Trade Execution Alerts">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Order Rejection Alerts">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="PnL Threshold Alerts">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Venue Connection Status">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Strategy Performance Alerts">
-          <Switch />
-        </SettingRow>
-
-        <SettingRow label="Minimum Alert Interval (sec)">
-          <Input
-            type="number"
-            defaultValue="60"
-            className="bg-zinc-800/50 border-zinc-700 font-mono"
-          />
-        </SettingRow>
-      </SettingsSection>
-
-      <SettingsSection
-        title="Notification Channels"
-        icon={<Bell className="w-5 h-5 text-emerald-400" />}
-      >
-        <SettingRow label="In-App Notifications">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Email Notifications">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="SMS Notifications">
-          <Switch />
-        </SettingRow>
-
-        <SettingRow label="Slack Notifications">
-          <Switch defaultChecked />
-        </SettingRow>
-
-        <SettingRow label="Telegram Notifications">
-          <Switch />
-        </SettingRow>
-
-        <SettingRow label="Sound Alerts">
-          <Switch defaultChecked />
-        </SettingRow>
-      </SettingsSection>
-    </div>
-  );
-}
-
-function SettingsSection({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <div className="bg-zinc-900/50 backdrop-blur-sm border border-zinc-800/50 rounded-xl p-4">
-      <div className="flex items-center gap-2 mb-4">
-        {icon}
-        <h3 className="text-zinc-300">{title}</h3>
-      </div>
-      <div className="space-y-4">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function SettingRow({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-2">
-      <Label className="text-xs text-zinc-400">{label}</Label>
-      {children}
+      <p className="text-xs text-zinc-500">
+        Updates apply immediately and are persisted by the Ops service. Keep your token secure; the Command Center never stores it beyond this session.
+      </p>
     </div>
   );
 }

@@ -7,9 +7,6 @@ import json
 import logging
 import math
 import random
-import threading
-from contextlib import suppress
-from functools import partial
 from threading import Lock
 from pathlib import Path
 from typing import Literal, Optional, Any, cast
@@ -56,21 +53,8 @@ from engine.idempotency import CACHE, append_jsonl
 from engine.state import SnapshotStore
 import engine.state as state_mod
 from engine.reconcile import reconcile_since_snapshot
-from engine.telemetry.publisher import (
-    publish_metrics as deck_publish_metrics,
-    publish_fill as deck_publish_fill,
-    record_equity,
-    latency_quantiles,
-)
 from engine import strategy
 from engine.universe import configured_universe, last_prices
-from engine.telemetry.publisher import (
-    publish_metrics as deck_publish_metrics,
-    publish_fill as deck_publish_fill,
-    latency_percentiles as deck_latency_percentiles,
-    record_realized_total as deck_record_realized_total,
-    consume_latency as deck_consume_latency,
-)
 from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
 
 
@@ -100,15 +84,9 @@ IS_EXPORTER = ROLE == "exporter"
 VENUE = os.getenv("VENUE", "BINANCE").upper()
 risk_cfg = load_risk_config()
 RAILS = RiskRails(risk_cfg)
-DECK_PUSH_DISABLED = os.getenv("DECK_DISABLE_PUSH", "").lower() in {"1", "true", "yes"}
-DECK_METRICS_INTERVAL_SEC = max(
-    1.0, float(os.getenv("DECK_METRICS_INTERVAL_SEC", "2.0"))
-)
 EXTERNAL_EVENTS_SECRET = os.getenv("EXTERNAL_EVENTS_SECRET", "")
+EXTERNAL_EVENTS_ENABLED = bool(EXTERNAL_EVENTS_SECRET)
 _EXTERNAL_SIGNATURE_HEADER = "X-Events-Signature"
-_deck_metrics_task: Optional[asyncio.Task] = None
-_deck_realized_lock = Lock()
-_deck_last_realized = 0.0
 _market_data_dispatcher: Optional[MarketDataDispatcher] = None
 _market_data_logger: Optional[MarketDataLogger] = None
 try:
@@ -495,7 +473,7 @@ async def auto_topup_worker() -> None:
 
 
 async def wallet_balance_worker() -> None:
-    """Poll Binance for wallet balances and expose them via Deck metrics."""
+    """Poll Binance for wallet balances and expose them via engine metrics."""
     if VENUE != "BINANCE":
         _WALLET_LOG.warning("wallet monitor: skipping (venue=%s)", VENUE)
         return
@@ -605,10 +583,6 @@ async def wallet_balance_worker() -> None:
 
 
 portfolio = Portfolio()
-try:
-    _deck_last_realized = float(getattr(portfolio.state, "realized", 0.0) or 0.0)
-except Exception:
-    _deck_last_realized = 0.0
 router = OrderRouterExt(rest_client, portfolio, venue=VENUE)
 order_router = router
 try:
@@ -621,219 +595,6 @@ _refresh_logger = logging.getLogger("engine.refresh")
 _startup_logger = logging.getLogger("engine.startup")
 _persist_logger = logging.getLogger("engine.persistence")
 _kraken_risk_logger = logging.getLogger("engine.kraken.telemetry")
-_deck_logger = logging.getLogger("engine.deck")
-
-
-def _deck_symbol(base: str, venue: str) -> str:
-    base = base.upper()
-    if "." in base:
-        return base
-    venue_norm = venue.upper() if venue else VENUE
-    return f"{base}.{venue_norm}"
-
-
-def _deck_fill_handler(event: dict[str, Any]) -> None:
-    if DECK_PUSH_DISABLED:
-        return
-    global _deck_last_realized
-    try:
-        base = str(event.get("symbol") or "").upper()
-        venue = str(event.get("venue") or VENUE).upper()
-        if not base:
-            return
-        symbol = _deck_symbol(base, venue)
-        latency_ms = deck_consume_latency(symbol) or deck_consume_latency(base) or 0.0
-        meta = event.get("strategy_meta") or {}
-        try:
-            pnl_meta = float(meta.get("pnl_usd", 0.0))
-        except (TypeError, ValueError):
-            pnl_meta = 0.0
-        pnl_usd = pnl_meta
-        try:
-            global _deck_last_realized
-            with _deck_realized_lock:
-                current_realized = float(
-                    getattr(portfolio.state, "realized", 0.0) or 0.0
-                )
-                delta = current_realized - _deck_last_realized
-                _deck_last_realized = current_realized
-            if abs(delta) > 1e-9:
-                pnl_usd = delta
-        except Exception:
-            pass
-        strategy_name = (
-            event.get("strategy_tag")
-            or meta.get("strategy")
-            or event.get("intent")
-            or "unclassified"
-        )
-        fill_payload = {
-            "ts": float(event.get("ts") or time.time()),
-            "strategy": str(strategy_name),
-            "symbol": symbol,
-            "side": str(event.get("side") or "").lower(),
-            "pnl_usd": pnl_usd,
-            "latency_ms": float(latency_ms or 0.0),
-            "info": {
-                "order_id": event.get("order_id"),
-                "qty": event.get("filled_qty"),
-                "price": event.get("avg_price"),
-                "intent": event.get("intent"),
-            },
-        }
-        fill_payload["info"] = {
-            k: v for k, v in fill_payload["info"].items() if v is not None
-        }
-        deck_publish_fill(fill_payload)
-    except Exception as exc:  # pragma: no cover - telemetry best effort
-        _deck_logger.debug("Deck fill publish failed: %s", exc)
-
-
-async def _deck_metrics_loop() -> None:
-    if DECK_PUSH_DISABLED or IS_EXPORTER:
-        return
-    loop = asyncio.get_running_loop()
-    while True:
-        try:
-            await asyncio.sleep(DECK_METRICS_INTERVAL_SEC)
-            state = portfolio.state
-            equity = float(getattr(state, "equity", 0.0) or 0.0)
-            realized = float(getattr(state, "realized", 0.0) or 0.0)
-            pnl_24h = deck_record_realized_total(realized)
-            p50, p95 = deck_latency_percentiles()
-            try:
-                positions_open = sum(
-                    1
-                    for pos in (state.positions or {}).values()
-                    if abs(getattr(pos, "quantity", 0.0) or 0.0) > 0.0
-                )
-            except Exception:
-                positions_open = 0
-            breaker_flags = {
-                "equity": RAILS.equity_breaker_open(),
-                "venue": RAILS.venue_breaker_open(),
-            }
-            drawdown_pct = RAILS.current_drawdown_pct()
-            error_rate_pct = RAILS.current_error_rate_pct()
-            publish_fn = partial(
-                deck_publish_metrics,
-                equity_usd=equity,
-                pnl_24h=pnl_24h,
-                drawdown_pct=drawdown_pct,
-                positions=positions_open,
-                tick_p50_ms=p50,
-                tick_p95_ms=p95,
-                error_rate_pct=error_rate_pct,
-                breaker=breaker_flags,
-                pnl_by_strategy=None,
-            )
-            await loop.run_in_executor(None, publish_fn)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # pragma: no cover - telemetry best effort
-            _deck_logger.debug("Deck metrics publish failed: %s", exc)
-
-
-_DECK_BRIDGE_ENABLED = os.getenv("DECK_BRIDGE_DISABLED", "false").lower() not in {
-    "1",
-    "true",
-    "yes",
-}
-
-
-def _deck_thread_wrapper(func, args, kwargs):
-    try:
-        func(*args, **kwargs)
-    except Exception:
-        pass
-
-
-def _queue_deck_call(func, *args, **kwargs) -> None:
-    if not _DECK_BRIDGE_ENABLED:
-        return
-    try:
-        loop = asyncio.get_running_loop()
-    except RuntimeError:
-        threading.Thread(
-            target=_deck_thread_wrapper, args=(func, args, kwargs), daemon=True
-        ).start()
-        return
-    loop.create_task(asyncio.to_thread(func, *args, **kwargs))
-
-
-def _queue_deck_metrics(pnl_by_strategy: dict[str, float] | None = None) -> None:
-    if not _DECK_BRIDGE_ENABLED:
-        return
-    try:
-        state = portfolio.state
-    except Exception:
-        return
-
-    equity = float(getattr(state, "equity", 0.0) or 0.0)
-    wallet_snapshot = _wallet_state_copy()
-    wallet_equity = (
-        _safe_float(wallet_snapshot.get("total_equity_usdt"))
-        if wallet_snapshot
-        else None
-    )
-    if wallet_equity is not None:
-        equity = wallet_equity
-    now = time.time()
-    pnl_24h, drawdown_pct = record_equity(equity, now=now)
-    positions_count = len(getattr(state, "positions", {}) or {})
-    tick_p50, tick_p95 = latency_quantiles()
-
-    try:
-        error_rate_pct = RAILS.current_error_rate_pct()
-    except Exception:
-        error_rate_pct = 0.0
-
-    try:
-        breaker_equity = RAILS.equity_breaker_open()
-    except Exception:
-        breaker_equity = False
-    try:
-        breaker_venue = RAILS.venue_breaker_open()
-    except Exception:
-        breaker_venue = False
-
-    metrics_kwargs = {
-        "equity_usd": equity,
-        "pnl_24h": pnl_24h,
-        "drawdown_pct": drawdown_pct,
-        "positions": positions_count,
-        "tick_p50_ms": tick_p50,
-        "tick_p95_ms": tick_p95,
-        "error_rate_pct": error_rate_pct,
-        "breaker": {"equity": breaker_equity, "venue": breaker_venue},
-        "pnl_by_strategy": pnl_by_strategy,
-    }
-
-    if wallet_snapshot:
-        wallet_fields = {
-            "wallet_timestamp": wallet_snapshot.get("timestamp"),
-            "funding_free_usdt": wallet_snapshot.get("funding_free_usdt"),
-            "spot_free_usdt": wallet_snapshot.get("spot_free_usdt"),
-            "spot_locked_usdt": wallet_snapshot.get("spot_locked_usdt"),
-            "spot_total_usdt": wallet_snapshot.get("spot_total_usdt"),
-            "futures_wallet_usdt": wallet_snapshot.get("futures_wallet_usdt"),
-            "futures_available_usdt": wallet_snapshot.get("futures_available_usdt"),
-            "total_equity_usdt": wallet_snapshot.get("total_equity_usdt"),
-        }
-        for key, value in wallet_fields.items():
-            if value is None:
-                continue
-            metrics_kwargs[key] = value
-
-    try:
-        snapshot = dict(portfolio.snapshot())
-        snapshot["equity_usd"] = equity
-        snapshot["cash_usd"] = float(getattr(state, "cash", 0.0) or 0.0)
-        RAILS.refresh_snapshot_metrics(snapshot, venue=VENUE)
-    except Exception:
-        pass
-
-    _queue_deck_call(deck_publish_metrics, **metrics_kwargs)
 
 
 store = None
@@ -987,10 +748,15 @@ def version():
 
 _external_event_logger = logging.getLogger("engine.api.external_events")
 
+if not EXTERNAL_EVENTS_ENABLED:
+    _external_event_logger.warning(
+        "EXTERNAL_EVENTS_SECRET not set; /events/external endpoint disabled"
+    )
+
 
 def _verify_external_signature(body: bytes, header_value: str) -> bool:
-    if not EXTERNAL_EVENTS_SECRET:
-        return True
+    if not EXTERNAL_EVENTS_ENABLED:
+        return False
     if not header_value or not header_value.startswith("sha256="):
         return False
     expected = hmac.new(
@@ -1006,6 +772,12 @@ async def ingest_external_event(
     x_events_signature: str = Header(default="", alias=_EXTERNAL_SIGNATURE_HEADER),
 ):
     """Ingress point for external (off-tick) strategy signals."""
+
+    if not EXTERNAL_EVENTS_ENABLED:
+        raise HTTPException(
+            status_code=503,
+            detail="external event ingestion disabled (missing EXTERNAL_EVENTS_SECRET)",
+        )
 
     raw_body = await request.body()
     if not _verify_external_signature(raw_body, x_events_signature):
@@ -1734,36 +1506,6 @@ async def _start_guardian_and_feeds():
                 _startup_logger.info("Telegram fill pings enabled")
             except Exception:
                 pass
-            try:
-
-                def _on_fill_deck(evt):
-                    info = {
-                        "order_id": evt.get("order_id"),
-                        "filled_qty": evt.get("filled_qty"),
-                        "avg_price": evt.get("avg_price"),
-                        "venue": evt.get("venue"),
-                    }
-                    payload = {
-                        "ts": float(evt.get("ts") or time.time()),
-                        "strategy": (
-                            evt.get("strategy_tag")
-                            or (evt.get("strategy_meta") or {}).get("name")
-                            or evt.get("intent")
-                        ),
-                        "symbol": evt.get("symbol"),
-                        "side": evt.get("side"),
-                        "pnl_usd": evt.get("pnl_usd") or evt.get("realized_pnl"),
-                        "latency_ms": evt.get("latency_ms"),
-                        "info": {k: v for k, v in info.items() if v is not None},
-                    }
-                    deck_publish_fill(
-                        {k: v for k, v in payload.items() if v is not None}
-                    )
-
-                BUS.subscribe("trade.fill", _on_fill_deck)
-                _startup_logger.info("Deck fill bridge enabled")
-            except Exception:
-                _startup_logger.debug("Deck fill bridge wiring failed", exc_info=True)
             roll = EventBORollup()
             # Optional 6h buckets
             buckets = EventBOBuckets(
@@ -1938,10 +1680,6 @@ def _startup_load_snapshot_and_reconcile():
         _startup_logger.info("Strategy scheduler started")
     except Exception:
         _startup_logger.warning("Strategy scheduler failed to start", exc_info=True)
-    try:
-        _queue_deck_metrics()
-    except Exception:
-        pass
     return True
 
 
@@ -2713,10 +2451,6 @@ async def account_snapshot(force: bool = False):
         _store.save(state.snapshot())
     except Exception:
         pass
-    try:
-        _queue_deck_metrics()
-    except Exception:
-        pass
     return snap
 
 
@@ -2754,10 +2488,6 @@ def post_reconcile():
         global _last_reconcile_ts
         _last_reconcile_ts = time.time()
         metrics.reconcile_lag_seconds.set(0.0)
-        try:
-            _queue_deck_metrics()
-        except Exception:
-            pass
         return {
             "status": "ok",
             "applied_snapshot_ts_ms": snap.get("ts_ms"),
@@ -2995,37 +2725,8 @@ async def _start_event_bus():
         _startup_logger.info("Signal priority queue dispatcher online")
         init_external_feed_bridge(BUS)
         _startup_logger.info("Legacy external event bridge initialized")
-        if not DECK_PUSH_DISABLED:
-            BUS.subscribe("trade.fill", _deck_fill_handler)
-            _deck_logger.info("Deck fill bridge subscribed to trade.fill")
     except Exception:
         _startup_logger.exception("Event bus startup failed")
-
-
-@app.on_event("startup")
-async def _start_deck_metrics():
-    """Launch background loop that pushes live metrics to the Deck."""
-    if IS_EXPORTER or DECK_PUSH_DISABLED:
-        return
-    global _deck_metrics_task
-    if _deck_metrics_task and not _deck_metrics_task.done():
-        return
-    _deck_metrics_task = asyncio.create_task(_deck_metrics_loop(), name="deck-metrics")
-    _deck_logger.info(
-        "Deck metrics loop started (interval=%.1fs)", DECK_METRICS_INTERVAL_SEC
-    )
-
-
-@app.on_event("shutdown")
-async def _stop_deck_metrics():
-    """Stop Deck metrics loop on shutdown."""
-    global _deck_metrics_task
-    if not _deck_metrics_task:
-        return
-    _deck_metrics_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await _deck_metrics_task
-    _deck_metrics_task = None
 
 
 @app.on_event("startup")
@@ -3298,10 +2999,6 @@ async def _refresh_binance_futures_snapshot() -> None:
     metrics.set_core_metric("metrics_heartbeat", now_ts)
     _snapshot_counter += 1
     metrics.set_core_metric("snapshot_id", _snapshot_counter)
-    try:
-        _queue_deck_metrics()
-    except Exception:
-        pass
 
 
 async def _refresh_binance_spot_snapshot() -> None:
@@ -3453,10 +3150,6 @@ async def _refresh_binance_spot_snapshot() -> None:
     metrics.set_core_metric("metrics_heartbeat", now_ts)
     _snapshot_counter += 1
     metrics.set_core_metric("snapshot_id", _snapshot_counter)
-    try:
-        _queue_deck_metrics()
-    except Exception:
-        pass
 
 
 async def _refresh_venue_data():
@@ -3603,11 +3296,6 @@ async def _kraken_risk_metrics_loop() -> None:
 
         if VENUE == "KRAKEN":
             await _kraken_refresh_mark_prices(time.time())
-
-        try:
-            _queue_deck_metrics()
-        except Exception:
-            pass
 
         elapsed = time.monotonic() - tick_start
         sleep_base = max(0.5, interval - elapsed)

@@ -104,7 +104,6 @@ services:
       - BINANCE_RECV_WINDOW=60000    # tolerant to clock skew
       - ENGINE_PORT=8003
       - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
-      - DECK_DISABLE_PUSH=1
     volumes:
       - ./engine/state:/app/engine/state:rw
       - ./engine/logs:/app/engine/logs:rw
@@ -562,50 +561,6 @@ services:
         condition: service_started
     networks:
       - trading_net
-
-  hmm_deck:
-    image: python:3.11-slim
-    container_name: hmm_deck
-    logging: *default-logging
-    working_dir: /app
-    volumes:
-      - ./:/app
-    command: >
-      sh -c "pip install --no-cache-dir fastapi uvicorn[standard] httpx &&
-             uvicorn ops.deck_api:app --host 0.0.0.0 --port 8002"
-    ports:
-      - "${DECK_PORT:-8012}:8002"
-    environment:
-      - DECK_STATIC_DIR=./deck
-      - DECK_TOKEN=${DECK_TOKEN:-}
-      - BINANCE_API_KEY=${BINANCE_API_KEY}
-      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-      - BINANCE_SAPI_BASE=${BINANCE_SAPI_BASE:-https://api.binance.com}
-      - DECK_TRANSFER_ALLOW=${DECK_TRANSFER_ALLOW:-FUNDING,MAIN,UMFUTURE}
-    networks:
-      - trading_net
-    profiles: ["deck"]
-
-  hmm_allocator:
-    build:
-      context: .
-    command: python -m ops.allocator_daemon
-    logging: *default-logging
-    environment:
-      # Talk to Deck inside the compose network (internal Deck port is 8002)
-      DECK_URL: http://hmm_deck:8002
-      # Tuning knobs (override via env or .env as needed)
-      REFRESH_SEC: ${ALLOCATOR_REFRESH_SEC:-600}
-      EMA_ALPHA: ${ALLOCATOR_EMA_ALPHA:-0.35}
-      EXPLORATION: ${ALLOCATOR_EXPLORATION:-0.08}
-      MIN_SHARE: ${ALLOCATOR_MIN_SHARE:-0.00}
-      MAX_SHARE: ${ALLOCATOR_MAX_SHARE:-1.00}
-      # Optional: only needed if Deck token auth is enabled
-      DECK_TOKEN: ${DECK_TOKEN:-}
-    depends_on:
-      - hmm_deck
-    restart: unless-stopped
-    profiles: ["allocator"]
 
 networks:
   trading_net:

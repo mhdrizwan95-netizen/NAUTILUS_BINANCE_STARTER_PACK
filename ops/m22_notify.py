@@ -17,7 +17,7 @@ import logging
 from datetime import datetime
 from typing import Dict, Any, Optional
 
-import httpx
+from ops.net import create_async_client, request_with_retry
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -179,7 +179,7 @@ async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, b
 
     results = {}
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    async with create_async_client() as client:
         for platform in platforms:
             try:
                 if platform == "telegram":
@@ -196,7 +196,9 @@ async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, b
                         "disable_web_page_preview": True,
                     }
 
-                    response = await client.post(url, json=payload)
+                    response = await request_with_retry(
+                        client, "POST", url, json=payload, retries=2
+                    )
                     response.raise_for_status()
                     results[platform] = True
                     logger.info(f"Message sent to Telegram")
@@ -208,7 +210,9 @@ async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, b
                         continue
 
                     payload = {"content": message}
-                    response = await client.post(DISCORD_WEBHOOK, json=payload)
+                    response = await request_with_retry(
+                        client, "POST", DISCORD_WEBHOOK, json=payload, retries=2
+                    )
                     response.raise_for_status()
                     results[platform] = True
                     logger.info("Message sent to Discord")
@@ -220,7 +224,9 @@ async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, b
                         continue
 
                     payload = {"text": message}
-                    response = await client.post(SLACK_WEBHOOK, json=payload)
+                    response = await request_with_retry(
+                        client, "POST", SLACK_WEBHOOK, json=payload, retries=2
+                    )
                     response.raise_for_status()
                     results[platform] = True
                     logger.info("Message sent to Slack")

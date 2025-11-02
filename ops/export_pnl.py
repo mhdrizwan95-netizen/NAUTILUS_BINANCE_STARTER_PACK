@@ -17,7 +17,7 @@ import csv
 from pathlib import Path
 from datetime import datetime
 import asyncio
-import httpx
+from ops.net import create_async_client, request_with_retry
 
 
 EXPORTS_DIR = Path("ops/exports")
@@ -62,12 +62,13 @@ async def fetch_pnl_data(ops_url="http://localhost:8002"):
         Dict containing timestamp and models data, or None if failed
     """
     try:
-        timeout = httpx.Timeout(10.0)
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            response = await client.get(f"{ops_url}/dash/pnl")
+        async with create_async_client() as client:
+            response = await request_with_retry(
+                client, "GET", f"{ops_url}/dash/pnl", retries=2, backoff_base=0.5
+            )
             response.raise_for_status()
             return response.json()
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         print(f"Failed to fetch PnL data: {e}")
         return None
 

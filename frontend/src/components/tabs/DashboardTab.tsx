@@ -1,8 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useId } from 'react';
 import { DateRange } from 'react-day-picker';
 import { Calendar as CalendarIcon, Filter, RefreshCcw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { Calendar } from '../ui/calendar';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -44,6 +43,16 @@ import {
   healthCheckSchema
 } from '../../lib/validation';
 import type { StrategySummary } from '../../types/trading';
+import {
+  buildSummarySearchParams,
+  createDefaultDashboardFilters,
+  fromDateRange,
+  toDateRange,
+} from '../../lib/dashboardFilters';
+import {
+  useDashboardFilterActions,
+  useDashboardFilters,
+} from '../../lib/store';
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-US', {
@@ -54,33 +63,32 @@ function formatCurrency(value: number) {
 }
 
 function formatPercent(value: number) {
-  return `${(value * 100).toFixed(2)}%`;
+  return `${Math.round(value * 100)}%`;
 }
 
-const getDefaultRange = (): DateRange => {
-  const to = new Date();
-  const from = new Date();
-  from.setDate(from.getDate() - 7);
-  return { from, to };
-};
-
 export function DashboardTab() {
-  const [selectedStrategies, setSelectedStrategies] = useState<string[]>([]);
-  const [appliedStrategies, setAppliedStrategies] = useState<string[]>([]);
-  const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
-  const [appliedSymbols, setAppliedSymbols] = useState<string[]>([]);
-  const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() => getDefaultRange());
-  const [activeRange, setActiveRange] = useState<DateRange | undefined>(() => getDefaultRange());
+  const dashboardFilters = useDashboardFilters();
+  const { setDashboardFilters } = useDashboardFilterActions();
+
+  const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() => toDateRange(dashboardFilters));
+  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(dashboardFilters.strategies);
+  const [selectedSymbols, setSelectedSymbols] = useState<string[]>(dashboardFilters.symbols);
+
+  useEffect(() => {
+    setPendingRange(toDateRange(dashboardFilters));
+    setSelectedStrategies(dashboardFilters.strategies);
+    setSelectedSymbols(dashboardFilters.symbols);
+  }, [dashboardFilters]);
+
+  const positionsHeadingId = useId();
+  const tradesHeadingId = useId();
 
   // Build query parameters
-  const queryParams = useMemo(() => {
-    const params = new URLSearchParams();
-    if (activeRange?.from) params.set('from', activeRange.from.toISOString());
-    if (activeRange?.to) params.set('to', activeRange.to.toISOString());
-    appliedStrategies.forEach((strategyId) => params.append('strategies[]', strategyId));
-    appliedSymbols.forEach((symbol) => params.append('symbols[]', symbol));
-    return params;
-  }, [activeRange, appliedStrategies, appliedSymbols]);
+  const summaryParams = useMemo(
+    () => buildSummarySearchParams(dashboardFilters),
+    [dashboardFilters],
+  );
+  const summaryParamsKey = useMemo(() => summaryParams.toString(), [summaryParams]);
 
   // React Query hooks for data fetching
   const strategiesQuery = useQuery({
@@ -90,8 +98,8 @@ export function DashboardTab() {
   });
 
   const summaryQuery = useQuery({
-    queryKey: queryKeys.dashboard.summary(Object.fromEntries(queryParams.entries())),
-    queryFn: () => getDashboardSummary(queryParams).then(data => validateApiResponse(dashboardSummarySchema, data)),
+    queryKey: queryKeys.dashboard.summary({ params: summaryParamsKey }),
+    queryFn: () => getDashboardSummary(summaryParams).then(data => validateApiResponse(dashboardSummarySchema, data)),
     staleTime: 30 * 1000, // 30 seconds for real-time data
   });
 
@@ -135,19 +143,21 @@ export function DashboardTab() {
   }, [summaryQuery.data]);
 
   const handleApplyFilters = () => {
-    setActiveRange(pendingRange);
-    setAppliedStrategies(selectedStrategies);
-    setAppliedSymbols(selectedSymbols);
+    const normalizedRange = fromDateRange(pendingRange);
+    setDashboardFilters({
+      from: normalizedRange.from,
+      to: normalizedRange.to,
+      strategies: selectedStrategies,
+      symbols: selectedSymbols,
+    });
   };
 
   const handleResetFilters = () => {
-    const resetRange = getDefaultRange();
-    setPendingRange(resetRange);
-    setActiveRange(resetRange);
+    const defaults = createDefaultDashboardFilters();
+    setDashboardFilters(defaults);
+    setPendingRange(toDateRange(defaults));
     setSelectedStrategies([]);
-    setAppliedStrategies([]);
     setSelectedSymbols([]);
-    setAppliedSymbols([]);
   };
 
   const toggleStrategySelection = (strategyId: string) => {
@@ -327,7 +337,7 @@ export function DashboardTab() {
           </div>
         </Card>
         <Card className="p-4">
-          <div className="text-xs text-muted-foreground">Open Positions</div>
+          <div className="text-xs text-muted-foreground">Positions</div>
           <div className="text-lg font-semibold">
             {summaryQuery.data ? summaryQuery.data.kpis.openPositions : <Skeleton className="h-6 w-12" />}
           </div>
@@ -354,8 +364,8 @@ export function DashboardTab() {
 
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <Card className="p-4">
-          <h3 className="mb-3 font-medium">Open Positions</h3>
-          <Table>
+          <h3 id={positionsHeadingId} className="mb-3 font-medium">Open Positions</h3>
+          <Table aria-labelledby={positionsHeadingId}>
             <TableHeader>
               <TableRow>
                 <TableHead>Symbol</TableHead>
@@ -383,8 +393,8 @@ export function DashboardTab() {
         </Card>
 
         <Card className="p-4">
-          <h3 className="mb-3 font-medium">Recent Trades</h3>
-          <Table>
+          <h3 id={tradesHeadingId} className="mb-3 font-medium">Recent Trades</h3>
+          <Table aria-labelledby={tradesHeadingId}>
             <TableHeader>
               <TableRow>
                 <TableHead>Time</TableHead>

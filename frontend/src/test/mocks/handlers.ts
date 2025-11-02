@@ -135,6 +135,74 @@ const generateMockHealth = () => ({
   ],
 });
 
+const mockPortfolioAggregate = () => ({
+  equity_usd: 425000,
+  cash_usd: 175000,
+  gain_usd: 12500,
+  return_pct: 0.032,
+  baseline_equity_usd: 412500,
+  last_refresh_epoch: Math.floor(Date.now() / 1000),
+});
+
+const mockExposureAggregate = () => ({
+  totals: {
+    exposure_usd: 250000,
+    count: 5,
+    venues: 2,
+  },
+  by_symbol: {
+    'BTCUSDT.BINANCE': {
+      qty_base: 1.25,
+      last_price_usd: 59000,
+      exposure_usd: 73750,
+    },
+    'ETHUSDT.BINANCE': {
+      qty_base: 10,
+      last_price_usd: 3200,
+      exposure_usd: 32000,
+    },
+    'AAPL.IBKR': {
+      qty_base: 120,
+      last_price_usd: 170,
+      exposure_usd: 20400,
+    },
+  },
+});
+
+const mockPnlSnapshot = () => ({
+  realized: {
+    BINANCE: 6800,
+    IBKR: 2200,
+  },
+  unrealized: {
+    BINANCE: 5400,
+    IBKR: -800,
+  },
+});
+
+const mockConfigEffective = () => ({
+  base: {
+    demo_mode: false,
+  },
+  overrides: {
+    DRY_RUN: false,
+    SYMBOL_SCANNER_ENABLED: true,
+    SOFT_BREACH_ENABLED: true,
+    SOFT_BREACH_TIGHTEN_SL_PCT: 0.12,
+    SOFT_BREACH_BREAKEVEN_OK: true,
+    SOFT_BREACH_CANCEL_ENTRIES: false,
+  },
+  effective: {
+    demo_mode: false,
+    DRY_RUN: false,
+    SYMBOL_SCANNER_ENABLED: true,
+    SOFT_BREACH_ENABLED: true,
+    SOFT_BREACH_TIGHTEN_SL_PCT: 0.12,
+    SOFT_BREACH_BREAKEVEN_OK: true,
+    SOFT_BREACH_CANCEL_ENTRIES: false,
+  },
+});
+
 // HTTP request handlers
 export const handlers = [
   // Strategies endpoints
@@ -210,6 +278,22 @@ export const handlers = [
 
   http.get('/api/health', () => {
     return HttpResponse.json(generateMockHealth());
+  }),
+
+  http.get('/aggregate/portfolio', () => {
+    return HttpResponse.json(mockPortfolioAggregate());
+  }),
+
+  http.get('/aggregate/exposure', () => {
+    return HttpResponse.json(mockExposureAggregate());
+  }),
+
+  http.get('/aggregate/pnl', () => {
+    return HttpResponse.json(mockPnlSnapshot());
+  }),
+
+  http.get('/api/config/effective', () => {
+    return HttpResponse.json(mockConfigEffective());
   }),
 
   // Backtest endpoints

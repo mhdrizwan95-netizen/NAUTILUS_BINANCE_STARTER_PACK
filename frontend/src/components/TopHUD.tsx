@@ -1,40 +1,66 @@
+import { useId } from 'react';
+import type { ReactNode } from 'react';
 import { Power, Activity, Wifi, WifiOff } from 'lucide-react';
 import { Switch } from './ui/switch';
 import { Button } from './ui/button';
-import { useAppStore, useModeActions, useRealTimeActions, useRealTimeData } from '../lib/store';
-import { Venue } from '../lib/validation';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 
-export function TopHUD({ isConnected = false }: { isConnected?: boolean }) {
-  const mode = useAppStore((state) => state.mode);
-  // Use selector with shallow equality to avoid unnecessary re-renders
-  const realTimeData = useRealTimeData();
-  const { setMode } = useModeActions();
-  const { updateVenues } = useRealTimeActions();
+export interface TopHudMetrics {
+  totalPnl: number;
+  winRate: number;
+  sharpe: number;
+  maxDrawdown: number;
+  openPositions: number;
+}
 
-  // Use real-time data or fallback to mock data
-  const metrics = realTimeData.globalMetrics;
-  const venues: Venue[] = realTimeData.venues.length > 0 ? realTimeData.venues : [
-    { id: 'binance', name: 'Binance', type: 'crypto' as const, status: 'connected' as const, latency: 12 },
-    { id: 'bybit', name: 'Bybit', type: 'crypto' as const, status: 'connected' as const, latency: 18 },
-    { id: 'ibkr', name: 'IBKR', type: 'equities' as const, status: 'connected' as const, latency: 45 },
-    { id: 'oanda', name: 'OANDA', type: 'fx' as const, status: 'degraded' as const, latency: 89 },
-  ];
+export interface TopHudVenue {
+  name: string;
+  status: 'ok' | 'warn' | 'down';
+  latencyMs: number;
+  queue: number;
+}
 
-  if (!metrics) return null; // Don't render until we have metrics
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
+export interface TopHUDProps {
+  mode: 'paper' | 'live';
+  metrics?: TopHudMetrics | null;
+  venues?: TopHudVenue[] | null;
+  isConnected?: boolean;
+  isLoading?: boolean;
+  onModeChange: (mode: 'paper' | 'live') => void;
+  onKillSwitch: () => void;
+}
+
+export function TopHUD({
+  mode,
+  metrics,
+  venues,
+  isConnected = false,
+  isLoading = false,
+  onModeChange,
+  onKillSwitch,
+}: TopHUDProps) {
+  const switchId = useId();
+  const switchLabelId = `${switchId}-label`;
+
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(value);
-  };
 
-  const formatPercent = (value: number) => {
-    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
-  };
+  const formatPercent = (value: number) => `${(value * 100).toFixed(0)}%`;
+  const formatDrawdown = (value: number) => `${(value * 100).toFixed(2)}%`;
+
+  const metricsAvailable = Boolean(metrics) && !isLoading;
+
+  const totalPnlValue = metricsAvailable && metrics ? formatCurrency(metrics.totalPnl) : '--';
+  const winRateValue = metricsAvailable && metrics ? `${formatPercent(metrics.winRate)} win` : undefined;
+  const sharpeValue = metricsAvailable && metrics ? metrics.sharpe.toFixed(2) : '--';
+  const drawdownValue = metricsAvailable && metrics ? formatDrawdown(metrics.maxDrawdown) : '--';
+  const positionsValue = metricsAvailable && metrics ? metrics.openPositions.toString() : '--';
 
   return (
     <motion.div
@@ -70,9 +96,20 @@ export function TopHUD({ isConnected = false }: { isConnected?: boolean }) {
           <span className={`text-xs ${mode === 'paper' ? 'text-amber-400' : 'text-zinc-500'}`}>
             PAPER
           </span>
+          <span id={switchLabelId} className="sr-only">
+            Trading mode
+          </span>
           <Switch
+            id={switchId}
+            aria-labelledby={switchLabelId}
             checked={mode === 'live'}
-            onCheckedChange={(checked: boolean) => setMode(checked ? 'live' : 'paper')}
+            onCheckedChange={(checked: boolean) => {
+              const nextMode = checked ? 'live' : 'paper';
+              onModeChange(nextMode);
+              toast.success(`Switched to ${nextMode.toUpperCase()} mode`, {
+                description: nextMode === 'live' ? 'Real capital at risk' : 'Simulated trading active',
+              });
+            }}
           />
           <span className={`text-xs ${mode === 'live' ? 'text-emerald-400' : 'text-zinc-500'}`}>
             LIVE
@@ -88,6 +125,7 @@ export function TopHUD({ isConnected = false }: { isConnected?: boolean }) {
               toast.error('EMERGENCY STOP ACTIVATED', {
                 description: 'All positions closed, trading halted',
               });
+              onKillSwitch();
             }}
             className="gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
           >
@@ -103,34 +141,52 @@ export function TopHUD({ isConnected = false }: { isConnected?: boolean }) {
         <div className="flex items-center gap-6">
           <MetricDisplay
             label="PnL"
-            value={formatCurrency(metrics.totalPnL)}
-            subtitle={formatPercent(metrics.totalPnLPercent)}
-            color={metrics.totalPnL >= 0 ? 'text-emerald-400' : 'text-red-400'}
+            value={totalPnlValue}
+            subtitle={winRateValue}
+            color={
+              metricsAvailable && metrics
+                ? metrics.totalPnl >= 0
+                  ? 'text-emerald-400'
+                  : 'text-red-400'
+                : 'text-zinc-600'
+            }
           />
           <div className="w-px h-8 bg-zinc-700/50" />
           <MetricDisplay
             label="Sharpe"
-            value={metrics.sharpe.toFixed(2)}
-            color={metrics.sharpe > 1 ? 'text-cyan-400' : 'text-zinc-400'}
+            value={sharpeValue}
+            color={
+              metricsAvailable && metrics
+                ? metrics.sharpe > 1
+                  ? 'text-cyan-400'
+                  : 'text-zinc-400'
+                : 'text-zinc-600'
+            }
           />
           <div className="w-px h-8 bg-zinc-700/50" />
           <MetricDisplay
             label="Drawdown"
-            value={`${(metrics.drawdown * 100).toFixed(2)}%`}
-            color={metrics.drawdown < 0.1 ? 'text-zinc-400' : 'text-amber-400'}
+            value={drawdownValue}
+            color={
+              metricsAvailable && metrics
+                ? metrics.maxDrawdown < 0.1
+                  ? 'text-zinc-400'
+                  : 'text-amber-400'
+                : 'text-zinc-600'
+            }
           />
           <div className="w-px h-8 bg-zinc-700/50" />
           <MetricDisplay
             label="Positions"
-            value={metrics.activePositions.toString()}
-            color="text-zinc-300"
+            value={positionsValue}
+            color={metricsAvailable ? 'text-zinc-300' : 'text-zinc-600'}
           />
         </div>
 
         {/* Right: Venue Status */}
         <div className="flex items-center gap-2">
-          {venues.map((venue) => (
-            <VenueIndicator key={venue.id} venue={venue} />
+          {(venues ?? []).map((venue) => (
+            <VenueIndicator key={venue.name} venue={venue} />
           ))}
         </div>
       </div>
@@ -145,41 +201,43 @@ function MetricDisplay({
   color,
 }: {
   label: string;
-  value: string;
-  subtitle?: string;
-  color: string;
+  value: ReactNode;
+  subtitle?: ReactNode;
+  color?: string;
 }) {
+  const isText = typeof value === 'string' || typeof value === 'number';
+
   return (
     <div className="flex flex-col">
       <span className="text-xs text-zinc-500 tracking-wider">{label}</span>
       <div className="flex items-baseline gap-2">
-        <span className={`font-mono ${color}`}>{value}</span>
+        <span className={isText ? `font-mono ${color ?? 'text-zinc-300'}` : 'font-mono text-zinc-300'}>
+          {value}
+        </span>
         {subtitle && <span className="text-xs text-zinc-600 font-mono">{subtitle}</span>}
       </div>
     </div>
   );
 }
 
-function VenueIndicator({ venue }: { venue: Venue }) {
+function VenueIndicator({ venue }: { venue: TopHudVenue }) {
   const statusColor = {
-    connected: 'bg-emerald-400',
-    degraded: 'bg-amber-400',
-    offline: 'bg-zinc-600',
+    ok: 'bg-emerald-400',
+    warn: 'bg-amber-400',
+    down: 'bg-red-500',
   }[venue.status];
 
-  const venueColor = {
-    crypto: 'border-cyan-400/30',
-    equities: 'border-amber-400/30',
-    fx: 'border-violet-400/30',
-  }[venue.type];
+  const statusLabel = {
+    ok: 'Healthy',
+    warn: 'Degraded',
+    down: 'Offline',
+  }[venue.status];
 
   return (
-    <div
-      className={`px-3 py-1.5 rounded-lg bg-zinc-800/50 border ${venueColor} flex items-center gap-2`}
-    >
+    <div className="px-3 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/40 flex items-center gap-3">
       <div className="relative">
         <div className={`w-2 h-2 rounded-full ${statusColor}`} />
-        {venue.status === 'connected' && (
+        {venue.status === 'ok' && (
           <motion.div
             className={`w-2 h-2 rounded-full ${statusColor} absolute inset-0`}
             animate={{ scale: [1, 2, 1], opacity: [1, 0, 1] }}
@@ -187,8 +245,12 @@ function VenueIndicator({ venue }: { venue: Venue }) {
           />
         )}
       </div>
-      <span className="text-xs text-zinc-400 font-mono">{venue.name}</span>
-      <span className="text-xs text-zinc-600 font-mono">{venue.latency}ms</span>
+      <div className="flex flex-col">
+        <span className="text-xs text-zinc-200 tracking-wide">{venue.name}</span>
+        <span className="text-[10px] text-zinc-500 font-mono">
+          {statusLabel} · {venue.latencyMs}ms · q{venue.queue}
+        </span>
+      </div>
     </div>
   );
 }

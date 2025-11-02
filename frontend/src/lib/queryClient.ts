@@ -54,6 +54,14 @@ export const queryKeys = {
     list: () => ['strategies', 'list'],
     detail: (id: string) => ['strategies', 'detail', id],
   },
+  funding: {
+    portfolio: () => ['funding', 'portfolio'],
+    exposure: () => ['funding', 'exposure'],
+    pnl: () => ['funding', 'pnl'],
+  },
+  settings: {
+    config: () => ['settings', 'config'],
+  },
   // Backtest queries
   backtests: {
     status: (jobId: string) => ['backtests', 'status', jobId],

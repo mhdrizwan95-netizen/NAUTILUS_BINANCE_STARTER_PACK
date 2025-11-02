@@ -1,6 +1,7 @@
 # Global Python constraints to stabilize builds
 # Web framework
-fastapi==0.115.5
+fastapi==0.120.4
+starlette==0.49.2
 # constraints file cannot include extras; pin base package only
 uvicorn==0.30.6
 
@@ -16,9 +17,9 @@ PyYAML==6.0.1
 
 # Data science stack
 numpy==1.26.4
-pandas==2.2.2
+pandas==2.2.3
 pyarrow==14.0.2
-scikit-learn==1.3.2
+scikit-learn==1.5.2
 hmmlearn==0.3.2
 joblib==1.3.2
 matplotlib==3.8.4
@@ -35,6 +36,3 @@ pydantic-settings==2.4.0
 tabulate==0.9.0
 watchfiles==0.21.0
 web3==6.20.0
-opentelemetry-api==1.27.0
-opentelemetry-sdk==1.27.0
-opentelemetry-instrumentation-fastapi==0.46b0

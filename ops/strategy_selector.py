@@ -2,10 +2,10 @@
 import json
 import logging
 import asyncio
-import httpx
 from pathlib import Path
 from datetime import datetime, timezone
 from ops.env import engine_endpoints
+from ops.net import create_async_client, request_with_retry
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 logging.basicConfig(
@@ -154,17 +154,26 @@ async def push_model_update(model_tag: str):
     """Broadcast strategy change to all running engines."""
     endpoints = engine_endpoints()
 
-    async with httpx.AsyncClient() as client:
+    async with create_async_client() as client:
         for url in endpoints:
+            endpoint = f"{url.rstrip('/')}/strategy/promote"
             try:
-                await client.post(
-                    f"{url.rstrip('/')}/strategy/promote",
+                response = await request_with_retry(
+                    client,
+                    "POST",
+                    endpoint,
                     json={"model_tag": model_tag},
-                    timeout=4.0,
+                    retries=3,
+                    backoff_base=0.5,
                 )
-                logging.debug(f"[Governance] Updated {url} to {model_tag}")
-            except Exception as e:
-                logging.warning(f"[Governance] Failed to update {url}: {e}")
+                response.raise_for_status()
+                logging.debug("[Governance] Updated %s to %s", endpoint, model_tag)
+            except Exception as exc:  # noqa: BLE001
+                logging.error(
+                    "[Governance] failed to update %s after retries: %s",
+                    endpoint,
+                    exc,
+                )
 
 
 def get_leaderboard() -> list:

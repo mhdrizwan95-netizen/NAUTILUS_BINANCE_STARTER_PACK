@@ -1,6 +1,0 @@
-system,data_category,contains_pii,sources,sinks,retention,notes
-engine,Orders & executions,Yes (account ids, order metadata),FastAPI /ops endpoints,SQLite under data/runtime & Prometheus events,30 days (needs explicit TTL),Mask account identifiers in logs; archive DB exports to encrypted storage
-ops,Operator actions & API tokens,Yes (operator ids, control commands),Ops Command Center UI,Postgres (ops) & Redis cache,90 days (per ops/m25_policy.yaml),Enforce token rotation & access reviews
-ml_service,Market features & model metadata,No direct PII,Ledger CSVs under /data/incoming,Model registry under /models,180 days (pending policy),Ensure research volume scrubbed on DSAR requests
-backtest_suite,Research datasets,Possible indirect PII when using customer feeds,/research/incoming CSVs,S3-style artifact bucket (planned),No fixed TTL today,Add purge job & consent gating before uploading customer data
-observability,Logs & metrics,Potential PII via unredacted payloads,Promtail scraping docker logs,Loki + Prometheus + Grafana dashboards,Indefinite (retention disabled),Enable Loki retention + access controls

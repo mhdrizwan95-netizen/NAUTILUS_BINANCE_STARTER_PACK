@@ -14,7 +14,7 @@ import time
 import hmac
 import hashlib
 import urllib.parse
-import requests
+from ops.net import create_client, request_with_retry_sync
 
 
 def main():
@@ -50,11 +50,15 @@ def main():
     url = f"{base.rstrip('/')}{endpoint}?{qs}&signature={sig}"
     # Try up to 3 times, respect Retry-After if provided
     for attempt in range(3):
-        r = requests.get(
-            url,
-            headers={"X-MBX-APIKEY": key},
-            timeout=float(os.environ.get("BINANCE_API_TIMEOUT", "10")),
-        )
+        with create_client() as client:
+            r = request_with_retry_sync(
+                client,
+                "GET",
+                url,
+                headers={"X-MBX-APIKEY": key},
+                retries=2,
+                timeout=float(os.environ.get("BINANCE_API_TIMEOUT", "10")),
+            )
         print(r.status_code, r.text[:500])
         if r.status_code == 429 and attempt < 2:
             try:

@@ -2,6 +2,7 @@
 
 # Environment configuration files (contain API keys)
 ops/env.*
+secrets/
 
 # Python cache and bytecode
 __pycache__/

@@ -118,6 +118,35 @@ export const dashboardSummarySchema = z.object({
   returns: z.array(z.number()),
 });
 
+export const portfolioAggregateSchema = z.object({
+  equity_usd: z.number(),
+  cash_usd: z.number(),
+  gain_usd: z.number(),
+  return_pct: z.number(),
+  baseline_equity_usd: z.number(),
+  last_refresh_epoch: z.number().nullable().optional(),
+});
+
+export const exposureEntrySchema = z.object({
+  qty_base: z.number(),
+  last_price_usd: z.number(),
+  exposure_usd: z.number(),
+});
+
+export const exposureAggregateSchema = z.object({
+  totals: z.object({
+    exposure_usd: z.number(),
+    count: z.number(),
+    venues: z.number(),
+  }),
+  by_symbol: z.record(exposureEntrySchema),
+});
+
+export const pnlSnapshotSchema = z.object({
+  realized: z.record(z.number()),
+  unrealized: z.record(z.number()),
+});
+
 // Health check validation
 export const healthCheckSchema = z.object({
   venues: z.array(z.object({
@@ -147,6 +176,12 @@ export const strategySummarySchema = z.object({
     sharpe: z.number().optional(),
     drawdown: z.number().optional(),
   }).optional(),
+});
+
+export const configEffectiveSchema = z.object({
+  base: z.record(z.unknown()),
+  overrides: z.record(z.unknown()),
+  effective: z.record(z.unknown()),
 });
 
 // Backtest result validation
@@ -271,11 +306,15 @@ export type Trade = z.infer<typeof tradeSchema>;
 export type Alert = z.infer<typeof alertSchema>;
 export type Position = z.infer<typeof positionSchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
+export type PortfolioAggregate = z.infer<typeof portfolioAggregateSchema>;
+export type ExposureAggregate = z.infer<typeof exposureAggregateSchema>;
+export type PnlSnapshot = z.infer<typeof pnlSnapshotSchema>;
 export type HealthCheck = z.infer<typeof healthCheckSchema>;
 export type StrategySummary = z.infer<typeof strategySummarySchema>;
 export type BacktestResult = z.infer<typeof backtestResultSchema>;
 export type BacktestStartRequest = z.infer<typeof backtestStartSchema>;
 export type StrategyUpdateRequest = z.infer<typeof strategyUpdateSchema>;
+export type ConfigEffective = z.infer<typeof configEffectiveSchema>;
 export type DateRange = z.infer<typeof dateRangeSchema>;
 export type DashboardFilters = z.infer<typeof dashboardFiltersSchema>;
 export type UserPreferences = z.infer<typeof userPreferencesSchema>;

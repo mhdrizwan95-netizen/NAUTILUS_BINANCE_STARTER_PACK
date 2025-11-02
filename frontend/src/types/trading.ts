@@ -116,3 +116,32 @@ export type BacktestResult = {
     pnl?: number;
   }>;
 };
+
+export type PortfolioAggregate = {
+  equity_usd: number;
+  cash_usd: number;
+  gain_usd: number;
+  return_pct: number;
+  baseline_equity_usd: number;
+  last_refresh_epoch?: number | null;
+};
+
+export type ExposureEntry = {
+  qty_base: number;
+  last_price_usd: number;
+  exposure_usd: number;
+};
+
+export type ExposureAggregate = {
+  totals: {
+    exposure_usd: number;
+    count: number;
+    venues: number;
+  };
+  by_symbol: Record<string, ExposureEntry>;
+};
+
+export type PnlSnapshot = {
+  realized: Record<string, number>;
+  unrealized: Record<string, number>;
+};

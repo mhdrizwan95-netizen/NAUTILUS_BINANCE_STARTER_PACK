@@ -45,9 +45,11 @@ pip install -r requirements-dev.txt
    ```
 5. Stop services when done.
    ```bash
-   make down           # core stack
-   make down-all       # core + observability bundle
-   ```
+ make down           # core stack
+ make down-all       # core + observability bundle
+ ```
+
+> Runtime images now ship with `tini` + `uvicorn` baked in, so `docker run nautilus_binance_starter_pack-engine_binance` works out-of-the-box. Compose can still override the command when necessary.
 
 ### Running components directly
 

@@ -2,6 +2,10 @@ import { create } from 'zustand';
 import { shallow } from 'zustand/shallow';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ModeType, GlobalMetrics, Venue, StrategyPerformance } from '../types/trading';
+import {
+  createDefaultDashboardFilters,
+  type DashboardFiltersState,
+} from './dashboardFilters';
 
 // App-wide state interface
 interface AppState {
@@ -27,6 +31,7 @@ interface AppState {
     sidebarOpen: boolean;
     activeTab: string;
     loadingStates: Record<string, boolean>;
+    dashboardFilters: DashboardFiltersState;
   };
 }
 
@@ -50,6 +55,7 @@ interface AppActions {
   setActiveTab: (tab: string) => void;
   setLoadingState: (key: string, loading: boolean) => void;
   clearLoadingStates: () => void;
+  setDashboardFilters: (filters: DashboardFiltersState) => void;
 
   // Utility actions
   reset: () => void;
@@ -75,13 +81,18 @@ const defaultState: AppState = {
     sidebarOpen: true,
     activeTab: 'dashboard',
     loadingStates: {},
+    dashboardFilters: createDefaultDashboardFilters(),
   },
 };
 
-// Create the store with persistence
-export const useAppStore = create<AppState & AppActions>()(
-  persist(
-    (set, get) => ({
+type StoreCreator = (
+  set: (nextState: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
+  get: () => AppState,
+  store: any
+) => AppState & AppActions;
+
+// Helper creator shared by persisted and ephemeral stores
+const createAppStore: StoreCreator = (set, get) => ({
       ...defaultState,
 
       // Mode actions
@@ -151,14 +162,23 @@ export const useAppStore = create<AppState & AppActions>()(
           },
         })),
       clearLoadingStates: () =>
+      set((state) => ({
+        ui: { ...state.ui, loadingStates: {} },
+      })),
+      setDashboardFilters: (filters) =>
         set((state) => ({
-          ui: { ...state.ui, loadingStates: {} },
+          ui: { ...state.ui, dashboardFilters: filters },
         })),
 
       // Utility actions
       reset: () => set(defaultState),
-    }),
-    {
+});
+
+const shouldPersist = () =>
+  typeof window !== 'undefined' && !(window as any).__NAUTILUS_DISABLE_PERSIST__;
+
+const storeInitializer = shouldPersist()
+  ? persist(createAppStore, {
       name: 'nautilus-app-store',
       storage: createJSONStorage(() => localStorage),
       // Only persist preferences and UI state, not real-time data
@@ -167,11 +187,17 @@ export const useAppStore = create<AppState & AppActions>()(
         ui: {
           sidebarOpen: state.ui.sidebarOpen,
           activeTab: state.ui.activeTab,
+          dashboardFilters: state.ui.dashboardFilters,
         },
       }),
-    }
-  )
-);
+    })
+  : createAppStore;
+
+if (!shouldPersist()) {
+  console.warn('App store persistence disabled');
+}
+
+export const useAppStore = create<AppState & AppActions>()(storeInitializer);
 
 // Selectors for commonly used state slices
 export const useMode = () => useAppStore((state) => state.mode);
@@ -180,20 +206,40 @@ export const useRealTimeData = () => useAppStore((state) => state.realTimeData, 
 export const useUIState = () => useAppStore((state) => state.ui);
 
 // Action selectors
-export const useModeActions = () => useAppStore((state) => ({ setMode: state.setMode }));
-export const usePreferenceActions = () => useAppStore((state) => ({
-  updatePreferences: state.updatePreferences,
-  resetPreferences: state.resetPreferences,
-}));
-export const useRealTimeActions = () => useAppStore((state) => ({
-  updateGlobalMetrics: state.updateGlobalMetrics,
-  updatePerformances: state.updatePerformances,
-  updateVenues: state.updateVenues,
-  updateRealTimeData: state.updateRealTimeData,
-}));
-export const useUIActions = () => useAppStore((state) => ({
-  setSidebarOpen: state.setSidebarOpen,
-  setActiveTab: state.setActiveTab,
-  setLoadingState: state.setLoadingState,
-  clearLoadingStates: state.clearLoadingStates,
-}));
+export const useModeActions = () =>
+  useAppStore((state) => ({ setMode: state.setMode }), shallow);
+export const usePreferenceActions = () =>
+  useAppStore(
+    (state) => ({
+      updatePreferences: state.updatePreferences,
+      resetPreferences: state.resetPreferences,
+    }),
+    shallow
+  );
+export const useRealTimeActions = () =>
+  useAppStore(
+    (state) => ({
+      updateGlobalMetrics: state.updateGlobalMetrics,
+      updatePerformances: state.updatePerformances,
+      updateVenues: state.updateVenues,
+      updateRealTimeData: state.updateRealTimeData,
+    }),
+    shallow
+  );
+export const useUIActions = () =>
+  useAppStore(
+    (state) => ({
+      setSidebarOpen: state.setSidebarOpen,
+      setActiveTab: state.setActiveTab,
+      setLoadingState: state.setLoadingState,
+      clearLoadingStates: state.clearLoadingStates,
+      setDashboardFilters: state.setDashboardFilters,
+    }),
+    shallow
+  );
+
+export const useDashboardFilters = () =>
+  useAppStore((state) => state.ui.dashboardFilters, shallow);
+
+export const useDashboardFilterActions = () =>
+  useAppStore((state) => ({ setDashboardFilters: state.setDashboardFilters }), shallow);

@@ -1,4 +1,13 @@
-import type { BacktestResult, StrategySummary } from '@/types/trading';
+import type {
+  BacktestResult,
+  StrategySummary,
+  PortfolioAggregate,
+  ExposureAggregate,
+  PnlSnapshot,
+  Trade,
+  Alert,
+} from '@/types/trading';
+import type { ConfigEffective } from './validation';
 
 const BASE = '';
 
@@ -123,23 +132,43 @@ export const getPositions = (signal?: AbortSignal) =>
   );
 
 export const getRecentTrades = (signal?: AbortSignal) =>
-  api<Array<{
-    time: string;
-    symbol: string;
-    side: 'buy' | 'sell';
-    qty: number;
-    price: number;
-    pnl?: number;
-  }>>('/api/trades/recent?limit=100', undefined, signal);
+  api<Trade[]>('/api/trades/recent?limit=100', undefined, signal);
 
 export const getAlerts = (signal?: AbortSignal) =>
-  api<Array<{ time: string; level: 'info' | 'warn' | 'error'; text: string }>>(
-    '/api/alerts?limit=50',
-    undefined,
-    signal,
-  );
+  api<Alert[]>('/api/alerts?limit=50', undefined, signal);
 
 export const getHealth = (signal?: AbortSignal) =>
   api<{
     venues: Array<{ name: string; status: 'ok' | 'warn' | 'down'; latencyMs: number; queue: number }>;
   }>('/api/health', undefined, signal);
+
+// Aggregated portfolio & exposure
+export const getAggregatePortfolio = (signal?: AbortSignal) =>
+  api<PortfolioAggregate>('/aggregate/portfolio', undefined, signal);
+
+export const getAggregateExposure = (signal?: AbortSignal) =>
+  api<ExposureAggregate>('/aggregate/exposure', undefined, signal);
+
+export const getAggregatePnl = (signal?: AbortSignal) =>
+  api<PnlSnapshot>('/aggregate/pnl', undefined, signal);
+
+// Config
+export const getConfigEffective = (signal?: AbortSignal) =>
+  api<ConfigEffective>('/api/config/effective', undefined, signal);
+
+export const updateConfig = (
+  payload: Record<string, unknown>,
+  token: string,
+  signal?: AbortSignal,
+) =>
+  api<ConfigEffective>(
+    '/api/config',
+    {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+      headers: {
+        'X-Ops-Token': token,
+      },
+    },
+    signal,
+  );

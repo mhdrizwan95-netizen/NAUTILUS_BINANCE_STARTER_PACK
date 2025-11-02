@@ -1,16 +1,68 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Route } from '@playwright/test';
 
 test.describe('Dashboard', () => {
   test.beforeEach(async ({ page }) => {
     // Set up API mocking for E2E tests
+    const fulfillJson = async (route: Route, body: unknown, status = 200) => {
+      await route.fulfill({
+        status,
+        contentType: 'application/json',
+        body: JSON.stringify(body),
+      });
+    };
+
+    await page.addInitScript(() => {
+      (window as any).__NAUTILUS_DISABLE_PERSIST__ = true;
+    });
+
+    page.on('console', (msg) => console.log('[console]', msg.type(), msg.text()));
+
+    await page.route('**/aggregate/**', async (route) => {
+      const url = route.request().url();
+      if (url.endsWith('/aggregate/portfolio')) {
+        await fulfillJson(route, {
+          equity_usd: 425000,
+          cash_usd: 175000,
+          gain_usd: 12500,
+          return_pct: 0.032,
+          baseline_equity_usd: 412500,
+          last_refresh_epoch: Math.floor(Date.now() / 1000),
+        });
+        return;
+      }
+      if (url.endsWith('/aggregate/exposure')) {
+        await fulfillJson(route, {
+          totals: { exposure_usd: 250000, count: 5, venues: 2 },
+          by_symbol: {
+            'BTCUSDT.BINANCE': {
+              qty_base: 1.25,
+              last_price_usd: 59000,
+              exposure_usd: 73750,
+            },
+            'ETHUSDT.BINANCE': {
+              qty_base: 10,
+              last_price_usd: 3200,
+              exposure_usd: 32000,
+            },
+          },
+        });
+        return;
+      }
+      if (url.endsWith('/aggregate/pnl')) {
+        await fulfillJson(route, {
+          realized: { BINANCE: 6800, IBKR: 2200 },
+          unrealized: { BINANCE: 5400, IBKR: -800 },
+        });
+        return;
+      }
+      await route.continue();
+    });
+
     await page.route('**/api/**', async (route) => {
       const url = route.request().url();
 
       if (url.includes('/api/strategies')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([
+        await fulfillJson(route, [
             {
               id: 'hmm',
               name: 'HMM',
@@ -29,13 +81,9 @@ test.describe('Dashboard', () => {
                 drawdown: 0.05,
               },
             },
-          ]),
-        });
+          ]);
       } else if (url.includes('/api/metrics/summary')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
+        await fulfillJson(route, {
             kpis: {
               totalPnl: 1847.25,
               winRate: 0.62,
@@ -52,13 +100,9 @@ test.describe('Dashboard', () => {
               { symbol: 'ETH/USDT', pnl: 596.75 },
             ],
             returns: [0.02, -0.03, 0.015, 0.008, -0.005],
-          }),
-        });
+          });
       } else if (url.includes('/api/positions')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([
+        await fulfillJson(route, [
             {
               symbol: 'BTC/USDT',
               qty: 0.5,
@@ -66,13 +110,9 @@ test.describe('Dashboard', () => {
               mark: 46500,
               pnl: 750,
             },
-          ]),
-        });
+          ]);
       } else if (url.includes('/api/trades/recent')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([
+        await fulfillJson(route, [
             {
               id: 'trade-1',
               timestamp: Date.now() - 300000,
@@ -84,13 +124,9 @@ test.describe('Dashboard', () => {
               strategyId: 'hmm',
               venueId: 'binance',
             },
-          ]),
-        });
+          ]);
       } else if (url.includes('/api/alerts')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify([
+        await fulfillJson(route, [
             {
               id: 'alert-1',
               timestamp: Date.now() - 120000,
@@ -98,13 +134,9 @@ test.describe('Dashboard', () => {
               message: 'High volatility detected on BTC/USDT',
               strategyId: 'hmm',
             },
-          ]),
-        });
+          ]);
       } else if (url.includes('/api/health')) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'application/json',
-          body: JSON.stringify({
+        await fulfillJson(route, {
             venues: [
               {
                 name: 'Binance',
@@ -113,10 +145,9 @@ test.describe('Dashboard', () => {
                 queue: 2,
               },
             ],
-          }),
-        });
+          });
       } else {
-        await route.continue();
+        await fulfillJson(route, {});
       }
     });
 
@@ -145,7 +176,8 @@ test.describe('Dashboard', () => {
 
     // Check if positions table is present
     await expect(page.getByText('Open Positions')).toBeVisible();
-    await expect(page.getByText('BTC/USDT')).toBeVisible();
+    const positionsTable = page.getByRole('table', { name: /open positions/i });
+    await expect(positionsTable.getByRole('cell', { name: 'BTC/USDT' })).toBeVisible();
 
     // Check if recent trades are displayed
     await expect(page.getByText('Recent Trades')).toBeVisible();
@@ -173,11 +205,11 @@ test.describe('Dashboard', () => {
     await expect(page.getByText('PAPER')).toBeVisible();
 
     // Click the mode switch
-    await page.getByRole('button', { name: /switch/i }).click();
+    const modeSwitch = page.getByRole('switch', { name: /trading mode/i });
+    await modeSwitch.click();
 
     // Should now show live mode styling (the switch should be checked)
-    const switchElement = page.locator('[data-testid="mode-switch"]');
-    await expect(switchElement).toHaveAttribute('data-checked', 'true');
+    await expect(modeSwitch).toHaveAttribute('aria-checked', 'true');
   });
 
   test('should show loading states initially', async ({ page }) => {

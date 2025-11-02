@@ -14,7 +14,7 @@ from typing import List, Optional
 import argparse
 
 import pandas as pd
-import requests
+from ops.net import create_client, request_with_retry_sync
 
 
 BINANCE_API = os.getenv("BINANCE_API", "https://api.binance.com/api/v3/klines")
@@ -25,8 +25,14 @@ WINDOW_MIN = int(os.getenv("VOL_WINDOW_MIN", 60))  # last 60 min
 
 def get_symbols() -> List[str]:
     try:
-        r = requests.get("https://api.binance.com/api/v3/exchangeInfo", timeout=5)
-        r.raise_for_status()
+        with create_client() as client:
+            r = request_with_retry_sync(
+                client,
+                "GET",
+                "https://api.binance.com/api/v3/exchangeInfo",
+                retries=2,
+            )
+            r.raise_for_status()
         data = r.json()
         # Focus on spot, quote USDT, trading enabled
         syms = [
@@ -42,8 +48,9 @@ def get_symbols() -> List[str]:
 def get_klines(symbol: str, limit: int = 60) -> Optional[pd.DataFrame]:
     url = f"{BINANCE_API}?symbol={symbol}&interval=1m&limit={limit}"
     try:
-        r = requests.get(url, timeout=4)
-        r.raise_for_status()
+        with create_client() as client:
+            r = request_with_retry_sync(client, "GET", url, retries=2)
+            r.raise_for_status()
         df = pd.DataFrame(
             r.json(),
             columns=[

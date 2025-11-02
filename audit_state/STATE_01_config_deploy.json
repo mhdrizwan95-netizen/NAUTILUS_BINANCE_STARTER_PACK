@@ -1,7 +1,7 @@
 {
   "config_issues": 4,
   "container_risks": [
-    "hmm_deck runtime installs as root with host bind",
+    "Legacy Deck runtime removed in favour of Ops command center",
     "Core trading services lack resource limits"
   ],
   "env_vars": {

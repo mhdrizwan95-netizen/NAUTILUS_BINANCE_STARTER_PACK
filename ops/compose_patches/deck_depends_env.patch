@@ -1,8 +1,0 @@
-# Use env substitution so Deck depends on your actual ops service name.
-# In docker-compose.yml under services.hmm_deck.depends_on, change:
-#   - hmm_ops
-# to:
-#   - ${OPS_SERVICE_NAME:-hmm_ops}
-#
-# and create a `.env` file at repo root with:
-#   OPS_SERVICE_NAME=<your_ops_service>

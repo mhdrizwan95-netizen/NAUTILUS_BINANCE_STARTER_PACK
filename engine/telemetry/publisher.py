@@ -8,8 +8,6 @@ from collections import deque
 from threading import Lock
 from typing import Deque, Dict, Optional, Tuple
 
-from ops.deck_metrics import push_fill, push_metrics, push_strategy_pnl
-
 log = logging.getLogger(__name__)
 
 _LAT_SAMPLES: Deque[float] = deque(maxlen=512)
@@ -132,44 +130,11 @@ def record_realized_total(realized_total_usd: float) -> float:
     return total - anchor
 
 
-def _safe_push(func, *args, **kwargs) -> bool:
-    try:
-        func(*args, **kwargs)
-        return True
-    except Exception as exc:  # pragma: no cover - best effort
-        log.debug("Deck push failed for %s: %s", getattr(func, "__name__", func), exc)
-        return False
+# Legacy compatibility: previously forwarded metrics to the Deck API.
+# With the Command Center running inside the Ops service, these become no-ops.
+def publish_metrics(**_kwargs: Dict[str, object]) -> None:
+    return None
 
 
-def publish_metrics(
-    *,
-    equity_usd: float,
-    pnl_24h: float,
-    drawdown_pct: float,
-    positions: int,
-    tick_p50_ms: float,
-    tick_p95_ms: float,
-    error_rate_pct: float,
-    breaker: Dict[str, object],
-    pnl_by_strategy: Optional[Dict[str, float]] = None,
-    **extra_metrics,
-) -> None:
-    payload: Dict[str, object] = {
-        "equity_usd": float(equity_usd),
-        "pnl_24h": float(pnl_24h),
-        "drawdown_pct": float(drawdown_pct),
-        "positions": int(positions),
-        "tick_p50_ms": float(tick_p50_ms),
-        "tick_p95_ms": float(tick_p95_ms),
-        "error_rate_pct": float(error_rate_pct),
-        "breaker": breaker,
-    }
-    for key, value in extra_metrics.items():
-        payload[key] = value
-    _safe_push(push_metrics, **payload)
-    if pnl_by_strategy:
-        _safe_push(push_strategy_pnl, pnl_by_strategy)
-
-
-def publish_fill(fill: Dict) -> None:
-    _safe_push(push_fill, fill)
+def publish_fill(_fill: Dict) -> None:
+    return None

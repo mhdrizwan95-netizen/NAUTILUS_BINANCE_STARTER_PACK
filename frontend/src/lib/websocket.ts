@@ -74,7 +74,7 @@ class WebSocketManager {
         console.log('WebSocket disconnected:', event.code, event.reason);
         this.stopHeartbeat();
         this.onDisconnect();
-        this.handleReconnect();
+        this.handleReconnect(event);
       };
 
       this.ws.onerror = (error) => {
@@ -129,18 +129,26 @@ class WebSocketManager {
     }
   }
 
-  private handleReconnect(): void {
+  private handleReconnect(event?: CloseEvent): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached');
+      console.error('Max reconnection attempts reached', event?.code ?? '');
       return;
     }
 
     this.reconnectAttempts++;
-    const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), this.maxReconnectDelay);
+    const backoff = Math.min(
+      this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay
+    );
+    const jitter = Math.floor(Math.random() * 500);
+    const delay = backoff + jitter;
 
-    console.log(`Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`);
+    console.log(
+      `Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+      event?.code ?? ''
+    );
 
-    setTimeout(() => {
+    window.setTimeout(() => {
       this.connect();
     }, delay);
   }

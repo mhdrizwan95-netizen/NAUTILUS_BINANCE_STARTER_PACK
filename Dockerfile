@@ -60,5 +60,5 @@ RUN useradd -m appuser \
  && chown -R appuser:appuser /app
 USER appuser
 
-# Uvicorn entrypoints (set by compose)
-CMD ["bash","-lc","echo 'Set a command in docker-compose.yml'"]
+ENTRYPOINT ["/usr/bin/tini","--"]
+CMD ["uvicorn","engine.app:app","--host","0.0.0.0","--port","8003"]
