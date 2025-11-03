@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ops/net.py
+# hypothesis_version: 6.143.1
+
+[0.5, 2.0, 3.0, 6.0, 8.0, 500, 502, 503, 504, 'create_async_client', 'create_client', 'request_with_retry']

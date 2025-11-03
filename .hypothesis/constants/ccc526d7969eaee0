@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/dex/watcher.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1.0, 'addr', 'candidate', 'dex-watcher', 'engine.dex.watcher', 'high_price', 'initial_qty', 'open', 'stop_loss', 'take_profit', 'trailing_stop']

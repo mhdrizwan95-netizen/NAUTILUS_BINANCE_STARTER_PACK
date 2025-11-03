@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/config/env.py
+# hypothesis_version: 6.143.1
+
+['*', ',', '.', '1', 'env_bool', 'env_csv', 'env_float', 'env_int', 'env_str', 'false', 'on', 'split_symbols', 'true', 'y', 'yes']

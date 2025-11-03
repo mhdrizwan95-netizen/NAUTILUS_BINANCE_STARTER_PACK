@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/guards/depeg_guard.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1.0, 60.0, 100.0, ',', '0', '0.5', '120', '3', '?', 'BTCUSDC', 'BTCUSDT', 'BUY', 'DEPEG_EXIT_RISK', 'DEPEG_GUARD_ENABLED', 'DEPEG_SWITCH_QUOTE', 'DEPEG_THRESHOLD_PCT', 'DEPEG_WATCH_SYMBOLS', 'SELL', 'USDC', 'USDTUSDC', '__await__', 'depeg_trigger', 'deviation_pct', 'engine.depeg_guard', 'false', 'health.state', 'last', 'list_positions', 'no', 'qty', 'quantity', 'reason', 'risk.depeg_trigger', 'set_preferred_quote', 'set_trading_enabled', 'state', 'symbol']

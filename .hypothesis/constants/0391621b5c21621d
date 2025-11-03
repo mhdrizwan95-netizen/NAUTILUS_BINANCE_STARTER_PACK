@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/services/ml_service/app/auth.py
+# hypothesis_version: 6.143.1
+
+['Auth required', 'Insufficient role', 'Invalid token', 'admin', 'role', 'roles']

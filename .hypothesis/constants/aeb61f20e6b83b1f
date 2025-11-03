@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/ops/fills_listener.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1000.0, 'FILL', 'GENERIC', 'TRADE', 'avg_price', 'event', 'event_time', 'executionReport', 'execution_type', 'filled_qty', 'futures', 'intent', 'last_filled_price', 'last_filled_qty', 'order_id', 'side', 'symbol', 'trade.fill', 'ts', 'venue']

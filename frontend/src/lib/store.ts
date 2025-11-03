@@ -19,6 +19,12 @@ interface AppState {
     soundEnabled: boolean;
     notificationsEnabled: boolean;
   };
+  // Ops auth context (memory only)
+  opsAuth: {
+    token: string;
+    actor: string;
+    approver: string;
+  };
   // Real-time data
   realTimeData: {
     globalMetrics: GlobalMetrics | null;
@@ -43,6 +49,12 @@ interface AppActions {
   // Preferences actions
   updatePreferences: (preferences: Partial<AppState['preferences']>) => void;
   resetPreferences: () => void;
+
+  // Ops auth actions
+  setOpsToken: (token: string) => void;
+  setOpsActor: (actor: string) => void;
+  setOpsApprover: (approver: string) => void;
+  clearOpsAuth: () => void;
 
   // Real-time data actions
   updateGlobalMetrics: (metrics: GlobalMetrics) => void;
@@ -70,6 +82,11 @@ const defaultState: AppState = {
     refreshInterval: 30,
     soundEnabled: true,
     notificationsEnabled: true,
+  },
+  opsAuth: {
+    token: '',
+    actor: '',
+    approver: '',
   },
   realTimeData: {
     globalMetrics: null,
@@ -106,6 +123,24 @@ const createAppStore: StoreCreator = (set, get) => ({
       resetPreferences: () =>
         set((state) => ({
           preferences: defaultState.preferences,
+        })),
+
+      // Ops auth actions
+      setOpsToken: (token) =>
+        set((state) => ({
+          opsAuth: { ...state.opsAuth, token },
+        })),
+      setOpsActor: (actor) =>
+        set((state) => ({
+          opsAuth: { ...state.opsAuth, actor },
+        })),
+      setOpsApprover: (approver) =>
+        set((state) => ({
+          opsAuth: { ...state.opsAuth, approver },
+        })),
+      clearOpsAuth: () =>
+        set((state) => ({
+          opsAuth: defaultState.opsAuth,
         })),
 
       // Real-time data actions

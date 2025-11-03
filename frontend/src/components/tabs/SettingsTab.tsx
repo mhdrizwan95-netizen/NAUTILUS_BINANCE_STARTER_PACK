@@ -16,11 +16,13 @@ import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Textarea } from '../ui/textarea';
 import { queryKeys } from '../../lib/queryClient';
-import { getConfigEffective, updateConfig } from '../../lib/api';
+import { getConfigEffective, type ControlRequestOptions, updateConfig } from '../../lib/api';
 import {
   configEffectiveSchema,
   validateApiResponse,
 } from '../../lib/validation';
+import { useAppStore } from '../../lib/store';
+import { generateIdempotencyKey } from '../../lib/idempotency';
 
 const CONFIG_FLAGS = [
   {
@@ -52,7 +54,15 @@ const CONFIG_FLAGS = [
 
 export function SettingsTab() {
   const queryClient = useQueryClient();
-  const [opsToken, setOpsToken] = useState('');
+  const opsToken = useAppStore((state) => state.opsAuth.token);
+  const opsActor = useAppStore((state) => state.opsAuth.actor);
+  const setOpsToken = useAppStore((state) => state.setOpsToken);
+  const setOpsActor = useAppStore((state) => state.setOpsActor);
+  const setOpsApprover = useAppStore((state) => state.setOpsApprover);
+  const opsApprover = useAppStore((state) => state.opsAuth.approver);
+  const [opsTokenInput, setOpsTokenInput] = useState(opsToken);
+  const [opsActorInput, setOpsActorInput] = useState(opsActor);
+  const [opsApproverInput, setOpsApproverInput] = useState(opsApprover);
   const [overrideDraft, setOverrideDraft] = useState('{}');
   const [overrideTouched, setOverrideTouched] = useState(false);
 
@@ -70,6 +80,18 @@ export function SettingsTab() {
     setOverrideDraft(JSON.stringify(configQuery.data.overrides ?? {}, null, 2));
   }, [configQuery.data, overrideTouched]);
 
+  useEffect(() => {
+    setOpsTokenInput(opsToken);
+  }, [opsToken]);
+
+  useEffect(() => {
+    setOpsActorInput(opsActor);
+  }, [opsActor]);
+
+  useEffect(() => {
+    setOpsApproverInput(opsApprover);
+  }, [opsApprover]);
+
   const tightenPct = useMemo(() => {
     const raw =
       configQuery.data?.effective?.SOFT_BREACH_TIGHTEN_SL_PCT ??
@@ -80,12 +102,12 @@ export function SettingsTab() {
   const updateMutation = useMutation({
     mutationFn: async ({
       patch,
-      token,
+      options,
     }: {
       patch: Record<string, unknown>;
-      token: string;
+      options: ControlRequestOptions;
     }) => {
-      const response = await updateConfig(patch, token);
+      const response = await updateConfig(patch, options);
       return validateApiResponse(
         configEffectiveSchema,
         response,
@@ -120,6 +142,10 @@ export function SettingsTab() {
       toast.error('Provide an OPS API token to update configuration');
       return;
     }
+    if (!opsApprover.trim()) {
+      toast.error('Provide an approver token (two-man rule) to update configuration');
+      return;
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(overrideDraft || '{}');
@@ -135,7 +161,12 @@ export function SettingsTab() {
     }
     updateMutation.mutate({
       patch: parsed as Record<string, unknown>,
-      token: opsToken.trim(),
+      options: {
+        token: opsToken.trim(),
+        actor: opsActorInput.trim() || undefined,
+        approverToken: opsApproverInput.trim() || undefined,
+        idempotencyKey: generateIdempotencyKey('config'),
+      },
     });
   };
 
@@ -195,14 +226,41 @@ export function SettingsTab() {
           <Input
             id="ops-token"
             type="password"
-            value={opsToken}
-            onChange={(event) => setOpsToken(event.target.value)}
+            value={opsTokenInput}
+            onChange={(event) => {
+              setOpsTokenInput(event.target.value);
+              setOpsToken(event.target.value);
+            }}
             placeholder="Paste OPS_API_TOKEN value"
             autoComplete="off"
           />
           <p className="text-xs text-zinc-500">
             When running locally, export <code>OPS_API_TOKEN</code> or <code>OPS_API_TOKEN_FILE</code> and reuse that value here for authenticated updates.
           </p>
+          <Label htmlFor="ops-actor" className="pt-2">Operator (audit log)</Label>
+          <Input
+            id="ops-actor"
+            type="text"
+            value={opsActorInput}
+            onChange={(event) => {
+              setOpsActorInput(event.target.value);
+              setOpsActor(event.target.value);
+            }}
+            placeholder="Enter your call-sign or initials"
+            autoComplete="off"
+          />
+          <Label htmlFor="ops-approver" className="pt-2">Approver token</Label>
+          <Input
+            id="ops-approver"
+            type="password"
+            value={opsApproverInput}
+            onChange={(event) => {
+              setOpsApproverInput(event.target.value);
+              setOpsApprover(event.target.value);
+            }}
+            placeholder="Second approver token (two-man rule)"
+            autoComplete="off"
+          />
         </CardContent>
       </Card>
 

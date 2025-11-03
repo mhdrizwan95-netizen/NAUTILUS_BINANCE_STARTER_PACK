@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/services/ml_service/app/inference.py
+# hypothesis_version: 6.143.1
+
+['No active model yet', 'metadata.json', 'model_meta', 'regime_proba', 'version.txt']

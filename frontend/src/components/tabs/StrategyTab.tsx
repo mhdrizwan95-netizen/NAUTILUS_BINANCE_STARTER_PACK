@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { DynamicParamForm } from '@/components/forms/DynamicParamForm';
 import { MiniChart } from '@/components/MiniChart';
+import { Switch } from '@/components/ui/switch';
 import {
   getStrategies,
   startStrategy,
@@ -21,6 +22,8 @@ import {
   updateStrategy,
 } from '@/lib/api';
 import type { StrategySummary } from '@/types/trading';
+import { useAppStore } from '@/lib/store';
+import { generateIdempotencyKey } from '@/lib/idempotency';
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-US', {
@@ -35,6 +38,9 @@ export function StrategyTab() {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [configureTarget, setConfigureTarget] = useState<StrategySummary | null>(null);
+  const opsToken = useAppStore((state) => state.opsAuth.token);
+  const opsActor = useAppStore((state) => state.opsAuth.actor);
+  const opsApprover = useAppStore((state) => state.opsAuth.approver);
 
   const refresh = async () => {
     setLoading(true);
@@ -54,10 +60,55 @@ export function StrategyTab() {
     refresh();
   }, []);
 
-  const handleStart = async (strategy: StrategySummary) => {
+  const requireCredentials = () => {
+    if (!opsToken.trim()) {
+      toast.error('Set OPS API token in Settings before issuing control actions');
+      return false;
+    }
+    if (!opsApprover.trim()) {
+      toast.error('Provide an approver token (two-man rule) before issuing control actions');
+      return false;
+    }
+    return true;
+  };
+
+  const buildControlOptions = (prefix: string) => ({
+    token: opsToken.trim(),
+    actor: opsActor.trim() || undefined,
+    approverToken: opsApprover.trim() || undefined,
+    idempotencyKey: generateIdempotencyKey(prefix),
+  });
+
+  const handleDryRunToggle = async (strategy: StrategySummary, enabled: boolean) => {
+    if (!requireCredentials()) {
+      return;
+    }
     setBusyId(strategy.id);
     try {
-      await startStrategy(strategy.id, strategy.params);
+      const nextParams = { ...(strategy.params ?? {}), dry_run: enabled };
+      await updateStrategy(
+        strategy.id,
+        nextParams,
+        buildControlOptions(`dryrun-${strategy.id}`),
+      );
+      toast.success(`Dry run ${enabled ? 'enabled' : 'disabled'} for ${strategy.name}`);
+      await refresh();
+    } catch (error) {
+      if (error instanceof Error) {
+        toast.error('Failed to toggle dry run', { description: error.message });
+      }
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleStart = async (strategy: StrategySummary) => {
+    if (!requireCredentials()) {
+      return;
+    }
+    setBusyId(strategy.id);
+    try {
+      await startStrategy(strategy.id, strategy.params, buildControlOptions(`start-${strategy.id}`));
       toast.success(`Started ${strategy.name}`);
       await refresh();
     } catch (error) {
@@ -70,9 +121,12 @@ export function StrategyTab() {
   };
 
   const handleStop = async (strategy: StrategySummary) => {
+    if (!requireCredentials()) {
+      return;
+    }
     setBusyId(strategy.id);
     try {
-      await stopStrategy(strategy.id);
+      await stopStrategy(strategy.id, buildControlOptions(`stop-${strategy.id}`));
       toast('Strategy stopped', { description: strategy.name });
       await refresh();
     } catch (error) {
@@ -165,6 +219,20 @@ export function StrategyTab() {
                 </div>
               </div>
 
+              <div className="rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="font-medium text-zinc-200">Dry run mode</p>
+                    <p className="text-zinc-500">Simulate orders without placing live trades.</p>
+                  </div>
+                  <Switch
+                    checked={Boolean(strategy.params?.dry_run)}
+                    disabled={busyId === strategy.id}
+                    onCheckedChange={(value) => handleDryRunToggle(strategy, value)}
+                  />
+                </div>
+              </div>
+
               <Separator />
 
               <div className="flex items-center gap-2">
@@ -222,9 +290,16 @@ export function StrategyTab() {
               initial={configureTarget.params}
               submitLabel="Save"
               onSubmit={async (values) => {
+                if (!requireCredentials()) {
+                  return;
+                }
                 setBusyId(configureTarget.id);
                 try {
-                  await updateStrategy(configureTarget.id, values);
+                  await updateStrategy(
+                    configureTarget.id,
+                    values,
+                    buildControlOptions(`update-${configureTarget.id}`),
+                  );
                   toast.success('Strategy updated');
                   setConfigureTarget(null);
                   await refresh();

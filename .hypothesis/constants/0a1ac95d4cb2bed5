@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/screener/strategies/momentum.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.008, 0.01, 0.02, 1.0, 1.2, 1.4, 2.5, 30.0, 100.0, 220.0, 420.0, 500.0, 200000.0, 600, 'LONG', 'breakout_level', 'depth_usd', 'last', 'market', 'momentum_breakout', 'r15', 'r15_pct', 'r60', 'r60_pct', 'vol_multiplier']

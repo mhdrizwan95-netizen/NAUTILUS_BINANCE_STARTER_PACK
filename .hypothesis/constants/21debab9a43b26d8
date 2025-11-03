@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/backtests/data_quality.py
+# hypothesis_version: 6.143.1
+
+[0.05, 1000000.0, 500, 'ask_px', 'ask_sz', 'bid_px', 'bid_sz', 'crossed_book', 'mid_jump_>5pct', 'nan', 'nan_px', 'neg_ask_sz', 'neg_bid_sz', 'spread_spike', 'time_backwards', 'ts_ns']

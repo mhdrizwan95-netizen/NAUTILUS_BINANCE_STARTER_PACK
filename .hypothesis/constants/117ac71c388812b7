@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/screener/strategies/meme.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.005, 0.09, 1.1, 1.2, 1.35, 4.0, 1500000.0, 900, 'LONG', 'MemeCoinScreener', 'depth_usd', 'last', 'market', 'meme_coin', 'meme_coin_sentiment', 'news_score', 'r15', 'social_score', 'take_profit_ladder']

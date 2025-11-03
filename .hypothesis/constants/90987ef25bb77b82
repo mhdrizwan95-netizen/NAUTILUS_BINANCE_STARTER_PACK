@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/core/event_bus.py
+# hypothesis_version: 6.143.1
+
+[0.05, 0.1, 1.0, 2000, '2000', '8', 'EVENTBUS_MAX_WORKERS', 'EVENTBUS_QUEUE_MAX', '__call__', '__name__', '__qualname__', '__self__', 'active_subscriptions', 'data', 'delivered', 'engine', 'events.external_feed', 'failed', 'metrics.update', 'order.filled', 'order.submitted', 'published', 'queue_size', 'risk.violation', 'running', 'source', 'strategy.promoted', 'timestamp', 'topic', 'topics', 'topics_count']

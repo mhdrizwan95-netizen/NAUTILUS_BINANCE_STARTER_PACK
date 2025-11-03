@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/risk_guardian.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1e-09, 0.3, 0.8, 1.0, 1.07, 1.35, 5.0, 100.0, 100, 10000, '.', '0', '5m', 'BINANCE', 'BUY', 'CROSS_HEALTH_FLOOR', 'DAILY_RESET_HOUR', 'DAILY_RESET_TZ', 'FUTURES_MMR_FLOOR', 'GUARDIAN_ENABLED', 'GUARDIAN_POLL_SEC', 'LOOP_ERROR', 'MAX_DAILY_LOSS_USD', 'MAX_OPEN_POSITIONS', 'SELL', 'UTC', 'VAR_ATR_N', 'VAR_ATR_TF', 'VAR_TRIM_PCT', 'VAR_USE_STOP_FIRST', 'cross', 'cross_health_hard', 'cross_health_soft', 'daily_reset', 'daily_stop', 'false', 'floors', 'futures_mmr', 'guard', 'health.state', 'kraken_equity_usd', 'last_price', 'limit', 'marginLevel', 'no', 'pnl_day', 'pnl_realized_total', 'quantity', 'reason', 'reduced_qty', 'risk-guardian', 'side', 'state', 'symbol', 'totalMaintMargin', 'totalWalletBalance', 'trading_enabled', 'true', 'utf-8', 'w', 'worst_score']

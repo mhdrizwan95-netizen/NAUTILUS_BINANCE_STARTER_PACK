@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/screener/alpha.py
+# hypothesis_version: 6.143.1
+
+[-0.9, 0.0, 0.4, 0.6, 0.9, 'r15', 'r60', 'spread_over_atr']

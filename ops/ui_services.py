@@ -7,14 +7,32 @@ import logging
 import os
 import time
 from copy import deepcopy
+import uuid
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import httpx
 import yaml
+from ops.env import primary_engine_endpoint
 
 logger = logging.getLogger(__name__)
+
+
+def _ops_control_token() -> Optional[str]:
+    token = os.getenv("OPS_API_TOKEN")
+    token_file = os.getenv("OPS_API_TOKEN_FILE")
+    if token_file:
+        try:
+            candidate = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            logger.warning("Failed to read OPS_API_TOKEN_FILE (%s): %s", token_file, exc)
+        else:
+            if candidate:
+                token = candidate
+    if token:
+        token = token.strip()
+    return token or None
 
 
 def _now() -> float:
@@ -396,7 +414,118 @@ class OpsGovernanceService:
             state = self._load_state()
             state["trading_enabled"] = bool(enabled)
             self._persist(state)
-            return {"trading_enabled": state["trading_enabled"], "ts": _now()}
+
+        endpoint = primary_engine_endpoint()
+        headers: Dict[str, str] = {}
+        token = _ops_control_token()
+        if token:
+            headers["X-Ops-Token"] = token
+
+        try:
+            async with httpx.AsyncClient(timeout=6.0) as client:
+                resp = await client.post(
+                    f"{endpoint}/ops/trading",
+                    json={"enabled": bool(enabled)},
+                    headers=headers or None,
+                )
+                resp.raise_for_status()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Engine trading toggle failed: %s", exc)
+
+        return {"trading_enabled": bool(enabled), "ts": _now()}
+
+    async def flatten_positions(self, actor: Optional[str] = None) -> Dict[str, Any]:
+        if self._portfolio_service is None:
+            raise RuntimeError("portfolio service unavailable")
+
+        endpoint = primary_engine_endpoint()
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            positions: List[Dict[str, Any]] = []
+            try:
+                resp = await client.get(f"{endpoint}/portfolio")
+                resp.raise_for_status()
+                payload = resp.json() or {}
+                positions = (
+                    payload.get("positions")
+                    or payload.get("state", {}).get("positions", [])
+                    or []
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Engine portfolio fetch failed: %s", exc)
+                positions = []
+
+            if not positions:
+                positions = await self._portfolio_service.list_open_positions()
+
+            targets: List[Dict[str, Any]] = []
+            for pos in positions:
+                try:
+                    qty = float(pos.get("qty") or pos.get("qty_base") or 0.0)
+                except Exception:
+                    qty = 0.0
+                if abs(qty) <= 0.0:
+                    continue
+                symbol = str(pos.get("symbol") or "").strip()
+                if not symbol:
+                    continue
+                targets.append({"symbol": symbol, "qty": qty})
+
+            if not targets:
+                return {
+                    "flattened": [],
+                    "requested": 0,
+                    "succeeded": 0,
+                    "actor": actor,
+                }
+
+            flattened: List[Dict[str, Any]] = []
+            succeeded = 0
+
+            for target in targets:
+                qty = float(target["qty"])
+                side = "SELL" if qty > 0 else "BUY"
+                symbol = target["symbol"]
+                venue = os.getenv("VENUE", "BINANCE").upper()
+                if "." not in symbol and venue:
+                    symbol = f"{symbol}.{venue}"
+                payload = {
+                    "symbol": symbol,
+                    "side": side,
+                    "quantity": abs(qty),
+                }
+                headers = {"X-Idempotency-Key": uuid.uuid4().hex}
+                try:
+                    resp = await client.post(
+                        f"{endpoint}/orders/market",
+                        json=payload,
+                        headers=headers,
+                    )
+                    resp.raise_for_status()
+                    flattened.append(
+                        {
+                            "symbol": symbol,
+                            "side": side,
+                            "quantity": abs(qty),
+                            "order": resp.json(),
+                        }
+                    )
+                    succeeded += 1
+                except Exception as exc:  # noqa: BLE001
+                    flattened.append(
+                        {
+                            "symbol": symbol,
+                            "side": side,
+                            "quantity": abs(qty),
+                            "error": str(exc),
+                        }
+                    )
+
+        return {
+            "flattened": flattened,
+            "requested": len(targets),
+            "succeeded": succeeded,
+            "actor": actor,
+        }
 
     async def transfer_internal(
         self, asset: str, amount: float, source: str, target: str

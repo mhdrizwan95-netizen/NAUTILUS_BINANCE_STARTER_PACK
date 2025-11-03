@@ -21,6 +21,7 @@ import zoneinfo
 from typing import Optional, Tuple
 
 from .metrics import REGISTRY as MET
+from engine.runtime.config import load_runtime_config
 
 
 def _as_float(v: Optional[str], default: float) -> float:
@@ -82,6 +83,13 @@ class RiskGuardian:
         )
         self._paused_until_utc_reset = False
         self._tz = None
+        self._max_loss_env_override = os.getenv("MAX_DAILY_LOSS_USD")
+        try:
+            self._daily_loss_pct = float(
+                load_runtime_config().risk.daily_stop_pct  # type: ignore[attr-defined]
+            )
+        except Exception:
+            self._daily_loss_pct = None
         try:
             self._tz = zoneinfo.ZoneInfo(self.cfg.daily_reset_tz)
         except Exception:
@@ -130,10 +138,22 @@ class RiskGuardian:
             await asyncio.sleep(dt)
 
     async def _enforce_daily_stop(self, order_router) -> None:
-        pass
-
         state = order_router.portfolio_service().state
         realized = float(state.realized or 0.0)
+        equity = float(getattr(state, "equity", 0.0) or 0.0)
+        loss_limit_usd = float(self.cfg.max_daily_loss_usd)
+        if self._max_loss_env_override:
+            try:
+                loss_limit_usd = float(self._max_loss_env_override)
+                self.cfg.max_daily_loss_usd = loss_limit_usd
+            except (TypeError, ValueError):
+                pass
+        elif self._daily_loss_pct is not None and equity > 0:
+            loss_limit_usd = max(
+                loss_limit_usd, abs(equity) * abs(self._daily_loss_pct)
+            )
+            self.cfg.max_daily_loss_usd = loss_limit_usd
+
         # Anchor at first run of day based on configured timezone/hour
         now_dt = datetime.now(self._tz)
         # daily boundary hour
@@ -163,7 +183,7 @@ class RiskGuardian:
         except Exception:
             pass
         if (
-            pnl_day <= -abs(self.cfg.max_daily_loss_usd)
+            pnl_day <= -abs(loss_limit_usd)
             and not self._paused_until_utc_reset
         ):
             # Pause trading via RiskRails config gate

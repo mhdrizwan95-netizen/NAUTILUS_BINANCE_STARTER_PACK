@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/guards/funding_guard.py
+# hypothesis_version: 6.143.1
+
+[0.0, 100.0, '.', '0', '0.00', '0.15', '0.30', 'BUY', 'FUNDING_HEDGE_RATIO', 'FUNDING_TRIM_PCT', 'SELL', '__await__', 'bulk_premium_index', 'engine.funding_guard', 'estimatedRate', 'false', 'lastFundingRate', 'no', 'quantity', 'rate', 'risk.funding_spike', 'symbol']

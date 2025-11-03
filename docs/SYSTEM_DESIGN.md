@@ -91,7 +91,7 @@ Signals & alpha  │  engine/strategy.py        │
 ### Ops API (`ops/ops_api.py`)
 - FastAPI app exposing control endpoints: `/status`, `/kill`, `/strategy/*`, `/metrics`, `/metrics_snapshot`, `/aggregate/*`, SSE/WebSocket feeds, and telemetry ingestion.
 - Aggregates metrics from engines, executor, universe, and screener, using `ops/prometheus.py` for multi-process safe counters and gauges.
-- Requires `X-OPS-TOKEN` for mutating actions (`OPS_API_TOKEN`, default `dev-token`).
+- Requires `X-OPS-TOKEN` for mutating actions (`OPS_API_TOKEN`, default `dev-token`) and `X-Ops-Approver` when `OPS_APPROVER_TOKENS` is configured.
 
 ### Governance & automation
 - `ops/strategy_router.py` routes strategy signals with weightings and tags.

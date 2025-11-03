@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/universe/__init__.py
+# hypothesis_version: 6.143.1
+
+[0.0, 10.0, 300.0, '/api/v3/exchangeInfo', 'BINANCE', 'BNBUSDT', 'BTCUSDT', 'ETHUSDT', 'StrategyUniverse', 'TRADING', 'USDT', 'X-MBX-APIKEY', 'api_key', 'configured_universe', 'is_futures', 'last_prices', 'markPrice', 'status', 'symbol', 'symbols', 'ts', 'venue']

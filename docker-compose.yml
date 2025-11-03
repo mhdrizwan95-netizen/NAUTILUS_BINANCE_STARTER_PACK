@@ -72,6 +72,8 @@ services:
       - BINANCE_RECV_WINDOW=60000
       - ENGINE_PORT=8003
       - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
+      - OPS_API_TOKEN=${OPS_API_TOKEN:-}
+      - OPS_API_TOKEN_FILE=${OPS_API_TOKEN_FILE:-}
     volumes:
       - ./engine/state:/app/engine/state:rw
       - ./engine/logs:/app/engine/logs:rw
@@ -184,8 +186,9 @@ services:
       # Optional: point API to on-disk data (mounted below)
       OPS_DATA_DIR: /app/data
       # LIVE-3: Environment variables for live metrics
-      OPS_API_TOKEN: ${OPS_API_TOKEN:?OPS_API_TOKEN must be provided via secrets manager}
+      OPS_API_TOKEN: ${OPS_API_TOKEN:-}
       OPS_API_TOKEN_FILE: ${OPS_API_TOKEN_FILE:-}
+      OPS_APPROVER_TOKENS: ${OPS_APPROVER_TOKENS:?OPS_APPROVER_TOKENS must be provided (comma-separated approver tokens)}
 
       ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS:-http://engine_binance:8003}"
 

@@ -9,6 +9,14 @@ import type {
 } from '@/types/trading';
 import type { ConfigEffective } from './validation';
 
+export interface ControlRequestOptions {
+  signal?: AbortSignal;
+  token?: string;
+  actor?: string;
+  idempotencyKey?: string;
+  approverToken?: string;
+}
+
 const BASE = '';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -78,17 +86,54 @@ async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): P
   }
 }
 
+const buildControlHeaders = (options?: ControlRequestOptions): Record<string, string> => {
+  const headers: Record<string, string> = {};
+  if (options?.token) {
+    headers['X-Ops-Token'] = options.token;
+  }
+  if (options?.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey;
+  }
+  if (options?.actor) {
+    headers['X-Ops-Actor'] = options.actor;
+  }
+  if (options?.approverToken) {
+    headers['X-Ops-Approver'] = options.approverToken;
+  }
+  return headers;
+};
+
 // Strategies
 export const getStrategies = (signal?: AbortSignal) =>
   api<StrategySummary[]>('/api/strategies', undefined, signal);
 export const getStrategy = (id: string, signal?: AbortSignal) =>
   api<StrategySummary>(`/api/strategies/${id}`, undefined, signal);
-export const startStrategy = (id: string, params?: Record<string, unknown>, signal?: AbortSignal) =>
-  api(`/api/strategies/${id}/start`, { method: 'POST', body: JSON.stringify({ params }) }, signal);
-export const stopStrategy = (id: string, signal?: AbortSignal) =>
-  api(`/api/strategies/${id}/stop`, { method: 'POST' }, signal);
-export const updateStrategy = (id: string, params: Record<string, unknown>, signal?: AbortSignal) =>
-  api(`/api/strategies/${id}/update`, { method: 'POST', body: JSON.stringify({ params }) }, signal);
+export const startStrategy = (
+  id: string,
+  params?: Record<string, unknown>,
+  options?: ControlRequestOptions,
+) =>
+  api(
+    `/api/strategies/${id}/start`,
+    { method: 'POST', body: JSON.stringify({ params }), headers: buildControlHeaders(options) },
+    options?.signal,
+  );
+export const stopStrategy = (id: string, options?: ControlRequestOptions) =>
+  api(
+    `/api/strategies/${id}/stop`,
+    { method: 'POST', headers: buildControlHeaders(options) },
+    options?.signal,
+  );
+export const updateStrategy = (
+  id: string,
+  params: Record<string, unknown>,
+  options?: ControlRequestOptions,
+) =>
+  api(
+    `/api/strategies/${id}/update`,
+    { method: 'POST', body: JSON.stringify({ params }), headers: buildControlHeaders(options) },
+    options?.signal,
+  );
 
 // Backtests
 export const startBacktest = (payload: {
@@ -100,7 +145,12 @@ export const startBacktest = (payload: {
   initialCapital?: number;
   feeBps?: number;
   slippageBps?: number;
-}) => api<{ jobId: string }>('/api/backtests', { method: 'POST', body: JSON.stringify(payload) });
+}, options?: ControlRequestOptions) =>
+  api<{ jobId: string }>(
+    '/api/backtests',
+    { method: 'POST', body: JSON.stringify(payload), headers: buildControlHeaders(options) },
+    options?.signal,
+  );
 
 export const pollBacktest = (jobId: string, signal?: AbortSignal) =>
   api<{
@@ -158,17 +208,48 @@ export const getConfigEffective = (signal?: AbortSignal) =>
 
 export const updateConfig = (
   payload: Record<string, unknown>,
-  token: string,
-  signal?: AbortSignal,
+  options: ControlRequestOptions,
 ) =>
   api<ConfigEffective>(
     '/api/config',
     {
       method: 'PUT',
       body: JSON.stringify(payload),
-      headers: {
-        'X-Ops-Token': token,
-      },
+      headers: buildControlHeaders(options),
     },
-    signal,
+    options?.signal,
+  );
+
+export const setTradingEnabled = (
+  enabled: boolean,
+  options: ControlRequestOptions,
+  reason?: string
+) =>
+  api<{ trading_enabled: boolean; ts: number }>(
+    '/api/ops/kill-switch',
+    {
+      method: 'POST',
+      body: JSON.stringify(
+        reason && reason.trim()
+          ? { enabled, reason: reason.trim() }
+          : { enabled }
+      ),
+      headers: buildControlHeaders(options),
+    },
+    options?.signal,
+  );
+
+export const flattenPositions = (options: ControlRequestOptions) =>
+  api<{
+    flattened: Array<Record<string, unknown>>;
+    requested: number;
+    succeeded: number;
+  }>(
+    '/api/ops/flatten',
+    {
+      method: 'POST',
+      body: JSON.stringify({}),
+      headers: buildControlHeaders(options),
+    },
+    options?.signal,
   );

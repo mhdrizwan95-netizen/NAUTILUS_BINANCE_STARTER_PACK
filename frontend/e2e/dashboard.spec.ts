@@ -1,4 +1,4 @@
-import { test, expect, type Route } from '@playwright/test';
+import { test, expect, type Route, type Dialog } from '@playwright/test';
 
 test.describe('Dashboard', () => {
   test.beforeEach(async ({ page }) => {
@@ -253,5 +253,73 @@ test.describe('Dashboard', () => {
     // Test tablet viewport
     await page.setViewportSize({ width: 768, height: 1024 });
     await expect(page.getByText('NAUTILUS')).toBeVisible();
+  });
+
+  test('should require confirmation for flatten and kill actions', async ({ page }) => {
+    await page.getByRole('tab', { name: 'Settings' }).click();
+    await page.fill('#ops-token', 'test-ops-token');
+    await page.fill('#ops-actor', 'operator');
+    await page.fill('#ops-approver', 'approver-token');
+    await page.getByRole('tab', { name: 'Dashboard' }).click();
+
+    const dialogs: Array<{ type: string; message: string }> = [];
+    const dialogHandler = async (dialog: Dialog) => {
+      dialogs.push({ type: dialog.type(), message: dialog.message() });
+      if (dialog.type() === 'prompt') {
+        await dialog.accept('Emergency test');
+      } else {
+        await dialog.accept();
+      }
+    };
+
+    page.on('dialog', dialogHandler);
+
+    const flattenRequests: Array<Record<string, unknown>> = [];
+    await page.route('**/api/ops/flatten', async (route) => {
+      const payload = route.request().postData();
+      flattenRequests.push(payload ? JSON.parse(payload) : {});
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ flattened: [], requested: 0, succeeded: 0 }),
+      });
+    });
+
+    const killRequests: Array<Record<string, unknown>> = [];
+    await page.route('**/api/ops/kill-switch', async (route) => {
+      const payload = route.request().postData();
+      killRequests.push(payload ? JSON.parse(payload) : {});
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ trading_enabled: false, ts: Date.now() }),
+      });
+    });
+
+    await Promise.all([
+      page.waitForRequest('**/api/ops/flatten'),
+      page.getByRole('button', { name: 'Flatten' }).click(),
+    ]);
+    await expect.poll(() => flattenRequests.length).toBe(1);
+
+    await Promise.all([
+      page.waitForRequest('**/api/ops/kill-switch'),
+      page.waitForRequest('**/api/ops/flatten'),
+      page.getByRole('button', { name: 'KILL' }).click(),
+    ]);
+
+    await expect.poll(() => killRequests.length).toBe(1);
+    await expect.poll(() => flattenRequests.length).toBe(2);
+
+    expect(killRequests[0].reason).toBe('Emergency test');
+    expect(flattenRequests[0]).toEqual({});
+    expect(flattenRequests[1]).toEqual({});
+    expect(dialogs.some((d) => d.type === 'confirm' && d.message.includes('Flatten will attempt'))).toBeTruthy();
+    expect(dialogs.some((d) => d.type === 'prompt' && d.message.includes('Emergency stop requires a reason'))).toBeTruthy();
+    expect(dialogs.filter((d) => d.type === 'confirm' && d.message.includes('EMERGENCY STOP')).length).toBeGreaterThanOrEqual(1);
+
+    page.off('dialog', dialogHandler);
+    await page.unroute('**/api/ops/flatten');
+    await page.unroute('**/api/ops/kill-switch');
   });
 });

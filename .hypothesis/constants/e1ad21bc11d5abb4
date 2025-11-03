@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/services/ml_service/app/trainer.py
+# hypothesis_version: 6.143.1
+
+[0.8, -200, 100, 200, 1000, '-inf', 'claimed_files', 'close', 'coerce', 'file_id', 'full', 'incoming/**/*.*', 'last', 'logret', 'message', 'metadata', 'metric_name', 'metric_value', 'ms', 'n_obs', 'n_states', 'no data available', 'no new data', 'not enough new data', 'path', 'promoted', 'tag', 'timestamp', 'train_seed', 'val_log_likelihood', 'version_dir', 'version_id']

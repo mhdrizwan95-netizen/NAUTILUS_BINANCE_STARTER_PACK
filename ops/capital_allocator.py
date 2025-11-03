@@ -205,7 +205,8 @@ def calculate_target_allocation(
 
     for model in enabled_models:
         current_quota = float(current_allocations.get(model, base_allocation))
-        last_update = last_updates.get(model, 0)
+        last_update_raw = last_updates.get(model, 0.0) or 0.0
+        last_update = float(last_update_raw)
 
         # Check cooldown period
         can_adjust = (now - last_update) >= cooldown_sec
@@ -216,7 +217,7 @@ def calculate_target_allocation(
 
         target_quota = current_quota
         decision = "hold"
-        reason = f"cooldown_active_until_{last_update + cooldown_sec}"
+        reason = f"cooldown_active_until_{last_update + cooldown_sec:.0f}"
 
         if can_adjust:
             if sharpe >= sharpe_promote:
@@ -227,6 +228,7 @@ def calculate_target_allocation(
 
                 # Update last update timestamp
                 last_updates[model] = now
+                last_update = now
 
             elif sharpe < sharpe_demote:
                 # Demote: shrink allocation
@@ -236,6 +238,7 @@ def calculate_target_allocation(
 
                 # Update last update timestamp
                 last_updates[model] = now
+                last_update = now
 
             else:
                 # Hold: no change

@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ops/portfolio_collector.py
+# hypothesis_version: 6.143.1
+
+[0.0, 6.0, 100.0, '%Y-%m-%d', '/', '//', ':', 'cash_usd', 'equity', 'equity_usd', 'last', 'last_price_quote', 'max', 'pnl', 'portfolio_cash_usd', 'portfolio_equity_usd', 'portfolio_gain_usd', 'portfolio_return_pct', 'positions', 'qty_base', 'unrealized']

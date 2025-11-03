@@ -37,9 +37,13 @@ fix_dashboard() {
         fi
         # Apply sample label normalizations cautiously to a new file
         sed -E \
-            -e 's/job="engine_(ibkr|bybit|binance)"/job="hmm_engine_binance"/g' \
+            -e 's/job="engine_binance"/job="hmm_engine_binance"/g' \
             -e 's/job="engine_binance_exporter"/job="hmm_engine_binance_exporter"/g' \
-            -e 's/\$\{__all_instances\}/\{job="hmm_engine_binance"\}/g' \
+            -e 's/job="engine_ibkr"/job="hmm_engine_ibkr"/g' \
+            -e 's/job="engine_ibkr_exporter"/job="hmm_engine_ibkr_exporter"/g' \
+            -e 's/job="engine_bybit"/job="hmm_engine_bybit"/g' \
+            -e 's/job="engine_bybit_exporter"/job="hmm_engine_bybit_exporter"/g' \
+            -e 's/\$\{__all_instances\}/\{job=~"hmm_engine_.*"\}/g' \
              < "${file}" > "${output}"
         echo "  ✅ Wrote: ${output} (review before importing to Grafana)"
     else

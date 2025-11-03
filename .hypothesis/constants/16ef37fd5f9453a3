@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/screener/features.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1e-09, 0.001, 50.0, 'asks', 'bids']

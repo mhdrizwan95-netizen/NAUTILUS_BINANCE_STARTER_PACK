@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/runtime/universe.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1.0, 10.0, 100.0, 86400000.0, 100, 200, 1000, '/api/v3/depth', '/api/v3/exchangeInfo', '/api/v3/klines', '/api/v3/ticker/24hr', '/fapi/v1/depth', '/fapi/v1/klines', '/fapi/v1/ticker/24hr', '1d', '24h_volume_usdt', '5m', '5m_atr_pct', 'PRICE_FILTER', 'USDT', 'X-MBX-APIKEY', 'asks', 'bid_liquidity_usd', 'bids', 'brackets', 'depth_usdt', 'filterType', 'filters', 'futures', 'has_major_news_flag', 'initialLeverage', 'interval', 'lastPrice', 'last_price', 'limit', 'liquidity_bid', 'news_flag', 'news_score', 'onboardDate', 'openInterest', 'open_interest_usd', 'orderbook_depth_usdt', 'price', 'quoteVolume', 'spot', 'strategy', 'symbol', 'symbols', 'tickSize', 'trend_30d_pct', 'universe-screener', 'utf-8', 'version', 'volume_usdt', 'w']

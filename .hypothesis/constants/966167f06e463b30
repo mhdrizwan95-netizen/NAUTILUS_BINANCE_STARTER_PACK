@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ops/__init__.py
+# hypothesis_version: 6.143.1
+
+['asyncio', 'requests']

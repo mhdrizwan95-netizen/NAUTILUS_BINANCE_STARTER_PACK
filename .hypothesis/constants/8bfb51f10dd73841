@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/execution/execute.py
+# hypothesis_version: 6.143.1
+
+['0', '1', '?', 'BUY', 'RecordedOrder', 'StrategyExecutor', '__call__', '__func__', 'backtest', 'cfg_hash', 'dry_run', 'false', 'idempotency_key', 'market', 'market_quote', 'meta', 'n', 'no', 'notional', 'off', 'on', 'order', 'orders.jsonl', 'place_market_order', 'quantity', 'quote', 'rejected', 'result', 'side', 'signal', 'source', 'status', 'strategy', 'submitted', 'symbol', 'tag', 'timestamp', 'true', 'ts', 'unexpected keyword', 'y', 'yes']

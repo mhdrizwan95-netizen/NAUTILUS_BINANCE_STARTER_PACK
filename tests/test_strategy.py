@@ -3,6 +3,9 @@ import importlib
 from fastapi.testclient import TestClient
 
 
+AUTH_HEADERS = {"X-Ops-Token": os.environ["OPS_API_TOKEN"]}
+
+
 def mk_client():
     from engine import app as appmod
 
@@ -21,6 +24,7 @@ def test_strategy_signal_dry_run():
     c = mk_client()
     r = c.post(
         "/strategy/signal",
+        headers=AUTH_HEADERS,
         json={"symbol": "BTCUSDT.BINANCE", "side": "BUY", "quote": 10, "tag": "test"},
     )
     assert r.status_code == 200
@@ -34,6 +38,7 @@ def test_strategy_signal_respects_rails():
     c = mk_client()
     r = c.post(
         "/strategy/signal",
+        headers=AUTH_HEADERS,
         json={"symbol": "DOGEUSDT.BINANCE", "side": "BUY", "quote": 10},
     )
     assert r.status_code == 200
@@ -46,6 +51,7 @@ def test_strategy_signal_override_dry_run():
     c = mk_client()
     r = c.post(
         "/strategy/signal",
+        headers=AUTH_HEADERS,
         json={"symbol": "BTCUSDT.BINANCE", "side": "BUY", "quote": 10, "dry_run": True},
     )
     assert r.status_code == 200

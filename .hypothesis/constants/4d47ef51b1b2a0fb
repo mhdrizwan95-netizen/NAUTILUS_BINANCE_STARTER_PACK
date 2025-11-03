@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/services/ml_service/app/model_store.py
+# hypothesis_version: 6.143.1
+
+['%Y-%m-%dT%H-%M-%SZ', '*', 'metadata.json', 'model.joblib', 'scaler.joblib', 'version.txt', 'version_id']

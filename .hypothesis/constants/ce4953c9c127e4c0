@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/core/market_resolver.py
+# hypothesis_version: 6.143.1
+
+['#', '*', ',', '.', ':', 'MARKET_ROUTE_MAP', 'futures', 'margin', 'options', 'r', 'spot', 'utf-8']

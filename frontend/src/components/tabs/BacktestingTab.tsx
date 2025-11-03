@@ -38,6 +38,8 @@ import {
   startBacktest,
 } from '@/lib/api';
 import type { StrategySummary } from '@/types/trading';
+import { useAppStore } from '@/lib/store';
+import { generateIdempotencyKey } from '@/lib/idempotency';
 
 type BacktestPoll = Awaited<ReturnType<typeof pollBacktest>>;
 
@@ -68,6 +70,9 @@ export function BacktestingTab() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [jobSnapshot, setJobSnapshot] = useState<BacktestPoll | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const opsToken = useAppStore((state) => state.opsAuth.token);
+  const opsActor = useAppStore((state) => state.opsAuth.actor);
+  const opsApprover = useAppStore((state) => state.opsAuth.approver);
 
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
@@ -129,6 +134,14 @@ export function BacktestingTab() {
   const pendingResult = jobSnapshot?.result;
 
   const handleStart = async () => {
+    if (!opsToken.trim()) {
+      toast.error('Provide an OPS API token before launching a backtest');
+      return;
+    }
+    if (!opsApprover.trim()) {
+      toast.error('Provide an approver token before launching a backtest');
+      return;
+    }
     if (!selectedStrategy) {
       toast.error('Select a strategy');
       return;
@@ -140,16 +153,24 @@ export function BacktestingTab() {
 
     setSubmitting(true);
     try {
-      const response = await startBacktest({
-        strategyId: selectedStrategy.id,
-        params: overrides,
-        symbols: selectedSymbols,
-        startDate: dateRange.from.toISOString(),
-        endDate: dateRange.to.toISOString(),
-        initialCapital,
-        feeBps,
-        slippageBps,
-      });
+      const response = await startBacktest(
+        {
+          strategyId: selectedStrategy.id,
+          params: overrides,
+          symbols: selectedSymbols,
+          startDate: dateRange.from.toISOString(),
+          endDate: dateRange.to.toISOString(),
+          initialCapital,
+          feeBps,
+          slippageBps,
+        },
+        {
+          token: opsToken.trim(),
+          actor: opsActor.trim() || undefined,
+          approverToken: opsApprover.trim() || undefined,
+          idempotencyKey: generateIdempotencyKey(`backtest-${selectedStrategy.id}`),
+        },
+      );
       setJobId(response.jobId);
       setJobSnapshot(null);
       toast('Backtest started', { description: `Job ${response.jobId}` });

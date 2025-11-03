@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/feeds/market_data_dispatcher.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.01, 1.0, 5.0, 'BINANCE', 'book', 'market.book', 'market.tick', 'market.trade', 'price', 'source', 'symbol', 'tick', 'trade', 'ts', 'type', 'venue']

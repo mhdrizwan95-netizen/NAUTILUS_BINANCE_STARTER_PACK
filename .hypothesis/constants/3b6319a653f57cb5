@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/strategies/dex_sniper.py
+# hypothesis_version: 6.143.1
+
+[0.0, 'A', 'B', 'DexExecutor required', 'addr', 'address', 'candidate', 'chain', 'dex_sniper', 'flatten_all', 'high_price', 'initial_qty', 'liq', 'liquidity', 'meta', 'pos_id', 'price', 'qty', 'source', 'strategy.dex_open', 'symbol', 'tax_pct', 'tier', 'token_address', 'top10_pct']

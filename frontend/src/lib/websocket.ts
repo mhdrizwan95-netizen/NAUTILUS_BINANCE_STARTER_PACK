@@ -160,18 +160,41 @@ class WebSocketManager {
 
 // Global WebSocket manager instance
 let wsManager: WebSocketManager | null = null;
+let currentUrl: string | null = null;
+
+const buildWebSocketUrl = (base: string, token: string | undefined): string => {
+  try {
+    const url = new URL(base, base.startsWith('ws') ? undefined : window.location.origin);
+    if (token?.trim()) {
+      url.searchParams.set('token', token.trim());
+    } else {
+      url.searchParams.delete('token');
+    }
+    return url.toString();
+  } catch {
+    if (token?.trim()) {
+      const delimiter = base.includes('?') ? '&' : '?';
+      return `${base}${delimiter}token=${encodeURIComponent(token.trim())}`;
+    }
+    return base;
+  }
+};
 
 export function initializeWebSocket(
   onMessage: (message: WebSocketMessage) => void,
   onConnect: () => void,
   onDisconnect: () => void,
-  onError: (error: Event) => void
+  onError: (error: Event) => void,
+  token?: string
 ): WebSocketManager {
   // Use environment variable or default to localhost
-  const wsUrl = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:8002/ws';
+  const baseUrl = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:8002/ws';
+  const wsUrl = buildWebSocketUrl(baseUrl, token);
 
-  if (!wsManager) {
+  if (!wsManager || currentUrl !== wsUrl) {
+    wsManager?.disconnect();
     wsManager = new WebSocketManager(wsUrl, onMessage, onConnect, onDisconnect, onError);
+    currentUrl = wsUrl;
   }
 
   return wsManager;
@@ -179,6 +202,7 @@ export function initializeWebSocket(
 
 export function useWebSocket(): WebSocketHookResult {
   const { updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData } = useRealTimeActions();
+  const opsToken = useAppStore((state) => state.opsAuth.token);
   const lastMessageRef = useRef<WebSocketMessage | null>(null);
   const managerRef = useRef<WebSocketManager | null>(null);
   const actionsRef = useRef({ updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData });
@@ -226,13 +250,25 @@ export function useWebSocket(): WebSocketHookResult {
   }, []);
 
   useEffect(() => {
-    if (!managerRef.current) {
+    const trimmedToken = opsToken.trim();
+
+    if (!trimmedToken) {
+      managerRef.current?.disconnect();
+      managerRef.current = null;
+      currentUrl = null;
+      return;
+    }
+
+    if (!managerRef.current || currentUrl === null) {
       managerRef.current = initializeWebSocket(
         handleMessage,
         handleConnect,
         handleDisconnect,
-        handleError
+        handleError,
+        trimmedToken
       );
+      managerRef.current.connect();
+    } else if (!managerRef.current.isConnected) {
       managerRef.current.connect();
     }
 
@@ -240,7 +276,7 @@ export function useWebSocket(): WebSocketHookResult {
       // Don't disconnect on unmount - keep connection alive
       // managerRef.current?.disconnect();
     };
-  }, []); // No dependencies - only run once
+  }, [handleConnect, handleDisconnect, handleError, handleMessage, opsToken]);
 
   const sendMessage = useCallback((message: any) => {
     managerRef.current?.sendMessage(message);

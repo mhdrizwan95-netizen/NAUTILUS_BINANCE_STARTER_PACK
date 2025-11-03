@@ -4,13 +4,6 @@ import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { TopHUD, type TopHudMetrics, type TopHudVenue } from './TopHUD';
 
-vi.mock('sonner', () => ({
-  toast: {
-    success: vi.fn(),
-    error: vi.fn(),
-  },
-}));
-
 vi.mock('./ui/switch', () => ({
   Switch: ({ checked, onCheckedChange, ...props }: any) => (
     <button
@@ -54,6 +47,9 @@ const renderHUD = (overrides: Partial<ComponentProps<typeof TopHUD>> = {}) =>
       isConnected
       onModeChange={vi.fn()}
       onKillSwitch={vi.fn()}
+      onPause={vi.fn()}
+      onResume={vi.fn()}
+      onFlatten={vi.fn()}
       {...overrides}
     />,
   );
@@ -90,11 +86,27 @@ describe('TopHUD', () => {
   it('invokes the kill switch handler', async () => {
     const onKillSwitch = vi.fn();
     const user = userEvent.setup();
-    renderHUD({ onKillSwitch });
+    renderHUD({ onKillSwitch, onPause: vi.fn(), onResume: vi.fn(), onFlatten: vi.fn() });
 
     await user.click(screen.getByText('KILL'));
 
     expect(onKillSwitch).toHaveBeenCalled();
+  });
+
+  it('invokes pause/resume/flatten control handlers', async () => {
+    const onPause = vi.fn();
+    const onResume = vi.fn();
+    const onFlatten = vi.fn();
+    const user = userEvent.setup();
+    renderHUD({ onPause, onResume, onFlatten });
+
+    await user.click(screen.getByText('Pause'));
+    await user.click(screen.getByText('Resume'));
+    await user.click(screen.getByText('Flatten'));
+
+    expect(onPause).toHaveBeenCalled();
+    expect(onResume).toHaveBeenCalled();
+    expect(onFlatten).toHaveBeenCalled();
   });
 
   it('renders venue status information', () => {

@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/services/ml_service/app/main.py
+# hypothesis_version: 6.143.1
+
+[0.0, '/', '/health', '/model', '/predict', '/train', '0.2.0', 'admin', 'message', 'metadata', 'metric_name', 'metric_value', 'ml-service (HMM)', 'n/a', 'ok', 'promoted', 'status', 'trainer', 'val_log_likelihood', 'version_dir', 'version_id']

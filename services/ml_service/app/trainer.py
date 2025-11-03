@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from loguru import logger
 from .config import settings
 from . import model_store
-from common import manifest
+from services.common import manifest
 
 
 def _load_new_data() -> Tuple[pd.DataFrame, List[str]]:

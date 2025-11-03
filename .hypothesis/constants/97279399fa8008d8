@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/services/ml_service/app/config.py
+# hypothesis_version: 6.143.1
+
+[1.0, 365, 2000, '.env', '/ml/data', '/ml/manifest.sqlite', '/models', '/models/current', '/models/registry', '0 */6 * * *', 'HS256', 'INFO', 'ignore']

@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/telemetry/rollups.py
+# hypothesis_version: 6.143.1
+
+[360, 86400, 'by_symbol', 'cnt', 'start', 'trades']

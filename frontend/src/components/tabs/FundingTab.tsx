@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, DollarSign, BarChart2 } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { TrendingUp, DollarSign, BarChart2, Save } from 'lucide-react';
 import {
   Card,
   CardContent,
@@ -16,13 +16,22 @@ import {
   getAggregatePortfolio,
   getAggregateExposure,
   getAggregatePnl,
+  getConfigEffective,
+  updateConfig,
+  type ControlRequestOptions,
 } from '../../lib/api';
 import {
   exposureAggregateSchema,
   pnlSnapshotSchema,
   portfolioAggregateSchema,
   validateApiResponse,
+  configEffectiveSchema,
 } from '../../lib/validation';
+import { Input } from '../ui/input';
+import { Button } from '../ui/button';
+import { useAppStore } from '../../lib/store';
+import { toast } from 'sonner';
+import { generateIdempotencyKey } from '../../lib/idempotency';
 
 function formatCurrency(value: number, opts: Intl.NumberFormatOptions = {}) {
   return new Intl.NumberFormat('en-US', {
@@ -45,11 +54,16 @@ function formatEpoch(epoch: number | null | undefined) {
 }
 
 export function FundingTab() {
+  const queryClient = useQueryClient();
+  const opsToken = useAppStore((state) => state.opsAuth.token);
+  const opsActor = useAppStore((state) => state.opsAuth.actor);
+  const opsApprover = useAppStore((state) => state.opsAuth.approver);
+
   const portfolioQuery = useQuery({
     queryKey: queryKeys.funding.portfolio(),
     queryFn: () =>
       getAggregatePortfolio().then((data) =>
-        validateApiResponse(portfolioAggregateSchema, data, 'Aggregate portfolio')
+        validateApiResponse(portfolioAggregateSchema, data, 'Aggregate portfolio'),
       ),
     refetchInterval: 30_000,
   });
@@ -58,7 +72,7 @@ export function FundingTab() {
     queryKey: queryKeys.funding.exposure(),
     queryFn: () =>
       getAggregateExposure().then((data) =>
-        validateApiResponse(exposureAggregateSchema, data, 'Exposure aggregate')
+        validateApiResponse(exposureAggregateSchema, data, 'Exposure aggregate'),
       ),
     refetchInterval: 30_000,
   });
@@ -67,10 +81,68 @@ export function FundingTab() {
     queryKey: queryKeys.funding.pnl(),
     queryFn: () =>
       getAggregatePnl().then((data) =>
-        validateApiResponse(pnlSnapshotSchema, data, 'PnL snapshot')
+        validateApiResponse(pnlSnapshotSchema, data, 'PnL snapshot'),
       ),
     refetchInterval: 30_000,
   });
+
+  const configQuery = useQuery({
+    queryKey: queryKeys.settings.config(),
+    queryFn: () =>
+      getConfigEffective().then((data) =>
+        validateApiResponse(configEffectiveSchema, data, 'Runtime config'),
+      ),
+    staleTime: 60_000,
+  });
+
+  const [budgetDraft, setBudgetDraft] = useState<Record<string, number>>({});
+  const [budgetTouched, setBudgetTouched] = useState(false);
+
+  useEffect(() => {
+    if (!configQuery.data || budgetTouched) return;
+    const buckets = configQuery.data.effective?.buckets ?? {};
+    const mapped = Object.entries(buckets).reduce<Record<string, number>>((acc, [key, val]) => {
+      acc[key] = typeof val === 'number' ? val : Number(val ?? 0);
+      return acc;
+    }, {});
+    setBudgetDraft(mapped);
+  }, [configQuery.data, budgetTouched]);
+
+  const updateBudgetsMutation = useMutation({
+    mutationFn: async ({
+      buckets,
+      options,
+    }: {
+      buckets: Record<string, number>;
+      options: ControlRequestOptions;
+    }) => updateConfig({ buckets }, options),
+    onSuccess: (data) => {
+      toast.success('Capital buckets updated');
+      setBudgetTouched(false);
+      const buckets = data.effective?.buckets ?? {};
+      const mapped = Object.entries(buckets).reduce<Record<string, number>>((acc, [key, val]) => {
+        acc[key] = typeof val === 'number' ? val : Number(val ?? 0);
+        return acc;
+      }, {});
+      setBudgetDraft(mapped);
+      queryClient.setQueryData(queryKeys.settings.config(), data);
+    },
+    onError: (error: unknown) => {
+      toast.error('Failed to update capital buckets', {
+        description: error instanceof Error ? error.message : 'Unknown error',
+      });
+    },
+  });
+
+  const handleBudgetChange = (bucket: string, value: number) => {
+    setBudgetTouched(true);
+    setBudgetDraft((prev) => ({ ...prev, [bucket]: value }));
+  };
+
+  const totalBudget = useMemo(
+    () => Object.values(budgetDraft).reduce((sum, value) => sum + (Number(value) || 0), 0),
+    [budgetDraft],
+  );
 
   const exposureRows = useMemo(() => {
     if (!exposureQuery.data) return [];
@@ -110,20 +182,100 @@ export function FundingTab() {
       .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
   }, [pnlQuery.data]);
 
-  const isLoading =
+  const isExposureLoading =
     portfolioQuery.isLoading || exposureQuery.isLoading || pnlQuery.isLoading;
 
   return (
     <div className="space-y-6 p-6">
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle>Capital Buckets</CardTitle>
+            <CardDescription>
+              Update allocation weights used by the allocator. Values must sum to 1.0.
+            </CardDescription>
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            disabled={
+              updateBudgetsMutation.isPending ||
+              !budgetTouched ||
+              !opsToken.trim() ||
+              Math.abs(totalBudget - 1) > 0.001
+            }
+            onClick={() => {
+              if (!opsToken.trim()) {
+                toast.error('Provide an OPS token in Settings before updating buckets');
+                return;
+              }
+              if (!opsApprover.trim()) {
+                toast.error('Provide an approver token before updating capital buckets');
+                return;
+              }
+              updateBudgetsMutation.mutate({
+                buckets: budgetDraft,
+                options: {
+                  token: opsToken.trim(),
+                  actor: opsActor.trim() || undefined,
+                  approverToken: opsApprover.trim() || undefined,
+                  idempotencyKey: generateIdempotencyKey('buckets'),
+                },
+              });
+            }}
+          >
+            <Save className="mr-2 h-4 w-4" />
+            {updateBudgetsMutation.isPending ? 'Saving…' : 'Save allocations'}
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {configQuery.isLoading ? (
+            <Skeleton className="h-32 w-full" />
+          ) : (
+            <div className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                {Object.entries(budgetDraft).map(([bucket, value]) => (
+                  <div
+                    key={bucket}
+                    className="rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-4 space-y-2"
+                  >
+                    <div className="flex items-center justify-between text-sm font-medium text-zinc-200">
+                      <span>{bucket}</span>
+                      <span>{(value * 100).toFixed(1)}%</span>
+                    </div>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={Number.isFinite(value) ? value : 0}
+                      onChange={(event) => handleBudgetChange(bucket, Number(event.target.value))}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center justify-between text-xs text-zinc-500">
+                <span>Total allocation</span>
+                <span
+                  className={
+                    Math.abs(totalBudget - 1) <= 0.001 ? 'text-emerald-400' : 'text-amber-400'
+                  }
+                >
+                  {totalBudget.toFixed(3)}
+                </span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       <div className="flex flex-col gap-4 md:grid md:grid-cols-3">
         <MetricCard
           title="Total Equity"
           description="Aggregate across all venues"
           icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
           value={
-            portfolioQuery.data
-              ? formatCurrency(portfolioQuery.data.equity_usd)
-              : '—'
+            portfolioQuery.data ? formatCurrency(portfolioQuery.data.equity_usd) : '—'
           }
           footer={
             portfolioQuery.data
@@ -137,9 +289,7 @@ export function FundingTab() {
           description="Liquid capital available"
           icon={<DollarSign className="h-4 w-4 text-cyan-400" />}
           value={
-            portfolioQuery.data
-              ? formatCurrency(portfolioQuery.data.cash_usd)
-              : '—'
+            portfolioQuery.data ? formatCurrency(portfolioQuery.data.cash_usd) : '—'
           }
           footer={
             portfolioQuery.data
@@ -152,17 +302,13 @@ export function FundingTab() {
           title="Tracked Symbols"
           description="Positions & watchlist coverage"
           icon={<BarChart2 className="h-4 w-4 text-violet-400" />}
-          value={
-            exposureQuery.data
-              ? exposureQuery.data.totals.count.toString()
-              : '—'
-          }
+          value={exposureQuery.data ? exposureQuery.data.totals.count.toString() : '—'}
           footer={
             exposureQuery.data
-              ? `Exposure: ${formatCurrency(
-                  exposureQuery.data.totals.exposure_usd,
-                  { maximumFractionDigits: 0, minimumFractionDigits: 0 }
-                )}`
+              ? `Exposure: ${formatCurrency(exposureQuery.data.totals.exposure_usd, {
+                  maximumFractionDigits: 0,
+                  minimumFractionDigits: 0,
+                })}`
               : 'Exposure: —'
           }
           loading={exposureQuery.isLoading}
@@ -173,16 +319,14 @@ export function FundingTab() {
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <div>
             <CardTitle>Symbol Exposure</CardTitle>
-            <CardDescription>
-              Top positions by notional exposure (USD)
-            </CardDescription>
+            <CardDescription>Top positions by notional exposure (USD)</CardDescription>
           </div>
           <Badge variant="outline">
             Last refresh: {formatEpoch(portfolioQuery.data?.last_refresh_epoch)}
           </Badge>
         </CardHeader>
         <CardContent>
-          {isLoading ? (
+          {isExposureLoading ? (
             <Skeleton className="h-40 w-full" />
           ) : exposureRows.length === 0 ? (
             <EmptyState message="No exposure data available yet. Once positions are reported by the engines they will appear here." />
@@ -229,9 +373,7 @@ export function FundingTab() {
       <Card>
         <CardHeader>
           <CardTitle>Venue PnL Snapshot</CardTitle>
-          <CardDescription>
-            Realized vs unrealized performance by venue
-          </CardDescription>
+          <CardDescription>Realized vs unrealized performance by venue</CardDescription>
         </CardHeader>
         <CardContent>
           {pnlQuery.isLoading ? (
@@ -310,9 +452,7 @@ function MetricCard({ title, description, value, icon, footer, loading }: Metric
         ) : (
           <div className="text-2xl font-semibold text-zinc-100">{value}</div>
         )}
-        {footer ? (
-          <p className="mt-2 text-xs text-zinc-500">{footer}</p>
-        ) : null}
+        {footer ? <p className="mt-2 text-xs text-zinc-500">{footer}</p> : null}
       </CardContent>
     </Card>
   );

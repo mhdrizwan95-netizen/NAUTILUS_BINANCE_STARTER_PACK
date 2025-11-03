@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ops/aggregate_exposure.py
+# hypothesis_version: 6.143.1
+
+[0.0, 5.0, ',', '.', '.IBKR', '/', 'BINANCE', 'IBKR', 'OPS_IBKR_TICKERS', 'PRICE_METRICS', 'USDT', 'count', 'exposure_usd', 'last', 'last_price_quote', 'last_price_usd', 'mark', 'ops.ibkr_prices', 'positions', 'price', 'qty', 'qty_base', 'sym', 'symbol', 'venues']

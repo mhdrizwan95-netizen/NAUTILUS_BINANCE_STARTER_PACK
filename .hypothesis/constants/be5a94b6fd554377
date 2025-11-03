@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/core/venue_specs.py
+# hypothesis_version: 6.143.1
+
+[1e-05, 0.0001, 0.01, 0.1, 1.0, 5.0, 10.0, 'AAPL', 'BINANCE', 'BINANCE_MARGIN', 'BNBUSDT', 'BTCUSDT', 'ETHUSDT', 'IBKR', 'KRAKEN', 'MSFT', 'PI_ETHUSD', 'PI_XBTUSD', 'venue_specs.json']

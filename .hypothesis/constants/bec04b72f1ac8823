@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/screener/strategies/base.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1.0, 50.0, 100.0, 86400000.0, 'StrategyCandidate', 'StrategyScreener', 'StrategySignal', 'abs_value', 'atr', 'confidence', 'context', 'entry_mode', 'freeze_mapping', 'listing_age', 'listing_age_days', 'merge_context', 'metadata', 'onboard_time_ms', 'onboard_ts', 'rsi', 'score', 'side', 'signal', 'sma', 'strategy_id', 'suggested_stop', 'suggested_tp', 'swing_high', 'swing_low', 'symbol', 'ts', 'validity_ttl']

@@ -28,6 +28,8 @@ async def test_slippage_warn_logged(caplog, monkeypatch):
     caplog.set_level(logging.WARNING)
     os.environ["BINANCE_MODE"] = "futures_testnet"
     os.environ["FUT_TAKER_MAX_SLIP_BPS"] = "15"
+    os.environ["MIN_NOTIONAL_USDT"] = "0"
+    os.environ["MIN_NOTIONAL_BLOCK_USD"] = "0"
 
     client = _MockClient(last=100.0, avg=101.0)
     set_exchange_client("BINANCE", client)

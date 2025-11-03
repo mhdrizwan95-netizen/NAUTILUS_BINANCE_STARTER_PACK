@@ -253,16 +253,18 @@ def test_manual_promotion_override():
     }
     save_registry(initial_reg)
 
-    # Set auth token for test
-    os.environ["OPS_API_TOKEN"] = "dev-token"
-
     client = TestClient(ops_app.app)
+    token = getattr(ops_app, "OPS_TOKEN", os.getenv("OPS_API_TOKEN"))
+    approver = os.getenv("OPS_APPROVER_TOKENS")
 
     # Manual promotion request
     response = client.post(
         "/strategy/promote",
         json={"model_tag": "ensemble_v2"},
-        headers={"X-OPS-TOKEN": "dev-token"},
+        headers={
+            "X-OPS-TOKEN": token,
+            "X-Ops-Approver": approver,
+        },
     )
 
     assert response.status_code == 200

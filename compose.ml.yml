@@ -20,7 +20,7 @@ services:
       - models:/models
       - data:/data
     ports:
-      - "8003:8000"
+      - "8017:8000"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
       interval: 30s

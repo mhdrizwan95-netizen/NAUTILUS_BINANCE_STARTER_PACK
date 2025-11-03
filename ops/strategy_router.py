@@ -14,14 +14,17 @@ Architecture:
 """
 
 import asyncio
+import hmac
 import json
 import logging
+import os
 import random
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional, Set
 
 import httpx
+from fastapi import APIRouter, HTTPException, Request
 
 from ops.capital_allocator import get_model_quota
 from ops.env import engine_endpoints
@@ -175,7 +178,7 @@ async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                 response = await client.post(
                     f"{endpoint}/strategy/signal",
                     json=signal_data,
-                    headers={"Content-Type": "application/json"},
+                    headers=_engine_headers({"Content-Type": "application/json"}),
                 )
 
                 if response.status_code == 404:
@@ -183,7 +186,7 @@ async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                     response = await client.post(
                         f"{endpoint}/orders/market",
                         json=signal_data,
-                        headers={"Content-Type": "application/json"},
+                        headers=_engine_headers({"Content-Type": "application/json"}),
                     )
 
                 response.raise_for_status()
@@ -272,7 +275,7 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
                 response = await client.post(
                     f"{endpoint}/strategy/signal",
                     json=signal_data,
-                    headers={"Content-Type": "application/json"},
+                    headers=_engine_headers({"Content-Type": "application/json"}),
                 )
 
                 response.raise_for_status()
@@ -350,16 +353,67 @@ async def fetch_price_for_symbol(symbol: str) -> float:
     return 0.0
 
 
-# FastAPI Router
-from fastapi import APIRouter, HTTPException
-
 router = APIRouter()
 
 
+def _load_ops_token() -> str:
+    token = os.getenv("OPS_API_TOKEN")
+    token_file = os.getenv("OPS_API_TOKEN_FILE")
+    if token_file:
+        try:
+            secret = Path(token_file).read_text(encoding="utf-8").strip()
+        except OSError as exc:
+            raise RuntimeError(
+                f"Failed to read OPS_API_TOKEN_FILE ({token_file})"
+            ) from exc
+        if secret:
+            token = secret
+    if not token or token == "dev-token":
+        raise RuntimeError(
+            "Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the strategy router"
+        )
+    return token
+
+
+def _load_approver_tokens() -> Set[str]:
+    raw = os.getenv("OPS_APPROVER_TOKENS") or os.getenv("OPS_APPROVER_TOKEN")
+    if not raw:
+        return set()
+    return {token.strip() for token in raw.split(",") if token.strip()}
+
+
+OPS_TOKEN = _load_ops_token()
+OPS_APPROVER_TOKENS = _load_approver_tokens()
+
+
+def _require_ops_token(request: Request) -> None:
+    header = request.headers.get("X-Ops-Token") or request.headers.get("X-OPS-TOKEN")
+    if not header or not hmac.compare_digest(header, OPS_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Ops-Token")
+
+
+def _require_ops_approver(request: Request) -> None:
+    if not OPS_APPROVER_TOKENS:
+        return
+    approver = request.headers.get("X-Ops-Approver")
+    if not approver or approver not in OPS_APPROVER_TOKENS:
+        raise HTTPException(status_code=403, detail="Approver token required")
+
+
+def _engine_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    headers: Dict[str, str] = {"X-Ops-Token": OPS_TOKEN}
+    if extra:
+        headers.update(extra)
+    return headers
+
+
 @router.post("/strategy/signal")
-async def strategy_signal_endpoint(signal_data: Dict[str, Any]) -> Dict[str, Any]:
+async def strategy_signal_endpoint(
+    signal_data: Dict[str, Any], request: Request
+) -> Dict[str, Any]:
     """Primary endpoint for routing trading signals to models."""
     try:
+        _require_ops_token(request)
         if not signal_data:
             raise HTTPException(status_code=400, detail="Empty signal data")
 
@@ -391,18 +445,21 @@ async def strategy_signal_endpoint(signal_data: Dict[str, Any]) -> Dict[str, Any
 
 
 @router.get("/strategy/weights")
-def get_weights_endpoint():
+def get_weights_endpoint(request: Request):
     """Get current strategy weights configuration."""
     try:
+        _require_ops_token(request)
         return _load_weights()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to load weights: {e}")
 
 
 @router.post("/strategy/weights")
-async def set_weights_endpoint(body: Dict[str, Any]):
+async def set_weights_endpoint(body: Dict[str, Any], request: Request):
     """Update strategy weights (admin operation)."""
     try:
+        _require_ops_token(request)
+        _require_ops_approver(request)
         config = _load_weights()
 
         # Validate manual override permission
@@ -460,9 +517,11 @@ async def set_weights_endpoint(body: Dict[str, Any]):
 
 
 @router.post("/strategy/promote_canary")
-async def promote_canary_endpoint(body: Dict[str, Any]):
+async def promote_canary_endpoint(body: Dict[str, Any], request: Request):
     """Manually promote a canary model (forced operation)."""
     try:
+        _require_ops_token(request)
+        _require_ops_approver(request)
         candidate = body.get("model")
         if not candidate:
             raise HTTPException(status_code=400, detail="model required")
@@ -513,8 +572,9 @@ async def promote_canary_endpoint(body: Dict[str, Any]):
 
 
 @router.get("/strategy/metrics")
-def get_routing_metrics():
+def get_routing_metrics(request: Request):
     """Get strategy routing performance metrics."""
+    _require_ops_token(request)
     config = _load_weights()
 
     total_routed = sum(metrics.signal_routed.values())

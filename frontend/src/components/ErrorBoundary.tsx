@@ -65,6 +65,7 @@ export function AppErrorBoundary({
   onError
 }: AppErrorBoundaryProps) {
   const handleError = (error: Error, errorInfo: React.ErrorInfo) => {
+    console.error('AppErrorBoundary captured error:', error, errorInfo);
     // Log to console in development
     if (process.env.NODE_ENV === 'development') {
       console.error('Error Boundary caught an error:', error, errorInfo);

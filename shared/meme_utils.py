@@ -30,9 +30,9 @@ def generate_meme_bracket(
     sp = max(0.0, float(stop_pct))
     tp = max(0.0, float(take_profit_pct))
     tr = max(0.0, float(trail_pct))
-    stop_px = px * (1.0 - sp)
+    stop_px = max(0.0, px * (1.0 - sp))
     take_profit_px = px * (1.0 + tp)
-    trail_px = px * (1.0 - tr)
+    trail_px = max(0.0, px * (1.0 - tr))
     return stop_px, take_profit_px, trail_px
 
 

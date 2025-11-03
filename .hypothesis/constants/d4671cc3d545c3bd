@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/screener/service.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.9, 1.0, 1.5, 5.0, 6.0, 1000.0, '-1003', '/candidates', '/control/scan', '/health', '/metrics', '/scan', '0.1', '1', '100', '429', '5', '60', 'ADAUSDT', 'BCHUSDT', 'BNBUSDT', 'BTCUSDT', 'DOTUSDT', 'ETCUSDT', 'ETHUSDT', 'LINKUSDT', 'LTCUSDT', 'SCREENER_AUTO_SCAN', 'SCREENER_ROTATE', 'SCREENER_SCAN_JITTER', 'SCREENER_SYMBOL_CAP', 'XRPUSDT', 'asks', 'bids', 'binance_429_total', 'code', 'enabled', 'features', 'interval_sec', 'long', 'ok', 'penalty', 'scan_errors_total', 'scan_latency_ms', 'score', 'screener', 'screener_score', 'short', 'side', 'startup', 'strategies', 'strike', 'symbol', 'true', 'ts', 'vwap_dev_prev', 'yes']

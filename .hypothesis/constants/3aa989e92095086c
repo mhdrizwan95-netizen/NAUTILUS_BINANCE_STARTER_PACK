@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/strategies/ensemble_policy.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.5, 'BUY', 'NONE', 'SELL', '_inner', 'components', 'conf', 'ensemble_v1', 'exp', 'hmm_conf', 'hmm_side', 'hmm_v1', 'ma_conf', 'ma_side', 'ma_v1', 'probs', 'score', 'weights']

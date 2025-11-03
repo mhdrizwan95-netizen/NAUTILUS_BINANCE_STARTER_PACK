@@ -1,8 +1,15 @@
+import os
 import time
+import uuid
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
+
+OPS_TOKEN = os.getenv("OPS_API_TOKEN", "test-ops-token-1234567890")
+OPS_APPROVER_TOKEN = (
+    (os.getenv("OPS_APPROVER_TOKENS") or "test-approver-token-1234567890").split(",")[0].strip()
+)
 
 
 @pytest.fixture()
@@ -29,12 +36,18 @@ def test_strategies_expose_param_schema(client: TestClient) -> None:
 
 def test_backtest_job_runner_returns_result(client: TestClient) -> None:
     # Start a synthetic backtest and poll for completion
+    key = f"test-{uuid.uuid4()}"
     start = client.post(
         "/api/backtests",
         json={
             "strategyId": "trend_core",
             "startDate": "2024-01-01T00:00:00Z",
             "endDate": "2024-01-02T00:00:00Z",
+        },
+        headers={
+            "X-Ops-Token": OPS_TOKEN,
+            "X-Ops-Approver": OPS_APPROVER_TOKEN,
+            "Idempotency-Key": key,
         },
     )
     assert start.status_code == 200
@@ -59,3 +72,32 @@ def test_backtest_job_runner_returns_result(client: TestClient) -> None:
     assert "totalReturn" in metrics
     assert "equityCurve" in result
     assert isinstance(result["equityCurve"], list)
+
+
+def test_backtest_requires_idempotency_key(client: TestClient) -> None:
+    resp = client.post(
+        "/api/backtests",
+        json={"strategyId": "trend_core"},
+        headers={"X-Ops-Token": OPS_TOKEN, "X-Ops-Approver": OPS_APPROVER_TOKEN},
+    )
+    assert resp.status_code == 400
+    assert "Idempotency-Key" in resp.json().get("detail", "")
+
+
+def test_backtest_replay_returns_cached_job_id(client: TestClient) -> None:
+    idem = f"test-{uuid.uuid4()}"
+    headers = {
+        "X-Ops-Token": OPS_TOKEN,
+        "X-Ops-Approver": OPS_APPROVER_TOKEN,
+        "Idempotency-Key": idem,
+    }
+    payload = {
+        "strategyId": "trend_core",
+        "startDate": "2024-01-01T00:00:00Z",
+        "endDate": "2024-01-02T00:00:00Z",
+    }
+    first = client.post("/api/backtests", json=payload, headers=headers)
+    assert first.status_code == 200
+    second = client.post("/api/backtests", json=payload, headers=headers)
+    assert second.status_code == 200
+    assert first.json() == second.json()

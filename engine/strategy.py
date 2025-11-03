@@ -20,6 +20,7 @@ from .strategies.trend_follow import TrendStrategyModule, load_trend_config
 from .strategies.scalping import ScalpStrategyModule, load_scalp_config
 from .state.cooldown import Cooldowns
 from .strategies.scalp.brackets import ScalpBracketManager
+from .ops_auth import require_ops_token
 
 try:
     from .strategies.momentum_realtime import (
@@ -311,6 +312,7 @@ class StrategySignal(BaseModel):
 
 @router.post("/strategy/signal")
 def post_strategy_signal(sig: StrategySignal, request: Request):
+    require_ops_token(request)
     idem = request.headers.get("X-Idempotency-Key")
     return _execute_strategy_signal(sig, idem_key=idem)
 

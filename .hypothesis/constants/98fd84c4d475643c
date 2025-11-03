@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/runtime/pipeline.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1e-08, 0.01, 0.95, 1.0, 5.0, 1000.0, '.', 'BUY', 'DEFAULT', 'SELL', '_client', 'cash', 'default', 'desired_leverage', 'equity', 'event', 'executedQty', 'filled_qty_base', 'futures', 'futures_core', 'leverage', 'listing', 'meme', 'momentum', 'origQty', 'position_risk', 'positions', 'quantity', 'reserve', 'resolved_market', 'scalper', 'signal-consumer', 'spot', 'spot_margin', 'state', 'symbol', 'trend']

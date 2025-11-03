@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/core/portfolio.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1e-10, '.', 'BINANCE_MARGIN', 'BUY', 'avg_price_quote', 'cash', 'equity', 'exposure', 'fees', 'last_price_quote', 'level', 'liability_usd', 'margin', 'market', 'orders_filled_total', 'pnl', 'positions', 'qty_base', 'realized', 'realized_usd', 'spot', 'symbol', 'ts', 'unrealized', 'unrealized_usd', 'venue']

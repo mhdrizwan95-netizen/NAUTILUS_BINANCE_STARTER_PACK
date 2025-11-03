@@ -3,32 +3,30 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
-from typing import Any, Dict, List, Optional, Set
+import random
+import time
+from collections import OrderedDict, deque
+from pathlib import Path
+from threading import RLock
+from typing import Any, Deque, Dict, List, Optional, Set
 
+import httpx
+import yaml
 from fastapi import (
     APIRouter,
     Depends,
     Header,
     HTTPException,
+    Request,
     WebSocket,
     WebSocketDisconnect,
     status,
 )
-import json
-import random
-import time
-from pathlib import Path
-from typing import Deque
-from collections import deque
-import asyncio
-import httpx
-import os
-from ops import pnl_dashboard as pnl
-from ops.env import engine_endpoints
-import yaml
 from pydantic import BaseModel
 
+from ops import pnl_dashboard as pnl
 from ops import ui_state
 
 
@@ -48,7 +46,41 @@ def _load_ops_token() -> str:
 OPS_TOKEN = _load_ops_token()
 WS_TOKEN = OPS_TOKEN
 
+def _load_approver_tokens() -> Set[str]:
+    raw = os.getenv("OPS_APPROVER_TOKENS") or os.getenv("OPS_APPROVER_TOKEN")
+    if not raw:
+        return set()
+    return {token.strip() for token in raw.split(",") if token.strip()}
+
+OPS_APPROVER_TOKENS = _load_approver_tokens()
+
+def _require_approver(header: str | None) -> Optional[str]:
+    if not OPS_APPROVER_TOKENS:
+        return None
+    if not header or header not in OPS_APPROVER_TOKENS:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Approver token required",
+        )
+    return header
+
+
+def _require_idempotency(request: Request) -> tuple[str, Optional[Dict[str, Any]]]:
+    key = request.headers.get("Idempotency-Key")
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing Idempotency-Key header",
+        )
+    cached = _idempotency_lookup(key)
+    return key, cached
+
 router = APIRouter(prefix="/api", tags=["command-center"])
+
+_IDEMPOTENCY_CACHE: OrderedDict[str, tuple[float, Dict[str, Any]]] = OrderedDict()
+_IDEMPOTENCY_LOCK = RLock()
+_IDEMPOTENCY_MAX = 512
+CONTROL_AUDIT_PATH = Path("ops/logs/control_actions.jsonl")
 
 
 class ConfigPatch(BaseModel):
@@ -74,6 +106,15 @@ class TransferRequest(BaseModel):
     amount: float
     source: str
     target: str
+
+
+class KillSwitchRequest(BaseModel):
+    enabled: bool
+    reason: Optional[str] = None
+
+
+class FlattenRequest(BaseModel):
+    dryRun: Optional[bool] = False
 
 
 def require_ops_token(x_ops_token: Optional[str] = Header(None)) -> None:
@@ -112,6 +153,48 @@ def _save_params(payload: Dict[str, Any]) -> None:
     PARAMS_PATH.write_text(
         json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
     )
+
+
+def _idempotency_lookup(key: str) -> Optional[Dict[str, Any]]:
+    with _IDEMPOTENCY_LOCK:
+        cached = _IDEMPOTENCY_CACHE.get(key)
+        if cached:
+            return cached[1]
+    return None
+
+
+def _idempotency_store(key: str, response: Dict[str, Any]) -> None:
+    with _IDEMPOTENCY_LOCK:
+        _IDEMPOTENCY_CACHE[key] = (time.time(), response)
+        _IDEMPOTENCY_CACHE.move_to_end(key)
+        while len(_IDEMPOTENCY_CACHE) > _IDEMPOTENCY_MAX:
+            _IDEMPOTENCY_CACHE.popitem(last=False)
+
+
+def _record_control_action(
+    action: str,
+    actor: Optional[str],
+    approver: Optional[str],
+    idempotency_key: str,
+    payload: Dict[str, Any],
+    result: Dict[str, Any],
+) -> None:
+    try:
+        CONTROL_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        entry = {
+            "ts": time.time(),
+            "action": action,
+            "actor": actor,
+            "approver": approver,
+            "idempotency_key": idempotency_key,
+            "payload": payload,
+            "result": result,
+        }
+        with CONTROL_AUDIT_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+    except Exception:
+        # Audit logging best-effort; avoid interrupting control flow
+        pass
 
 
 def _yaml_schema_to_param_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -193,13 +276,34 @@ async def config_effective(state: Dict[str, Any] = Depends(get_state)) -> Any:
 @router.put("/config")
 async def config_update(
     patch: ConfigPatch,
+    request: Request,
     state: Dict[str, Any] = Depends(get_state),
     _auth: None = Depends(require_ops_token),
 ) -> Any:
+    idem_key, cached = _require_idempotency(request)
+    if cached:
+        return cached
+
+    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     payload = {k: v for k, v in patch.dict().items() if v is not None}
     if not payload:
-        return await state["config"].get_effective()
-    return await state["config"].patch(payload)
+        result = await state["config"].get_effective()
+        payload_for_audit: Dict[str, Any] = {"noop": True}
+    else:
+        result = await state["config"].patch(payload)
+        payload_for_audit = payload
+
+    response = result
+    _record_control_action(
+        "config.patch",
+        request.headers.get("X-Ops-Actor"),
+        approver,
+        idem_key,
+        payload_for_audit,
+        {"ok": True, "result": result},
+    )
+    _idempotency_store(idem_key, response)
+    return response
 
 
 @router.get("/strategies/governance")
@@ -270,12 +374,75 @@ async def soft_breach(
 
 @router.post("/ops/kill-switch")
 async def killswitch(
-    payload: Dict[str, Any],
+    payload: KillSwitchRequest,
+    request: Request,
     state: Dict[str, Any] = Depends(get_state),
     _auth: None = Depends(require_ops_token),
 ) -> Any:
-    enabled = bool(payload.get("enabled", True))
-    return await state["ops"].set_trading_enabled(enabled)
+    idem_key = request.headers.get("Idempotency-Key")
+    if not idem_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing Idempotency-Key header",
+        )
+    cached = _idempotency_lookup(idem_key)
+    if cached:
+        return cached
+
+    approver = _require_approver(request.headers.get("X-Ops-Approver"))
+
+    result = await state["ops"].set_trading_enabled(payload.enabled)
+    action = "resume" if payload.enabled else "pause"
+    response = {"ok": True, "action": action, "result": result, "approver": approver}
+    _record_control_action(
+        action,
+        request.headers.get("X-Ops-Actor"),
+        approver,
+        idem_key,
+        payload.model_dump(),
+        response,
+    )
+    _idempotency_store(idem_key, response)
+    return response
+
+
+@router.post("/ops/flatten")
+async def flatten_portfolio(
+    _body: FlattenRequest,
+    request: Request,
+    state: Dict[str, Any] = Depends(get_state),
+    _auth: None = Depends(require_ops_token),
+) -> Any:
+    idem_key = request.headers.get("Idempotency-Key")
+    if not idem_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing Idempotency-Key header",
+        )
+    cached = _idempotency_lookup(idem_key)
+    if cached:
+        return cached
+
+    approver = _require_approver(request.headers.get("X-Ops-Approver"))
+
+    try:
+        result = await state["ops"].flatten_positions(
+            actor=request.headers.get("X-Ops-Actor")
+        )
+    except RuntimeError as exc:  # pragma: no cover - defensive
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
+
+    response = {"ok": True, "action": "flatten", "approver": approver, **result}
+    _record_control_action(
+        "flatten",
+        request.headers.get("X-Ops-Actor"),
+        approver,
+        idem_key,
+        {},
+        response,
+    )
+    _idempotency_store(idem_key, response)
+    return response
 
 
 @router.get("/feeds/status")
@@ -426,36 +593,83 @@ async def cc_strategy_get(
 @router.post("/strategies/{strategy_id}/start")
 async def cc_strategy_start(
     strategy_id: str,
+    request: Request,
     body: Dict[str, Any] | None = None,
     state: Dict[str, Any] = Depends(get_state),
+    _auth: None = Depends(require_ops_token),
 ) -> Any:
+    idem_key, cached = _require_idempotency(request)
+    if cached:
+        return cached
+
+    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     try:
         await state["strategy"].patch(strategy_id, {"enabled": True})
-        # Optionally accept params overrides
         if body and isinstance(body.get("params"), dict):
             store = _load_params()
             store[strategy_id] = body["params"]
             _save_params(store)
-        return {"ok": True}
+        response = {"ok": True, "action": "start", "strategyId": strategy_id}
+        _record_control_action(
+            "strategy.start",
+            request.headers.get("X-Ops-Actor"),
+            approver,
+            idem_key,
+            body or {},
+            response,
+        )
+        _idempotency_store(idem_key, response)
+        return response
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/strategies/{strategy_id}/stop")
 async def cc_strategy_stop(
-    strategy_id: str, state: Dict[str, Any] = Depends(get_state)
+    strategy_id: str,
+    request: Request,
+    state: Dict[str, Any] = Depends(get_state),
+    _auth: None = Depends(require_ops_token),
 ) -> Any:
+    idem_key, cached = _require_idempotency(request)
+    if cached:
+        return cached
+
+    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     try:
         await state["strategy"].patch(strategy_id, {"enabled": False})
-        return {"ok": True}
+        response = {"ok": True, "action": "stop", "strategyId": strategy_id}
+        _record_control_action(
+            "strategy.stop",
+            request.headers.get("X-Ops-Actor"),
+            approver,
+            idem_key,
+            {"strategyId": strategy_id},
+            response,
+        )
+        _idempotency_store(idem_key, response)
+        return response
+    except HTTPException:
+        raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/strategies/{strategy_id}/update")
 async def cc_strategy_update(
-    strategy_id: str, body: Dict[str, Any], state: Dict[str, Any] = Depends(get_state)
+    strategy_id: str,
+    body: Dict[str, Any],
+    request: Request,
+    state: Dict[str, Any] = Depends(get_state),
+    _auth: None = Depends(require_ops_token),
 ) -> Any:
+    idem_key, cached = _require_idempotency(request)
+    if cached:
+        return cached
+
+    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     try:
         params = body.get("params") or {}
         if not isinstance(params, dict):
@@ -463,11 +677,21 @@ async def cc_strategy_update(
         store = _load_params()
         store[strategy_id] = params
         _save_params(store)
-        return {"ok": True}
+        response = {"ok": True, "action": "update", "strategyId": strategy_id}
+        _record_control_action(
+            "strategy.update",
+            request.headers.get("X-Ops-Actor"),
+            approver,
+            idem_key,
+            body,
+            response,
+        )
+        _idempotency_store(idem_key, response)
+        return response
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # Backtests: job tracker backed by filesystem so multiple workers share state
@@ -549,7 +773,16 @@ def _synth_backtest_result(strategy_name: str) -> Dict[str, Any]:
 
 
 @router.post("/backtests")
-async def cc_backtest_start(payload: Dict[str, Any]) -> Any:
+async def cc_backtest_start(
+    payload: Dict[str, Any],
+    request: Request,
+    _auth: None = Depends(require_ops_token),
+) -> Any:
+    idem_key, cached = _require_idempotency(request)
+    if cached:
+        return cached
+
+    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     job_id = f"job-{int(time.time()*1000)}-{random.randint(100,999)}"
     _save_job(job_id, {"status": "queued", "progress": 0.0})
 
@@ -589,7 +822,17 @@ async def cc_backtest_start(payload: Dict[str, Any]) -> Any:
     t = threading.Thread(target=_thread_runner, name=f"backtest-{job_id}", daemon=True)
     t.start()
 
-    return {"jobId": job_id}
+    response = {"ok": True, "jobId": job_id}
+    _record_control_action(
+        "backtest.start",
+        request.headers.get("X-Ops-Actor"),
+        approver,
+        idem_key,
+        payload,
+        response,
+    )
+    _idempotency_store(idem_key, response)
+    return response
 
 
 @router.get("/backtests/{job_id}")

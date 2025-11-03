@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, Response
 from prometheus_client import (
     CollectorRegistry,
@@ -32,6 +34,14 @@ def health():
 @APP.post("/tick")
 def tick():
     listed = fetch_exchange_info(quote=CFG.quote)
+    if not listed:
+        sizes = STORE.bucket_sizes()
+        for bucket, count in sizes.items():
+            G_SIZE.labels(bucket).set(count)
+        logging.warning(
+            "Universe tick skipped: exchange info returned no symbols; keeping prior state"
+        )
+        return {"ok": False, "reason": "empty_exchange_info", "sizes": sizes}
     ranks = fetch_top24h(listed)
     STORE.merge(listed, ranks)
     STORE.promote_demote()

@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ops/capital_allocator.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.15, 0.2, 0.3, 1.0, 5.0, 250.0, 1000.0, 25000.0, 50000.0, 900, '"', '#', ',', '.tmp', '=', 'OPS_METRICS_URL', 'allocation_mode', 'base_equity_frac', 'capital_quota_usd', 'cooldown_sec', 'current_quota', 'decision', 'demote', 'details', 'dynamic', 'enabled', 'equity', 'equity_usd', 'final_quotas', 'hmm_v2_canary', 'hold', 'input_metrics', 'last_update', 'ma_crossover_v3', 'max_quota_usd', 'min_quota_usd', 'model', 'model=', 'models', 'next_update', 'pnl_realized_total{', 'policy', 'portfolio_equity_usd', 'promote', 'realized', 'realized_pnl', 'reason', 'refresh_sec', 'sharpe', 'sharpe_demote', 'sharpe_promote', 'simulation_ts', 'step_down_pct', 'step_up_pct', 'strategy_sharpe{', 'target_allocations', 'target_quota', 'total_allocated', 'ts', 'unknown', 'updated_at', '{', '}']

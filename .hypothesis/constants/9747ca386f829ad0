@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ops/pnl_collector.py
+# hypothesis_version: 6.143.1
+
+[0.0, 5.0, '/', '//', ':', 'max', 'pnl', 'pnl_realized_total', 'pnl_unrealized_total', 'realized', 'unrealized', 'venue']

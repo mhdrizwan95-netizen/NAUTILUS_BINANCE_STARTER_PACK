@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/ops/health_guard.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1e-08, 0.6, 1.0, '.', '1', 'BUY', 'LONG', 'SELL', 'SHORT', 'SOFT_BREACH_ENABLED', 'STOP', 'SoftBreachGuard', 'TAKE_PROFIT', 'avg_price', 'avg_price_quote', 'cancel_order', 'clientOrderId', 'client_order_id', 'details', 'entry', 'events.external_feed', 'kind', 'list_open_orders', 'market', 'meta', 'on', 'open', 'orderId', 'order_id', 'payload', 'portfolio_service', 'positions', 'price', 'protection', 'qty', 'qty_base', 'quantity', 'reduceOnly', 'side', 'soft_breach_guard', 'source', 'state', 'stop', 'stopPrice', 'symbol', 'tag', 'true', 'type', 'unknown', 'venue', 'yes']

@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ops/strategy_selector.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.001, 0.05, 0.1, 0.5, '.tmp', 'POST', 'current_model', 'drawdown', 'from', 'is_current', 'last_promotion', 'model_tag', 'name', 'promotion_log', 'rank', 'realized', 'reason', 'samples', 'score', 'sharpe', 'time', 'to', 'trades', 'version']

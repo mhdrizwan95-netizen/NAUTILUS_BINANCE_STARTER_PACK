@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/events/publisher.py
+# hypothesis_version: 6.143.1
+
+[0.5, 'asset_hints', 'events.external_feed', 'expires_at', 'json', 'pair', 'pairs', 'priority', 'symbol', 'symbols', 'tickers', 'ttl_sec']

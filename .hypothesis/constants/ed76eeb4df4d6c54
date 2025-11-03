@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/ops/health_notify.py
+# hypothesis_version: 6.143.1
+
+[0.0, 'DEGRADED', 'HALTED', 'HEALTH_DEBOUNCE_SEC', 'HEALTH_TG_ENABLED', 'OK', 'health.state', 'reason', 'state', '🔴', '🟡', '🟢']

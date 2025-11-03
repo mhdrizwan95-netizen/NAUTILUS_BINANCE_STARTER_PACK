@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ops/slip_model.py
+# hypothesis_version: 6.143.1
+
+[1e-09, 1.0, 200, '.', 'SLIP_MODEL_PATH', 'SLIP_TRAIN_PATH', 'atrp_1m', 'data/fills.parquet', 'data/slip_model.json', 'depth_imbalance', 'depth_usd', 'features', 'is_burst', 'mu', 'order_quote_usd', 'side', 'sigma', 'slip_bp', 'spread_bp', 'w']

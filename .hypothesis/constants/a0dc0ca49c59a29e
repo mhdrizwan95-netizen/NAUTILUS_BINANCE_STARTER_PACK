@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/strategies/momentum_realtime.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.0005, 0.001, 1.0, 1.0005, 10.0, 15.0, 25.0, 100.0, '.', 'BINANCE', 'BUY', 'MOMENTUM_RT_DRY_RUN', 'MOMENTUM_RT_ENABLED', 'MOMENTUM_RT_STOP_PCT', 'MOMENTUM_RT_TP_PCT', 'SELL', 'SymbolScanner', 'baseline_high', 'baseline_low', 'breakout_down', 'breakout_up', 'futures', 'inf', 'market', 'meta', 'momentum_rt', 'pct_move', 'quote', 'side', 'spot', 'stop_price', 'symbol', 'tag', 'take_profit', 'trail_distance', 'volume_ratio', 'window_sec']

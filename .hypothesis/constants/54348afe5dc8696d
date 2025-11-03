@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/backtests/engine.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1e-09, 1e-06, 1000.0, 1000000000000, '.', '.parquet', '.pq', '1', 'BINANCE', 'BUY', 'BacktestEngine', 'BacktestEvent', 'BacktestStep', 'FeedConfig', 'GENERIC', 'OfflineKlineClient', 'SELL', 'SimClock', '_executor', '_max_workers', '_running', '_shutdown', '_sl', '_tp', 'avg_price', 'backtest', 'backtest-bus', 'close', 'close_time', 'dry_run', 'exit', 'filled_qty', 'handle_tick', 'high', 'intent', 'low', 'number_of_trades', 'on', 'on_tick', 'open', 'open_time', 'open_ts', 'order_id', 'price', 'quote_asset_volume', 'quote_volume', 'side', 'simulated', 'sl', 'start_time', 'stop_price', 'strategy_meta', 'strategy_side', 'strategy_symbol', 'strategy_tag', 'symbol', 'take_profit', 'taker_buy_base', 'taker_buy_quote', 'taker_buy_volume', 'timestamp', 'tp', 'trade.fill', 'trade_count', 'trigger', 'true', 'ts', 'venue', 'volume', 'y', 'yes']

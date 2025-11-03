@@ -1,9 +1,8 @@
 import { useId } from 'react';
 import type { ReactNode } from 'react';
-import { Power, Activity, Wifi, WifiOff } from 'lucide-react';
+import { Power, Activity, Wifi, WifiOff, Pause, Play, RefreshCw } from 'lucide-react';
 import { Switch } from './ui/switch';
 import { Button } from './ui/button';
-import { toast } from 'sonner';
 import { motion } from 'motion/react';
 
 export interface TopHudMetrics {
@@ -27,8 +26,12 @@ export interface TopHUDProps {
   venues?: TopHudVenue[] | null;
   isConnected?: boolean;
   isLoading?: boolean;
-  onModeChange: (mode: 'paper' | 'live') => void;
-  onKillSwitch: () => void;
+  onModeChange: (mode: 'paper' | 'live') => void | Promise<void>;
+  onKillSwitch: () => void | Promise<void>;
+  onPause: () => void | Promise<void>;
+  onResume: () => void | Promise<void>;
+  onFlatten: () => void | Promise<void>;
+  controlState?: 'pause' | 'resume' | 'flatten' | 'kill' | null;
 }
 
 export function TopHUD({
@@ -39,6 +42,10 @@ export function TopHUD({
   isLoading = false,
   onModeChange,
   onKillSwitch,
+  onPause,
+  onResume,
+  onFlatten,
+  controlState = null,
 }: TopHUDProps) {
   const switchId = useId();
   const switchLabelId = `${switchId}-label`;
@@ -105,10 +112,7 @@ export function TopHUD({
             checked={mode === 'live'}
             onCheckedChange={(checked: boolean) => {
               const nextMode = checked ? 'live' : 'paper';
-              onModeChange(nextMode);
-              toast.success(`Switched to ${nextMode.toUpperCase()} mode`, {
-                description: nextMode === 'live' ? 'Real capital at risk' : 'Simulated trading active',
-              });
+              void onModeChange(nextMode);
             }}
           />
           <span className={`text-xs ${mode === 'live' ? 'text-emerald-400' : 'text-zinc-500'}`}>
@@ -117,16 +121,50 @@ export function TopHUD({
         </div>
 
         {/* Right: Kill Switch */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void onPause();
+            }}
+            disabled={controlState === 'pause'}
+            className="gap-2 border-amber-400/30 text-amber-400 hover:bg-amber-500/10"
+          >
+            <Pause className="w-4 h-4" />
+            Pause
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void onResume();
+            }}
+            disabled={controlState === 'resume'}
+            className="gap-2 border-emerald-400/30 text-emerald-400 hover:bg-emerald-500/10"
+          >
+            <Play className="w-4 h-4" />
+            Resume
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              void onFlatten();
+            }}
+            disabled={controlState === 'flatten'}
+            className="gap-2 border-cyan-400/30 text-cyan-300 hover:bg-cyan-500/10"
+          >
+            <RefreshCw className="w-4 h-4" />
+            Flatten
+          </Button>
           <Button
             variant="destructive"
             size="sm"
             onClick={() => {
-              toast.error('EMERGENCY STOP ACTIVATED', {
-                description: 'All positions closed, trading halted',
-              });
-              onKillSwitch();
+              void onKillSwitch();
             }}
+            disabled={controlState === 'kill'}
             className="gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
           >
             <Power className="w-4 h-4" />

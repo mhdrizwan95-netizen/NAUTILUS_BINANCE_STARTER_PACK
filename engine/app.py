@@ -54,6 +54,7 @@ from engine.state import SnapshotStore
 import engine.state as state_mod
 from engine.reconcile import reconcile_since_snapshot
 from engine import strategy
+from engine.ops_auth import require_ops_token
 from engine.universe import configured_universe, last_prices
 from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
 
@@ -3612,6 +3613,29 @@ def reload_risk_config():
         "max_notional_usdt": cfg.max_notional_usdt,
         "max_orders_per_min": cfg.max_orders_per_min,
     }
+
+
+class TradingToggle(BaseModel):
+    enabled: bool
+
+
+@app.post("/ops/trading")
+async def toggle_trading(body: TradingToggle, request: Request):
+    """Toggle trading enablement via authenticated Ops control."""
+    require_ops_token(request)
+    enabled = bool(body.enabled)
+    RAILS.cfg.trading_enabled = enabled
+    try:
+        metrics.set_trading_enabled(enabled)
+    except Exception:
+        pass
+    try:
+        await router.set_trading_enabled(enabled)
+    except Exception:
+        logging.getLogger("engine.ops_auth").warning(
+            "Failed to persist trading flag", exc_info=True
+        )
+    return {"status": "ok", "trading_enabled": enabled}
 
 
 @app.get("/governance/status")

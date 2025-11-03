@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/strategies/scalp/brackets.py
+# hypothesis_version: 6.143.1
+
+[0.0, 'BUY', '__call__', 'meta', 'quantity', 'scalp', 'side', 'sl', 'stop_price', 'symbol', 'tag', 'take_profit', 'tp', 'trigger', 'venue']

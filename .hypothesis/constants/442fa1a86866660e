@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/shared/listing_utils.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.1, 1.0, 1.2, 40.0, 120.0, 150.0, 'ListingMetrics', 'last_price', 'listing_age_days', 'move_fraction', 'volume_confirmed', 'volume_multiplier']

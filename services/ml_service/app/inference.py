@@ -55,6 +55,9 @@ def start_watchdog():
 def predict_proba(logret_series):
     with _MODEL_LOCK:
         model, scaler, meta = _MODEL, _SCALER, _META
+        if model is None:
+            _load_active_model()
+            model, scaler, meta = _MODEL, _SCALER, _META
     if model is None:
         raise RuntimeError("No active model. Train first.")
     import numpy as np

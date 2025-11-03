@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/ops/stop_validator.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1e-08, '.', '1m', 'BUY', 'LIMIT', 'LONG', 'SELL', 'SHORT', 'SL', 'STOP', 'list_open_protection', 'notify.telegram', 'orderType', 'price', 'quantity', 'side', 'symbol', 'text', 'trade.fill', 'type']

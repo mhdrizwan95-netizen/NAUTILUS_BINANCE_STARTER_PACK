@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/dex/state.py
+# hypothesis_version: 6.143.1
+
+[0.0, ',', '.', ':', 'DexPosition', 'address', 'chain', 'closed', 'closed_at', 'closed_reason', 'entry_price', 'id', 'last_action', 'metadata', 'notional', 'open', 'opened_at', 'pos_id', 'positions', 'qty', 'r', 'status', 'stop_loss_pct', 'symbol', 'tier', 'tp_targets', 'trail_pct', 'utf-8', 'w']

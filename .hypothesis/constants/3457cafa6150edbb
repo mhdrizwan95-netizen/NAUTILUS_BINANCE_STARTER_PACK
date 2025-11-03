@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/strategies/momentum_15m.py
+# hypothesis_version: 6.143.1
+
+[0.0, '.', 'BUY', 'MOMENTUM_15M_DRY_RUN', 'MOMENTUM_15M_ENABLED', 'MOMENTUM_15M_SYMBOL', 'Momentum15mConfig', 'Momentum15mStrategy', 'SELL', 'backtest', 'breakdown_low', 'breakout_high', 'dry_run', 'engine.momentum.15m', 'error', 'message', 'meta', 'momentum_15m', 'positions', 'quantity', 'quote', 'reason', 'short_breakdown', 'side', 'status', 'strategy', 'submitted', 'symbol', 'tag', 'ts', 'window_high', 'window_low']

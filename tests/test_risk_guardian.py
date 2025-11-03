@@ -14,9 +14,11 @@ class StubPosition:
 
 
 class StubRouter:
-    def __init__(self, positions=None, realized=0.0):
+    def __init__(self, positions=None, realized=0.0, equity=0.0):
         positions = positions or {}
-        self._state = types.SimpleNamespace(positions=positions, realized=realized)
+        self._state = types.SimpleNamespace(
+            positions=positions, realized=realized, equity=equity
+        )
         self.calls = []
 
     def portfolio_service(self):
@@ -95,6 +97,87 @@ async def test_guardian_hard_cross_health_trims_var(monkeypatch, tmp_path):
         assert symbol == "ALT.BINANCE"
         assert side == "SELL"
         assert qty == pytest.approx(30.0)
+    finally:
+        events.clear()
+
+
+@pytest.mark.asyncio
+async def test_guardian_daily_stop_uses_equity_pct(monkeypatch, tmp_path):
+    # Ensure runtime-config-derived pct is honoured when no env override provided
+    monkeypatch.delenv("MAX_DAILY_LOSS_USD", raising=False)
+    monkeypatch.setattr(
+        "engine.risk_guardian.load_runtime_config",
+        lambda: types.SimpleNamespace(
+            risk=types.SimpleNamespace(daily_stop_pct=0.06)
+        ),
+    )
+    cfg = GuardianConfig(
+        enabled=True,
+        cross_health_floor=1.35,
+        futures_mmr_floor=0.80,
+        critical_ratio=1.07,
+        max_daily_loss_usd=100.0,
+        daily_reset_tz="UTC",
+        daily_reset_hour=0,
+    )
+    guardian = RiskGuardian(cfg)
+    router = StubRouter({}, realized=0.0, equity=50000.0)
+
+    monkeypatch.chdir(tmp_path)
+    await guardian._enforce_daily_stop(router)
+
+    # Equity-based limit should be 3k (6% of 50k), larger than static 100
+    router._state.realized = -3200.0
+    events = []
+
+    async def fake_publish(event_type, payload):
+        events.append((event_type, payload))
+
+    monkeypatch.setattr("engine.core.event_bus.publish_risk_event", fake_publish)
+    try:
+        await guardian._enforce_daily_stop(router)
+        assert events and events[0][0] == "daily_stop"
+        assert events[0][1]["limit"] == pytest.approx(3000.0, rel=1e-3)
+    finally:
+        events.clear()
+
+
+@pytest.mark.asyncio
+async def test_guardian_daily_stop_respects_env_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAX_DAILY_LOSS_USD", "500")
+    monkeypatch.setattr(
+        "engine.risk_guardian.load_runtime_config",
+        lambda: types.SimpleNamespace(
+            risk=types.SimpleNamespace(daily_stop_pct=0.10)
+        ),
+    )
+    cfg = GuardianConfig(
+        enabled=True,
+        cross_health_floor=1.35,
+        futures_mmr_floor=0.80,
+        critical_ratio=1.07,
+        max_daily_loss_usd=200.0,
+        daily_reset_tz="UTC",
+        daily_reset_hour=0,
+    )
+    guardian = RiskGuardian(cfg)
+    router = StubRouter({}, realized=0.0, equity=50000.0)
+
+    monkeypatch.chdir(tmp_path)
+    await guardian._enforce_daily_stop(router)
+
+    router._state.realized = -600.0
+    events = []
+
+    async def fake_publish(event_type, payload):
+        events.append((event_type, payload))
+
+    monkeypatch.setattr("engine.core.event_bus.publish_risk_event", fake_publish)
+    try:
+        await guardian._enforce_daily_stop(router)
+        assert events and events[0][0] == "daily_stop"
+        # Env override should win over runtime pct (500 vs 5000)
+        assert events[0][1]["limit"] == pytest.approx(500.0, rel=1e-3)
     finally:
         events.clear()
 

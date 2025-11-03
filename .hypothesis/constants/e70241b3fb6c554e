@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/ml_service/app.py
+# hypothesis_version: 6.143.1
+
+[-2.0, 0.0, 0.0005, 0.001, 0.01, 0.5, 0.65, 1.0, 1.5, 10.0, 100, 200, 400, 500, '.hmm.joblib', '.macro.joblib', '.microdict.joblib', '.policy.joblib', '.scaler.joblib', '.scalermacro.joblib', '.scalermicro.joblib', '/health', '/infer', '/infer_h2', '/load', '/models', '/partial_fit', '/promote', '/train', '/train_h2', 'BTCUSDT', 'BUY', 'Empty sequences', 'HMM training failed', 'HOLD', 'Models loaded OK', 'SELL', 'Train first', 'active', 'active_h2_tag.txt', 'active_tag.txt', 'bic', 'classes_', 'diag', 'hmm', 'hmm_v1.joblib', 'limit_px', 'loaded', 'macro', 'micro', 'microdict', 'model_store', 'n_components', 'n_macro', 'n_micro', 'ok', 'policy', 'policy_trained', 'policy_v1.joblib', 'qty', 'scaler', 'scaler_macro', 'scaler_micro', 'scaler_v1.joblib', 'scalermacro', 'scalermicro', 'side', 'startup', 'stmcw', 'tag', 'v']

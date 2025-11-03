@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/shared/meme_utils.py
+# hypothesis_version: 6.143.1
+
+[-1.5, 0.0, 0.1, 1.0, 1.5, 30.0, 110.0, 150.0, 1000000.0, 2000000.0, 'MemeMetrics', 'compute_meme_metrics', 'depth_usd', 'last_price', 'move_fraction', 'sentiment', 'vol_spike']

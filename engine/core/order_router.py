@@ -736,34 +736,48 @@ async def _place_market_order_async_core(
     if spec is None:
         raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
 
+    step_size = float(spec.step_size)
+    min_qty = float(spec.min_qty)
+    min_notional = float(spec.min_notional)
+
+    # Attempt to refine specs from live exchange filters
+    try:
+        filt = await client.exchange_filter(base, market=market_hint)
+    except Exception:
+        filt = None
+
+    if filt is not None:
+        step_size = float(getattr(filt, "step_size", step_size) or step_size)
+        min_qty = float(getattr(filt, "min_qty", min_qty) or min_qty)
+        min_notional = float(getattr(filt, "min_notional", min_notional) or min_notional)
+
     # Quote→qty or direct qty; IBKR requires integer shares
     did_round = False
     if quote is not None and (quantity is None or quantity == 0):
         raw_qty = float(quote) / float(px)
         if venue == "KRAKEN":
-            quantity = _round_step_up(raw_qty, spec.step_size)
+            quantity = _round_step_up(raw_qty, step_size)
         else:
-            quantity = _round_step(raw_qty, spec.step_size)
+            quantity = _round_step(raw_qty, step_size)
         did_round = quantity != raw_qty
     elif quantity is not None:
         if venue == "KRAKEN":
-            quantity = _round_step_up(float(quantity), spec.step_size)
+            quantity = _round_step_up(float(quantity), step_size)
         else:
-            quantity = _round_step(float(quantity), spec.step_size)
+            quantity = _round_step(float(quantity), step_size)
         did_round = True
 
     if did_round:
         REGISTRY["orders_rounded_total"].inc()
 
-    if quantity is None or abs(quantity) < spec.min_qty:
+    if quantity is None or abs(quantity) < min_qty:
         orders_rejected.inc()
         raise ValueError(
-            f"QTY_TOO_SMALL: Rounded qty {quantity} < min_qty {spec.min_qty}"
+            f"QTY_TOO_SMALL: Rounded qty {quantity} < min_qty {min_qty}"
         )
 
     quantity_val = float(quantity)
     notional = abs(quantity_val) * float(px)
-    min_notional = spec.min_notional
     if venue == "IBKR":
         min_notional = max(min_notional, ibkr_min_notional_usd())
 

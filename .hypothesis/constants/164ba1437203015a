@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/strategies/calibration.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1.0, '*', '60', 'HMM_CALIBRATION_PATH', 'confidence_gain', 'cooldown_scale', 'data', 'path', 'profiles', 'quote_multiplier', 'r', 'ts', 'utf-8']

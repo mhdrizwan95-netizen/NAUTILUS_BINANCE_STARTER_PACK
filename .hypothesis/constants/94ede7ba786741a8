@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/risk_var.py
+# hypothesis_version: 6.143.1
+
+[0.0, 0.01, '5m', 'avg_price', 'entry', 'last_price', 'quantity', 'stop', 'symbol']

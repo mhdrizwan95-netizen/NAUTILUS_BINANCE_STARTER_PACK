@@ -1,0 +1,4 @@
+# file: /Users/mrz/Github/NAUTILUS_BINANCE_STARTER_PACK/engine/execution/venue_overrides.py
+# hypothesis_version: 6.143.1
+
+[0.0, 1.0, 60.0, '.', '0', '0.5', '10', '15', '3', '30', '5', '60', 'false', 'no', 'slippage', 'spread']
