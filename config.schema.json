@@ -94,6 +94,11 @@
                 "OPS_API_TOKEN_FILE": {
                     "type": "string"
                 },
+                "OPS_APPROVER_TOKENS": {
+                    "type": "string",
+                    "description": "Comma-separated list of approver secrets",
+                    "minLength": 3
+                },
                 "ENGINE_ENDPOINTS": {
                     "type": "string",
                     "default": "http://engine_binance:8003"
@@ -116,6 +121,11 @@
                                 "OPS_API_TOKEN_FILE"
                             ]
                         }
+                    ]
+                },
+                {
+                    "required": [
+                        "OPS_APPROVER_TOKENS"
                     ]
                 }
             ]

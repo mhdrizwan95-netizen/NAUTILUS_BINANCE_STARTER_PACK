@@ -259,16 +259,15 @@ export function useWebSocket(): WebSocketHookResult {
       return;
     }
 
-    if (!managerRef.current || currentUrl === null) {
-      managerRef.current = initializeWebSocket(
-        handleMessage,
-        handleConnect,
-        handleDisconnect,
-        handleError,
-        trimmedToken
-      );
-      managerRef.current.connect();
-    } else if (!managerRef.current.isConnected) {
+    managerRef.current = initializeWebSocket(
+      handleMessage,
+      handleConnect,
+      handleDisconnect,
+      handleError,
+      trimmedToken
+    );
+
+    if (!managerRef.current.isConnected) {
       managerRef.current.connect();
     }
 

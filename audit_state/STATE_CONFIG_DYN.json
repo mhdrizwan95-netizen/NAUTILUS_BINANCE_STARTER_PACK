@@ -1,0 +1,9 @@
+{
+  "env_map": {
+    "OPS_APPROVER_TOKENS": {
+      "defined_in": ["docker-compose.yml"],
+      "templates": ["config.example.env"],
+      "schema": false
+    }
+  }
+}

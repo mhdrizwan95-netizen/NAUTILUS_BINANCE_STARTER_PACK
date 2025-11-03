@@ -1,0 +1,9 @@
+{
+  "ops_actions": [
+    "pause",
+    "resume",
+    "flatten",
+    "kill",
+    "mode-toggle"
+  ]
+}

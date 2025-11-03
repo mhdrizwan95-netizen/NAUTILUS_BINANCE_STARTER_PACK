@@ -269,16 +269,22 @@ class ScannerService:
         self._path = Path(state_path)
         self._lock = RLock()
         self._last_refresh: Dict[str, float] = {}
+        self._alias_map: Dict[str, tuple[str, ...]] = {
+            "trend": ("trend_core",),
+            "momentum": ("momentum_hmm",),
+            "scalper": ("scalp_cex",),
+            "event": ("event_meme",),
+        }
         self._ensure_file()
 
     def _ensure_file(self) -> None:
         if self._path.exists():
             return
         default = {
-            "trend_core": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],
-            "momentum_hmm": ["SOLUSDT", "AVAXUSDT"],
-            "event_meme": [],
-            "scalp_cex": [],
+            "trend": ["BTCUSDT", "ETHUSDT", "BNBUSDT"],
+            "momentum": ["SOLUSDT", "AVAXUSDT"],
+            "event": [],
+            "scalper": [],
         }
         self._path.write_text(
             json.dumps(default, indent=2, sort_keys=True), encoding="utf-8"
@@ -296,10 +302,21 @@ class ScannerService:
             json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
         )
 
+    def _resolve_key(self, payload: Dict[str, List[str]], strategy_id: str) -> str:
+        if strategy_id in payload:
+            return strategy_id
+        for alias in self._alias_map.get(strategy_id, ()):  # migrate legacy keys
+            if alias in payload:
+                payload[strategy_id] = payload.pop(alias)
+                self._save(payload)
+                return strategy_id
+        return strategy_id
+
     async def universe(self, strategy_id: str) -> Dict[str, Any]:
         with self._lock:
             payload = self._load()
-            symbols = payload.get(strategy_id, [])
+            key = self._resolve_key(payload, strategy_id)
+            symbols = payload.get(key, [])
             return {
                 "strategy": strategy_id,
                 "symbols": symbols,
@@ -309,8 +326,11 @@ class ScannerService:
     async def refresh(self, strategy_id: str) -> Dict[str, Any]:
         with self._lock:
             payload = self._load()
+            key = self._resolve_key(payload, strategy_id)
             # Refresh is currently a no-op placeholder; we simply timestamp it.
             self._last_refresh[strategy_id] = _now()
+            if key != strategy_id and strategy_id not in payload:
+                payload[strategy_id] = payload.get(key, [])
             self._save(payload)
             return {
                 "strategy": strategy_id,

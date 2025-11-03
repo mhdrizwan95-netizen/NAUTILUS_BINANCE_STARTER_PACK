@@ -1,0 +1,7 @@
+{
+  "control_api": [
+    {"method": "POST", "path": "/orders/market", "auth": "missing"},
+    {"method": "POST", "path": "/api/ops/kill-switch", "auth": "token+approver+idempotency"},
+    {"method": "POST", "path": "/api/ops/flatten", "auth": "token+approver+idempotency"}
+  ]
+}

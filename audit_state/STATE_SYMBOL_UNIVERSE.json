@@ -1,0 +1,24 @@
+{
+  "universe_policy": {
+    "trend": {
+      "min_24h_volume_usdt": 10000000,
+      "max_symbols": 30
+    },
+    "momentum": {
+      "min_24h_volume_usdt": 8000000,
+      "max_symbols": 25
+    },
+    "scalper": {
+      "min_24h_volume_usdt": 60000000,
+      "max_symbols": 6
+    },
+    "event": {
+      "min_24h_volume_usdt": 5000000,
+      "max_symbols": 50
+    }
+  },
+  "tiers": {
+    "config_runtime.yaml": ["trend", "momentum", "scalper", "event"],
+    "ops_universe_state.json": ["trend_core", "momentum_hmm", "scalp_cex", "event_meme"]
+  }
+}

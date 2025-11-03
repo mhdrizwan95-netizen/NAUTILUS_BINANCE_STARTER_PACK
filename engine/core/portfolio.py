@@ -125,19 +125,37 @@ class Portfolio:
         if side == "BUY":
             cash_change = price * quantity + fee_usd
             self._state.cash -= cash_change
-            total_cost = position.avg_price * prev_qty + price * quantity
-            position.quantity = new_qty
-            if new_qty != 0:
-                position.avg_price = total_cost / new_qty
         else:
             cash_change = price * quantity - fee_usd
             self._state.cash += cash_change
-            realized = (price - position.avg_price) * quantity
+
+        realized = 0.0
+        closing_trade = prev_qty != 0 and (prev_qty > 0 > qty or prev_qty < 0 < qty)
+        if closing_trade:
+            closed = min(abs(prev_qty), abs(qty))
+            if prev_qty > 0:
+                realized = (price - position.avg_price) * closed
+            else:
+                realized = (position.avg_price - price) * closed
             self._state.realized += realized
             position.rpl += realized
-            position.quantity = new_qty
+
+        if prev_qty == 0 or (prev_qty > 0 and qty > 0) or (prev_qty < 0 and qty < 0):
+            # Adding to an existing position in the same direction (or opening new)
+            if new_qty != 0:
+                position.avg_price = (
+                    position.avg_price * abs(prev_qty) + price * abs(qty)
+                ) / abs(new_qty)
+        else:
+            # Crossing through zero or partially closing
             if math.isclose(new_qty, 0.0, abs_tol=1e-10):
                 position.avg_price = 0.0
+                new_qty = 0.0
+            elif prev_qty > 0 > new_qty or prev_qty < 0 < new_qty:
+                # Reversed direction – remaining portion is entered at current price
+                position.avg_price = price
+
+        position.quantity = new_qty
 
         self._state.fees += fee_usd
         position.last_price = price

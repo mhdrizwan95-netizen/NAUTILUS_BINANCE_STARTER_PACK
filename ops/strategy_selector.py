@@ -69,6 +69,8 @@ def rank_strategies(registry: dict) -> list:
 
     ranked = []
     for name, stats in models:
+        if bool(stats.get("manual")):
+            continue
         sample_count = _as_count(stats.get("samples", 0))
         trade_count = _as_count(stats.get("trades", 0))
         if sample_count < 3 and trade_count < 50:
@@ -97,6 +99,14 @@ def promote_best():
         return
 
     current = registry.get("current_model")
+    if current:
+        current_stats = registry.get(current) or {}
+        if current_stats.get("manual"):
+            logging.info(
+                "[Governance] Manual override active for %s; skipping auto promotion",
+                current,
+            )
+            return
     best_model, best_score, best_stats = ranked[0]
 
     if len(ranked) >= 2:

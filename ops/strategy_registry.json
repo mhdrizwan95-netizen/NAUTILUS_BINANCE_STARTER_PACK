@@ -5,5 +5,11 @@
   },
   "ensemble_v2": {
     "manual": false
+  },
+  "stable_model": {
+    "manual": false
+  },
+  "canary_model": {
+    "manual": false
   }
 }

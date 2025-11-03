@@ -8,7 +8,7 @@
   "sharpe_promote": 1.00,
   "sharpe_demote": 0.30,
   "cooldown_sec": 900,
-  "enabled": ["ma_crossover_v3", "hmm_v2_canary"],
+  "enabled": ["stable_model", "canary_model"],
   "allocation_mode": "dynamic",
   "fallback_mode": "equal_split"
 }

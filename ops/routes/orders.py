@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from ops.engine_client import market_order
+from ops.ui_api import require_ops_token
 
 router = APIRouter()
 
@@ -42,7 +43,9 @@ class MarketOrderIn(BaseModel):
 
 
 @router.post("/orders/market")
-async def create_market_order(body: MarketOrderIn):
+async def create_market_order(
+    body: MarketOrderIn, _auth: None = Depends(require_ops_token)
+):
     try:
         result = await market_order(body.payload())
     except Exception as exc:  # noqa: BLE001
