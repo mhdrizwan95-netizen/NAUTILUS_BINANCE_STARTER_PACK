@@ -1,6 +1,0 @@
-{
-  "selector": "score_promote",
-  "gates": {
-    "manual_override_respected": false
-  }
-}

@@ -202,6 +202,13 @@ export const getAggregateExposure = (signal?: AbortSignal) =>
 export const getAggregatePnl = (signal?: AbortSignal) =>
   api<PnlSnapshot>('/aggregate/pnl', undefined, signal);
 
+export const getOpsStatus = (signal?: AbortSignal) =>
+  api<{ ok: boolean; state: { trading_enabled?: boolean } & Record<string, unknown> }>(
+    '/status',
+    undefined,
+    signal,
+  );
+
 // Config
 export const getConfigEffective = (signal?: AbortSignal) =>
   api<ConfigEffective>('/api/config/effective', undefined, signal);
@@ -249,6 +256,16 @@ export const flattenPositions = (options: ControlRequestOptions) =>
     {
       method: 'POST',
       body: JSON.stringify({}),
+      headers: buildControlHeaders(options),
+    },
+    options?.signal,
+  );
+
+export const issueWebsocketSession = (options: ControlRequestOptions) =>
+  api<{ session: string; expires: number }>(
+    '/api/ops/ws-session',
+    {
+      method: 'POST',
       headers: buildControlHeaders(options),
     },
     options?.signal,

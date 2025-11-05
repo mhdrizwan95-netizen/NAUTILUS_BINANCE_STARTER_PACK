@@ -1,0 +1,25 @@
+{
+  "budgets": {
+    "base_equity_frac": 0.2,
+    "min_pool_usd": 10000.0,
+    "reserve_equity_usd": 5000.0,
+    "model_targets": {
+      "stable_model": 0.7,
+      "canary_model": 0.3
+    }
+  },
+  "alloc_constraints": {
+    "min_quota_usd": 250.0,
+    "max_quota_usd": 25000.0,
+    "step_up_pct": 0.15,
+    "step_down_pct": 0.2,
+    "cooldown_sec": 900
+  },
+  "policy_guards": [
+    "capital_pool_floor",
+    "canary_cap_limit"
+  ],
+  "smoke_checks": [
+    "ops/smoke_funds.sh"
+  ]
+}

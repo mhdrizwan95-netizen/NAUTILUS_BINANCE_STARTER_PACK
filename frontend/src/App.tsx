@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { TopHUD } from './components/TopHUD';
 import { TabbedInterface } from './components/TabbedInterface';
@@ -6,8 +6,10 @@ import { Toaster } from './components/ui/sonner';
 import { toast } from 'sonner';
 import { motion } from 'motion/react';
 import {
+  getConfigEffective,
   getDashboardSummary,
   getHealth,
+  getOpsStatus,
   setTradingEnabled,
   flattenPositions,
   updateConfig,
@@ -15,10 +17,13 @@ import {
 import { queryClient, queryKeys } from './lib/queryClient';
 import { buildSummarySearchParams } from './lib/dashboardFilters';
 import { useAppStore, useDashboardFilters } from './lib/store';
-import { useWebSocket } from './lib/websocket';
+import { useWebSocket, type WebSocketMessage } from './lib/websocket';
 import { generateIdempotencyKey } from './lib/idempotency';
+import { mergeMetricsSnapshot, mergeVenuesSnapshot } from './lib/streamMergers';
+import { useRenderCounter } from './lib/debug/why';
 
 export default function App() {
+  useRenderCounter('App');
   const [isBooting, setIsBooting] = useState(true);
   const [mode, setMode] = useState<'paper' | 'live'>('paper');
   const [notifiedOnline, setNotifiedOnline] = useState(false);
@@ -35,11 +40,26 @@ export default function App() {
     [summaryParamsKey],
   );
   const { lastMessage, isConnected: wsConnected } = useWebSocket();
+  const lastProcessedMessage = useRef<{ type: string; ts: number | null } | null>(null);
+  const metricsDigestRef = useRef<string | null>(null);
+  const venuesDigestRef = useRef<string | null>(null);
 
   const summaryQuery = useQuery({
     queryKey: summaryQueryKey,
     queryFn: () => getDashboardSummary(summaryParams),
     staleTime: 30 * 1000,
+  });
+
+  const configQuery = useQuery({
+    queryKey: queryKeys.settings.config(),
+    queryFn: () => getConfigEffective(),
+    staleTime: 60 * 1000,
+  });
+
+  const opsStatusQuery = useQuery({
+    queryKey: queryKeys.ops.status(),
+    queryFn: () => getOpsStatus(),
+    refetchInterval: 15 * 1000,
   });
 
   const healthQueryKey = queryKeys.dashboard.health();
@@ -68,6 +88,20 @@ export default function App() {
       setNotifiedOnline(true);
     }
   }, [notifiedOnline, summaryQuery.isSuccess]);
+
+  useEffect(() => {
+    const effective = configQuery.data?.effective as Record<string, unknown> | undefined;
+    const overrides = configQuery.data?.overrides as Record<string, unknown> | undefined;
+    const dryRunValue = (effective?.DRY_RUN ?? overrides?.DRY_RUN) as unknown;
+    if (typeof dryRunValue === 'boolean') {
+      setMode(dryRunValue ? 'paper' : 'live');
+    }
+  }, [configQuery.data]);
+
+  const tradingEnabled = (() => {
+    const value = opsStatusQuery.data?.state?.trading_enabled;
+    return typeof value === 'boolean' ? value : true;
+  })();
 
   const hudMetrics = summaryQuery.data
     ? {
@@ -120,6 +154,10 @@ export default function App() {
       toast.error('Set an OPS API token in Settings before issuing control actions.');
       return false;
     }
+    if (!opsAuth.actor.trim()) {
+      toast.error('Provide an operator call-sign for the audit log before issuing control actions.');
+      return false;
+    }
     if (!opsAuth.approver.trim()) {
       toast.error('Provide an approver token (two-man rule) before issuing critical controls.');
       return false;
@@ -127,12 +165,17 @@ export default function App() {
     return true;
   };
 
-  const buildControlOptions = (prefix: string) => ({
-    token: opsAuth.token.trim(),
-    actor: opsAuth.actor.trim() || undefined,
-    approverToken: opsAuth.approver.trim() || undefined,
-    idempotencyKey: generateIdempotencyKey(prefix),
-  });
+  const buildControlOptions = (prefix: string) => {
+    const token = opsAuth.token.trim();
+    const actor = opsAuth.actor.trim();
+    const approver = opsAuth.approver.trim();
+    return {
+      token,
+      actor,
+      approverToken: approver || undefined,
+      idempotencyKey: generateIdempotencyKey(prefix),
+    };
+  };
 
   const notifyControlError = (title: string, error: unknown) => {
     const description = error instanceof Error ? error.message : 'Unknown error';
@@ -156,27 +199,31 @@ export default function App() {
       return;
     }
 
+    const nextToken = {
+      type: lastMessage.type,
+      ts: typeof lastMessage.timestamp === 'number' ? lastMessage.timestamp : null,
+    };
+    if (
+      lastProcessedMessage.current &&
+      lastProcessedMessage.current.type === nextToken.type &&
+      lastProcessedMessage.current.ts === nextToken.ts
+    ) {
+      return;
+    }
+    lastProcessedMessage.current = nextToken;
+
     if (lastMessage.type === 'metrics') {
       const payload = lastMessage.data?.kpis ?? lastMessage.data;
       if (payload) {
+        const digest = JSON.stringify(payload);
+        if (metricsDigestRef.current === digest) {
+          return;
+        }
+        metricsDigestRef.current = digest;
         window.setTimeout(() => {
-          queryClient.setQueryData(summaryQueryKey, (existing: any) => {
-            if (!existing) {
-              return {
-                kpis: payload,
-                equityByStrategy: [],
-                pnlBySymbol: [],
-                returns: [],
-              };
-            }
-            return {
-              ...existing,
-              kpis: {
-                ...existing.kpis,
-                ...payload,
-              },
-            };
-          });
+          queryClient.setQueryData(summaryQueryKey, (existing: any) =>
+            mergeMetricsSnapshot(existing, payload)
+          );
         }, 0);
       }
     }
@@ -185,8 +232,15 @@ export default function App() {
       const venues = Array.isArray(lastMessage.data)
         ? lastMessage.data
         : lastMessage.data?.venues ?? [];
+      const digest = JSON.stringify(venues);
+      if (venuesDigestRef.current === digest) {
+        return;
+      }
+      venuesDigestRef.current = digest;
       window.setTimeout(() => {
-        queryClient.setQueryData(healthQueryKey, { venues });
+        queryClient.setQueryData(healthQueryKey, (existing: any) =>
+          mergeVenuesSnapshot(existing, venues)
+        );
       }, 0);
     }
   }, [lastMessage, summaryQueryKey, healthQueryKey]);
@@ -195,9 +249,21 @@ export default function App() {
     if (!requireOpsToken()) {
       return;
     }
+    if (newMode === 'live') {
+      const acknowledged = window.confirm(
+        'Switching to LIVE mode will disable dry-run safeguards and place real orders. Confirm to proceed.'
+      );
+      if (!acknowledged) {
+        toast.info('Live mode unchanged', {
+          description: 'Dry-run remains enabled until an operator confirms the switch.',
+        });
+        return;
+      }
+    }
     const previous = mode;
     try {
       await updateConfig({ DRY_RUN: newMode === 'paper' }, buildControlOptions(`mode-${newMode}`));
+      await queryClient.invalidateQueries({ queryKey: queryKeys.settings.config() });
       setMode(newMode);
       toast.success(`Switched to ${newMode.toUpperCase()} mode`, {
         description: newMode === 'live' ? 'Real capital at risk' : 'Simulated trading active',
@@ -216,6 +282,7 @@ export default function App() {
     await withControl('pause', async () => {
       try {
         await setTradingEnabled(false, buildControlOptions('pause'));
+        await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
         toast.warning('Trading paused', {
           description: 'All new orders halted until resume or restart.',
         });
@@ -233,6 +300,7 @@ export default function App() {
     await withControl('resume', async () => {
       try {
         await setTradingEnabled(true, buildControlOptions('resume'));
+        await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
         toast.success('Trading resumed', { description: 'Engines may submit new orders.' });
       } catch (error) {
         notifyControlError('Failed to resume trading', error);
@@ -272,6 +340,7 @@ export default function App() {
     await withControl('kill', async () => {
       try {
         await setTradingEnabled(false, buildControlOptions('kill-pause'), reason);
+        await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
         const result = await flattenPositions(buildControlOptions('kill-flatten'));
         toast.error('EMERGENCY STOP ACTIVATED', {
           description: `Trading disabled and flatten queued (${result.succeeded}/${result.requested}).`,
@@ -327,6 +396,7 @@ export default function App() {
         venues={venueStatuses}
         isConnected={isRealtimeConnected}
         isLoading={summaryQuery.isLoading || healthQuery.isLoading}
+        tradingEnabled={tradingEnabled}
         onModeChange={handleModeChange}
         onKillSwitch={handleKillSwitch}
         onPause={handlePause}

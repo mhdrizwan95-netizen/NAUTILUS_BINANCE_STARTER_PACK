@@ -1,0 +1,85 @@
+{
+  "framework": "React 18 + Vite + TypeScript + TanStack Query 5 + Zustand",
+  "frontend_root": "frontend",
+  "live_flags": {
+    "websocket": "VITE_WS_URL (defaults to ws://localhost:8002/ws)",
+    "polling_disable": "VITE_LIVE_OFF=true disables usePolling timers and WebSocket hydrate"
+  },
+  "suspects": [
+    {
+      "id": "ws-app-query-hydrate",
+      "type": "effect-dep-mutates-dep",
+      "source": "frontend/src/App.tsx:192-235",
+      "downstream": [
+        "TanStack Query cache for dashboard.summary/health",
+        "App render -> TopHUD metrics props -> React Query observers"
+      ],
+      "symptoms": [
+        "Stack trace references TanStack forceStoreRerender",
+        "Loop reproduces when websocket metrics stream is live"
+      ],
+      "notes": "WebSocket handler pushes every payload into query cache via setQueryData inside an effect that depends on lastMessage. Message objects lack stable identity/diffing, so every notification rehydrates queries even when unchanged. React Query notifies subscribers synchronously, retriggering the same effect before the guard records a processed hash.",
+      "instrument_plan": [
+        "Wrap App with dev-only render counter (whyDidYouUpdate) to log metrics message ids",
+        "Log query cache writes for dashboard.summary to confirm duplicate writes"
+      ]
+    },
+    {
+      "id": "ws-session-recursion",
+      "type": "effect-dep-mutates-dep",
+      "source": "frontend/src/lib/websocket.ts:244-309",
+      "downstream": [
+        "useWebSocket state machine (wsSession, managerRef)",
+        "App re-render because hook returns new session state"
+      ],
+      "symptoms": [
+        "When OPS tokens missing or invalid, session issuance re-runs on every render",
+        "managerRef.disconnect() + setWsSession(null) fire before previous effect cleanup"
+      ],
+      "notes": "Effect recomputes trimmed token/actor each render. On error the catch sets wsSession(null) which is already null, but React still schedules state work. Combined with StrictMode double-invoke, the hook re-requests a session rapidly, keeping the component in an update loop once backend responds with errors.",
+      "instrument_plan": [
+        "Add console.count in dev to track session requests",
+        "Mock issueWebsocketSession in tests and assert no re-request without credentials"
+      ]
+    },
+    {
+      "id": "polling-fn-identity",
+      "type": "timer/subscription recreated without cleanup",
+      "source": "frontend/src/lib/hooks.ts:3-46",
+      "downstream": [
+        "Consumers passing inline poller functions (e.g. BacktestingTab)",
+        "Repeated timer setup tears down previous but can interleave updates leading to synchronous setState bursts"
+      ],
+      "symptoms": [
+        "When fn identity changes per render, tick() fires immediately and schedules the next timeout, stacking multiple pending promises",
+        "Combined with optimistic UI (setJobSnapshot) the component can oscillate between job states"
+      ],
+      "notes": "usePolling stores fn in dependency array. If consumers forget to memoize, every render recreates the timer, immediately calling tick() and setData(), causing clustered state updates. Need a stable fn or internal ref guard."
+    }
+  ],
+  "loop_graph": [
+    {
+      "source": "WebSocket message -> useWebSocket.handleMessage",
+      "edge": "updateGlobalMetrics/venues -> Zustand realTimeData",
+      "target": "App + dashboard queries recompute",
+      "risk": "Repeated query cache writes trigger React Query forceStoreRerender leading to depth overflow"
+    },
+    {
+      "source": "useWebSocket session effect",
+      "edge": "issueWebsocketSession retries -> setWsSession(null)",
+      "target": "App effect waiting on lastMessage re-invokes before cleanups finish",
+      "risk": "Credential-less mode spins session fetch loop"
+    },
+    {
+      "source": "usePolling tick timer",
+      "edge": "setData -> component state setter",
+      "target": "Component render -> re-creates polling fn",
+      "risk": "Timer churn causes back-to-back state updates without delays"
+    }
+  ],
+  "instrumentation_todo": [
+    "Add dev-only render counter hook (whyDidYouUpdate) to App, TopHUD, DashboardTab",
+    "Enable TanStack Query logger to confirm cache write frequency",
+    "Write Vitest harness that mounts App with mocked WS to observe render counts"
+  ]
+}

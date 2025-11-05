@@ -1,0 +1,33 @@
+{
+  "universe_policy": {
+    "venue": "BINANCE",
+    "quote": "USDT",
+    "scan_interval_sec": 60,
+    "thresholds": {
+      "min_notional_per_min": 5000,
+      "max_spread_atr": 1.2,
+      "min_depth_usdt": 5000,
+      "ignition": {
+        "turnover_mult": 8.0,
+        "tradecount_mult": 5.0,
+        "atrp_min": 0.015
+      },
+      "quarantine": {
+        "min_age_minutes": 360,
+        "safe_scans": 3
+      },
+      "demotion": {
+        "notional_drop_mult": 0.33,
+        "cb_hits": 2
+      }
+    }
+  },
+  "tiers": {
+    "runtime_buckets": ["quarantine", "candidate", "retired"],
+    "static_ops_buckets": ["trend", "momentum", "scalper", "event"]
+  },
+  "policy_guards": [
+    "universe_age_cooldown",
+    "quarantine_promotion_checks"
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "tests": [
+    {
+      "file": "frontend/src/components/forms/DynamicParamForm.test.tsx",
+      "purpose": "Ensures the dynamic form emits onChange exactly once per meaningful update to prevent feedback loops in BacktestingTab."
+    },
+    {
+      "file": "frontend/src/lib/hooks.test.tsx",
+      "purpose": "Verifies usePolling skips redundant state writes and honors the VITE_LIVE_OFF flag."
+    },
+    {
+      "file": "frontend/src/lib/streamMergers.test.ts",
+      "purpose": "Confirms metric and venue merge helpers preserve references when payloads are unchanged."
+    },
+    {
+      "file": "frontend/src/lib/websocket.test.ts",
+      "purpose": "Adds regression coverage for WebSocket URL construction and the live-update disable flag."
+    }
+  ],
+  "commands": [
+    "cd frontend && npm run test"
+  ]
+}

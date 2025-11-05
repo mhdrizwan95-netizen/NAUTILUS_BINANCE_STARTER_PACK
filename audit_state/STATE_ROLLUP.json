@@ -1,209 +1,762 @@
 {
   "slices": [
     {
-      "name": "CTRL_API",
+      "name": "T-00 Recon & Inventory",
       "paths": [
-        "ops/ui_api.py",
-        "ops/routes",
-        "ops/strategy_router.py"
+        "."
       ]
     },
     {
-      "name": "CTRL_UI",
+      "name": "T-ARCH Architecture Alignment",
+      "paths": [
+        "docs/SYSTEM_DESIGN.md",
+        "engine",
+        "services"
+      ]
+    },
+    {
+      "name": "T-CFG Config & Settings",
+      "paths": [
+        "config",
+        "config.schema.json",
+        "env.example",
+        "ops/observability"
+      ]
+    },
+    {
+      "name": "T-CTRL-API Control Plane",
+      "paths": [
+        "ops/ui_api.py",
+        "ops/strategy_router.py",
+        "tests/ui"
+      ]
+    },
+    {
+      "name": "T-CTRL-UI Ops Dashboard",
       "paths": [
         "frontend/src/components",
         "frontend/src/lib",
-        "frontend/src/main.tsx"
+        "frontend/src/App.tsx"
       ]
     },
     {
-      "name": "ENGINE_CORE",
-      "paths": [
-        "engine",
-        "adapters",
-        "situations"
-      ]
-    },
-    {
-      "name": "FUNDS_ALLOC",
+      "name": "T-FUNDS Dynamic Funds",
       "paths": [
         "ops/capital_allocator.py",
-        "ops/allocator.py",
-        "ops/m25_policy.yaml"
-      ]
-    },
-    {
-      "name": "STRATEGY_SELECT",
-      "paths": [
-        "ops/strategy_selector.py",
-        "ops/strategy_weights.json",
-        "ops/strategy_router.py"
-      ]
-    },
-    {
-      "name": "CONFIG_DYN",
-      "paths": [
-        "conf/params.yaml",
-        "config.schema.json",
-        "scripts/validate_config_env.py"
-      ]
-    },
-    {
-      "name": "SYMBOL_UNIVERSE",
-      "paths": [
-        "ops/universe_state.json",
         "ops/policies.yaml",
-        "ops/m25_policy.yaml"
+        "ops/capital_policy.json"
       ]
     },
     {
-      "name": "OBSERVABILITY",
+      "name": "T-SELECT Strategy Selection",
       "paths": [
-        "ops/observability",
-        "ops/prometheus.yml",
-        "docs/observability"
+        "ops/strategy_registry.json",
+        "ops/m25_governor.py",
+        "engine"
       ]
     },
     {
-      "name": "SECURITY_SECRETS",
+      "name": "T-CFG-DYN Remote Config",
       "paths": [
-        "ops/notify",
-        "frontend/src/lib/security.ts",
-        "scripts/telegram_ping.sh"
+        "ops/policies.backup.yaml",
+        "ops/observability/grafana",
+        "config"
       ]
     },
     {
-      "name": "CI_CD",
+      "name": "T-SYMBOLS Universe",
       "paths": [
-        "Makefile",
-        "scripts/quickcheck.sh",
-        "ops/m19_run_once.sh"
+        "universe",
+        "ops/universe_state.json",
+        "ops/policies.yaml"
       ]
     },
     {
-      "name": "ML_PIPELINE",
+      "name": "T-LOOP-LEARN ML Loop",
       "paths": [
         "ml_service",
-        "scripts/train_hmm_policy.py",
-        "ops/m17_train_micro.py"
+        "ops/train_backfill_one.py",
+        "backtests"
       ]
     },
     {
-      "name": "DRYRUN_SHADOW",
+      "name": "T-HITL Human Safeguards",
       "paths": [
-        "ops/canary_sim.py",
-        "ops/verify_trades.py",
-        "ops/ui_state.py"
+        "ops/governance_daemon.py",
+        "docs/OPS_RUNBOOK.md",
+        "ops/runbook.md"
+      ]
+    },
+    {
+      "name": "Observability, Resilience & Deployment",
+      "paths": [
+        "ops/observability",
+        "docker-compose.yml",
+        "compose.autotrain.yml",
+        "compose.backfill.yml",
+        "compose.ml.yml",
+        "ops/quickcheck.sh"
       ]
     }
   ],
-  "arch_components": [],
-  "broken_links": [],
+  "arch_components": [
+    {
+      "component": "Strategy & ML Layer",
+      "docs": [
+        "docs/SYSTEM_DESIGN.md#2-strategy-ml-layer"
+      ],
+      "code": [
+        "engine/strategy.py",
+        "engine/strategies/",
+        "ml_service/app.py",
+        "ops/strategy_router.py"
+      ],
+      "notes": "Strategy loop, ensemble policies, and optional external ML service align with documented flow."
+    },
+    {
+      "component": "Execution Engine & Risk",
+      "docs": [
+        "docs/SYSTEM_DESIGN.md#1-execution-plane-engine"
+      ],
+      "code": [
+        "engine/app.py",
+        "engine/core/",
+        "engine/risk.py",
+        "engine/state/",
+        "engine/storage/sqlite.py"
+      ],
+      "notes": "FastAPI engine, order router, risk rails, and persistence layers present as described."
+    },
+    {
+      "component": "Ops Control Plane",
+      "docs": [
+        "docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops"
+      ],
+      "code": [
+        "ops/ops_api.py",
+        "ops/ui_api.py",
+        "ops/ui_state.py",
+        "ops/prometheus.py"
+      ],
+      "notes": "Control endpoints and UI router live under ops, matching documentation."
+    },
+    {
+      "component": "Governance & Capital Allocation",
+      "docs": [
+        "docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops"
+      ],
+      "code": [
+        "ops/capital_allocator.py",
+        "ops/m25_governor.py",
+        "ops/governance_daemon.py",
+        "ops/strategy_weights.json",
+        "ops/capital_policy.json"
+      ],
+      "notes": "Capital allocator and governor daemons exist; configs mostly present."
+    },
+    {
+      "component": "Universe/Screener/Situations Services",
+      "docs": [
+        "docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops",
+        "docs/SYSTEM_DESIGN.md#5-data-event-flow"
+      ],
+      "code": [
+        "universe/service.py",
+        "screener/service.py",
+        "situations/service.py"
+      ],
+      "notes": "Ancillary services align with data flow narrative."
+    },
+    {
+      "component": "Observability Stack",
+      "docs": [
+        "docs/SYSTEM_DESIGN.md#4-observability-persistence",
+        "docs/SYSTEM_DESIGN.md#observability-bundle"
+      ],
+      "code": [
+        "ops/observability/",
+        "docs/observability/"
+      ],
+      "notes": "Prometheus/Grafana/Loki configs exactly under documented directories."
+    },
+    {
+      "component": "Frontend Command Center",
+      "docs": [
+        "docs/SYSTEM_DESIGN.md"
+      ],
+      "code": [
+        "frontend/src/App.tsx",
+        "frontend/src/components/",
+        "frontend/src/lib/"
+      ]
+    },
+    {
+      "component": "Data Persistence",
+      "docs": [
+        "docs/SYSTEM_DESIGN.md#4-observability-persistence"
+      ],
+      "code": [
+        "engine/logs/",
+        "engine/state/",
+        "data/runtime/"
+      ],
+      "notes": "JSONL logs, snapshots, and SQLite queues match storage description."
+    }
+  ],
+  "broken_links": [
+    {
+      "doc": "docs/SYSTEM_DESIGN.md#governance-automation",
+      "reference": "ops/m20_playbook.py",
+      "issue": "File not present in repo; governance playbook path likely renamed or removed."
+    },
+    {
+      "doc": "docs/SYSTEM_DESIGN.md#configuration-surfaces",
+      "reference": "ops/capital_allocations.json",
+      "issue": "Config file absent; allocator now uses strategy_weights.json/capital_policy.json."
+    },
+    {
+      "doc": "docs/SYSTEM_DESIGN.md#built-in-strategy-loop",
+      "reference": "engine/models/active_hmm_policy.pkl",
+      "issue": "Runtime artifact not versioned; consider documenting storage location or publishing sample."
+    }
+  ],
   "env_map": {
-    "OPS_APPROVER_TOKENS": {
-      "defined_in": [
-        "docker-compose.yml"
+    "engine_core": {
+      "defaults": [
+        "config.example.env:3",
+        "engine/config/defaults.py:22"
       ],
-      "templates": [
-        "config.example.env"
+      "overrides": [
+        ".env:1"
       ],
-      "schema": false
+      "notes": "Risk rails & trading toggles derive from defaults.py and are lifted by env/config loaders."
+    },
+    "binance": {
+      "required": [
+        "BINANCE_API_KEY",
+        "BINANCE_API_SECRET"
+      ],
+      "defaults": [
+        "config.example.env:11"
+      ],
+      "overrides": [
+        ".env:81"
+      ],
+      "secrets_path": "compose.hardening.override.yaml mounts /run/secrets"
+    },
+    "ops_api": {
+      "defaults": [
+        "config.example.env:21"
+      ],
+      "overrides": [
+        ".env:94"
+      ],
+      "required": [
+        "OPS_API_TOKEN"
+      ],
+      "secret_file": "config.example.env:24"
+    },
+    "observability": {
+      "defaults": [
+        "config.example.env:31"
+      ],
+      "notes": "Grafana admin password provided via secret file per config.example.env:33"
+    },
+    "ml_service": {
+      "defaults": [
+        "config.example.env:35",
+        "engine/config/defaults.py:205"
+      ],
+      "compose_env": "compose.ml.yml"
+    },
+    "data_ingester": {
+      "defaults": [
+        "config.example.env:44",
+        "engine/config/defaults.py:189"
+      ],
+      "notes": "Shared ledger path reused by ML + ingester"
+    },
+    "strategies": {
+      "defaults": [
+        "engine/config/defaults.py:48",
+        "engine/config/defaults.py:145"
+      ],
+      "overrides": [
+        ".env:22"
+      ],
+      "notes": "Feature switches for trend/momentum/meme/listing strategies centralised in defaults"
     }
   },
-  "ports": [],
+  "ports": [
+    "engine_binance:8003",
+    "engine_binance_exporter:9103",
+    "ops:8002",
+    "executor:9102",
+    "universe:8009",
+    "screener:8010",
+    "situations:8011",
+    "data_ingester:8001",
+    "ml_service:8000"
+  ],
   "datastores": [],
   "topics": [],
   "control_api": [
     {
-      "method": "POST",
-      "path": "/orders/market",
-      "auth": "missing"
+      "component": "App.tsx handleModeChange",
+      "ui_ref": "frontend/src/App.tsx:231",
+      "endpoint": "PUT /api/config",
+      "headers": [
+        "X-Ops-Token",
+        "X-Ops-Actor",
+        "X-Ops-Approver",
+        "Idempotency-Key"
+      ],
+      "idempotency_source": "generateIdempotencyKey('mode-${newMode}')"
     },
     {
-      "method": "POST",
-      "path": "/api/ops/kill-switch",
-      "auth": "token+approver+idempotency"
+      "component": "App.tsx handlePause",
+      "ui_ref": "frontend/src/App.tsx:261",
+      "endpoint": "POST /api/ops/kill-switch",
+      "payload": {
+        "enabled": false
+      },
+      "headers": [
+        "X-Ops-Token",
+        "X-Ops-Actor",
+        "X-Ops-Approver",
+        "Idempotency-Key"
+      ],
+      "idempotency_source": "generateIdempotencyKey('pause')"
     },
     {
-      "method": "POST",
-      "path": "/api/ops/flatten",
-      "auth": "token+approver+idempotency"
+      "component": "App.tsx handleResume",
+      "ui_ref": "frontend/src/App.tsx:279",
+      "endpoint": "POST /api/ops/kill-switch",
+      "payload": {
+        "enabled": true
+      },
+      "headers": [
+        "X-Ops-Token",
+        "X-Ops-Actor",
+        "X-Ops-Approver",
+        "Idempotency-Key"
+      ],
+      "idempotency_source": "generateIdempotencyKey('resume')"
+    },
+    {
+      "component": "App.tsx handleFlatten",
+      "ui_ref": "frontend/src/App.tsx:295",
+      "endpoint": "POST /api/ops/flatten",
+      "headers": [
+        "X-Ops-Token",
+        "X-Ops-Actor",
+        "X-Ops-Approver",
+        "Idempotency-Key"
+      ],
+      "idempotency_source": "generateIdempotencyKey('flatten')"
+    },
+    {
+      "component": "App.tsx handleKillSwitch",
+      "ui_ref": "frontend/src/App.tsx:315",
+      "endpoint": "POST /api/ops/kill-switch + POST /api/ops/flatten",
+      "headers": [
+        "X-Ops-Token",
+        "X-Ops-Actor",
+        "X-Ops-Approver",
+        "Idempotency-Key"
+      ],
+      "idempotency_source": [
+        "generateIdempotencyKey('kill-pause')",
+        "generateIdempotencyKey('kill-flatten')"
+      ],
+      "requires_reason": true
+    },
+    {
+      "component": "SettingsTab handleSubmit",
+      "ui_ref": "frontend/src/components/tabs/SettingsTab.tsx:140",
+      "endpoint": "PUT /api/config",
+      "headers": [
+        "X-Ops-Token",
+        "X-Ops-Actor",
+        "X-Ops-Approver",
+        "Idempotency-Key"
+      ],
+      "idempotency_source": "generateIdempotencyKey('config')"
+    },
+    {
+      "component": "useWebSocket requestSession",
+      "ui_ref": "frontend/src/lib/websocket.ts:260",
+      "endpoint": "POST /api/ops/ws-session",
+      "headers": [
+        "X-Ops-Token",
+        "X-Ops-Actor"
+      ],
+      "idempotency_source": "generateIdempotencyKey('ws-session')"
     }
   ],
   "ops_actions": [
-    "pause",
-    "resume",
-    "flatten",
-    "kill",
-    "mode-toggle"
+    "strategy_promote",
+    "router_weight_sync"
   ],
-  "rbac": {},
-  "policy_guards": [],
+  "rbac": {
+    "roles": {
+      "viewer": {
+        "description": "Read-only access to dashboards and health widgets",
+        "capabilities": [
+          "read:dashboard",
+          "read:metrics",
+          "read:alerts"
+        ]
+      },
+      "operator": {
+        "description": "Authenticated operator with OPS token and call-sign",
+        "capabilities": [
+          "viewer",
+          "control:pause",
+          "control:resume",
+          "control:flatten",
+          "config:patch",
+          "ws:session"
+        ]
+      },
+      "approver": {
+        "description": "Second approver token required for high-risk commands",
+        "capabilities": [
+          "operator",
+          "approve:kill-switch",
+          "approve:config",
+          "approve:flatten"
+        ]
+      }
+    },
+    "ui_requirements": [
+      {
+        "control": "TopHUD.pause",
+        "requires": "operator+approver"
+      },
+      {
+        "control": "TopHUD.resume",
+        "requires": "operator+approver"
+      },
+      {
+        "control": "TopHUD.flatten",
+        "requires": "operator+approver"
+      },
+      {
+        "control": "TopHUD.kill",
+        "requires": "operator+approver"
+      },
+      {
+        "control": "SettingsTab.saveOverrides",
+        "requires": "operator+approver"
+      },
+      {
+        "control": "WebSocket.connect",
+        "requires": "operator"
+      }
+    ],
+    "storage": {
+      "opsAuth": {
+        "persisted": false,
+        "source": "frontend/src/lib/store.ts:212",
+        "notes": "OPS credentials remain in-memory and are never stored in localStorage"
+      }
+    },
+    "permissions": [
+      {
+        "capability": "control:config_patch",
+        "endpoint": "PUT /api/config",
+        "guard": "IdempotentTwoManGuard",
+        "source": "ops/ui_api.py:337-370"
+      },
+      {
+        "capability": "control:kill_switch",
+        "endpoint": "POST /api/ops/kill-switch",
+        "guard": "IdempotentTwoManGuard",
+        "source": "ops/ui_api.py:442-470"
+      },
+      {
+        "capability": "control:flatten",
+        "endpoint": "POST /api/ops/flatten",
+        "guard": "IdempotentTwoManGuard",
+        "source": "ops/ui_api.py:468-494"
+      },
+      {
+        "capability": "strategy:lifecycle",
+        "endpoint": "POST /api/strategies/{id}/start|stop|update",
+        "guard": "IdempotentTwoManGuard",
+        "source": "ops/ui_api.py:667-760"
+      },
+      {
+        "capability": "backtest:start",
+        "endpoint": "POST /api/backtests",
+        "guard": "IdempotentTwoManGuard",
+        "source": "ops/ui_api.py:846-908"
+      },
+      {
+        "capability": "config:reload",
+        "endpoint": "POST /api/governance/reload",
+        "guard": "TokenOnlyGuard",
+        "source": "ops/ui_api.py:497-520"
+      },
+      {
+        "capability": "strategy:patch",
+        "endpoint": "PATCH /api/strategies/{id}",
+        "guard": "require_ops_token",
+        "source": "ops/ui_api.py:386-393"
+      },
+      {
+        "capability": "funds:transfer",
+        "endpoint": "POST /api/account/transfer",
+        "guard": "require_ops_token",
+        "source": "ops/ui_api.py:545-552"
+      }
+    ],
+    "gaps": [
+      {
+        "issue": "strategy_patch_missing_two_man",
+        "endpoint": "PATCH /api/strategies/{id}",
+        "impact": "Single OPS token may disable/retune strategies without second approver.",
+        "source": "ops/ui_api.py:386-393"
+      },
+      {
+        "issue": "fund_transfer_single_token",
+        "endpoint": "POST /api/account/transfer",
+        "impact": "Internal transfers can execute without dual approval or idempotency.",
+        "source": "ops/ui_api.py:545-552"
+      },
+      {
+        "issue": "governance_reload_single_token",
+        "endpoint": "POST /api/governance/reload",
+        "impact": "Policy reload can apply unsafe changes without approver oversight.",
+        "source": "ops/ui_api.py:497-520"
+      },
+      {
+        "issue": "viewer_role_not_distinct",
+        "endpoint": "POST /api/ops/ws-session",
+        "impact": "Backend cannot distinguish viewers from operators; X-Ops-Actor is optional and unauthenticated.",
+        "source": "ops/ui_api.py:243-258"
+      }
+    ],
+    "session": {
+      "ws_ttl_seconds": 900,
+      "source": "ops/ui_api.py:216-258",
+      "notes": "WS session secrets live in-process only; rotation requires revoking OPS token or restarting service."
+    }
+  },
+  "policy_guards": [
+    "universe_age_cooldown",
+    "quarantine_promotion_checks"
+  ],
   "budgets": {
-    "capital_policy.enabled": [
-      "ma_crossover_v3",
-      "hmm_v2_canary"
-    ],
-    "strategy_weights.weights": [
-      "stable_model",
-      "canary_model"
-    ],
-    "strategy_registry.current": "hmm_v1"
+    "base_equity_frac": 0.2,
+    "min_pool_usd": 10000.0,
+    "reserve_equity_usd": 5000.0,
+    "model_targets": {
+      "stable_model": 0.7,
+      "canary_model": 0.3
+    }
   },
   "alloc_constraints": {
-    "capital_policy.base_equity_frac": 0.2,
-    "capital_policy.min_quota_usd": 250.0,
-    "capital_policy.max_quota_usd": 25000.0
+    "min_quota_usd": 250.0,
+    "max_quota_usd": 25000.0,
+    "step_up_pct": 0.15,
+    "step_down_pct": 0.2,
+    "cooldown_sec": 900
   },
-  "selector": "score_promote",
+  "selector": "sharpe_rank_promote",
   "gates": {
-    "manual_override_respected": false
+    "healthchecks": "docker-compose.yml defines curl-based health probes for engine and ops (readyz endpoints) with generous start periods.",
+    "logging": "All services use json-file logging with 10MB/3-file rotation to cap Docker.raw growth.",
+    "secrets": "Grafana admin password expected via GF_SECURITY_ADMIN_PASSWORD__FILE; OPS_APPROVER_TOKENS enforced via compose env (ops service).",
+    "min_samples": 3,
+    "min_trades": 50,
+    "improvement_threshold": 0.05,
+    "manual_override": true
   },
   "universe_policy": {
-    "trend": {
-      "min_24h_volume_usdt": 10000000,
-      "max_symbols": 30
-    },
-    "momentum": {
-      "min_24h_volume_usdt": 8000000,
-      "max_symbols": 25
-    },
-    "scalper": {
-      "min_24h_volume_usdt": 60000000,
-      "max_symbols": 6
-    },
-    "event": {
-      "min_24h_volume_usdt": 5000000,
-      "max_symbols": 50
+    "venue": "BINANCE",
+    "quote": "USDT",
+    "scan_interval_sec": 60,
+    "thresholds": {
+      "min_notional_per_min": 5000,
+      "max_spread_atr": 1.2,
+      "min_depth_usdt": 5000,
+      "ignition": {
+        "turnover_mult": 8.0,
+        "tradecount_mult": 5.0,
+        "atrp_min": 0.015
+      },
+      "quarantine": {
+        "min_age_minutes": 360,
+        "safe_scans": 3
+      },
+      "demotion": {
+        "notional_drop_mult": 0.33,
+        "cb_hits": 2
+      }
     }
   },
   "tiers": {
-    "config_runtime.yaml": [
+    "runtime_buckets": [
+      "quarantine",
+      "candidate",
+      "retired"
+    ],
+    "static_ops_buckets": [
       "trend",
       "momentum",
       "scalper",
       "event"
-    ],
-    "ops_universe_state.json": [
-      "trend_core",
-      "momentum_hmm",
-      "scalp_cex",
-      "event_meme"
     ]
   },
-  "closed_loop": false,
-  "gates_live": {},
-  "hitl": {},
-  "cooldowns": {},
-  "shadow_mode": false,
-  "smoke_checks": [],
-  "ci_jobs": [],
-  "gates_ci": [],
-  "slis": [],
-  "slos": [],
-  "alerts": [],
-  "dep_risks": 0,
+  "closed_loop": true,
+  "gates_live": {
+    "ledger": "/shared/manifest.sqlite",
+    "hmm_url": "http://ml_service:8000",
+    "param_controller": "http://param_controller:8002",
+    "exactly_once_default": true,
+    "compose_override": "EXACTLY_ONCE=${ML_EXACTLY_ONCE:-true}",
+    "promotion_delta": 1.0
+  },
+  "hitl": {
+    "two_man_rule": "High-risk endpoints in ops/ui_api.py:431-525 require OPS_TOKEN plus OPS_APPROVER_TOKENS; frontend/App.tsx:146-335 refuses to send controls without both.",
+    "kill_reason_prompt": "frontend/src/App.tsx:126-144 requires operators to enter a reason before invoking the kill switch.",
+    "control_audit_log": "ops/ui_api.py:352-525 logs every mutation to ops/logs/control_actions.jsonl via _record_control_action.",
+    "runbook_handoffs": "docs/OPS_RUNBOOK.md:20-63 spells out operator + approver workflow for pause/resume and strategy weight changes."
+  },
+  "cooldowns": {
+    "governance_actions": "ops/governance_daemon.py:176-212 tracks last_actions per rule and enforces cooldown_seconds before re-triggering.",
+    "ui_control_state": "frontend/src/App.tsx:179-188 holds controlState to prevent duplicate submissions while awaiting response."
+  },
+  "shadow_mode": true,
+  "smoke_checks": [
+    "curl -fsS http://localhost:8003/readyz",
+    "curl -fsS http://localhost:8002/readyz",
+    "python - <<'PY'\nimport asyncio\nfrom ops.net import create_async_client, request_with_retry\nasync def main():\n    async with create_async_client() as client:\n        resp = await request_with_retry(client, 'GET', 'http://engine_binance:8003/version')\n        print(resp.status_code)\nasyncio.run(main())\nPY"
+  ],
+  "ci_jobs": [
+    "make prom-reload",
+    "make grafana-restart"
+  ],
+  "gates_ci": [
+    "docker compose -f docker-compose.yml config",
+    "docker compose -f docker-compose.yml -f compose.autotrain.yml config"
+  ],
+  "slis": [
+    "histogram_quantile(0.95, sum by (le) (rate(fill_latency_ms_bucket[5m])))",
+    "sum(rate(http_requests_total{service=\"ops-api\",status!~\"5..\"}[5m])) / sum(rate(http_requests_total{service=\"ops-api\"}[5m]))",
+    "realtime_heartbeat_age_seconds"
+  ],
+  "slos": [
+    "trading-latency <= 1500ms P95 over 7d",
+    "ops-api availability >= 99.5% over 30d",
+    "websocket heartbeat age <= 30s for 99% of samples"
+  ],
+  "alerts": [
+    "ExternalFeedStale",
+    "MarginLevelCritical",
+    "KrakenExposureBreach",
+    "PromoOrderBudgetSpike",
+    "KrakenTelemetryStale"
+  ],
+  "dep_risks": 1,
   "perf_hotspots": [
-    "portfolio-short-pnl-mispricing"
-  ]
+    "signal_queue_unbounded"
+  ],
+  "policy_guard_details": {
+    "authz_two_man_required": "Extend IdempotentTwoManGuard + idempotency to PATCH /api/strategies/{id} and POST /api/account/transfer.",
+    "ops_token_rotation_gap": "OPS_API_TOKEN and OPS_APPROVER_TOKENS cache in-process (ops/middleware/control_guard.py:22-56); add file watcher or reload endpoint for rotation.",
+    "ws_message_once_guard": "App.tsx (frontend/src/App.tsx:193-200) memoizes the last processed WebSocket payload so React Query hydration runs at most once per message, preventing nested rerender loops."
+  },
+  "authz_findings": [
+    "PATCH /api/strategies/{strategy_id} only requires X-Ops-Token (ops/ui_api.py:386-393), allowing one credential to toggle strategies without secondary approval.",
+    "POST /api/account/transfer uses require_ops_token (ops/ui_api.py:545-552) so funds can move without dual approval or idempotency.",
+    "POST /api/governance/reload relies on TokenOnlyGuard (ops/ui_api.py:497-520), letting a solo operator reload policies.",
+    "Control guards cache OPS token + approver secrets until restart (ops/middleware/control_guard.py:22-56), blocking secret rotation/revocation.",
+    "Viewer/operator roles share the same credential; X-Ops-Actor header is optional and unverified (ops/ui_api.py:243-258)."
+  ],
+  "config_files": [
+    {
+      "path": "config/runtime.yaml",
+      "purpose": "Risk budgets, symbol buckets, futures leverage",
+      "notes": "Overrides runtime.example.yaml and is consumed by ops/state loaders"
+    },
+    {
+      "path": "config/universe.yaml",
+      "purpose": "Universe service filters & tiers",
+      "notes": "Sits alongside runtime for symbol governance"
+    },
+    {
+      "path": "config/screener.yaml",
+      "purpose": "Screener thresholds and data sources",
+      "notes": "Piped into screener/service.py"
+    },
+    {
+      "path": "config/situations.json",
+      "purpose": "Situational alerts definitions",
+      "notes": "Used by situations/service.py"
+    },
+    {
+      "path": "config/external_feeds.yaml",
+      "purpose": "Webhook/feed credentials",
+      "notes": "Ops notify + external integrations"
+    },
+    {
+      "path": "ops/policies.yaml",
+      "purpose": "Governance rules & kill-switches",
+      "notes": "Read by ops/governance_daemon.py"
+    },
+    {
+      "path": "ops/policies.backup.yaml",
+      "purpose": "Fallback copy for remote config",
+      "notes": "Maintained by ops/policies tooling"
+    },
+    {
+      "path": "ops/observability/prometheus/prometheus.yml",
+      "purpose": "Prometheus scrape config",
+      "notes": "Augmented by docker-compose.observability.yml"
+    },
+    {
+      "path": "docker-compose.yml",
+      "purpose": "Service env injection order",
+      "notes": "Compose env & .env precedence"
+    }
+  ],
+  "config_store": {
+    "primary": "ops/policies.yaml",
+    "fallback": "ops/policies.backup.yaml",
+    "loader": "ops/governance_daemon.py:61-162",
+    "reload_interface": "ops/governance_daemon.py:411-421",
+    "distribution": "manual file sync (no remote store)"
+  },
+  "audit_trail": true,
+  "notes": {
+    "reload": "Operators can call POST /api/governance/reload (ops/ui_api.py:520-533) to apply policy edits without a restart.",
+    "backup": "Backup YAML ships with repo but no automation to sync from remote source.",
+    "daemon": "Governance daemon persists audit events to ops/logs/governance_audit.jsonl in addition to the in-memory ring buffer.",
+    "overlays": "compose.autotrain.yml adds data_ingester, ml_service, param_controller; compose.ml.yml exposes ml_service on 8017 with healthcheck; compose.backfill.yml runs data backfill job.",
+    "tmpfs": "Engine/ops containers mount /tmp/prom_multiproc tmpfs to avoid stale Prometheus files on restart.",
+    "networks": "All services share trading_net for service discovery; external DNS 1.1.1.1/8.8.8.8 configured for engines.",
+    "restart_flows": "Use 'docker compose up -d --no-deps --force-recreate ops' for API recycle per docs/OPS_RUNBOOK.md restart instructions.",
+    "middleware_gap": "High-risk control endpoints now use ops.middleware.control_guard.IdempotentTwoManGuard (ops/ui_api.py:320-520) for consistent enforcement.",
+    "audit_persistence": "Governance daemon writes audits to ops/logs/governance_audit.jsonl while retaining the in-memory ring buffer (ops/governance_daemon.py:360-386).",
+    "ingester": "CCXT fetch_ohlcv -> ledger watermark, deletes duplicate files",
+    "scheduler": "APS cron (0 */6 * * *) drives retrains, requeues failures",
+    "watchdog": "Filesystem observer reloads /models/current symlink for online inference",
+    "bandit": "LinTS registry in /shared/param_controller.sqlite with outcome logging",
+    "exactly_once": "EXACTLY_ONCE can be toggled via ML_EXACTLY_ONCE env; compose overlays default to the application setting.",
+    "prometheus": "ops/observability/prometheus/prometheus.yml scrapes engines, ops API, executor, ML services with 5s/15s cadence; relabeling sets job label from host.",
+    "grafana": "Dashboards auto-provisioned via ops/observability/grafana/provisioning with datasource UID 'prometheus' and 5s refresh.",
+    "alertmanager": "ops/observability/alertmanager/alertmanager.yml posts to Telegram using env tokens; group wait 10s and repeat interval 2h.",
+    "logging": "Promtail pushes Docker logs to Loki (ops/observability/promtail/config.yml) with json stage and RFC3339Nano timestamps.",
+    "slo_registry": "ops/observability/slo.yaml declares three SLOs with burn-rate alert guidance.",
+    "http_retry_backoff": "Ops network clients share HTTPX limits + capped exponential backoff (ops/net.py:1-108); Binance REST helper retries with jitter (shared/binance_http.py:7-47).",
+    "sqlite_async_queue": "Engine persistence writes through a background queue with WAL + busy_timeout to avoid 'database is locked' errors (engine/storage/sqlite.py:2-109).",
+    "signal_queue_priority": "Strategy/event pipeline runs off a cooperative priority queue with expiry support to prevent stale signals (engine/core/signal_queue.py:1-74).",
+    "ops_healthchecks": "docker-compose healthchecks for engine/ops hit `/readyz` and allow generous start periods (docker-compose.yml:53-108,160-214).",
+    "selector": "ops/strategy_selector.py ranks strategies by Sharpe - drawdown penalty and promotes when improvement > 0.05",
+    "weights": "ops/strategy_weights.json enforces 80/20 weighting with max_canary_weight guard",
+    "registry": "ops/strategy_registry.json lists eligible models with manual flags"
+  }
 }

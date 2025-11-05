@@ -57,13 +57,28 @@ from engine import strategy
 from engine.ops_auth import require_ops_token
 from engine.universe import configured_universe, last_prices
 from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
+from engine.logging_utils import (
+    setup_logging,
+    bind_request_id,
+    reset_request_context,
+)
+from engine.middleware.redaction import RedactionMiddleware
+
+
+setup_logging()
+
+SERVICE_NAME = os.getenv("OBS_SERVICE_NAME", "engine")
 
 
 class _RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         request.state.request_id = req_id
-        response = await call_next(request)
+        token = bind_request_id(req_id)
+        try:
+            response = await call_next(request)
+        finally:
+            reset_request_context(token)
         try:
             response.headers["X-Request-ID"] = req_id
         except Exception:
@@ -71,8 +86,39 @@ class _RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class _HttpMetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration = time.perf_counter() - start
+            metrics.observe_http_request(
+                SERVICE_NAME, request.method, _route_template(request), 500, duration
+            )
+            raise
+        duration = time.perf_counter() - start
+        metrics.observe_http_request(
+            SERVICE_NAME,
+            request.method,
+            _route_template(request),
+            response.status_code,
+            duration,
+        )
+        return response
+
+
+def _route_template(request: Request) -> str:
+    route = request.scope.get("route")
+    if route and getattr(route, "path", None):
+        return route.path
+    return request.url.path
+
+
 app = FastAPI(title="HMM Engine", version="0.1.0")
 app.add_middleware(_RequestIDMiddleware)
+app.add_middleware(_HttpMetricsMiddleware)
+app.add_middleware(RedactionMiddleware)
 
 
 def _truthy_env(name: str) -> bool:

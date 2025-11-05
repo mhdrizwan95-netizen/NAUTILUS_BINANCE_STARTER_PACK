@@ -1,0 +1,7 @@
+{
+  "shadow_mode": true,
+  "smoke_checks": [
+    "./smoke_shadow.sh",
+    "curl -fsS http://localhost:8002/status | jq '.trading_enabled == false'"
+  ]
+}

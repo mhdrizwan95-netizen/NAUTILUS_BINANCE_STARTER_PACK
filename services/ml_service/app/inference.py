@@ -28,28 +28,42 @@ def _load_active_model():
 
 
 class _Bump(FileSystemEventHandler):
+    def __init__(self, symlink: Path) -> None:
+        super().__init__()
+        self._symlink = symlink
+
     def on_modified(self, event):
         if event.is_directory:
             return
-        if event.src_path.endswith("version.txt") or event.src_path.endswith(
-            "metadata.json"
-        ):
+        name = Path(event.src_path).name
+        if name in {"version.txt", "metadata.json"}:
+            logger.info("Detected model update; reloading")
+            _load_active_model()
+
+    def on_moved(self, event):
+        # Symlink replace triggers moved events on parent
+        if Path(event.dest_path) == self._symlink or Path(event.src_path) == self._symlink:
+            logger.info("Detected model update; reloading")
+            _load_active_model()
+
+    def on_created(self, event):
+        if Path(event.src_path) == self._symlink:
             logger.info("Detected model update; reloading")
             _load_active_model()
 
 
 def start_watchdog():
     cur = Path(settings.CURRENT_SYMLINK)
-    parent = cur if cur.is_dir() else cur.parent
+    parent = cur.parent
     parent.mkdir(parents=True, exist_ok=True)
-    event_handler = _Bump()
+    event_handler = _Bump(symlink=cur)
     obs = Observer()
-    watch_dir = cur.resolve() if cur.exists() else parent.resolve()
-    obs.schedule(event_handler, path=str(watch_dir), recursive=False)
+    watch_dir = parent.resolve()
+    obs.schedule(event_handler, path=str(watch_dir), recursive=True)
     obs.daemon = True
     obs.start()
     _load_active_model()
-    logger.info(f"Started watcher on {watch_dir}")
+    logger.info(f"Started watcher on {watch_dir} (symlink {cur})")
 
 
 def predict_proba(logret_series):

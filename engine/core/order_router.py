@@ -704,7 +704,8 @@ async def _place_market_order_async_core(
     base = symbol.split(".")[0].upper()
 
     if venue is None:
-        default_venue = "BINANCE" if base.endswith("USDT") else "IBKR"
+        engine_venue = get_settings().venue.upper() if hasattr(get_settings(), "venue") else "BINANCE"
+        default_venue = engine_venue or "BINANCE"
         symbol = f"{base}.{default_venue}"
         venue = default_venue
 

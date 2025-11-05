@@ -10,10 +10,8 @@ from pathlib import Path as Path2
 import json, time, httpx, os, glob, subprocess, shlex, logging
 import asyncio
 from typing import List, Dict, Any
-try:
-    from prometheus_fastapi_instrumentator import Instrumentator
-except ModuleNotFoundError:  # pragma: no cover - exercised in minimal envs
-    Instrumentator = None  # type: ignore[assignment]
+
+os.environ.setdefault("OBS_SERVICE_NAME", "ops-api")
 
 try:
     from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
@@ -71,7 +69,13 @@ from ops.routes.orders import router as orders_router
 from ops.strategy_router import router as strategy_router
 from ops.pnl_dashboard import router as pnl_router
 from ops.situations.router import router as situations_router
-import time
+from engine.logging_utils import (
+    setup_logging,
+    bind_request_id,
+    reset_request_context,
+)
+from engine.middleware.redaction import RedactionMiddleware
+from engine.metrics import observe_http_request
 
 
 class MetricsIn(BaseModel):
@@ -87,23 +91,15 @@ class MetricsIn(BaseModel):
     gross_exposure_usd: float | None = None
 
 
+setup_logging()
+
 APP = FastAPI(title="Ops API")
-if Instrumentator:
-    PROM_INSTRUMENTATOR = Instrumentator(registry=REGISTRY)
-    PROM_INSTRUMENTATOR.instrument(APP).expose(
-        APP, include_in_schema=False, endpoint="/metrics"
-    )
-else:
-    PROM_INSTRUMENTATOR = None
 
-    @APP.get("/metrics", include_in_schema=False)
-    def _metrics_fallback():
-        payload, content_type = render_latest()
-        return Response(payload, media_type=content_type)
 
-    logging.getLogger(__name__).warning(
-        "prometheus_fastapi_instrumentator not installed; using fallback /metrics route"
-    )
+@APP.get("/metrics", include_in_schema=False)
+def _metrics():
+    payload, content_type = render_latest()
+    return Response(payload, media_type=content_type)
 
 if FastAPIInstrumentor:
     FastAPIInstrumentor.instrument_app(APP)
@@ -116,7 +112,11 @@ class _RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         req_id = request.headers.get("X-Request-ID") or uuid.uuid4().hex
         _REQ_ID.set(req_id)
-        response = await call_next(request)
+        token = bind_request_id(req_id)
+        try:
+            response = await call_next(request)
+        finally:
+            reset_request_context(token)
         try:
             response.headers["X-Request-ID"] = req_id
         except Exception:
@@ -124,7 +124,31 @@ class _RequestIDMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class _HttpMetricsMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+        route = _route_template(request)
+        try:
+            response = await call_next(request)
+        except Exception:
+            duration = time.perf_counter() - start
+            observe_http_request("ops-api", request.method, route, 500, duration)
+            raise
+        duration = time.perf_counter() - start
+        observe_http_request("ops-api", request.method, route, response.status_code, duration)
+        return response
+
+
+def _route_template(request: Request) -> str:
+    route = request.scope.get("route")
+    if route and getattr(route, "path", None):
+        return route.path
+    return request.url.path
+
+
 APP.add_middleware(_RequestIDMiddleware)
+APP.add_middleware(_HttpMetricsMiddleware)
+APP.add_middleware(RedactionMiddleware)
 APP.include_router(orders_router)
 APP.include_router(strategy_router)
 APP.include_router(pnl_router)

@@ -1,0 +1,41 @@
+{
+  "ports": [
+    "engine_binance:8003",
+    "engine_binance_exporter:9103",
+    "ops:8002",
+    "executor:9102",
+    "universe:8009",
+    "screener:8010",
+    "situations:8011",
+    "data_ingester:8001",
+    "ml_service:8000"
+  ],
+  "gates": {
+    "healthchecks": "docker-compose.yml defines curl-based health probes for engine and ops (readyz endpoints) with generous start periods.",
+    "logging": "All services use json-file logging with 10MB/3-file rotation to cap Docker.raw growth.",
+    "secrets": "Grafana admin password expected via GF_SECURITY_ADMIN_PASSWORD__FILE; OPS_APPROVER_TOKENS enforced via compose env (ops service)."
+  },
+  "smoke_checks": [
+    "docker compose ps",
+    "curl -fsS http://localhost:8003/readyz",
+    "curl -fsS http://localhost:8002/readyz",
+    "curl -fsS http://localhost:8009/health",
+    "curl -fsS http://localhost:8010/health",
+    "curl -fsS http://localhost:8011/health"
+  ],
+  "policy_guards": [
+    "ops_requires_approver_env",
+    "engine_tmpfs_prometheus",
+    "compose_logging_limits"
+  ],
+  "gates_ci": [
+    "docker compose -f docker-compose.yml config",
+    "docker compose -f docker-compose.yml -f compose.autotrain.yml config"
+  ],
+  "notes": {
+    "overlays": "compose.autotrain.yml adds data_ingester, ml_service, param_controller; compose.ml.yml exposes ml_service on 8017 with healthcheck; compose.backfill.yml runs data backfill job.",
+    "tmpfs": "Engine/ops containers mount /tmp/prom_multiproc tmpfs to avoid stale Prometheus files on restart.",
+    "networks": "All services share trading_net for service discovery; external DNS 1.1.1.1/8.8.8.8 configured for engines.",
+    "restart_flows": "Use 'docker compose up -d --no-deps --force-recreate ops' for API recycle per docs/OPS_RUNBOOK.md restart instructions."
+  }
+}

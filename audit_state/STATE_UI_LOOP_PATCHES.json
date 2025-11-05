@@ -1,0 +1,25 @@
+{
+  "patches": [
+    {
+      "file": "frontend/src/App.tsx",
+      "summary": "Debounce WebSocket-derived React Query writes using message tokens and serialized digests so no-ops skip cache updates.",
+      "rationale": "Prevents identical metrics/health payloads from triggering new query cache objects, eliminating the effect-dep-mutates-dep loop that hit React’s maximum update depth.",
+      "loop_fixed": "ws-app-query-hydrate"
+    },
+    {
+      "file": "frontend/src/lib/websocket.ts",
+      "summary": "Throttle websocket session issuance per credential pair with in-flight guard and back-off after failures.",
+      "rationale": "Stops StrictMode double-run from repeatedly requesting sessions when ops credentials stay unchanged, preventing the session spin loop.",
+      "loop_fixed": "ws-session-recursion"
+    },
+    {
+      "file": "frontend/src/lib/hooks.ts",
+      "summary": "Stabilise polling timers by pinning async fn/comparator in refs so timer effect only depends on interval + enabled state.",
+      "rationale": "Avoids recreating timers/setState bursts when consumers inline the polling function, eliminating timer churn loops.",
+      "loop_fixed": "polling-fn-identity"
+    }
+  ],
+  "notes": [
+    "All updates preserve public APIs; changes limited to guarding equality and throttling repeated side effects."
+  ]
+}

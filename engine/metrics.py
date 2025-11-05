@@ -39,6 +39,18 @@ breaker_state = Gauge(
 orders_rounded = Counter("orders_rounded_total", "Orders that required qty rounding")
 fees_paid_total = Gauge("fees_paid_total", "Total fees paid in USD")
 
+http_requests_total = Counter(
+    "http_requests_total",
+    "HTTP responses served",
+    ["service", "method", "path", "status"],
+)
+http_request_latency_seconds = Histogram(
+    "http_request_latency_seconds",
+    "HTTP request latency (seconds)",
+    ["service", "method", "path"],
+    buckets=(0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+
 fill_latency = Histogram(
     "fill_latency_ms",
     "Order fill latency (ms)",
@@ -852,6 +864,24 @@ def set_max_notional(value: float) -> None:
     """Set max notional gauge."""
     try:
         max_notional_usdt.set(float(value))
+    except Exception:
+        pass
+
+
+def observe_http_request(
+    service: str,
+    method: str,
+    path: str,
+    status_code: int,
+    duration_seconds: float,
+) -> None:
+    """Emit HTTP request counters / latency histograms."""
+    status = str(status_code)
+    try:
+        http_requests_total.labels(service, method, path, status).inc()
+        http_request_latency_seconds.labels(service, method, path).observe(
+            duration_seconds
+        )
     except Exception:
         pass
 

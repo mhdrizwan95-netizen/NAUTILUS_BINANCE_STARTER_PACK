@@ -1,0 +1,57 @@
+#
+# Dynamic capital budget blueprint for the Nautilus Command Center.
+# Consumed by humans (and scripts) to reason about capital pool splits,
+# reserve policy, and model-specific guardrails.
+#
+
+meta:
+  version: 2025-03-01
+  owner: capital-allocator
+  source: ops/capital_allocator.py
+  notes:
+    - "Base capital pool derived from total equity * base_equity_frac."
+    - "Reserve cash is excluded from the pool to fund withdrawals and volatility shocks."
+
+pool:
+  base_equity_frac: 0.20        # Mirrors capital_policy.json
+  min_pool_usd: 10000.0         # Ensure minimum dry powder when equity is low
+  reserve_equity_usd: 5000.0    # Held outside allocator for emergency fills
+  fallback_mode: equal_split    # Behavior when metrics are unavailable
+
+models:
+  stable_model:
+    bucket: core
+    target_pct: 0.70            # Target share of dynamic pool
+    min_quota_usd: 2500.0
+    max_quota_usd: 20000.0
+    promote_threshold_sharpe: 1.0
+    demote_threshold_sharpe: 0.3
+    step_up_pct: 0.15
+    step_down_pct: 0.20
+  canary_model:
+    bucket: experimental
+    target_pct: 0.30
+    min_quota_usd: 500.0
+    max_quota_usd: 6000.0
+    promote_threshold_sharpe: 1.2
+    demote_threshold_sharpe: 0.2
+    step_up_pct: 0.15
+    step_down_pct: 0.25
+
+cooldowns:
+  decision_cooldown_sec: 900     # Same as capital_policy.json
+  promote_grace_sec: 1800        # Extra delay before re-promoting after demotion
+
+alerts:
+  - name: capital_pool_diminished
+    condition: "total_allocated < pool.min_pool_usd"
+    severity: warning
+    action: notify
+  - name: canary_overallocation
+    condition: "models.canary_model.target_quota > models.canary_model.max_quota_usd"
+    severity: critical
+    action: pause_canary
+
+reporting:
+  allocations_path: ops/capital_allocations.json
+  audit_schema: docs/control_action_audit.schema.json

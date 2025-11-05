@@ -202,11 +202,16 @@ export function FundingTab() {
               updateBudgetsMutation.isPending ||
               !budgetTouched ||
               !opsToken.trim() ||
+              !opsActor.trim() ||
               Math.abs(totalBudget - 1) > 0.001
             }
             onClick={() => {
               if (!opsToken.trim()) {
                 toast.error('Provide an OPS token in Settings before updating buckets');
+                return;
+              }
+              if (!opsActor.trim()) {
+                toast.error('Provide an operator call-sign before updating capital buckets');
                 return;
               }
               if (!opsApprover.trim()) {
@@ -217,7 +222,7 @@ export function FundingTab() {
                 buckets: budgetDraft,
                 options: {
                   token: opsToken.trim(),
-                  actor: opsActor.trim() || undefined,
+                  actor: opsActor.trim(),
                   approverToken: opsApprover.trim() || undefined,
                   idempotencyKey: generateIdempotencyKey('buckets'),
                 },

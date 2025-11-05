@@ -1,0 +1,41 @@
+{
+  "slis": [
+    "histogram_quantile(0.95, sum by (le) (rate(fill_latency_ms_bucket[5m])))",
+    "sum(rate(http_requests_total{service=\"ops-api\",status!~\"5..\"}[5m])) / sum(rate(http_requests_total{service=\"ops-api\"}[5m]))",
+    "realtime_heartbeat_age_seconds"
+  ],
+  "slos": [
+    "trading-latency <= 1500ms P95 over 7d",
+    "ops-api availability >= 99.5% over 30d",
+    "websocket heartbeat age <= 30s for 99% of samples"
+  ],
+  "alerts": [
+    "ExternalFeedStale",
+    "MarginLevelCritical",
+    "KrakenExposureBreach",
+    "PromoOrderBudgetSpike",
+    "KrakenTelemetryStale"
+  ],
+  "smoke_checks": [
+    "make validate-obs",
+    "curl -fsS http://localhost:9090/api/v1/label/job/values",
+    "curl -fsS http://localhost:3000/api/datasources",
+    "make grafana-import path=ops/observability/grafana/dashboards/command_center.json"
+  ],
+  "policy_guards": [
+    "grafana_secret_file_configured",
+    "alertmanager_telegram_env",
+    "prometheus_recording_rules"
+  ],
+  "ci_jobs": [
+    "make prom-reload",
+    "make grafana-restart"
+  ],
+  "notes": {
+    "prometheus": "ops/observability/prometheus/prometheus.yml scrapes engines, ops API, executor, ML services with 5s/15s cadence; relabeling sets job label from host.",
+    "grafana": "Dashboards auto-provisioned via ops/observability/grafana/provisioning with datasource UID 'prometheus' and 5s refresh.",
+    "alertmanager": "ops/observability/alertmanager/alertmanager.yml posts to Telegram using env tokens; group wait 10s and repeat interval 2h.",
+    "logging": "Promtail pushes Docker logs to Loki (ops/observability/promtail/config.yml) with json stage and RFC3339Nano timestamps.",
+    "slo_registry": "ops/observability/slo.yaml declares three SLOs with burn-rate alert guidance."
+  }
+}

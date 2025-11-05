@@ -65,6 +65,10 @@ export function StrategyTab() {
       toast.error('Set OPS API token in Settings before issuing control actions');
       return false;
     }
+    if (!opsActor.trim()) {
+      toast.error('Provide an operator call-sign before issuing control actions');
+      return false;
+    }
     if (!opsApprover.trim()) {
       toast.error('Provide an approver token (two-man rule) before issuing control actions');
       return false;
@@ -74,7 +78,7 @@ export function StrategyTab() {
 
   const buildControlOptions = (prefix: string) => ({
     token: opsToken.trim(),
-    actor: opsActor.trim() || undefined,
+    actor: opsActor.trim(),
     approverToken: opsApprover.trim() || undefined,
     idempotencyKey: generateIdempotencyKey(prefix),
   });

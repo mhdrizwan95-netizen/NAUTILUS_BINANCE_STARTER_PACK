@@ -1,5 +1,6 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
 import { useAppStore, useRealTimeActions } from './store';
+import { issueWebsocketSession } from './api';
 
 export interface WebSocketMessage {
   type: string;
@@ -162,21 +163,14 @@ class WebSocketManager {
 let wsManager: WebSocketManager | null = null;
 let currentUrl: string | null = null;
 
-const buildWebSocketUrl = (base: string, token: string | undefined): string => {
+const buildWebSocketUrl = (base: string, session: string): string => {
   try {
     const url = new URL(base, base.startsWith('ws') ? undefined : window.location.origin);
-    if (token?.trim()) {
-      url.searchParams.set('token', token.trim());
-    } else {
-      url.searchParams.delete('token');
-    }
+    url.searchParams.set('session', session);
     return url.toString();
   } catch {
-    if (token?.trim()) {
-      const delimiter = base.includes('?') ? '&' : '?';
-      return `${base}${delimiter}token=${encodeURIComponent(token.trim())}`;
-    }
-    return base;
+    const delimiter = base.includes('?') ? '&' : '?';
+    return `${base}${delimiter}session=${encodeURIComponent(session)}`;
   }
 };
 
@@ -185,11 +179,11 @@ export function initializeWebSocket(
   onConnect: () => void,
   onDisconnect: () => void,
   onError: (error: Event) => void,
-  token?: string
+  session: string
 ): WebSocketManager {
   // Use environment variable or default to localhost
   const baseUrl = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:8002/ws';
-  const wsUrl = buildWebSocketUrl(baseUrl, token);
+  const wsUrl = buildWebSocketUrl(baseUrl, session);
 
   if (!wsManager || currentUrl !== wsUrl) {
     wsManager?.disconnect();
@@ -201,11 +195,30 @@ export function initializeWebSocket(
 }
 
 export function useWebSocket(): WebSocketHookResult {
+  const liveDisabled = import.meta.env.VITE_LIVE_OFF === 'true';
+  const disabledResult = useMemo<WebSocketHookResult>(
+    () => ({
+      isConnected: false,
+      lastMessage: null,
+      sendMessage: () => {},
+      reconnect: () => {},
+    }),
+    []
+  );
+
+  if (liveDisabled) {
+    return disabledResult;
+  }
+
   const { updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData } = useRealTimeActions();
-  const opsToken = useAppStore((state) => state.opsAuth.token);
+  const { token: opsToken, actor: opsActor } = useAppStore((state) => state.opsAuth);
   const lastMessageRef = useRef<WebSocketMessage | null>(null);
   const managerRef = useRef<WebSocketManager | null>(null);
   const actionsRef = useRef({ updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData });
+  const [wsSession, setWsSession] = useState<string | null>(null);
+  const lastCredentialsRef = useRef<string | null>(null);
+  const sessionRequestInFlight = useRef(false);
+  const lastSessionFailureRef = useRef<number>(0);
 
   // Update actions ref when they change
   actionsRef.current = { updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData };
@@ -251,6 +264,72 @@ export function useWebSocket(): WebSocketHookResult {
 
   useEffect(() => {
     const trimmedToken = opsToken.trim();
+    const trimmedActor = opsActor.trim();
+    if (!trimmedToken || !trimmedActor) {
+      setWsSession(null);
+      managerRef.current?.disconnect();
+      managerRef.current = null;
+      currentUrl = null;
+      lastCredentialsRef.current = null;
+      return;
+    }
+
+    const credentialSignature = `${trimmedToken}:${trimmedActor}`;
+    if (
+      wsSession &&
+      lastCredentialsRef.current === credentialSignature
+    ) {
+      return;
+    }
+
+    if (sessionRequestInFlight.current) {
+      return;
+    }
+
+    const now = Date.now();
+    if (
+      lastCredentialsRef.current === credentialSignature &&
+      !wsSession &&
+      now - lastSessionFailureRef.current < 5000
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const requestSession = async () => {
+      sessionRequestInFlight.current = true;
+      try {
+        const response = await issueWebsocketSession({
+          token: trimmedToken,
+          actor: trimmedActor,
+        });
+        if (cancelled) {
+          return;
+        }
+        setWsSession((prev) => (prev === response.session ? prev : response.session));
+        lastSessionFailureRef.current = 0;
+      } catch (error) {
+        console.error('Failed to issue WebSocket session:', error);
+        if (!cancelled) {
+          setWsSession((prev) => (prev === null ? prev : null));
+          lastSessionFailureRef.current = Date.now();
+        }
+      } finally {
+        lastCredentialsRef.current = credentialSignature;
+        sessionRequestInFlight.current = false;
+      }
+    };
+
+    requestSession();
+
+    return () => {
+      cancelled = true;
+      sessionRequestInFlight.current = false;
+    };
+  }, [opsToken, opsActor, wsSession]);
+
+  useEffect(() => {
+    const trimmedToken = opsToken.trim();
 
     if (!trimmedToken) {
       managerRef.current?.disconnect();
@@ -259,12 +338,16 @@ export function useWebSocket(): WebSocketHookResult {
       return;
     }
 
+    if (!wsSession) {
+      return;
+    }
+
     managerRef.current = initializeWebSocket(
       handleMessage,
       handleConnect,
       handleDisconnect,
       handleError,
-      trimmedToken
+      wsSession
     );
 
     if (!managerRef.current.isConnected) {
@@ -275,7 +358,7 @@ export function useWebSocket(): WebSocketHookResult {
       // Don't disconnect on unmount - keep connection alive
       // managerRef.current?.disconnect();
     };
-  }, [handleConnect, handleDisconnect, handleError, handleMessage, opsToken]);
+  }, [handleConnect, handleDisconnect, handleError, handleMessage, opsToken, wsSession]);
 
   const sendMessage = useCallback((message: any) => {
     managerRef.current?.sendMessage(message);

@@ -1,0 +1,23 @@
+{
+  "policy_guards": [
+    "http_retry_backoff",
+    "sqlite_async_queue",
+    "signal_queue_priority",
+    "ops_healthchecks"
+  ],
+  "smoke_checks": [
+    "curl -fsS http://localhost:8003/readyz",
+    "curl -fsS http://localhost:8002/readyz",
+    "python - <<'PY'\nimport asyncio\nfrom ops.net import create_async_client, request_with_retry\nasync def main():\n    async with create_async_client() as client:\n        resp = await request_with_retry(client, 'GET', 'http://engine_binance:8003/version')\n        print(resp.status_code)\nasyncio.run(main())\nPY"
+  ],
+  "notes": {
+    "http_retry_backoff": "Ops network clients share HTTPX limits + capped exponential backoff (ops/net.py:1-108); Binance REST helper retries with jitter (shared/binance_http.py:7-47).",
+    "sqlite_async_queue": "Engine persistence writes through a background queue with WAL + busy_timeout to avoid 'database is locked' errors (engine/storage/sqlite.py:2-109).",
+    "signal_queue_priority": "Strategy/event pipeline runs off a cooperative priority queue with expiry support to prevent stale signals (engine/core/signal_queue.py:1-74).",
+    "ops_healthchecks": "docker-compose healthchecks for engine/ops hit `/readyz` and allow generous start periods (docker-compose.yml:53-108,160-214)."
+  },
+  "perf_hotspots": [
+    "signal_queue_unbounded"
+  ],
+  "dep_risks": 1
+}

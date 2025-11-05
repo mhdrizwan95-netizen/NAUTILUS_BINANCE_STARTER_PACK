@@ -1,0 +1,68 @@
+{
+  "arch_components": [
+    {
+      "component": "Strategy & ML Layer",
+      "docs": ["docs/SYSTEM_DESIGN.md#2-strategy-ml-layer"],
+      "code": ["engine/strategy.py", "engine/strategies/", "ml_service/app.py", "ops/strategy_router.py"],
+      "notes": "Strategy loop, ensemble policies, and optional external ML service align with documented flow."
+    },
+    {
+      "component": "Execution Engine & Risk",
+      "docs": ["docs/SYSTEM_DESIGN.md#1-execution-plane-engine"],
+      "code": ["engine/app.py", "engine/core/", "engine/risk.py", "engine/state/", "engine/storage/sqlite.py"],
+      "notes": "FastAPI engine, order router, risk rails, and persistence layers present as described."
+    },
+    {
+      "component": "Ops Control Plane",
+      "docs": ["docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops"],
+      "code": ["ops/ops_api.py", "ops/ui_api.py", "ops/ui_state.py", "ops/prometheus.py"],
+      "notes": "Control endpoints and UI router live under ops, matching documentation."
+    },
+    {
+      "component": "Governance & Capital Allocation",
+      "docs": ["docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops"],
+      "code": ["ops/capital_allocator.py", "ops/m25_governor.py", "ops/governance_daemon.py", "ops/strategy_weights.json", "ops/capital_policy.json"],
+      "notes": "Capital allocator and governor daemons exist; configs mostly present."
+    },
+    {
+      "component": "Universe/Screener/Situations Services",
+      "docs": ["docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops", "docs/SYSTEM_DESIGN.md#5-data-event-flow"],
+      "code": ["universe/service.py", "screener/service.py", "situations/service.py"],
+      "notes": "Ancillary services align with data flow narrative."
+    },
+    {
+      "component": "Observability Stack",
+      "docs": ["docs/SYSTEM_DESIGN.md#4-observability-persistence", "docs/SYSTEM_DESIGN.md#observability-bundle"],
+      "code": ["ops/observability/", "docs/observability/"],
+      "notes": "Prometheus/Grafana/Loki configs exactly under documented directories."
+    },
+    {
+      "component": "Frontend Command Center",
+      "docs": ["docs/SYSTEM_DESIGN.md"],
+      "code": ["frontend/src/App.tsx", "frontend/src/components/", "frontend/src/lib/"]
+    },
+    {
+      "component": "Data Persistence",
+      "docs": ["docs/SYSTEM_DESIGN.md#4-observability-persistence"],
+      "code": ["engine/logs/", "engine/state/", "data/runtime/"],
+      "notes": "JSONL logs, snapshots, and SQLite queues match storage description."
+    }
+  ],
+  "broken_links": [
+    {
+      "doc": "docs/SYSTEM_DESIGN.md#governance-automation",
+      "reference": "ops/m20_playbook.py",
+      "issue": "File not present in repo; governance playbook path likely renamed or removed."
+    },
+    {
+      "doc": "docs/SYSTEM_DESIGN.md#configuration-surfaces",
+      "reference": "ops/capital_allocations.json",
+      "issue": "Config file absent; allocator now uses strategy_weights.json/capital_policy.json."
+    },
+    {
+      "doc": "docs/SYSTEM_DESIGN.md#built-in-strategy-loop",
+      "reference": "engine/models/active_hmm_policy.pkl",
+      "issue": "Runtime artifact not versioned; consider documenting storage location or publishing sample."
+    }
+  ]
+}

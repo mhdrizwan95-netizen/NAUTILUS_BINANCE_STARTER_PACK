@@ -1,0 +1,28 @@
+{
+  "closed_loop": true,
+  "gates_live": {
+    "ledger": "/shared/manifest.sqlite",
+    "hmm_url": "http://ml_service:8000",
+    "param_controller": "http://param_controller:8002",
+    "exactly_once_default": true,
+    "compose_override": "EXACTLY_ONCE=${ML_EXACTLY_ONCE:-true}",
+    "promotion_delta": 1.0
+  },
+  "smoke_checks": [
+    "POST http://localhost:8001/ingest_once",
+    "POST http://localhost:8003/train",
+    "GET http://localhost:8003/model",
+    "GET http://localhost:8002/param/{strategy}/{instrument}"
+  ],
+  "policy_guards": [
+    "ledger_determinism",
+    "auto_promote_delta"
+  ],
+  "notes": {
+    "ingester": "CCXT fetch_ohlcv -> ledger watermark, deletes duplicate files",
+    "scheduler": "APS cron (0 */6 * * *) drives retrains, requeues failures",
+    "watchdog": "Filesystem observer reloads /models/current symlink for online inference",
+    "bandit": "LinTS registry in /shared/param_controller.sqlite with outcome logging",
+    "exactly_once": "EXACTLY_ONCE can be toggled via ML_EXACTLY_ONCE env; compose overlays default to the application setting."
+  }
+}

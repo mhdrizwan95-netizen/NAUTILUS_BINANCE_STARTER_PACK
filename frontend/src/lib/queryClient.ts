@@ -54,6 +54,9 @@ export const queryKeys = {
     list: () => ['strategies', 'list'],
     detail: (id: string) => ['strategies', 'detail', id],
   },
+  ops: {
+    status: () => ['ops', 'status'],
+  },
   funding: {
     portfolio: () => ['funding', 'portfolio'],
     exposure: () => ['funding', 'exposure'],

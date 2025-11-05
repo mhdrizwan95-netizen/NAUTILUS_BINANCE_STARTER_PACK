@@ -108,7 +108,18 @@ def choose_model(signal_id: Optional[str] = None) -> str:
 
     # Validate weights
     total_weight = sum(weights.values())
-    if abs(total_weight - 1.0) > 0.001:
+    if total_weight <= 0:
+        logging.error(
+            "[ROUTER] No positive weights configured (total=%s); defaulting to current model",
+            total_weight,
+        )
+        current = config.get("current")
+        fallback_model = current or next(iter(weights.keys()), None)
+        if fallback_model is None:
+            raise RuntimeError("No strategies available for routing")
+        weights = {fallback_model: 1.0}
+        total_weight = 1.0
+    elif abs(total_weight - 1.0) > 0.001:
         logging.warning(f"[ROUTER] Weights don't sum to 1.0: {total_weight}")
         # Normalize
         weights = {k: v / total_weight for k, v in weights.items()}
@@ -241,7 +252,22 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
     original_quote = signal_data.get("quote")
     original_quantity = signal_data.get("quantity")
 
-    if original_quote is not None and quota_usd > 0:
+    if quota_usd <= 0:
+        logging.warning(
+            "[ROUTER] 🚫 Quota exhausted for %s — dropping signal %s",
+            model,
+            signal_data.get("id"),
+        )
+        metrics.increment_signal_failed(model)
+        return {
+            "error": "quota_exhausted",
+            "model_tag": model,
+            "capital_quota_usd": quota_usd,
+            "status": "rejected",
+            "timestamp": time.time(),
+        }
+
+    if original_quote is not None:
         # Clip quote to available quota
         adjusted_quote = min(float(original_quote), quota_usd)
         signal_data["quote"] = adjusted_quote
@@ -250,7 +276,7 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
             f"requested ${original_quote:.0f}, adjusted to ${adjusted_quote:.0f}"
         )
 
-    elif original_quantity is not None and quota_usd > 0:
+    elif original_quantity is not None:
         # Convert quantity to quote, then clip to quota, then convert back
         price = await fetch_price_for_symbol(signal_data.get("symbol", ""))
         if price > 0:

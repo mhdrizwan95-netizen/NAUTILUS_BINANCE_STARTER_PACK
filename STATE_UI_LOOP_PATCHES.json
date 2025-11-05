@@ -1,0 +1,35 @@
+{
+  "patches": [
+    {
+      "id": "loop_dynamic_param_form",
+      "file": "frontend/src/components/forms/DynamicParamForm.tsx",
+      "summary": "Debounce watch() emissions using serialized snapshot tracking to avoid redundant upstream state writes.",
+      "details": "On every render the react-hook-form watch proxy produced a new reference; we serialize values, compare with the last emitted snapshot, and only invoke onChange when meaningful differences exist, emitting a cloned payload to keep parents pure."
+    },
+    {
+      "id": "loop_websocket_metrics",
+      "file": "frontend/src/App.tsx",
+      "summary": "Route WebSocket frames through merge helpers that preserve references when data is unchanged.",
+      "details": "Factored KPI and venue merging into lib/streamMergers so setQueryData can return existing snapshots when payloads match (using shallow object and array comparisons), preventing React Query cascades on every WS tick."
+    },
+    {
+      "id": "loop_polling_hook",
+      "file": "frontend/src/lib/hooks.ts",
+      "summary": "Augmented usePolling with equality guard, last-value tracking, and live-update kill switch support.",
+      "details": "The hook now accepts a comparator (default Object.is), skips state writes if the comparator deems results equal, resets memoized data on teardown, and respects VITE_LIVE_OFF to disable timers during tests."
+    },
+    {
+      "id": "loop_dev_instrumentation",
+      "file": "frontend/src/lib/debug/why.ts",
+      "summary": "Added dev-only render counters and prop diff tracing for loop diagnosis.",
+      "details": "Introduced useWhyDidYouUpdate and useRenderCounter hooks, wired into App, TopHUD, and BacktestingTab to aid future loop investigations without affecting production."
+    }
+  ],
+  "helpers": {
+    "files": [
+      "frontend/src/lib/equality.ts",
+      "frontend/src/lib/streamMergers.ts"
+    ],
+    "purpose": "Shared shallow comparison utilities and deterministic merge helpers ensure query cache updates remain referentially stable."
+  }
+}

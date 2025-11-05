@@ -1,0 +1,21 @@
+{
+  "selector": "sharpe_rank_promote",
+  "gates": {
+    "min_samples": 3,
+    "min_trades": 50,
+    "improvement_threshold": 0.05,
+    "manual_override": true
+  },
+  "ops_actions": [
+    "strategy_promote",
+    "router_weight_sync"
+  ],
+  "policy_guards": [
+    "promotion_log_cap"
+  ],
+  "notes": {
+    "selector": "ops/strategy_selector.py ranks strategies by Sharpe - drawdown penalty and promotes when improvement > 0.05",
+    "weights": "ops/strategy_weights.json enforces 80/20 weighting with max_canary_weight guard",
+    "registry": "ops/strategy_registry.json lists eligible models with manual flags"
+  }
+}

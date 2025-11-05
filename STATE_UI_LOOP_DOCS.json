@@ -1,0 +1,14 @@
+{
+  "readme": {
+    "file": "frontend/README.md",
+    "highlights": [
+      "Documented the dev-only loop detector hooks and how to observe render counts/prop diffs.",
+      "Explained the VITE_LIVE_OFF flag for disabling WebSockets and polling during tests.",
+      "Added a reviewer checklist focused on render-loop regressions."
+    ]
+  },
+  "flags": {
+    "env": "VITE_LIVE_OFF",
+    "description": "When set to 'true', the UI stubs live WebSocket connections and polling timers to keep tests deterministic."
+  }
+}

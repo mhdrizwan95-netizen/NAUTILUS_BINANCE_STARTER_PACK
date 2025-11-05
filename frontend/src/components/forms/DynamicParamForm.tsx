@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import type { ParamSchema } from '@/types/settings';
 import { Button } from '@/components/ui/button';
@@ -40,10 +40,23 @@ export function DynamicParamForm({
   const { control, handleSubmit, watch } = useForm({ defaultValues: defaults });
 
   const watchedValues = watch();
+  const lastEmitted = useRef<string | null>(null);
+  const serialized = useMemo(() => JSON.stringify(watchedValues), [watchedValues]);
 
   useEffect(() => {
-    onChange?.(watchedValues);
-  }, [watchedValues, onChange]);
+    if (!onChange) {
+      return;
+    }
+    if (serialized === lastEmitted.current) {
+      return;
+    }
+    lastEmitted.current = serialized;
+    try {
+      onChange(JSON.parse(serialized));
+    } catch {
+      onChange(watchedValues);
+    }
+  }, [serialized, watchedValues, onChange]);
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

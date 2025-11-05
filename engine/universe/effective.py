@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import List, Optional
+
+import yaml
 
 from engine.config.defaults import GLOBAL_DEFAULTS
 from engine.config.env import _get, split_symbols
@@ -10,6 +13,22 @@ try:  # Optional import when the scanner package is not available in minimal env
     from engine.strategies.symbol_scanner import SymbolScanner  # type: ignore
 except Exception:  # pragma: no cover - scanner is optional
     SymbolScanner = None  # type: ignore
+
+
+_RUNTIME_PATH = Path("config/runtime.yaml")
+
+
+def _load_runtime_core() -> List[str]:
+    try:
+        raw = yaml.safe_load(_RUNTIME_PATH.read_text()) if _RUNTIME_PATH.exists() else None
+    except Exception:
+        return []
+    symbols = (raw or {}).get("symbols", {})
+    core = symbols.get("core") if isinstance(symbols, dict) else None
+    if not isinstance(core, list):
+        return []
+    cleaned = [token.split(".")[0].upper() for token in core if token]
+    return sorted({token for token in cleaned if token and token != "*"})
 
 
 def _scanner_enabled() -> bool:
@@ -43,7 +62,11 @@ class StrategyUniverse:
             return symbols if symbols else None
 
         raw = _get("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"])
-        return split_symbols(raw)
+        parsed = split_symbols(raw)
+        if parsed:
+            return parsed
+        runtime_core = _load_runtime_core()
+        return runtime_core or None
 
 
 def _normalise_symbols(symbols: Optional[List[str]]) -> List[str]:

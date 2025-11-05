@@ -1,5 +1,5 @@
-fastapi==0.115.*
-uvicorn[standard]==0.30.*
+fastapi==0.120.4
+uvicorn[standard]==0.30.6
 pydantic==2.*
 pydantic-settings==2.*
 numpy>=1.26,<3

@@ -1,0 +1,46 @@
+{
+  "framework": {
+    "root": "frontend",
+    "stack": "React 18 + Vite + TypeScript + Zustand + React Query + motion",
+    "tests": {
+      "unit": "vitest",
+      "e2e": "playwright",
+      "config": ["frontend/vitest.config.ts", "frontend/playwright.config.ts"]
+    },
+    "liveFlags": ["VITE_WS_URL", "VITE_API_URL", "__NAUTILUS_DISABLE_PERSIST__"]
+  },
+  "suspects": [
+    {
+      "id": "loop_dynamic_param_form",
+      "location": "frontend/src/components/forms/DynamicParamForm.tsx:29-54",
+      "type": "effect-dep-mutates-dep",
+      "graph": "watch() \u2192 useEffect(onChange) \u2192 BacktestingTab.setOverrides \u2192 re-render DynamicParamForm",
+      "notes": "react-hook-form watch() returns a new object each render; effect pushes it upstream without equality guard, so BacktestingTab state is rewritten on every render causing a tight render cycle when overrides are open."
+    },
+    {
+      "id": "loop_websocket_metrics",
+      "location": "frontend/src/App.tsx:120-170",
+      "type": "effect-dep-mutates-cache",
+      "graph": "WebSocket message \u2192 App.useEffect \u2192 queryClient.setQueryData(summary|health) \u2192 useQuery subscribers \u2192 App re-render",
+      "notes": "setQueryData runs for every metrics/health frame without checking whether payloads changed; downstream components (TopHUD, DashboardTab) re-render even for identical snapshots, creating an unbounded update loop at WS cadence."
+    },
+    {
+      "id": "loop_polling_hook",
+      "location": "frontend/src/lib/hooks.ts:1-29",
+      "type": "timer-subscription",
+      "graph": "setTimeout tick \u2192 fn() \u2192 setData/setError \u2192 component re-render \u2192 effect schedules next tick",
+      "notes": "usePolling sets local state on every poll result regardless of equality and reschedules immediately, so when fn resolves rapidly with same payload it causes continuous renders."
+    }
+  ],
+  "instrumentation": {
+    "renderCounterPlan": [
+      "Wrap BacktestingTab and DynamicParamForm with a dev-only render counter to confirm the overrides form never settles.",
+      "Add console.count in App metrics effect to quantify WS-driven re-render cadence.",
+      "Instrument usePolling with a ref to record consecutive identical payloads that still trigger state writes."
+    ],
+    "openQuestions": [
+      "Should WebSocket metric updates bypass React Query entirely in favor of Zustand real-time slices?",
+      "Do we need to dedupe poll responses or shorten interval only when job states change?"
+    ]
+  }
+}

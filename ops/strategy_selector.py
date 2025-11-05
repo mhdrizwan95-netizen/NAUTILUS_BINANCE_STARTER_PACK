@@ -8,6 +8,7 @@ from ops.env import engine_endpoints
 from ops.net import create_async_client, request_with_retry
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
+WEIGHTS_PATH = Path("ops/strategy_weights.json")
 logging.basicConfig(
     level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
 )
@@ -150,6 +151,7 @@ def promote_best():
         logging.info(
             f"[Governance] Promoted {best_model} (v{best_stats['version']}) at {best_stats['last_promotion']}"
         )
+        _sync_router_weights(best_model)
         # Broadcast promotion to engines
         asyncio.run(push_model_update(best_model))
     elif len(ranked) >= 1 and current is None:
@@ -157,7 +159,34 @@ def promote_best():
         registry["current_model"] = best_model
         save_registry(registry)
         logging.info(f"[Governance] Initialized with best model: {best_model}")
+        _sync_router_weights(best_model)
         asyncio.run(push_model_update(best_model))
+
+
+def _sync_router_weights(current_model: str) -> None:
+    """Ensure the strategy router weights mirror the promoted model."""
+    try:
+        if WEIGHTS_PATH.exists():
+            config = json.loads(WEIGHTS_PATH.read_text())
+        else:
+            config = {}
+    except Exception as exc:  # noqa: BLE001
+        logging.error("[Governance] Failed to read strategy_weights.json: %s", exc)
+        config = {}
+
+    weights = config.get("weights") or {}
+    # Ensure promoted model is present and dominates routing
+    weights = {model: (1.0 if model == current_model else 0.0) for model in weights}
+    if current_model not in weights:
+        weights[current_model] = 1.0
+
+    config.update({"current": current_model, "weights": weights})
+
+    try:
+        WEIGHTS_PATH.write_text(json.dumps(config, indent=2))
+        logging.info("[Governance] Router weights updated for %s", current_model)
+    except Exception as exc:  # noqa: BLE001
+        logging.error("[Governance] Failed to update strategy_weights.json: %s", exc)
 
 
 async def push_model_update(model_tag: str):

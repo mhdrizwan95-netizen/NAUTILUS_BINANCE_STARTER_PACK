@@ -42,6 +42,8 @@ CREATE TABLE IF NOT EXISTS locks(
 def _connect(db_path: str = DEFAULT_DB):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 

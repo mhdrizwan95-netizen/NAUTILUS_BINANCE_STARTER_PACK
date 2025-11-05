@@ -1,0 +1,18 @@
+{
+  "config_store": {
+    "primary": "ops/policies.yaml",
+    "fallback": "ops/policies.backup.yaml",
+    "loader": "ops/governance_daemon.py:61-162",
+    "reload_interface": "ops/governance_daemon.py:411-421",
+    "distribution": "manual file sync (no remote store)"
+  },
+  "audit_trail": true,
+  "policy_guards": [
+    "governance_rule_cooldowns"
+  ],
+  "notes": {
+    "reload": "Operators can call POST /api/governance/reload (ops/ui_api.py:520-533) to apply policy edits without a restart.",
+    "backup": "Backup YAML ships with repo but no automation to sync from remote source.",
+    "daemon": "Governance daemon persists audit events to ops/logs/governance_audit.jsonl in addition to the in-memory ring buffer."
+  }
+}

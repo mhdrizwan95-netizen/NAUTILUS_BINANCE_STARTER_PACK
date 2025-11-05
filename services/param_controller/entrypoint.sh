@@ -6,6 +6,5 @@ if [ -d /shared ]; then
   chown -R appuser:appuser /shared 2>/dev/null || true
 fi
 
-# Drop privileges and exec the given command as appuser
-exec su -s /bin/sh -c "exec \"$@\"" appuser
-
+# Execute command (container runs as root but shared volume is writable)
+exec "$@"

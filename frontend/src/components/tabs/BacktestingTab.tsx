@@ -40,6 +40,7 @@ import {
 import type { StrategySummary } from '@/types/trading';
 import { useAppStore } from '@/lib/store';
 import { generateIdempotencyKey } from '@/lib/idempotency';
+import { useRenderCounter } from '@/lib/debug/why';
 
 type BacktestPoll = Awaited<ReturnType<typeof pollBacktest>>;
 
@@ -59,6 +60,7 @@ function formatCurrency(value: number) {
 }
 
 export function BacktestingTab() {
+  useRenderCounter('BacktestingTab');
   const [strategies, setStrategies] = useState<StrategySummary[]>([]);
   const [selectedStrategyId, setSelectedStrategyId] = useState<string>('');
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
@@ -110,7 +112,20 @@ export function BacktestingTab() {
     return pollBacktest(jobId);
   }, [jobId]);
 
-  const { data: polledJob } = usePolling<BacktestPoll | null>(pollingFn, 1200, Boolean(jobId));
+  const { data: polledJob } = usePolling<BacktestPoll | null>(
+    pollingFn,
+    1200,
+    Boolean(jobId),
+    (previous, next) => {
+      if (previous === next) return true;
+      if (!previous || !next) return false;
+      if (previous.status !== next.status) return false;
+      if ((previous.progress ?? null) !== (next.progress ?? null)) return false;
+      const prevResult = previous.result ?? null;
+      const nextResult = next.result ?? null;
+      return JSON.stringify(prevResult) === JSON.stringify(nextResult);
+    }
+  );
 
   useEffect(() => {
     if (polledJob) {
@@ -136,6 +151,10 @@ export function BacktestingTab() {
   const handleStart = async () => {
     if (!opsToken.trim()) {
       toast.error('Provide an OPS API token before launching a backtest');
+      return;
+    }
+    if (!opsActor.trim()) {
+      toast.error('Provide an operator call-sign before launching a backtest');
       return;
     }
     if (!opsApprover.trim()) {
@@ -166,7 +185,7 @@ export function BacktestingTab() {
         },
         {
           token: opsToken.trim(),
-          actor: opsActor.trim() || undefined,
+          actor: opsActor.trim(),
           approverToken: opsApprover.trim() || undefined,
           idempotencyKey: generateIdempotencyKey(`backtest-${selectedStrategy.id}`),
         },

@@ -5,6 +5,7 @@
 # =============================================================================
 
 # ---- Configurable knobs ------------------------------------------------------
+PYTHON                ?= python3
 COMPOSE               ?= docker compose
 OBS_COMPOSE           ?= docker compose -f ops/observability/docker-compose.observability.yml
 COMPOSE_BUILD_FLAGS   ?= --progress=plain
@@ -190,7 +191,7 @@ down-all:
 # -----------------------------------------------------------------------------
 # CI helpers
 # -----------------------------------------------------------------------------
-.PHONY: lint test image push
+.PHONY: lint test image push ci
 lint:
 	@which hadolint >/dev/null 2>&1 && hadolint Dockerfile || echo "hadolint not installed; skipping root Dockerfile"
 	@which hadolint >/dev/null 2>&1 && hadolint services/ml_service/Dockerfile || true
@@ -200,10 +201,10 @@ lint:
 	@echo "lint done"
 
 test:
-	@python -m pytest -q || python -m pytest -q --maxfail=1 || true
+	@$(PYTHON) -m pytest -q --maxfail=1
 	@if command -v npm >/dev/null 2>&1; then \
 	  echo "Running frontend unit tests"; \
-	  cd frontend && npm ci && npm run test -- --run || true; \
+	  cd frontend && npm ci && npm run test -- --run; \
 	else echo "npm not found; skipping frontend tests"; fi
 
 image:
@@ -213,6 +214,8 @@ push:
 	@if [ -z "$(REGISTRY)" ]; then echo "REGISTRY is required"; exit 1; fi
 	@docker tag $(IMG:-=nautilus):$(TAG:-=dev) $(REGISTRY)/$(IMG:-=nautilus):$(TAG:-=dev)
 	@docker push $(REGISTRY)/$(IMG:-=nautilus):$(TAG:-=dev)
+
+ci: lint test
 
 .PHONY: docker-prune prune-ml-volumes
 docker-prune:

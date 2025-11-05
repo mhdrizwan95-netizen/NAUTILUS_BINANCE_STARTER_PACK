@@ -1,0 +1,819 @@
+openapi: 3.0.3
+info:
+  title: Nautilus Command Center Control API
+  version: 1.0.0
+  description: Internal API exposed by ops/ui_api.py for manual overrides and governance
+    actions. High-risk mutations require OPS token, two-man approval, and Idempotency-Key
+    headers.
+servers:
+- url: https://command-center.local
+  description: Command Center
+paths:
+  /api/ops/ws-session:
+    post:
+      summary: Issue a short-lived WebSocket session token
+      tags:
+      - Session
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WsSessionResponse'
+      description: Requires X-Ops-Token. Returns session token used as query param
+        for WebSocket subscriptions.
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+  /api/engine/status:
+    get:
+      summary: Return engine health summary
+      tags:
+      - Status
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/config/effective:
+    get:
+      summary: Return current effective runtime configuration
+      tags:
+      - Config
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/config:
+    put:
+      summary: Patch runtime configuration toggles
+      tags:
+      - Config
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/OpsActor'
+      - $ref: '#/components/parameters/OpsApprover'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigPatch'
+  /api/strategies/governance:
+    get:
+      summary: List governance strategy registry
+      tags:
+      - Strategies
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/strategies/{strategy_id}:
+    patch:
+      summary: Update strategy enabled flag or weights
+      tags:
+      - Strategies
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrategyPatch'
+    get:
+      summary: Return a single strategy card with params
+      tags:
+      - Strategies
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/universe/{strategy_id}:
+    get:
+      summary: Fetch symbols universe for strategy
+      tags:
+      - Universe
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/universe/{strategy_id}/refresh:
+    post:
+      summary: Trigger refresh of strategy universe
+      tags:
+      - Universe
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+  /api/orders/open:
+    get:
+      summary: List currently open orders
+      tags:
+      - Orders
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/orders/cancel:
+    post:
+      summary: Cancel multiple orders
+      tags:
+      - Orders
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelOrdersRequest'
+  /api/positions/open:
+    get:
+      summary: List open positions with PnL
+      tags:
+      - Positions
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/risk/soft-breach/now:
+    post:
+      summary: Trigger soft breach risk handler immediately
+      tags:
+      - Risk
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+  /api/ops/kill-switch:
+    post:
+      summary: Toggle global trading kill-switch
+      tags:
+      - Ops
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/OpsActor'
+      - $ref: '#/components/parameters/OpsApprover'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KillSwitchRequest'
+  /api/ops/flatten:
+    post:
+      summary: Flatten all open positions
+      tags:
+      - Ops
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/OpsActor'
+      - $ref: '#/components/parameters/OpsApprover'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FlattenRequest'
+  /api/feeds/status:
+    get:
+      summary: Return status of ingest feeds
+      tags:
+      - Feeds
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/feeds/announcements:
+    patch:
+      summary: Patch announcement feed settings
+      tags:
+      - Feeds
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedPatch'
+  /api/feeds/meme:
+    patch:
+      summary: Patch meme feed settings
+      tags:
+      - Feeds
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FeedPatch'
+  /api/account/transfer:
+    post:
+      summary: Transfer funds between internal accounts
+      tags:
+      - Account
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TransferRequest'
+  /api/events/trade:
+    post:
+      summary: Ingest executed trade event for broadcast
+      tags:
+      - Events
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TradeEvent'
+  /api/strategies:
+    get:
+      summary: Return Command Center strategy cards
+      tags:
+      - Strategies
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/strategies/{strategy_id}/start:
+    post:
+      summary: Enable a strategy and optionally update params
+      tags:
+      - Strategies
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/OpsActor'
+      - $ref: '#/components/parameters/OpsApprover'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrategyStartRequest'
+  /api/strategies/{strategy_id}/stop:
+    post:
+      summary: Disable a strategy
+      tags:
+      - Strategies
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/OpsActor'
+      - $ref: '#/components/parameters/OpsApprover'
+  /api/strategies/{strategy_id}/update:
+    post:
+      summary: Persist strategy params overrides
+      tags:
+      - Strategies
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/OpsActor'
+      - $ref: '#/components/parameters/OpsApprover'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StrategyUpdateRequest'
+  /api/backtests:
+    post:
+      summary: Schedule a governance backtest job
+      tags:
+      - Backtests
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestStartResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/OpsActor'
+      - $ref: '#/components/parameters/OpsApprover'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BacktestRequest'
+  /api/backtests/{job_id}:
+    get:
+      summary: Poll backtest job status/result
+      tags:
+      - Backtests
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BacktestStatusResponse'
+      security: []
+  /api/metrics/summary:
+    get:
+      summary: Return aggregated portfolio metrics and KPIs
+      tags:
+      - Metrics
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/positions:
+    get:
+      summary: Return normalized positions list
+      tags:
+      - Positions
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security: []
+  /api/trades/recent:
+    get:
+      summary: Return recent trade feed
+      tags:
+      - Trades
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TradesResponse'
+      security: []
+  /api/alerts:
+    get:
+      summary: Return recent alerts
+      tags:
+      - Alerts
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AlertsResponse'
+      security: []
+    post:
+      summary: Post alert into control feed
+      tags:
+      - Alerts
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenericResponse'
+      security:
+      - OpsToken: []
+      parameters:
+      - $ref: '#/components/parameters/OpsActor'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AlertRequest'
+  /api/health:
+    get:
+      summary: Return aggregated venue/engine health
+      tags:
+      - Status
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+      security: []
+components:
+  securitySchemes:
+    OpsToken:
+      type: apiKey
+      in: header
+      name: X-Ops-Token
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 8
+      description: Client-generated idempotency token (UUID recommended). Required
+        for control mutations.
+    OpsActor:
+      name: X-Ops-Actor
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Human operator identity for audit logging.
+    OpsApprover:
+      name: X-Ops-Approver
+      in: header
+      required: false
+      schema:
+        type: string
+      description: Secondary approver token when two-man rule is enforced.
+  schemas:
+    GenericResponse:
+      type: object
+      additionalProperties: true
+    WsSessionResponse:
+      type: object
+      properties:
+        session:
+          type: string
+        expires:
+          type: number
+          format: unix-time
+      required:
+      - session
+      - expires
+    ConfigPatch:
+      type: object
+      properties:
+        DRY_RUN:
+          type: boolean
+        SYMBOL_SCANNER_ENABLED:
+          type: boolean
+        SOFT_BREACH_ENABLED:
+          type: boolean
+        SOFT_BREACH_TIGHTEN_SL_PCT:
+          type: number
+        SOFT_BREACH_BREAKEVEN_OK:
+          type: boolean
+        SOFT_BREACH_CANCEL_ENTRIES:
+          type: boolean
+    StrategyPatch:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        weights:
+          type: object
+          additionalProperties:
+            type: number
+    CancelOrdersRequest:
+      type: object
+      properties:
+        orderIds:
+          type: array
+          items:
+            type: string
+          minItems: 1
+      required:
+      - orderIds
+    KillSwitchRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        reason:
+          type: string
+      required:
+      - enabled
+    FlattenRequest:
+      type: object
+      properties:
+        dryRun:
+          type: boolean
+          default: false
+    FeedPatch:
+      type: object
+      additionalProperties: true
+    TransferRequest:
+      type: object
+      properties:
+        asset:
+          type: string
+        amount:
+          type: number
+        source:
+          type: string
+        target:
+          type: string
+      required:
+      - asset
+      - amount
+      - source
+      - target
+    TradeEvent:
+      type: object
+      properties:
+        time:
+          type: integer
+        symbol:
+          type: string
+        side:
+          type: string
+          enum:
+          - buy
+          - sell
+        qty:
+          type: number
+        price:
+          type: number
+        pnl:
+          type:
+          - number
+          - 'null'
+      required:
+      - symbol
+      - side
+    StrategyStartRequest:
+      type: object
+      properties:
+        params:
+          type: object
+          additionalProperties: true
+    StrategyUpdateRequest:
+      type: object
+      properties:
+        params:
+          type: object
+          additionalProperties: true
+      required:
+      - params
+    BacktestRequest:
+      type: object
+      properties:
+        strategyId:
+          type: string
+        config:
+          type: object
+          additionalProperties: true
+      required:
+      - strategyId
+    BacktestStartResponse:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        jobId:
+          type: string
+      required:
+      - ok
+      - jobId
+    BacktestStatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        progress:
+          type: number
+        result:
+          type: object
+      required:
+      - status
+      - progress
+    TradesResponse:
+      type: array
+      items:
+        type: object
+        properties:
+          time:
+            type: integer
+          symbol:
+            type: string
+          side:
+            type: string
+          qty:
+            type: number
+          price:
+            type: number
+          pnl:
+            type:
+            - number
+            - 'null'
+    AlertsResponse:
+      type: array
+      items:
+        type: object
+        properties:
+          time:
+            type: integer
+          level:
+            type: string
+          text:
+            type: string
+        required:
+        - time
+        - level
+        - text
+    AlertRequest:
+      type: object
+      properties:
+        time:
+          type: integer
+        level:
+          type: string
+        text:
+          type: string
+      required:
+      - level
+      - text
+    HealthResponse:
+      type: object
+      properties:
+        venues:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              status:
+                type: string
+              latencyMs:
+                type: number
+              queue:
+                type: integer
+            required:
+            - name
+            - status
+      required:
+      - venues

@@ -20,7 +20,10 @@ CREATE TABLE IF NOT EXISTS outcomes(
 
 def connect(db_path: str):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
-    return sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+    conn = sqlite3.connect(db_path, timeout=30, check_same_thread=False)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    return conn
 
 
 def init(db_path: str):
@@ -86,3 +89,20 @@ def log_outcome(
     )
     conn.commit()
     conn.close()
+
+
+def fetch_outcomes(
+    db_path: str, strategy: str, instrument: str
+) -> List[Tuple[str, float, dict]]:
+    conn = connect(db_path)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT preset_id, reward, features_json FROM outcomes WHERE strategy=? AND instrument=?",
+    (strategy, instrument),
+    )
+    rows = [
+        (row[0], float(row[1]), json.loads(row[2]) if row[2] else {})
+        for row in cur.fetchall()
+    ]
+    conn.close()
+    return rows

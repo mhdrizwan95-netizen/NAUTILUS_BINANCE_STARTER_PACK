@@ -1,10 +1,32 @@
 #!/usr/bin/env python3
 import os, hmac, hashlib, time, urllib.parse, httpx
-from typing import Dict, Any
+from pathlib import Path
+from typing import Dict, Any, Iterable
 
 
 def _now_ms() -> int:
     return int(time.time() * 1000)
+
+
+def _env_or_file(name: str) -> str:
+    value = (os.getenv(name) or "").strip()
+    file_path = os.getenv(f"{name}_FILE")
+    if file_path:
+        try:
+            candidate = Path(file_path).read_text(encoding="utf-8").strip()
+        except OSError:
+            candidate = ""
+        if candidate:
+            return candidate
+    return value
+
+
+def _resolve_secret(candidates: Iterable[str]) -> str:
+    for candidate in candidates:
+        value = _env_or_file(candidate)
+        if value:
+            return value
+    return ""
 
 
 class BinanceAccountProvider:
@@ -29,16 +51,16 @@ class BinanceAccountProvider:
                 "DEMO_COINM_BASE", "https://testnet.binancefuture.com"
             )
             key_candidates = [
-                os.getenv("DEMO_API_KEY_SPOT"),
-                os.getenv("DEMO_API_KEY_USDM"),
-                os.getenv("DEMO_API_KEY"),
-                os.getenv("BINANCE_API_KEY", ""),
+                "DEMO_API_KEY_SPOT",
+                "DEMO_API_KEY_USDM",
+                "DEMO_API_KEY",
+                "BINANCE_API_KEY",
             ]
             secret_candidates = [
-                os.getenv("DEMO_API_SECRET_SPOT"),
-                os.getenv("DEMO_API_SECRET_USDM"),
-                os.getenv("DEMO_API_SECRET"),
-                os.getenv("BINANCE_API_SECRET", ""),
+                "DEMO_API_SECRET_SPOT",
+                "DEMO_API_SECRET_USDM",
+                "DEMO_API_SECRET",
+                "BINANCE_API_SECRET",
             ]
         else:
             self.spot_base = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
@@ -46,11 +68,11 @@ class BinanceAccountProvider:
             self.coinm_base = os.getenv(
                 "BINANCE_COINM_BASE", "https://dapi.binance.com"
             )
-            key_candidates = [os.getenv("BINANCE_API_KEY", "")]
-            secret_candidates = [os.getenv("BINANCE_API_SECRET", "")]
+            key_candidates = ["BINANCE_API_KEY"]
+            secret_candidates = ["BINANCE_API_SECRET"]
 
-        self.api_key = next((v for v in key_candidates if v), "")
-        self.api_secret = next((v for v in secret_candidates if v), "")
+        self.api_key = _resolve_secret(key_candidates)
+        self.api_secret = _resolve_secret(secret_candidates)
 
         self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
         self.timeout = int(os.getenv("BINANCE_API_TIMEOUT", "10"))

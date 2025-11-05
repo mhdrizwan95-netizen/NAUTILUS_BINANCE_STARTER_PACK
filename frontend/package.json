@@ -53,6 +53,8 @@
             "zustand": "^5.0.0"
       },
       "devDependencies": {
+            "eslint": "^9.14.0",
+            "eslint-plugin-jsx-a11y": "^6.9.0",
             "@playwright/test": "^1.56.1",
             "@testing-library/jest-dom": "^6.5.0",
             "@testing-library/react": "^16.0.1",
@@ -77,6 +79,28 @@
             "test:coverage": "vitest --coverage",
             "test:e2e": "playwright test",
             "test:e2e:ui": "playwright test --ui",
-            "preview": "vite preview"
+            "preview": "vite preview",
+            "lint:a11y": "eslint \"src/**/*.{ts,tsx}\" --max-warnings=0"
+      },
+      "eslintConfig": {
+            "extends": [
+                  "eslint:recommended"
+            ],
+            "plugins": [
+                  "jsx-a11y"
+            ],
+            "env": {
+                  "browser": true,
+                  "es2021": true
+            },
+            "parserOptions": {
+                  "ecmaVersion": "latest",
+                  "sourceType": "module"
+            },
+            "rules": {
+                  "jsx-a11y/no-autofocus": "error",
+                  "jsx-a11y/no-noninteractive-tabindex": "error",
+                  "jsx-a11y/aria-roles": "error"
+            }
       }
 }

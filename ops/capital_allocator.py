@@ -153,7 +153,13 @@ def fetch_registry_fallback() -> Dict[str, Any]:
     Returns simulated metrics based on stored registry data.
     """
     registry = load_json(REGISTRY_PATH, {})
-    fallback = {"portfolio_equity_usd": 50000.0, "models": {}}  # Reasonable fallback
+    allocations = load_json(ALLOCATIONS_PATH, {})
+    last_equity = float(allocations.get("equity_usd") or 0.0)
+    if last_equity <= 0.0:
+        last_equity = float(
+            sum((allocations.get("capital_quota_usd") or {}).values())
+        )
+    fallback = {"portfolio_equity_usd": last_equity, "models": {}}
 
     for model_name, model_data in registry.items():
         if isinstance(model_data, dict):
@@ -162,7 +168,11 @@ def fetch_registry_fallback() -> Dict[str, Any]:
                 "realized_pnl": model_data.get("realized", 0.0),
             }
 
-    logging.info(f"Using registry fallback metrics: {len(fallback['models'])} models")
+    logging.info(
+        "Using registry fallback metrics: %s models, equity_hint=%s",
+        len(fallback["models"]),
+        fallback["portfolio_equity_usd"],
+    )
     return fallback
 
 
@@ -181,10 +191,14 @@ def calculate_target_allocation(
         return target_allocations
 
     # Calculate total available capital pool
-    equity_fraction = policy.get("base_equity_frac", 0.2)
-    total_pool = float(
-        max(1000.0, equity * equity_fraction)
-    )  # Minimum $1K even with no equity
+    equity_fraction = float(policy.get("base_equity_frac", 0.2))
+    total_pool = max(0.0, equity * equity_fraction)
+    min_pool = float(policy.get("min_pool_usd", 0.0) or 0.0)
+    if min_pool > 0.0:
+        total_pool = max(total_pool, min_pool)
+    reserve_equity = float(policy.get("reserve_equity_usd", 0.0) or 0.0)
+    safe_equity = max(0.0, equity - reserve_equity)
+    total_pool = min(total_pool, safe_equity if safe_equity > 0.0 else equity)
 
     # Start with even split baseline
     base_allocation = total_pool / len(enabled_models)

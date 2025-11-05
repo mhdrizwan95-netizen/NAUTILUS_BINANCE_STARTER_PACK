@@ -16,3 +16,31 @@ services:
     user: "472:472"
     volumes:
       - ${SECRETS_DIR:?}/grafana_admin_password:/run/secrets/grafana_admin_password:ro
+
+  engine_binance:
+    environment:
+      BINANCE_API_KEY_FILE: /run/secrets/binance_api_key
+      BINANCE_API_SECRET_FILE: /run/secrets/binance_api_secret
+    read_only: true
+    tmpfs:
+      - /tmp/prom_multiproc:rw,uid=1000,gid=1000,mode=1777
+    secrets:
+      - binance_api_key
+      - binance_api_secret
+
+  engine_binance_exporter:
+    environment:
+      BINANCE_API_KEY_FILE: /run/secrets/binance_api_key
+      BINANCE_API_SECRET_FILE: /run/secrets/binance_api_secret
+    read_only: true
+    tmpfs:
+      - /tmp/prom_multiproc:rw,uid=1000,gid=1000,mode=1777
+    secrets:
+      - binance_api_key
+      - binance_api_secret
+
+secrets:
+  binance_api_key:
+    file: ${SECRETS_DIR:?}/binance_api_key
+  binance_api_secret:
+    file: ${SECRETS_DIR:?}/binance_api_secret

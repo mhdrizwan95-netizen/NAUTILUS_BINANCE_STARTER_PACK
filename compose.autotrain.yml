@@ -28,7 +28,7 @@ services:
       - REGISTRY_DIR=/models/registry
       - CURRENT_SYMLINK=/models/current
       - LEDGER_DB=/shared/manifest.sqlite
-      - EXACTLY_ONCE=false
+      - EXACTLY_ONCE=${ML_EXACTLY_ONCE:-true}
       - DELETE_AFTER_PROCESS=true
     depends_on:
       - data_ingester
@@ -47,7 +47,7 @@ services:
       - REGISTRY_DIR=/models/registry
       - CURRENT_SYMLINK=/models/current
       - LEDGER_DB=/shared/manifest.sqlite
-      - EXACTLY_ONCE=false
+      - EXACTLY_ONCE=${ML_EXACTLY_ONCE:-true}
       - DELETE_AFTER_PROCESS=true
       - RETRAIN_CRON=0 */6 * * *
     volumes:

@@ -13,11 +13,14 @@ Architecture:
 """
 
 import asyncio
+import json
 import logging
 import os
 import time
+from pathlib import Path
+from typing import Any, Callable, Dict, List, Optional
+
 import yaml
-from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 
 from engine.core.event_bus import BUS
@@ -34,6 +37,8 @@ _GOVERNANCE_RULE_TRIPPED = Counter(
     "Total governance rule executions",
     ["name"],
 )
+
+AUDIT_PATH = Path("ops/logs/governance_audit.jsonl")
 
 
 @dataclass
@@ -386,6 +391,12 @@ class GovernanceDaemon:
 
         # Immediate log for transparency
         logging.info(f"[GOV] AUDIT: {rule.action} executed due to {rule.trigger}")
+        try:
+            AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with AUDIT_PATH.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(audit_event) + "\n")
+        except Exception as exc:  # pragma: no cover - best-effort persistence
+            logging.warning("[GOV] Failed to append audit trail: %s", exc)
         try:
             _GOVERNANCE_RULE_TRIPPED.labels(
                 name=rule.name or f"{rule.trigger}:{rule.action}"

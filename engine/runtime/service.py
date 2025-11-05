@@ -77,10 +77,9 @@ async def _run_pipeline(config: RuntimeConfig) -> None:
 
 
 async def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s :: %(message)s",
-    )
+    from engine.logging_utils import setup_logging
+
+    setup_logging()
     config = load_runtime_config()
     log.info("[runtime] starting strategy pipeline (demo=%s)", config.demo_mode)
     await _run_pipeline(config)

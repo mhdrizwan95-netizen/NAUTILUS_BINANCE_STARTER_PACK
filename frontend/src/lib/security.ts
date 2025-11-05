@@ -227,38 +227,32 @@ export class RequestSigner {
 // Secure storage utilities
 export class SecureStorage {
   private static readonly PREFIX = 'nautilus_secure_';
-  private static readonly SECRET = 'nautilus-secure-storage-key';
-  private static keyPromise: Promise<CryptoKey> | null = null;
+  private static encryptionKey: CryptoKey | null = null;
 
-  private static async getKey(): Promise<CryptoKey | null> {
+  static async bootstrap(sessionKeyMaterial: string): Promise<void> {
     if (!isCryptoAvailable()) {
-      return null;
+      throw new Error('Secure storage unavailable without WebCrypto');
     }
-    if (!this.keyPromise) {
-      this.keyPromise = window.crypto.subtle.importKey(
-        'raw',
-        await window.crypto.subtle.digest('SHA-256', encoder.encode(this.SECRET)),
-        { name: 'AES-GCM' },
-        false,
-        ['encrypt', 'decrypt'],
-      );
-    }
-    return this.keyPromise;
+    this.encryptionKey = await window.crypto.subtle.importKey(
+      'raw',
+      encoder.encode(sessionKeyMaterial),
+      { name: 'AES-GCM' },
+      false,
+      ['encrypt', 'decrypt'],
+    );
   }
 
   // Store sensitive data (encrypted when Web Crypto is available)
   static async setItem(key: string, value: string): Promise<void> {
     try {
-      const storageKey = await this.getKey();
-      if (!storageKey) {
-        localStorage.setItem(this.PREFIX + key, value);
-        return;
+      if (!this.encryptionKey) {
+        throw new Error('SecureStorage not bootstrapped with session key');
       }
 
       const iv = window.crypto.getRandomValues(new Uint8Array(12));
       const cipherBuffer = await window.crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },
-        storageKey,
+        this.encryptionKey,
         encoder.encode(value),
       );
 
@@ -281,29 +275,20 @@ export class SecureStorage {
         return null;
       }
 
-      const storageKey = await this.getKey();
-      if (!storageKey) {
-        return stored;
+      if (!this.encryptionKey) {
+        throw new Error('SecureStorage not bootstrapped with session key');
       }
 
-      try {
-        const parsed = JSON.parse(stored) as { iv?: string; value?: string };
-        if (!parsed.iv || !parsed.value) {
-          throw new Error('Invalid payload');
-        }
-        const decrypted = await window.crypto.subtle.decrypt(
-          { name: 'AES-GCM', iv: base64ToArrayBuffer(parsed.iv) },
-          storageKey,
-          base64ToArrayBuffer(parsed.value),
-        );
-        return decoder.decode(decrypted);
-      } catch {
-        try {
-          return decoder.decode(base64ToArrayBuffer(stored));
-        } catch {
-          return stored;
-        }
+      const parsed = JSON.parse(stored) as { iv?: string; value?: string };
+      if (!parsed.iv || !parsed.value) {
+        throw new Error('Invalid payload');
       }
+      const decrypted = await window.crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: base64ToArrayBuffer(parsed.iv) },
+        this.encryptionKey,
+        base64ToArrayBuffer(parsed.value),
+      );
+      return decoder.decode(decrypted);
     } catch (error) {
       console.error('Failed to retrieve secure item:', error);
       return null;

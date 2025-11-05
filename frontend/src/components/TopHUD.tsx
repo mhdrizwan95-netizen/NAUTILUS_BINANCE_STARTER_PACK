@@ -4,6 +4,8 @@ import { Power, Activity, Wifi, WifiOff, Pause, Play, RefreshCw } from 'lucide-r
 import { Switch } from './ui/switch';
 import { Button } from './ui/button';
 import { motion } from 'motion/react';
+import { Badge } from './ui/badge';
+import { useRenderCounter } from '@/lib/debug/why';
 
 export interface TopHudMetrics {
   totalPnl: number;
@@ -32,6 +34,7 @@ export interface TopHUDProps {
   onResume: () => void | Promise<void>;
   onFlatten: () => void | Promise<void>;
   controlState?: 'pause' | 'resume' | 'flatten' | 'kill' | null;
+  tradingEnabled?: boolean;
 }
 
 export function TopHUD({
@@ -46,9 +49,13 @@ export function TopHUD({
   onResume,
   onFlatten,
   controlState = null,
+  tradingEnabled = true,
 }: TopHUDProps) {
+  useRenderCounter('TopHUD');
   const switchId = useId();
   const switchLabelId = `${switchId}-label`;
+  const killDescriptionId = useId();
+  const statusLiveId = useId();
 
   const formatCurrency = (value: number) =>
     new Intl.NumberFormat('en-US', {
@@ -82,17 +89,20 @@ export function TopHUD({
           <div className="relative">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-indigo-500 opacity-20 absolute inset-0 blur-md" />
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-indigo-500 flex items-center justify-center relative">
-              <Activity className="w-4 h-4 text-zinc-900" />
+              <Activity className="w-4 h-4 text-zinc-900" aria-hidden="true" />
             </div>
           </div>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-zinc-100 tracking-tight">NAUTILUS</h1>
               {isConnected ? (
-                <Wifi className="w-4 h-4 text-emerald-400" />
+                <Wifi className="w-4 h-4 text-emerald-400" aria-hidden="true" />
               ) : (
-                <WifiOff className="w-4 h-4 text-red-400" />
+                <WifiOff className="w-4 h-4 text-red-400" aria-hidden="true" />
               )}
+              <span className="sr-only">
+                {isConnected ? 'Connected to engine and market data' : 'Disconnected from engine and market data'}
+              </span>
             </div>
             <p className="text-zinc-500 text-xs tracking-wider">TERMINAL</p>
           </div>
@@ -128,10 +138,10 @@ export function TopHUD({
             onClick={() => {
               void onPause();
             }}
-            disabled={controlState === 'pause'}
+            disabled={controlState === 'pause' || !tradingEnabled}
             className="gap-2 border-amber-400/30 text-amber-400 hover:bg-amber-500/10"
           >
-            <Pause className="w-4 h-4" />
+            <Pause className="w-4 h-4" aria-hidden="true" />
             Pause
           </Button>
           <Button
@@ -140,10 +150,10 @@ export function TopHUD({
             onClick={() => {
               void onResume();
             }}
-            disabled={controlState === 'resume'}
+            disabled={controlState === 'resume' || tradingEnabled}
             className="gap-2 border-emerald-400/30 text-emerald-400 hover:bg-emerald-500/10"
           >
-            <Play className="w-4 h-4" />
+            <Play className="w-4 h-4" aria-hidden="true" />
             Resume
           </Button>
           <Button
@@ -155,7 +165,7 @@ export function TopHUD({
             disabled={controlState === 'flatten'}
             className="gap-2 border-cyan-400/30 text-cyan-300 hover:bg-cyan-500/10"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4" aria-hidden="true" />
             Flatten
           </Button>
           <Button
@@ -166,17 +176,31 @@ export function TopHUD({
             }}
             disabled={controlState === 'kill'}
             className="gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
+            aria-describedby={killDescriptionId}
           >
-            <Power className="w-4 h-4" />
+            <Power className="w-4 h-4" aria-hidden="true" />
             KILL
           </Button>
+          <span id={killDescriptionId} className="sr-only">
+            Immediately disable live trading across all venues.
+          </span>
+          <Badge
+            variant={tradingEnabled ? 'secondary' : 'destructive'}
+            id={statusLiveId}
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="uppercase tracking-wide"
+          >
+            {tradingEnabled ? 'Trading enabled' : 'Trading paused'}
+          </Badge>
         </div>
       </div>
 
       {/* Row 2: Global Metrics & Venue Status */}
       <div className="flex items-center justify-between">
         {/* Left: Global Metrics */}
-        <div className="flex items-center gap-6">
+        <dl className="grid gap-4 sm:flex sm:items-center sm:gap-8" aria-live="polite" aria-describedby={statusLiveId}>
           <MetricDisplay
             label="PnL"
             value={totalPnlValue}
@@ -189,7 +213,6 @@ export function TopHUD({
                 : 'text-zinc-600'
             }
           />
-          <div className="w-px h-8 bg-zinc-700/50" />
           <MetricDisplay
             label="Sharpe"
             value={sharpeValue}
@@ -201,7 +224,6 @@ export function TopHUD({
                 : 'text-zinc-600'
             }
           />
-          <div className="w-px h-8 bg-zinc-700/50" />
           <MetricDisplay
             label="Drawdown"
             value={drawdownValue}
@@ -213,13 +235,12 @@ export function TopHUD({
                 : 'text-zinc-600'
             }
           />
-          <div className="w-px h-8 bg-zinc-700/50" />
           <MetricDisplay
             label="Positions"
             value={positionsValue}
             color={metricsAvailable ? 'text-zinc-300' : 'text-zinc-600'}
           />
-        </div>
+        </dl>
 
         {/* Right: Venue Status */}
         <div className="flex items-center gap-2">
@@ -246,15 +267,15 @@ function MetricDisplay({
   const isText = typeof value === 'string' || typeof value === 'number';
 
   return (
-    <div className="flex flex-col">
-      <span className="text-xs text-zinc-500 tracking-wider">{label}</span>
-      <div className="flex items-baseline gap-2">
+    <>
+      <dt className="text-xs text-zinc-500 tracking-wider">{label}</dt>
+      <dd className="flex items-baseline gap-2">
         <span className={isText ? `font-mono ${color ?? 'text-zinc-300'}` : 'font-mono text-zinc-300'}>
           {value}
         </span>
         {subtitle && <span className="text-xs text-zinc-600 font-mono">{subtitle}</span>}
-      </div>
-    </div>
+      </dd>
+    </>
   );
 }
 
@@ -272,14 +293,20 @@ function VenueIndicator({ venue }: { venue: TopHudVenue }) {
   }[venue.status];
 
   return (
-    <div className="px-3 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/40 flex items-center gap-3">
+    <div
+      className="px-3 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/40 flex items-center gap-3"
+      role="status"
+      aria-live="polite"
+      aria-label={`${venue.name} status ${statusLabel}. Latency ${venue.latencyMs} milliseconds. Queue depth ${venue.queue}.`}
+    >
       <div className="relative">
-        <div className={`w-2 h-2 rounded-full ${statusColor}`} />
+        <div className={`w-2 h-2 rounded-full ${statusColor}`} aria-hidden="true" />
         {venue.status === 'ok' && (
           <motion.div
             className={`w-2 h-2 rounded-full ${statusColor} absolute inset-0`}
             animate={{ scale: [1, 2, 1], opacity: [1, 0, 1] }}
             transition={{ duration: 2, repeat: Infinity }}
+            aria-hidden="true"
           />
         )}
       </div>

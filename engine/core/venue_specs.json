@@ -2179,6 +2179,16 @@
       "min_qty": 1.0,
       "step_size": 1.0,
       "min_notional": 0.0
+    },
+    "KITEUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
+    },
+    "MMTUSDT": {
+      "min_qty": 0.1,
+      "step_size": 0.1,
+      "min_notional": 0.0
     }
   }
 }

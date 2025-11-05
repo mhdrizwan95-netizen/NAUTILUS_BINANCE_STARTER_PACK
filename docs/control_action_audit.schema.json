@@ -1,0 +1,47 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CommandCenterControlAction",
+  "description": "Normalized entry stored in ops/logs/control_actions.jsonl for every mutating command.",
+  "type": "object",
+  "required": [
+    "ts",
+    "action",
+    "idempotency_key",
+    "payload",
+    "result"
+  ],
+  "properties": {
+    "ts": {
+      "type": "number",
+      "description": "Unix epoch timestamp (seconds) when the action was recorded."
+    },
+    "action": {
+      "type": "string",
+      "description": "Action identifier (e.g. config.patch, flatten, strategy.start)."
+    },
+    "actor": {
+      "type": ["string", "null"],
+      "description": "Operator identity supplied via X-Ops-Actor header."
+    },
+    "approver": {
+      "type": ["string", "null"],
+      "description": "Secondary approver token when two-man rule is enforced."
+    },
+    "idempotency_key": {
+      "type": "string",
+      "minLength": 8,
+      "description": "Client-generated key used to deduplicate repeated submissions."
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Request body captured before dispatch."
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Handler response persisted for replay."
+    }
+  },
+  "additionalProperties": true
+}

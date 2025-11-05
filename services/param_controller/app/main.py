@@ -35,17 +35,24 @@ def get_param(strategy: str, instrument: str, features: Dict[str, float] = {}):
     presets = store.list_presets(settings.PC_DB, strategy, instrument)
     if not presets:
         raise HTTPException(404, "no presets registered")
-    # Build K x d design with same x for each arm
-    feat_keys = sorted(features.keys())
-    x = np.array([features[k] for k in feat_keys], dtype=float)
-    if x.size == 0:
-        # fallback: bias only
-        x = np.array([1.0], dtype=float)
+    history = store.fetch_outcomes(settings.PC_DB, strategy, instrument)
+    history_feature_keys = {k for _, _, feats in history for k in feats.keys()}
+    feat_keys = sorted(set(features.keys()) | history_feature_keys)
+    if not feat_keys:
+        feat_keys = ["bias"]
+        features = {"bias": 1.0}
+    x = np.array([features.get(k, 0.0) for k in feat_keys], dtype=float)
     K = len(presets)
     X = np.vstack([x for _ in range(K)])
     bandit = LinTS(d=x.size, l2=settings.L2)
-    # We don't persist the bandit posterior in this minimal example; for production,
-    # persist A/b per (strategy,instrument) and warm-start here.
+    preset_index = {pid: idx for idx, (pid, _) in enumerate(presets)}
+    for preset_id, reward, feat_dict in history:
+        idx = preset_index.get(preset_id)
+        if idx is None:
+            continue
+        vec = np.array([feat_dict.get(k, 0.0) for k in feat_keys], dtype=float)
+        bandit.update(idx, vec, reward)
+    # Sample from posterior conditioned on historical outcomes
     k = bandit.choose(X)
     pid, params = presets[k]
     config_id = f"{strategy}:{instrument}:{pid}"

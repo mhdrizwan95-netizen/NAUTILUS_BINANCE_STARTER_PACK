@@ -121,8 +121,11 @@ class ConfigService:
     def __init__(self, base_path: Path, overrides_path: Path) -> None:
         self._base_path = Path(base_path)
         self._overrides_path = Path(overrides_path)
+        self._meta_path = self._overrides_path.with_suffix(".meta.json")
+        self._audit_path = self._overrides_path.with_suffix(".audit.jsonl")
         self._lock = RLock()
         self._overrides: Dict[str, Any] = self._load_overrides()
+        self._meta: Dict[str, Any] = self._load_meta()
 
     def _load_base(self) -> Dict[str, Any]:
         if not self._base_path.exists():
@@ -140,10 +143,31 @@ class ConfigService:
             return {}
 
     def _persist(self) -> None:
+        self._overrides_path.parent.mkdir(parents=True, exist_ok=True)
         self._overrides_path.write_text(
             json.dumps(self._overrides, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+
+    def _load_meta(self) -> Dict[str, Any]:
+        if not self._meta_path.exists():
+            return {"version": 0, "updated_at": None, "updated_by": None, "approved_by": None}
+        try:
+            return json.loads(self._meta_path.read_text(encoding="utf-8"))
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to load runtime meta: %s", exc)
+            return {"version": 0, "updated_at": None, "updated_by": None, "approved_by": None}
+
+    def _persist_meta(self) -> None:
+        self._meta_path.write_text(json.dumps(self._meta, indent=2, sort_keys=True), encoding="utf-8")
+
+    def _append_audit(self, record: Dict[str, Any]) -> None:
+        try:
+            self._audit_path.parent.mkdir(parents=True, exist_ok=True)
+            with self._audit_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record) + "\n")
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Failed to append config audit log: %s", exc)
 
     async def get_effective(self) -> Dict[str, Any]:
         with self._lock:
@@ -154,19 +178,45 @@ class ConfigService:
                 "base": base,
                 "overrides": _deepcopy(self._overrides),
                 "effective": effective,
+                "meta": _deepcopy(self._meta),
             }
 
-    async def patch(self, updates: Dict[str, Any]) -> Dict[str, Any]:
+    async def patch(
+        self,
+        updates: Dict[str, Any],
+        *,
+        actor: Optional[str],
+        approver: Optional[str],
+    ) -> Dict[str, Any]:
         with self._lock:
+            base = self._load_base()
+            allowed_keys = set(base.keys())
+            for key in updates:
+                if key not in allowed_keys:
+                    raise ValueError(f"Unknown runtime setting '{key}'")
             for key, value in updates.items():
                 self._overrides[key] = value
             self._persist()
-            base = self._load_base()
             effective = _deepcopy(base)
             effective.update(self._overrides)
+            self._meta["version"] = int(self._meta.get("version", 0)) + 1
+            self._meta["updated_at"] = _now()
+            self._meta["updated_by"] = actor
+            self._meta["approved_by"] = approver
+            self._persist_meta()
+            self._append_audit(
+                {
+                    "ts": self._meta["updated_at"],
+                    "version": self._meta["version"],
+                    "actor": actor,
+                    "approver": approver,
+                    "payload": updates,
+                }
+            )
             return {
                 "effective": effective,
                 "overrides": _deepcopy(self._overrides),
+                "meta": _deepcopy(self._meta),
             }
 
 

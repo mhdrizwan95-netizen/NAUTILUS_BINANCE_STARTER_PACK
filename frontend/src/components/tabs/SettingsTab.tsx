@@ -142,6 +142,10 @@ export function SettingsTab() {
       toast.error('Provide an OPS API token to update configuration');
       return;
     }
+    if (!opsActorInput.trim()) {
+      toast.error('Provide an operator call-sign for audit logging');
+      return;
+    }
     if (!opsApprover.trim()) {
       toast.error('Provide an approver token (two-man rule) to update configuration');
       return;
@@ -163,7 +167,7 @@ export function SettingsTab() {
       patch: parsed as Record<string, unknown>,
       options: {
         token: opsToken.trim(),
-        actor: opsActorInput.trim() || undefined,
+        actor: opsActorInput.trim(),
         approverToken: opsApproverInput.trim() || undefined,
         idempotencyKey: generateIdempotencyKey('config'),
       },
@@ -237,7 +241,7 @@ export function SettingsTab() {
           <p className="text-xs text-zinc-500">
             When running locally, export <code>OPS_API_TOKEN</code> or <code>OPS_API_TOKEN_FILE</code> and reuse that value here for authenticated updates.
           </p>
-          <Label htmlFor="ops-actor" className="pt-2">Operator (audit log)</Label>
+          <Label htmlFor="ops-actor" className="pt-2">Operator (audit log, required)</Label>
           <Input
             id="ops-actor"
             type="text"

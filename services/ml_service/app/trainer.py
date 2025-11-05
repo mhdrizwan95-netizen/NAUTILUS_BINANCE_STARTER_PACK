@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from loguru import logger
 from .config import settings
 from . import model_store
-from services.common import manifest
+from common import manifest
 
 
 def _load_new_data() -> Tuple[pd.DataFrame, List[str]]:
@@ -36,6 +36,9 @@ def _load_new_data() -> Tuple[pd.DataFrame, List[str]]:
         except Exception as e:
             logger.warning(f"skipping {path}: {e}")
     if not dfs:
+        # Requeue anything we claimed before falling back
+        if claimed_ids:
+            _requeue_claims(claimed_ids)
         # Fallback: sliding window from disk (non-strict mode)
         if not settings.EXACTLY_ONCE:
             return _load_window_from_disk(days=settings.TRAIN_WINDOW_DAYS), []

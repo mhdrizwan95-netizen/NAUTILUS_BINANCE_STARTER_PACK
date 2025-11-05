@@ -6,6 +6,7 @@ import asyncio
 import json
 import os
 import random
+import secrets
 import time
 from collections import OrderedDict, deque
 from pathlib import Path
@@ -28,6 +29,14 @@ from pydantic import BaseModel
 
 from ops import pnl_dashboard as pnl
 from ops import ui_state
+from ops.middleware.control_guard import (
+    ControlContext,
+    IdempotentTwoManGuard,
+    TokenOnlyGuard,
+)
+from ops.governance_daemon import (
+    reload_governance_policies as governance_reload_policies,
+)
 
 
 def _load_ops_token() -> str:
@@ -81,6 +90,9 @@ _IDEMPOTENCY_CACHE: OrderedDict[str, tuple[float, Dict[str, Any]]] = OrderedDict
 _IDEMPOTENCY_LOCK = RLock()
 _IDEMPOTENCY_MAX = 512
 CONTROL_AUDIT_PATH = Path("ops/logs/control_actions.jsonl")
+_WS_SESSIONS: Dict[str, float] = {}
+_WS_SESSION_LOCK = RLock()
+_WS_SESSION_TTL_SEC = float(os.getenv("OPS_WS_SESSION_TTL", "900"))
 
 
 class ConfigPatch(BaseModel):
@@ -171,6 +183,12 @@ def _idempotency_store(key: str, response: Dict[str, Any]) -> None:
             _IDEMPOTENCY_CACHE.popitem(last=False)
 
 
+def _idempotency_cached_response(idem_key: str) -> Optional[Dict[str, Any]]:
+    if not idem_key:
+        return None
+    return _idempotency_lookup(idem_key)
+
+
 def _record_control_action(
     action: str,
     actor: Optional[str],
@@ -195,6 +213,51 @@ def _record_control_action(
     except Exception:
         # Audit logging best-effort; avoid interrupting control flow
         pass
+
+
+def _issue_ws_session() -> tuple[str, float]:
+    """Create a short-lived WebSocket session token."""
+    now = time.time()
+    expiry = now + _WS_SESSION_TTL_SEC
+    token = secrets.token_urlsafe(32)
+    with _WS_SESSION_LOCK:
+        # prune expired sessions first
+        expired = [key for key, ts in _WS_SESSIONS.items() if ts <= now]
+        for key in expired:
+            _WS_SESSIONS.pop(key, None)
+        _WS_SESSIONS[token] = expiry
+    return token, expiry
+
+
+def _validate_ws_session(session: Optional[str]) -> bool:
+    if not session:
+        return False
+    now = time.time()
+    with _WS_SESSION_LOCK:
+        expiry = _WS_SESSIONS.get(session)
+        if expiry and expiry > now:
+            return True
+        if expiry is not None:
+            _WS_SESSIONS.pop(session, None)
+    return False
+
+
+@router.post("/ops/ws-session")
+async def create_ws_session(
+    request: Request, _auth: None = Depends(require_ops_token)
+) -> Dict[str, Any]:
+    """Issue a temporary session token for WebSocket subscriptions."""
+    session, expiry = _issue_ws_session()
+    actor = request.headers.get("X-Ops-Actor")
+    _record_control_action(
+        "ws_session.issue",
+        actor,
+        None,
+        session,
+        {},
+        {"expires": expiry},
+    )
+    return {"session": session, "expires": expiry}
 
 
 def _yaml_schema_to_param_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
@@ -276,28 +339,34 @@ async def config_effective(state: Dict[str, Any] = Depends(get_state)) -> Any:
 @router.put("/config")
 async def config_update(
     patch: ConfigPatch,
-    request: Request,
+    guard: ControlContext = Depends(IdempotentTwoManGuard),
     state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
 ) -> Any:
-    idem_key, cached = _require_idempotency(request)
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
     if cached:
         return cached
 
-    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     payload = {k: v for k, v in patch.dict().items() if v is not None}
     if not payload:
         result = await state["config"].get_effective()
         payload_for_audit: Dict[str, Any] = {"noop": True}
     else:
-        result = await state["config"].patch(payload)
+        try:
+            result = await state["config"].patch(
+                payload,
+                actor=guard.actor,
+                approver=guard.approver,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         payload_for_audit = payload
 
     response = result
     _record_control_action(
         "config.patch",
-        request.headers.get("X-Ops-Actor"),
-        approver,
+        guard.actor,
+        guard.approver,
         idem_key,
         payload_for_audit,
         {"ok": True, "result": result},
@@ -375,29 +444,21 @@ async def soft_breach(
 @router.post("/ops/kill-switch")
 async def killswitch(
     payload: KillSwitchRequest,
-    request: Request,
+    guard: ControlContext = Depends(IdempotentTwoManGuard),
     state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
 ) -> Any:
-    idem_key = request.headers.get("Idempotency-Key")
-    if not idem_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing Idempotency-Key header",
-        )
-    cached = _idempotency_lookup(idem_key)
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
     if cached:
         return cached
 
-    approver = _require_approver(request.headers.get("X-Ops-Approver"))
-
     result = await state["ops"].set_trading_enabled(payload.enabled)
     action = "resume" if payload.enabled else "pause"
-    response = {"ok": True, "action": action, "result": result, "approver": approver}
+    response = {"ok": True, "action": action, "result": result, "approver": guard.approver}
     _record_control_action(
         action,
-        request.headers.get("X-Ops-Actor"),
-        approver,
+        guard.actor,
+        guard.approver,
         idem_key,
         payload.model_dump(),
         response,
@@ -409,34 +470,24 @@ async def killswitch(
 @router.post("/ops/flatten")
 async def flatten_portfolio(
     _body: FlattenRequest,
-    request: Request,
+    guard: ControlContext = Depends(IdempotentTwoManGuard),
     state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
 ) -> Any:
-    idem_key = request.headers.get("Idempotency-Key")
-    if not idem_key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing Idempotency-Key header",
-        )
-    cached = _idempotency_lookup(idem_key)
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
     if cached:
         return cached
 
-    approver = _require_approver(request.headers.get("X-Ops-Approver"))
-
     try:
-        result = await state["ops"].flatten_positions(
-            actor=request.headers.get("X-Ops-Actor")
-        )
+        result = await state["ops"].flatten_positions(actor=guard.actor)
     except RuntimeError as exc:  # pragma: no cover - defensive
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
-    response = {"ok": True, "action": "flatten", "approver": approver, **result}
+    response = {"ok": True, "action": "flatten", "approver": guard.approver, **result}
     _record_control_action(
         "flatten",
-        request.headers.get("X-Ops-Actor"),
-        approver,
+        guard.actor,
+        guard.approver,
         idem_key,
         {},
         response,
@@ -444,6 +495,31 @@ async def flatten_portfolio(
     _idempotency_store(idem_key, response)
     return response
 
+
+@router.post("/governance/reload")
+async def governance_reload(
+    guard: ControlContext = Depends(TokenOnlyGuard),
+) -> Any:
+    try:
+        ok = governance_reload_policies()
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, f"Reload failed: {exc}"
+        ) from exc
+    if not ok:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Reload returned false"
+        )
+    audit_key = guard.idempotency_key or secrets.token_urlsafe(16)
+    _record_control_action(
+        "governance.reload",
+        guard.actor,
+        guard.approver,
+        audit_key,
+        {},
+        {"ok": True},
+    )
+    return {"ok": True}
 
 @router.get("/feeds/status")
 async def feeds_status(state: Dict[str, Any] = Depends(get_state)) -> Any:
@@ -593,16 +669,15 @@ async def cc_strategy_get(
 @router.post("/strategies/{strategy_id}/start")
 async def cc_strategy_start(
     strategy_id: str,
-    request: Request,
     body: Dict[str, Any] | None = None,
+    guard: ControlContext = Depends(IdempotentTwoManGuard),
     state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
 ) -> Any:
-    idem_key, cached = _require_idempotency(request)
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
     if cached:
         return cached
 
-    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     try:
         await state["strategy"].patch(strategy_id, {"enabled": True})
         if body and isinstance(body.get("params"), dict):
@@ -612,8 +687,8 @@ async def cc_strategy_start(
         response = {"ok": True, "action": "start", "strategyId": strategy_id}
         _record_control_action(
             "strategy.start",
-            request.headers.get("X-Ops-Actor"),
-            approver,
+            guard.actor,
+            guard.approver,
             idem_key,
             body or {},
             response,
@@ -629,22 +704,21 @@ async def cc_strategy_start(
 @router.post("/strategies/{strategy_id}/stop")
 async def cc_strategy_stop(
     strategy_id: str,
-    request: Request,
+    guard: ControlContext = Depends(IdempotentTwoManGuard),
     state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
 ) -> Any:
-    idem_key, cached = _require_idempotency(request)
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
     if cached:
         return cached
 
-    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     try:
         await state["strategy"].patch(strategy_id, {"enabled": False})
         response = {"ok": True, "action": "stop", "strategyId": strategy_id}
         _record_control_action(
             "strategy.stop",
-            request.headers.get("X-Ops-Actor"),
-            approver,
+            guard.actor,
+            guard.approver,
             idem_key,
             {"strategyId": strategy_id},
             response,
@@ -661,15 +735,14 @@ async def cc_strategy_stop(
 async def cc_strategy_update(
     strategy_id: str,
     body: Dict[str, Any],
-    request: Request,
+    guard: ControlContext = Depends(IdempotentTwoManGuard),
     state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
 ) -> Any:
-    idem_key, cached = _require_idempotency(request)
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
     if cached:
         return cached
 
-    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     try:
         params = body.get("params") or {}
         if not isinstance(params, dict):
@@ -680,8 +753,8 @@ async def cc_strategy_update(
         response = {"ok": True, "action": "update", "strategyId": strategy_id}
         _record_control_action(
             "strategy.update",
-            request.headers.get("X-Ops-Actor"),
-            approver,
+            guard.actor,
+            guard.approver,
             idem_key,
             body,
             response,
@@ -775,14 +848,13 @@ def _synth_backtest_result(strategy_name: str) -> Dict[str, Any]:
 @router.post("/backtests")
 async def cc_backtest_start(
     payload: Dict[str, Any],
-    request: Request,
-    _auth: None = Depends(require_ops_token),
+    guard: ControlContext = Depends(IdempotentTwoManGuard),
 ) -> Any:
-    idem_key, cached = _require_idempotency(request)
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
     if cached:
         return cached
 
-    approver = _require_approver(request.headers.get("X-Ops-Approver"))
     job_id = f"job-{int(time.time()*1000)}-{random.randint(100,999)}"
     _save_job(job_id, {"status": "queued", "progress": 0.0})
 
@@ -825,8 +897,8 @@ async def cc_backtest_start(
     response = {"ok": True, "jobId": job_id}
     _record_control_action(
         "backtest.start",
-        request.headers.get("X-Ops-Actor"),
-        approver,
+        guard.actor,
+        guard.approver,
         idem_key,
         payload,
         response,
@@ -1112,10 +1184,10 @@ _events_peers: Set[WebSocket] = set()
 
 
 async def _guard_ws(websocket: WebSocket) -> None:
-    token = websocket.query_params.get("token")
-    if token != WS_TOKEN:
-        await websocket.close(code=4401)
-        raise WebSocketDisconnect()
+    if _validate_ws_session(websocket.query_params.get("session")):
+        return
+    await websocket.close(code=4401)
+    raise WebSocketDisconnect()
 
 
 async def _ws_keep(websocket: WebSocket, peers: Set[WebSocket]) -> None:
