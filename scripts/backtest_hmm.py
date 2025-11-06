@@ -19,12 +19,15 @@ Outputs:
   - summary.json (returns, sharpe, drawdown, trades)
 """
 
-import math
 import json
 import pickle
 import argparse
-import numpy as np, pandas as pd
+import math
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
 from train_hmm_policy import _read_csv, _rolling_features
 
 

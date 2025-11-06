@@ -161,7 +161,8 @@ def main():
         if metric.lower() == "max_drawdown_usd":
             improvement = current_val - latest_val
 
-        print("✅ Auto-promotion criteria met!"        print(f"   {metric.upper()} improved by {improvement:.3f}")
+        print("✅ Auto-promotion criteria met!")
+        print(f"   {metric.upper()} improved by {improvement:.3f}")
 
         reason = f"Auto-promotion: {metric} improved by {improvement:.3f} (> {args.min_improve})"
         _promote_model(latest["tag"], reason)
@@ -170,7 +171,11 @@ def main():
         return 0
 
     else:
-        print("❌ Auto-promotion criteria not met."        print(f"   {metric.upper()} did not improve sufficiently (threshold: {args.min_improve})")
+        print("❌ Auto-promotion criteria not met.")
+        print(
+            f"   {metric.upper()} did not improve sufficiently "
+            f"(threshold: {args.min_improve})"
+        )
         print("   Model remains in registry for manual review if desired.")
         return 0
 

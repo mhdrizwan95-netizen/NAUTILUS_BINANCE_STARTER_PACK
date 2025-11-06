@@ -5,8 +5,9 @@ Provides IBKR-specific implementation of VenueClient protocol.
 """
 
 from __future__ import annotations
-from typing import Optional, Dict, Any, List
+
 import logging
+from typing import Any
 
 from engine.connectors.ibkr_client import IbkrClient
 
@@ -20,7 +21,7 @@ class IbkrVenue:
         self._c = client
         logging.info(f"[IBKR Venue] Initialized with client: {client}")
 
-    def get_last_price(self, symbol: str) -> Optional[float]:
+    def get_last_price(self, symbol: str) -> float | None:
         """Get latest price for IBKR symbol."""
         # Strip venue suffix if present
         clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
@@ -28,7 +29,7 @@ class IbkrVenue:
 
     def place_market_order(
         self, *, symbol: str, side: str, quote: float | None, quantity: float | None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Place market order via IBKR. Only supports quantity (integer shares)."""
         if quote is not None:
             raise ValueError(
@@ -46,7 +47,7 @@ class IbkrVenue:
         result["venue"] = self.VENUE
         return result
 
-    def account_snapshot(self) -> Dict[str, Any]:
+    def account_snapshot(self) -> dict[str, Any]:
         """IBKR account snapshot (minimal implementation)."""
         return {
             "venue": self.VENUE,
@@ -55,11 +56,11 @@ class IbkrVenue:
             "pnl": {"realized": None, "unrealized": None},
         }
 
-    def positions(self) -> List[Dict[str, Any]]:
+    def positions(self) -> list[dict[str, Any]]:
         """IBKR positions. Source of truth is engine state, not here."""
         return []
 
-    def list_open_orders(self) -> List[Dict[str, Any]]:
+    def list_open_orders(self) -> list[dict[str, Any]]:
         """List open orders for IBKR reconciliation."""
         try:
             orders = self._c.ib.openOrders()

@@ -10,6 +10,7 @@ Requires a running TWS or IB Gateway and ib_insync installed.
 """
 
 import os
+
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq

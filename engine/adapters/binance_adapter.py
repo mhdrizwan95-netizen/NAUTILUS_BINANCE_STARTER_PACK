@@ -5,10 +5,9 @@ Provides Binance-specific implementation of VenueClient protocol.
 """
 
 from __future__ import annotations
-from typing import Optional, Dict, Any, List
-import logging
 
-from engine.connectors.binance_client import BinanceClient  # Assuming this exists
+import logging
+from typing import Any
 
 
 class BinanceVenue:
@@ -20,7 +19,7 @@ class BinanceVenue:
         self._c = client
         logging.info(f"[Binance Venue] Initialized with client: {client}")
 
-    def get_last_price(self, symbol: str) -> Optional[float]:
+    def get_last_price(self, symbol: str) -> float | None:
         """Get latest price for Binance symbol."""
         # Strip venue suffix if present
         clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
@@ -28,7 +27,7 @@ class BinanceVenue:
 
     def place_market_order(
         self, *, symbol: str, side: str, quote: float | None, quantity: float | None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Place market order via Binance. Supports both quote and quantity."""
         clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
 
@@ -40,7 +39,7 @@ class BinanceVenue:
         result["venue"] = self.VENUE
         return result
 
-    def account_snapshot(self) -> Dict[str, Any]:
+    def account_snapshot(self) -> dict[str, Any]:
         """Binance account snapshot."""
         try:
             return self._c.account_snapshot()
@@ -53,7 +52,7 @@ class BinanceVenue:
                 "pnl": {"realized": None, "unrealized": None},
             }
 
-    def positions(self) -> List[Dict[str, Any]]:
+    def positions(self) -> list[dict[str, Any]]:
         """Binance positions."""
         try:
             return self._c.positions()
@@ -61,7 +60,7 @@ class BinanceVenue:
             logging.warning(f"[Binance Venue] Positions fetch failed: {e}")
             return []
 
-    def list_open_orders(self) -> List[Dict[str, Any]]:
+    def list_open_orders(self) -> list[dict[str, Any]]:
         """List open orders for Binance reconciliation."""
         try:
             orders = self._c.get_open_orders()

@@ -1,70 +1,68 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import inspect
-import time
 import json
 import logging
 import math
+import os
 import random
-from threading import Lock
-from pathlib import Path
-from typing import Literal, Optional, Any, cast
-
-from fastapi import FastAPI, Header, HTTPException, Request, Query
-from starlette.middleware.base import BaseHTTPMiddleware
+import time
 import uuid
+from pathlib import Path
+from threading import Lock
+from typing import Any, Literal, cast
+
+import httpx as _httpx
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import (
     BaseModel,
+    ConfigDict,
     Field,
+    ValidationError,
     field_validator,
     model_validator,
-    ConfigDict,
-    ValidationError,
 )
-import hmac
-import hashlib
-import httpx as _httpx
+from starlette.middleware.base import BaseHTTPMiddleware
 
-import os
-from shared.dry_run import install_dry_run_guard, log_dry_run_banner
-from engine.config import get_settings, load_risk_config, QUOTE_CCY, norm_symbol
-from engine.core.binance import BinanceREST, BinanceMarginREST
-from engine.core.kraken import KrakenREST
+import engine.state as state_mod
+from engine import metrics, strategy
+from engine.compat import init_external_feed_bridge
+from engine.config import QUOTE_CCY, get_settings, load_risk_config, norm_symbol
+from engine.core import alert_daemon
+from engine.core.binance import BinanceMarginREST, BinanceREST
 from engine.core.binance_ws import BinanceWS
-from engine.ops.bracket_governor import BracketGovernor
-from engine.core.order_router import OrderRouterExt, set_exchange_client, _MDAdapter
-from engine.ops.stop_validator import StopValidator
-from engine.core.portfolio import Portfolio, Position
 from engine.core.event_bus import (
     BUS,
     initialize_event_bus,
     publish_risk_event,
 )
-from engine.core.signal_queue import SIGNAL_QUEUE
-from engine.runtime import tasks as runtime_tasks
-from engine.core import alert_daemon
-from engine.risk import RiskRails
-from engine import metrics
-from engine.compat import init_external_feed_bridge
+from engine.core.kraken import KrakenREST
+from engine.core.order_router import OrderRouterExt, _MDAdapter, set_exchange_client
+from engine.core.portfolio import Portfolio, Position
+from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
 from engine.events.publisher import publish_external_event
 from engine.events.schemas import ExternalEvent
-from engine.idempotency import CACHE, append_jsonl
-from engine.state import SnapshotStore
-import engine.state as state_mod
-from engine.reconcile import reconcile_since_snapshot
-from engine import strategy
-from engine.ops_auth import require_ops_token
-from engine.universe import configured_universe, last_prices
 from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
+from engine.idempotency import CACHE, append_jsonl
 from engine.logging_utils import (
-    setup_logging,
     bind_request_id,
     reset_request_context,
+    setup_logging,
 )
 from engine.middleware.redaction import RedactionMiddleware
-
+from engine.ops.bracket_governor import BracketGovernor
+from engine.ops.stop_validator import StopValidator
+from engine.ops_auth import require_ops_token
+from engine.reconcile import reconcile_since_snapshot
+from engine.risk import RiskRails
+from engine.runtime import tasks as runtime_tasks
+from engine.state import SnapshotStore
+from engine.universe import configured_universe, last_prices
+from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 setup_logging()
 
@@ -137,8 +135,8 @@ RAILS = RiskRails(risk_cfg)
 EXTERNAL_EVENTS_SECRET = os.getenv("EXTERNAL_EVENTS_SECRET", "")
 EXTERNAL_EVENTS_ENABLED = bool(EXTERNAL_EVENTS_SECRET)
 _EXTERNAL_SIGNATURE_HEADER = "X-Events-Signature"
-_market_data_dispatcher: Optional[MarketDataDispatcher] = None
-_market_data_logger: Optional[MarketDataLogger] = None
+_market_data_dispatcher: MarketDataDispatcher | None = None
+_market_data_logger: MarketDataLogger | None = None
 try:
     MIN_FUT_BAL_USDT = float(os.getenv("MIN_FUT_BAL_USDT", "300"))
 except (TypeError, ValueError):
@@ -293,7 +291,7 @@ elif VENUE == "KRAKEN":
 else:
     rest_client = BinanceREST()
 
-margin_rest_client: Optional[BinanceMarginREST]
+margin_rest_client: BinanceMarginREST | None
 if _truthy_env("MARGIN_ENABLED") or _truthy_env("BINANCE_MARGIN_ENABLED"):
     if settings.api_key and settings.api_secret:
         try:
@@ -312,7 +310,7 @@ else:
 MARGIN_REST = margin_rest_client
 
 if VENUE == "KRAKEN":
-    KRAKEN_REST: KrakenREST | None = cast(Optional[KrakenREST], rest_client)
+    KRAKEN_REST: KrakenREST | None = cast(KrakenREST | None, rest_client)
 else:
     KRAKEN_REST = None
 
@@ -616,7 +614,7 @@ async def wallet_balance_worker() -> None:
                 state.cash = funding_free + spot_total + futures_available
                 state.margin_level = margin_level
                 state.margin_liability_usd = margin_liability_usd
-                setattr(state, "wallet_breakdown", snapshot)
+                state.wallet_breakdown = snapshot
             except Exception:
                 pass
             try:
@@ -965,20 +963,20 @@ class MarketOrderRequest(BaseModel):
 
     symbol: str = Field(..., description="e.g., BTCUSDT.BINANCE")
     side: Literal["BUY", "SELL"]
-    quote: Optional[float] = Field(
+    quote: float | None = Field(
         None, gt=0, description="Quote currency amount (USDT)."
     )
-    quantity: Optional[float] = Field(None, gt=0, description="Base asset quantity.")
-    market: Optional[str] = Field(
+    quantity: float | None = Field(None, gt=0, description="Base asset quantity.")
+    market: str | None = Field(
         None, description="Preferred market within venue (spot/futures/margin)."
     )
-    venue: Optional[str] = Field(
+    venue: str | None = Field(
         None, description="Trading venue. Defaults to VENUE env var."
     )
 
     @field_validator("venue")
     @classmethod
-    def _normalize_venue(cls, value: Optional[str]) -> Optional[str]:
+    def _normalize_venue(cls, value: str | None) -> str | None:
         return value.upper() if value else None
 
     @model_validator(mode="after")
@@ -995,11 +993,11 @@ class LimitOrderRequest(BaseModel):
     side: Literal["BUY", "SELL"]
     price: float = Field(..., gt=0, description="Limit price")
     timeInForce: Literal["IOC", "FOK", "GTC"] = Field("IOC")
-    quote: Optional[float] = Field(
+    quote: float | None = Field(
         None, gt=0, description="Quote currency amount (USDT)."
     )
-    quantity: Optional[float] = Field(None, gt=0, description="Base asset quantity.")
-    market: Optional[str] = Field(
+    quantity: float | None = Field(None, gt=0, description="Base asset quantity.")
+    market: str | None = Field(
         None, description="Preferred market within venue (spot/futures/margin)."
     )
 
@@ -1154,8 +1152,9 @@ async def _init_multi_venue_clients():
     if IS_EXPORTER:
         return
     try:
-        from engine.connectors.ibkr_client import IbkrClient
         import os
+
+        from engine.connectors.ibkr_client import IbkrClient
 
         # Only initialize IBKR if connection details are provided
         if os.getenv("IBKR_HOST"):
@@ -1236,9 +1235,9 @@ async def _start_guardian_and_feeds():
     # DEX sniper wiring
     try:
         from engine.dex import DexExecutor, DexState, load_dex_config
-        from engine.dex.wallet import DexWallet
-        from engine.dex.router import DexRouter
         from engine.dex.oracle import DexPriceOracle
+        from engine.dex.router import DexRouter
+        from engine.dex.wallet import DexWallet
         from engine.dex.watcher import DexWatcher
         from engine.handlers.dex_handlers import on_dex_candidate
         from engine.strategies.dex_sniper import DexSniper
@@ -1323,11 +1322,11 @@ async def _start_guardian_and_feeds():
 
     # Momentum breakout module
     try:
+        from engine import strategy as _strategy_mod
         from engine.strategies.momentum_breakout import (
             MomentumBreakout,
             load_momentum_config,
         )
-        from engine import strategy as _strategy_mod
 
         momentum_cfg = load_momentum_config()
         if momentum_cfg.enabled:
@@ -1398,18 +1397,17 @@ async def _start_guardian_and_feeds():
                 _MEME_SENTIMENT.cfg = meme_cfg
                 _MEME_SENTIMENT.rest_client = rest_client
                 _startup_logger.info("Meme sentiment strategy configuration refreshed")
-        else:
-            if _MEME_SENTIMENT is not None:
-                try:
-                    BUS.unsubscribe(
-                        "events.external_feed", _MEME_SENTIMENT.on_external_event
-                    )
-                except Exception:
-                    pass
-                _MEME_SENTIMENT = None
-                _startup_logger.info(
-                    "Meme sentiment strategy disabled via configuration"
+        elif _MEME_SENTIMENT is not None:
+            try:
+                BUS.unsubscribe(
+                    "events.external_feed", _MEME_SENTIMENT.on_external_event
                 )
+            except Exception:
+                pass
+            _MEME_SENTIMENT = None
+            _startup_logger.info(
+                "Meme sentiment strategy disabled via configuration"
+            )
     except Exception:
         _startup_logger.warning("Meme sentiment strategy wiring failed", exc_info=True)
 
@@ -1436,20 +1434,19 @@ async def _start_guardian_and_feeds():
                 _LISTING_SNIPER.cfg = listing_cfg
                 _LISTING_SNIPER.rest_client = rest_client
                 _startup_logger.info("Listing sniper configuration refreshed")
-        else:
-            if _LISTING_SNIPER is not None:
-                try:
-                    BUS.unsubscribe(
-                        "events.external_feed", _LISTING_SNIPER.on_external_event
-                    )
-                except Exception:
-                    pass
-                try:
-                    await _LISTING_SNIPER.shutdown()
-                except Exception:
-                    pass
-                _LISTING_SNIPER = None
-                _startup_logger.info("Listing sniper disabled via configuration")
+        elif _LISTING_SNIPER is not None:
+            try:
+                BUS.unsubscribe(
+                    "events.external_feed", _LISTING_SNIPER.on_external_event
+                )
+            except Exception:
+                pass
+            try:
+                await _LISTING_SNIPER.shutdown()
+            except Exception:
+                pass
+            _LISTING_SNIPER = None
+            _startup_logger.info("Listing sniper disabled via configuration")
     except Exception:
         _startup_logger.warning("Listing sniper wiring failed", exc_info=True)
 
@@ -1477,30 +1474,29 @@ async def _start_guardian_and_feeds():
                 _AIRDROP_PROMO.cfg = airdrop_cfg
                 _AIRDROP_PROMO.rest_client = rest_client
                 _startup_logger.info("Airdrop promo watcher configuration refreshed")
-        else:
-            if _AIRDROP_PROMO is not None:
-                try:
-                    BUS.unsubscribe(
-                        "events.external_feed", _AIRDROP_PROMO.on_external_event
-                    )
-                except Exception:
-                    pass
-                try:
-                    await _AIRDROP_PROMO.shutdown()
-                except Exception:
-                    pass
-                _AIRDROP_PROMO = None
-                _startup_logger.info("Airdrop promo watcher disabled via configuration")
+        elif _AIRDROP_PROMO is not None:
+            try:
+                BUS.unsubscribe(
+                    "events.external_feed", _AIRDROP_PROMO.on_external_event
+                )
+            except Exception:
+                pass
+            try:
+                await _AIRDROP_PROMO.shutdown()
+            except Exception:
+                pass
+            _AIRDROP_PROMO = None
+            _startup_logger.info("Airdrop promo watcher disabled via configuration")
     except Exception:
         _startup_logger.warning("Airdrop promo watcher wiring failed", exc_info=True)
 
     # Start Telegram digest (if enabled)
     try:
         if os.getenv("TELEGRAM_ENABLED", "").lower() in {"1", "true", "yes"}:
-            from ops.notify.telegram import Telegram
-            from ops.notify.bridge import NotifyBridge
-            from engine.telemetry.rollups import EventBORollup, EventBOBuckets
             from engine.ops.digest import DigestJob
+            from engine.telemetry.rollups import EventBOBuckets, EventBORollup
+            from ops.notify.bridge import NotifyBridge
+            from ops.notify.telegram import Telegram
 
             tg = Telegram(
                 os.getenv("TELEGRAM_BOT_TOKEN", ""),
@@ -1523,8 +1519,9 @@ async def _start_guardian_and_feeds():
                 pass
             # Health notifier (BUS -> Telegram) if enabled
             try:
-                from engine.ops.health_notify import HealthNotifier
                 import time as _t
+
+                from engine.ops.health_notify import HealthNotifier
 
                 hcfg = {
                     "HEALTH_TG_ENABLED": os.getenv("HEALTH_TG_ENABLED", "true").lower()
@@ -1649,7 +1646,7 @@ async def _start_guardian_and_feeds():
             )
             # attach to router for place_entry consult
             try:
-                setattr(router, "_overrides", ov)
+                router._overrides = ov
             except Exception:
                 pass
             _startup_logger.info("Auto cutback/mute overrides enabled")
@@ -1738,11 +1735,11 @@ def _startup_load_snapshot_and_reconcile():
 momentum_strategy = None
 try:
     if VENUE == "KRAKEN":
+        from engine import strategy as _strategy_mod
         from engine.strategies.momentum_15m import (
             Momentum15mStrategy,
             load_momentum_15m_config,
         )
-        from engine import strategy as _strategy_mod
 
         mom_cfg = load_momentum_15m_config()
         momentum_strategy = Momentum15mStrategy(router=router, risk=RAILS, cfg=mom_cfg)
@@ -2599,12 +2596,6 @@ async def health():
         except Exception:
             pass
 
-    try:
-        metrics.MARK_PRICE.labels(symbol=base, venue="kraken").set(0.0)
-        metrics.mark_price_by_symbol.labels(symbol=base).set(0.0)
-    except Exception:
-        pass
-
     return {
         "engine": "ok",
         "mode": settings.mode,
@@ -3357,7 +3348,7 @@ async def _kraken_risk_metrics_loop() -> None:
 
         try:
             await asyncio.wait_for(_kraken_risk_stop_event.wait(), timeout=sleep_for)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
         except asyncio.CancelledError:
             raise
@@ -3426,11 +3417,10 @@ async def _start_binance_ws():
             ws_base = "wss://stream.binancefuture.com/stream"
         else:
             ws_base = "wss://fstream.binance.com/stream"
+    elif (settings.mode or "").startswith("demo") or "test" in (settings.mode or ""):
+        ws_base = "wss://testnet.binance.vision/stream"
     else:
-        if (settings.mode or "").startswith("demo") or "test" in (settings.mode or ""):
-            ws_base = "wss://testnet.binance.vision/stream"
-        else:
-            ws_base = "wss://stream.binance.com:9443/stream"
+        ws_base = "wss://stream.binance.com:9443/stream"
 
     # Select symbols: prefer configured allowlist; else a small default set
     try:

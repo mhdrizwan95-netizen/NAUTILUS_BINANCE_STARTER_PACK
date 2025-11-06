@@ -11,8 +11,7 @@ CLI is intentionally omitted; use from Makefile or notebooks.
 
 import os
 import time
-from datetime import datetime, timezone
-from typing import List
+from datetime import UTC, datetime
 
 import httpx
 import pandas as pd
@@ -30,7 +29,7 @@ def fetch_klines(
     Returns a DataFrame with columns:
       ts, open, high, low, close, volume, quote_volume, trades
     """
-    out: List[list] = []
+    out: list[list] = []
     start = int(start_ms)
     end = int(end_ms)
     with httpx.Client(timeout=20.0) as client:
@@ -125,7 +124,7 @@ def save_day(
 
 
 def _ms(dt: datetime) -> int:
-    return int(dt.replace(tzinfo=timezone.utc).timestamp() * 1000)
+    return int(dt.replace(tzinfo=UTC).timestamp() * 1000)
 
 
 __all__ = ["fetch_klines", "save_day", "_ms"]

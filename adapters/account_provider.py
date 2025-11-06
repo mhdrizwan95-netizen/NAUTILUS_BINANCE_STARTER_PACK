@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
-import os, hmac, hashlib, time, urllib.parse, httpx
+import hashlib
+import hmac
+import os
+import time
+import urllib.parse
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Dict, Any, Iterable
+from typing import Any
+
+import httpx
 
 
 def _now_ms() -> int:
@@ -80,7 +87,7 @@ class BinanceAccountProvider:
         self.headers = {"X-MBX-APIKEY": self.api_key}
         self.http = httpx.AsyncClient(timeout=self.timeout)
 
-    def _sign(self, params: Dict[str, Any]) -> str:
+    def _sign(self, params: dict[str, Any]) -> str:
         query = urllib.parse.urlencode(params, doseq=True)
         return hmac.new(
             self.api_secret.encode(), query.encode(), hashlib.sha256
@@ -91,8 +98,8 @@ class BinanceAccountProvider:
         base: str,
         path: str,
         auth: bool = True,
-        params: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        params: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         params = dict(params or {})
         if auth:
             params["timestamp"] = _now_ms()
@@ -103,19 +110,19 @@ class BinanceAccountProvider:
         r.raise_for_status()
         return r.json()
 
-    async def fetch_spot_account(self) -> Dict[str, Any]:
+    async def fetch_spot_account(self) -> dict[str, Any]:
         # GET /api/v3/account
         return await self._get(self.spot_base, "/api/v3/account", auth=True)
 
-    async def fetch_usdm_account(self) -> Dict[str, Any]:
+    async def fetch_usdm_account(self) -> dict[str, Any]:
         # GET /fapi/v2/account
         return await self._get(self.usdm_base, "/fapi/v2/account", auth=True)
 
-    async def fetch_coinm_account(self) -> Dict[str, Any]:
+    async def fetch_coinm_account(self) -> dict[str, Any]:
         # GET /dapi/v1/account
         return await self._get(self.coinm_base, "/dapi/v1/account", auth=True)
 
-    async def fetch(self) -> Dict[str, Any]:
+    async def fetch(self) -> dict[str, Any]:
         """
         Returns a compact metrics dict used by ops snapshot code.
         We try all three markets; if one fails, we continue.
@@ -136,7 +143,7 @@ class BinanceAccountProvider:
 
         # Simplified equity estimates:
         # Spot: sum of free + locked *assumed in USDT terms if asset == USDT (otherwise 0 for compactness)
-        def spot_equity_usdt(sp: Dict[str, Any]) -> float:
+        def spot_equity_usdt(sp: dict[str, Any]) -> float:
             bal = 0.0
             for a in sp.get("balances", []):
                 if a.get("asset") == "USDT":
@@ -144,14 +151,14 @@ class BinanceAccountProvider:
             return bal
 
         # Futures balances often provide "totalWalletBalance" in USDT (USD-M)
-        def usdm_equity_usdt(fut: Dict[str, Any]) -> float:
+        def usdm_equity_usdt(fut: dict[str, Any]) -> float:
             try:
                 return float(fut.get("totalWalletBalance", 0))
             except Exception:
                 return 0.0
 
         # COIN-M: sum wallet balances across assets (approx in their asset terms; left as 0 for simplicity)
-        def coinm_equity_est(cm: Dict[str, Any]) -> float:
+        def coinm_equity_est(cm: dict[str, Any]) -> float:
             try:
                 return sum(
                     float(x.get("walletBalance", 0)) for x in cm.get("assets", [])

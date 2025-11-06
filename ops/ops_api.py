@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.websockets import WebSocketDisconnect
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 os.environ.setdefault("OBS_SERVICE_NAME", "ops-api")
@@ -31,7 +32,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - optional in minimal envs
     FastAPIInstrumentor = None  # type: ignore[assignment]
 
-from ops.prometheus import REGISTRY, get_or_create_counter, render_latest
+from ops.prometheus import get_or_create_counter, render_latest
 from ops.pnl_collector import PNL_REALIZED, PNL_UNREALIZED
 from ops.env import engine_endpoints
 from ops.portfolio_collector import (
@@ -50,6 +51,7 @@ from ops.ui_api import (
     ws_price,
     ws_trades,
     broadcast_account,
+    cc_health,
 )
 from ops.ui_services import (
     ConfigService,
@@ -63,15 +65,6 @@ from ops.ui_services import (
 )
 from ops import ui_state
 from ops.background import account_broadcaster, default_symbols, price_stream
-
-# Risk monitoring configuration
-RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
-ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL")
-EXPOSURE_CHECK_INTERVAL = int(os.getenv("EXPOSURE_CHECK_INTERVAL_SEC", "30"))
-
-# Do not resolve endpoints at import time; tests mutate env per case.
-
-# --- metrics snapshot surface -----------------------------------------------
 from ops.telemetry_store import (
     load as _load_snap,
     save as _save_snap,
@@ -85,6 +78,13 @@ from ops.situations.router import router as situations_router
 from engine.logging_utils import bind_request_id, reset_request_context, setup_logging
 from engine.middleware.redaction import RedactionMiddleware
 from engine.metrics import observe_http_request
+
+# Risk monitoring configuration
+RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
+ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL")
+EXPOSURE_CHECK_INTERVAL = int(os.getenv("EXPOSURE_CHECK_INTERVAL_SEC", "30"))
+
+# Do not resolve endpoints at import time; tests mutate env per case.
 
 
 class MetricsIn(BaseModel):
@@ -416,7 +416,7 @@ class RetrainReq(BaseModel):
 
 
 @APP.get("/status")
-async def status():
+async def get_status():
     st = {"ts": int(time.time()), "trading_enabled": True}
     if STATE_FILE.exists():
         try:
@@ -577,7 +577,7 @@ SNAP_DIR = Path2("data/ops_snapshots")
 SNAP_DIR.mkdir(parents=True, exist_ok=True)
 RET_DAYS = int(os.getenv("SNAP_RETENTION_DAYS", "14"))
 
-from ops.engine_client import get_portfolio, health as engine_health
+from ops.engine_client import get_portfolio, health as engine_health  # noqa: E402
 
 # globals for account cache
 ACCOUNT_CACHE: dict = {
@@ -778,12 +778,12 @@ async def _risk_monitoring_loop(run_once: bool = False):
         await asyncio.sleep(EXPOSURE_CHECK_INTERVAL)
 
 
-from ops.portfolio_collector import portfolio_collector_loop
-from ops.strategy_tracker import strategy_tracker_loop
-from ops.strategy_selector import promote_best
+from ops.portfolio_collector import portfolio_collector_loop  # noqa: E402
+from ops.strategy_tracker import strategy_tracker_loop  # noqa: E402
+from ops.strategy_selector import promote_best  # noqa: E402
 
-import os as _os
-import fcntl as _fcntl
+import os as _os  # noqa: E402
+import fcntl as _fcntl  # noqa: E402
 
 _TRACKER_LOCK_FD = None  # keep process-global lock handle alive
 
@@ -944,10 +944,9 @@ async def aggregate_portfolio():
 
 
 # Use the new comprehensive exposure aggregator
-from ops.aggregate_exposure import aggregate_exposure
-from ops.exposure_collector import exposure_collector_loop
-from ops.pnl_collector import pnl_collector_loop
-from ops.portfolio_collector import portfolio_collector_loop
+from ops.aggregate_exposure import aggregate_exposure  # noqa: E402
+from ops.exposure_collector import exposure_collector_loop  # noqa: E402
+from ops.pnl_collector import pnl_collector_loop  # noqa: E402
 
 
 @APP.get("/aggregate/exposure")
@@ -1007,7 +1006,7 @@ def get_portfolio_snapshot():
 # ---------- Strategy Governance Dashboard Endpoints ----------
 
 # Import strategy governance functions
-from ops.strategy_selector import get_leaderboard
+from ops.strategy_selector import get_leaderboard  # noqa: E402
 
 
 # Leaderboard endpoint - core governance API

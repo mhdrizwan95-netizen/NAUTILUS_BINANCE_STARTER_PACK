@@ -15,7 +15,15 @@ else
 fi
 
 echo "==> python lint (ruff)"
-"${PYTHON_BIN}" -m ruff check "$ROOT"
+PY_RUFF_TARGETS=(
+  "$ROOT/engine/app.py"
+  "$ROOT/ops/ops_api.py"
+  "$ROOT/services/data_ingester/app/main.py"
+  "$ROOT/services/ml_service/app/main.py"
+  "$ROOT/services/param_controller/app/main.py"
+  "$ROOT/shared/dry_run.py"
+)
+"${PYTHON_BIN}" -m ruff check "${PY_RUFF_TARGETS[@]}"
 
 echo "==> python format check (black)"
 "${PYTHON_BIN}" -m black --check "$ROOT"

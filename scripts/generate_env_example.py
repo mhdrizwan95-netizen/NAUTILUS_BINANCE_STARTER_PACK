@@ -321,7 +321,7 @@ COMMENTS = {
     "ML_SERVICE": "Base URL for the training/inference service used during sim.",
     "PARAM_CONTROLLER": "Base URL for the parameter controller service.",
     "CHUNK_ROWS": "Number of rows included in each simulated ingest batch.",
-    "END_TS": "Optional end timestamp (ms) to limit simulation range (0 = all).",
+    "SIM_END_TS": "Optional end timestamp (ms) to limit simulation range (0 = all).",
     "TRAIN_CRON_MINUTES": "Minutes between retraining events during simulation.",
     "PROMOTE": "Allow simulator to promote better models automatically.",
     "FEE_BP": "Per-side fee assumptions in basis points for execution.",

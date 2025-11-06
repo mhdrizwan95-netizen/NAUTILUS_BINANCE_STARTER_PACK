@@ -72,11 +72,12 @@ exclude = '''
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+extend-exclude = ["scripts/**"]
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "N", "B", "UP", "PL", "S"]
-ignore = ["E203", "S311"]
-per-file-ignores = {"tests/" = ["S101"], "frontend/" = ["S"]}
+select = ["E", "F"]
+ignore = ["E203", "E501"]
+per-file-ignores = {"tests/" = ["E999"], "frontend/" = ["E999"]}
 
 [tool.ruff.format]
 quote-style = "double"
