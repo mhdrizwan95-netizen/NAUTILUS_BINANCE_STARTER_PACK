@@ -8,13 +8,27 @@ detach="${DRY_RUN_DETACH:-0}"
 
 cd "$ROOT"
 
-readonly SERVICES=(
+AVAILABLE_SERVICES="$(docker compose config --services | tr '\n' ' ')"
+
+want_services=(
   ops
   prometheus
   grafana
   engine_binance_exporter
   engine_binance
 )
+
+SERVICES=()
+for svc in "${want_services[@]}"; do
+  if echo " ${AVAILABLE_SERVICES} " | grep -q " ${svc} "; then
+    SERVICES+=("${svc}")
+  fi
+done
+
+if [[ "${#SERVICES[@]}" -eq 0 ]]; then
+  echo "No matching services found for dry run" >&2
+  exit 1
+fi
 
 trap 'docker compose stop "${SERVICES[@]}" >/dev/null 2>&1 || true' EXIT
 
@@ -26,9 +40,15 @@ echo "==> starting services"
 docker compose start "${SERVICES[@]}"
 
 echo "==> running health checks"
-curl -fsS --retry 5 --retry-delay 2 http://localhost:8002/health >/dev/null
-curl -fsS --retry 5 --retry-delay 2 http://localhost:8003/health >/dev/null
-curl -fsS --retry 5 --retry-delay 2 http://localhost:9103/health >/dev/null
+if echo " ${SERVICES[*]} " | grep -q " ops "; then
+  curl -fsS --retry 5 --retry-delay 2 http://localhost:8002/health >/dev/null
+fi
+if echo " ${SERVICES[*]} " | grep -q " engine_binance "; then
+  curl -fsS --retry 5 --retry-delay 2 http://localhost:8003/health >/dev/null
+fi
+if echo " ${SERVICES[*]} " | grep -q " engine_binance_exporter "; then
+  curl -fsS --retry 5 --retry-delay 2 http://localhost:9103/health >/dev/null
+fi
 
 if [[ "$detach" == "1" ]]; then
   echo "==> dry run checks passed (services stopped on exit)"

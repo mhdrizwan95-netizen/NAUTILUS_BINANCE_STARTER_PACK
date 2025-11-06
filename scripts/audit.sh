@@ -3,20 +3,31 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
+if [[ -n "${PYTHON:-}" ]]; then
+  PYTHON_BIN="${PYTHON}"
+elif command -v python3.11 >/dev/null 2>&1; then
+  PYTHON_BIN="python3.11"
+elif command -v python3 >/dev/null 2>&1; then
+  PYTHON_BIN="python3"
+else
+  echo "python interpreter not found" >&2
+  exit 1
+fi
+
 echo "==> python lint (ruff)"
-python -m ruff check "$ROOT"
+"${PYTHON_BIN}" -m ruff check "$ROOT"
 
 echo "==> python format check (black)"
-python -m black --check "$ROOT"
+"${PYTHON_BIN}" -m black --check "$ROOT"
 
 echo "==> python typecheck (mypy)"
-python -m mypy engine ops services src tests
+"${PYTHON_BIN}" -m mypy engine ops services src tests
 
 echo "==> pytest smoke"
-PYTHONWARNINGS=ignore::DeprecationWarning pytest -q
+PYTHONWARNINGS=ignore::DeprecationWarning "${PYTHON_BIN}" -m pytest -q
 
 echo "==> pip-audit"
-pip-audit -r "$ROOT/requirements.txt" -r "$ROOT/requirements-dev.txt"
+"${PYTHON_BIN}" -m pip_audit -r "$ROOT/requirements.txt" -r "$ROOT/requirements-dev.txt"
 
 echo "==> bandit"
 bandit -q -r engine ops services src
