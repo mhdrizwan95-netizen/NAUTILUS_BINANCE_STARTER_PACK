@@ -1,27 +1,104 @@
+[build-system]
+requires = ["setuptools>=69", "wheel", "pip-tools>=7.4"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "nautilus-hmm-binance"
 version = "0.1.0"
-requires-python = ">=3.12"
+requires-python = ">=3.11,<3.13"
 dependencies = [
-  "nautilus_trader[binance]",
-  "fastapi",
-  "uvicorn",
-  "pandas",
-  "numpy",
-  "scikit-learn",
-  "xgboost",
-  "hmmlearn",
-  "duckdb",
-  "pyarrow",
-  "python-dotenv",
-  "httpx"
+  "nautilus_trader[binance]>=1.210.0",
+  "fastapi==0.120.4",
+  "uvicorn[standard]==0.30.6",
+  "httpx==0.27.2",
+  "requests==2.32.3",
+  "jinja2==3.1.4",
+  "prometheus-client==0.20.0",
+  "prometheus-fastapi-instrumentator==6.1.0",
+  "pandas==2.2.3",
+  "numpy==1.26.4",
+  "pyarrow==14.0.2",
+  "scikit-learn==1.5.2",
+  "xgboost==2.1.1",
+  "hmmlearn==0.3.2",
+  "duckdb==1.1.0",
+  "python-dotenv==1.0.1",
+  "pydantic==2.8.2",
+  "pydantic-settings==2.11.0",
+  "python-jose[cryptography]==3.3.0",
+  "PyYAML==6.0.1",
+  "tabulate==0.9.0",
+  "matplotlib==3.8.4",
+  "watchfiles==0.21.0"
+]
+
+[project.optional-dependencies]
+dev = [
+  "bandit==1.7.9",
+  "black==24.10.0",
+  "hypothesis==6.115.5",
+  "mypy==1.11.2",
+  "pip-audit==2.7.3",
+  "pip-tools==7.4.1",
+  "pre-commit==3.8.0",
+  "pytest==8.3.3",
+  "pytest-asyncio==0.23.8",
+  "respx[httpx]==0.21.1",
+  "ruff==0.6.9",
+  "types-python-dateutil==2.9.0.20240906",
+  "types-requests==2.32.0.20241016",
+  "web3==6.20.1"
 ]
 
 [tool.pyright]
-pythonVersion = "3.13"
+pythonVersion = "3.11"
 typeCheckingMode = "basic"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+exclude = '''
+/(
+  \.git
+| \.mypy_cache
+| \.pytest_cache
+| build
+| dist
+| frontend/node_modules
+| frontend/build
+)/
+'''
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "B", "UP", "PL", "S"]
+ignore = ["E203", "S311"]
+per-file-ignores = {"tests/" = ["S101"], "frontend/" = ["S"]}
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+warn_unused_configs = true
+warn_return_any = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+exclude = [
+  "frontend/",
+  "docs/",
+  "scripts/",
+  "tests/e2e/",
+]
+
+[tool.bandit]
+skips = ["B101"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-q --maxfail=1 --disable-warnings"

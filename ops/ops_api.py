@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
+from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 os.environ.setdefault("OBS_SERVICE_NAME", "ops-api")
 
@@ -109,6 +110,8 @@ API_VERSION_PATTERN = re.compile(r"^v\d+$")
 
 
 APP = FastAPI(title="Ops API")
+install_dry_run_guard(APP, allow_paths={"/health", "/metrics", "/metrics/prometheus", "/static"})
+log_dry_run_banner("ops.api")
 
 
 @APP.get("/metrics", include_in_schema=False)
@@ -303,6 +306,9 @@ def _load_ops_token() -> str:
             raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE ({token_file})") from exc
         if secret:
             token = secret
+    dry_run = os.getenv("DRY_RUN", "0").lower() in {"1", "true", "yes"}
+    if dry_run and not token:
+        return "dry-run-token"
     if not token or token == "dev-token":
         raise RuntimeError("Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Ops API")
     return token

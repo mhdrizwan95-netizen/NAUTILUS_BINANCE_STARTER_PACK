@@ -6,6 +6,7 @@ import { Button } from './ui/button';
 import { motion } from 'motion/react';
 import { Badge } from './ui/badge';
 import { useRenderCounter } from '@/lib/debug/why';
+import { isDryRunMode } from '@/lib/security';
 
 export interface TopHudMetrics {
   totalPnl: number;
@@ -52,6 +53,7 @@ export function TopHUD({
   tradingEnabled = true,
 }: TopHUDProps) {
   useRenderCounter('TopHUD');
+  const dryRunMode = isDryRunMode();
   const switchId = useId();
   const switchLabelId = `${switchId}-label`;
   const killDescriptionId = useId();
@@ -95,6 +97,11 @@ export function TopHUD({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-zinc-100 tracking-tight">NAUTILUS</h1>
+              {dryRunMode && (
+                <Badge className="bg-amber-500/20 text-amber-200 border border-amber-400/30">
+                  DRY RUN
+                </Badge>
+              )}
               {isConnected ? (
                 <Wifi className="w-4 h-4 text-emerald-400" aria-hidden="true" />
               ) : (

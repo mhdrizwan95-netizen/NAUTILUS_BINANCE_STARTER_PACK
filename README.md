@@ -1,12 +1,22 @@
 # Nautilus HMM Starter Pack
 
-## TL;DR
-- Multi‑venue execution engine (`engine/app.py`) with Binance/Kraken adapters, in‑memory portfolio, persistence, reconciliation, and real‑time tick routing into the MA/HMM ensemble
-- Risk rails and breakers (exposure caps, equity floor/drawdown, venue error‑rate) with rich metrics
-- Event-driven modules: Event Breakout (dry-run first), Stop Validator (server-side SL fixups), Guards (Depeg, Funding)
-- Adaptive trend stack: SMA/RSI/ATR module with auto-tuning (`TREND_AUTO_TUNE_*`) and optional symbol scanner that keeps the shortlist fresh
-- Observability: Prometheus/Grafana dashboards, Telegram digest/alerts, BUS-driven events (e.g., `trade.fill`, `health.state`)
-- Feature‑gated flags so you can dark‑launch each module safely
+## Quickstart
+
+| Step | Command | Purpose |
+|------|---------|---------|
+| 1 | `make bootstrap` | Sync pinned Python/Node dependencies and install pre-commit hooks. |
+| 2 | `make lint typecheck test` | Run ruff, black, mypy, pytest, and frontend Vitest in one go. |
+| 3 | `make audit` | Execute the read-only security + quality suite (ruff, mypy, pip-audit, npm audit, docker compose config). |
+| 4 | `make dry-run` | Launch a guarded stack (`DRY_RUN=1`) and run health checks without touching venues. |
+| 5 | `make up-core` | Optional: bring the trading stack up after validating the dry run. |
+
+Try `make help` for the legacy targets while the new lifecycle gets folded into the rest of the Makefile.
+
+## Stack Highlights
+- Python 3.11 FastAPI services (`engine`, `ops`, `services/*`) backed by `nautilus_trader`, risk rails, and governance daemons.
+- React 18 + Vite Command Center with TanStack Query, Radix UI, Vitest, and Playwright for E2E.
+- Docker Compose orchestration for trading, ML retraining, and observability bundles.
+- `scripts/audit.sh` (read-only checks) and `scripts/dry_run.sh` (safe launch) keep local workflows deterministic.
 
 ## Service Topology
 

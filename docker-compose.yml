@@ -1,6 +1,7 @@
 x-env-common: &env_common
   PYTHONPATH: /app
   PROMETHEUS_MULTIPROC_DIR: /tmp/prom_multiproc
+  DRY_RUN: ${DRY_RUN:-1}
 
 # Limit container logs to avoid unbounded Docker.raw growth
 x-logging: &default-logging

@@ -1,5 +1,16 @@
 // Security utilities and hardening
 
+const readDryRunFlag = (): boolean =>
+  typeof import.meta !== 'undefined' && (import.meta.env?.VITE_DRY_RUN ?? '0') === '1';
+
+export const isDryRunMode = (): boolean => readDryRunFlag();
+
+export function assertWritableOperation(operation: string): void {
+  if (readDryRunFlag()) {
+    throw new Error(`Operation "${operation}" is disabled while DRY_RUN=1`);
+  }
+}
+
 // Content Security Policy headers (to be set by server)
 export const CSP_HEADERS = {
   'Content-Security-Policy': [

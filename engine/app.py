@@ -28,6 +28,7 @@ import hashlib
 import httpx as _httpx
 
 import os
+from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 from engine.config import get_settings, load_risk_config, QUOTE_CCY, norm_symbol
 from engine.core.binance import BinanceREST, BinanceMarginREST
 from engine.core.kraken import KrakenREST
@@ -116,6 +117,8 @@ def _route_template(request: Request) -> str:
 
 
 app = FastAPI(title="HMM Engine", version="0.1.0")
+install_dry_run_guard(app, allow_paths={"/health", "/metrics", "/metrics/prometheus"})
+log_dry_run_banner("engine.app")
 app.add_middleware(_RequestIDMiddleware)
 app.add_middleware(_HttpMetricsMiddleware)
 app.add_middleware(RedactionMiddleware)

@@ -12,7 +12,14 @@ export default defineConfig({
     exclude: ['node_modules/**/*', 'e2e/**/*'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'lcov', 'json', 'html'],
+      reportsDirectory: './coverage',
+      thresholds: {
+        statements: 80,
+        branches: 70,
+        functions: 80,
+        lines: 80,
+      },
       exclude: [
         'node_modules/',
         'src/test/',

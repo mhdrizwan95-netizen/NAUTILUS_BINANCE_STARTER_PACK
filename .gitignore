@@ -1,4 +1,7 @@
 .env
+.env.local
+.envrc
+.env.*.backup
 
 # Environment configuration files (contain API keys)
 ops/env.*
@@ -25,10 +28,30 @@ data/ops_snapshots/
 
 # Frontend build artifacts
 node_modules/
+frontend/node_modules/
+frontend/build/
+frontend/dist/
+frontend/.vite/
+frontend/.turbo/
+frontend/playwright-report/
+frontend/test-results/
+frontend/coverage/
 nautilus-ui/node_modules/
 nautilus-ui/.next/
 nautilus-ui/out/
 nautilus-ui/build/
 
+# Test and coverage reports
+reports/
+
+# Archives and bundles
+*.zip
+*.tar.gz
+*.tgz
+*.tar
+
+# Python virtual environments
+.venv/
+venv/
 # Archived research utilities
 legacy/

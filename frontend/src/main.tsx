@@ -13,6 +13,11 @@ import {
 import { initializeSecurity } from "./lib/security";
 import { queryClient } from "./lib/queryClient";
 
+if (import.meta.env?.VITE_DRY_RUN === "1") {
+  console.info("DRY_RUN=1 — Command Center is running in read-only mode.");
+  document.documentElement.dataset.dryRun = "true";
+}
+
 // Initialize monitoring and security
 setupGlobalErrorHandling();
 setupPerformanceObserver();

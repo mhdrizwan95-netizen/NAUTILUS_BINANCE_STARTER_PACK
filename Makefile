@@ -77,6 +77,60 @@ help:
 	@echo "  make push REGISTRY=org IMG=nautilus TAG=dev   # push image"
 	@echo ""
 
+# ---------------------------------------------------------------------------
+# Deterministic developer lifecycle
+# ---------------------------------------------------------------------------
+.PHONY: bootstrap
+bootstrap: ## Install pinned Python & frontend dependencies (idempotent)
+	$(PYTHON) -m pip install --upgrade pip pip-tools
+	pip-sync requirements.txt requirements-dev.txt
+	pre-commit install --install-hooks
+	cd frontend && npm ci --ignore-scripts
+
+.PHONY: lint
+lint: ## Run Python and frontend linters
+	$(PYTHON) -m ruff check .
+	$(PYTHON) -m black --check .
+	cd frontend && npm run lint
+
+.PHONY: format
+format: ## Auto-format Python and frontend sources
+	$(PYTHON) -m ruff format .
+	$(PYTHON) -m black .
+	cd frontend && npm run format:write
+
+.PHONY: typecheck
+typecheck: ## Static type analysis across services and UI
+	$(PYTHON) -m mypy engine ops services src tests
+	cd frontend && npm run typecheck
+
+.PHONY: test
+test: test-python test-frontend ## Run all unit test suites
+
+.PHONY: test-python
+test-python:
+	PYTHONWARNINGS=ignore::DeprecationWarning pytest -q
+
+.PHONY: test-frontend
+test-frontend:
+	mkdir -p reports
+	cd frontend && npm run test:ci
+
+.PHONY: test-e2e
+test-e2e: ## Opt-in E2E browser tests (Playwright)
+	cd frontend && npm run test:e2e -- --reporter=list
+
+.PHONY: audit
+audit: ## Run read-only security and quality checks
+	bash scripts/audit.sh
+
+.PHONY: dry-run
+dry-run: ## Start dry-run stack with DRY_RUN=1 guardrails
+	bash scripts/dry_run.sh
+
+.PHONY: ci
+ci: lint typecheck test audit ## Aggregate target for CI environments
+
 # -----------------------------------------------------------------------------
 # Build & Core lifecycle
 # -----------------------------------------------------------------------------
@@ -189,18 +243,18 @@ down-all:
 	$(OBS_COMPOSE) down || true
 
 # -----------------------------------------------------------------------------
-# CI helpers
+# Container helpers
 # -----------------------------------------------------------------------------
-.PHONY: lint test image push ci
-lint:
+.PHONY: docker-lint image push legacy-test
+docker-lint:
 	@which hadolint >/dev/null 2>&1 && hadolint Dockerfile || echo "hadolint not installed; skipping root Dockerfile"
 	@which hadolint >/dev/null 2>&1 && hadolint services/ml_service/Dockerfile || true
 	@which hadolint >/dev/null 2>&1 && hadolint services/data_ingester/Dockerfile || true
 	@which hadolint >/dev/null 2>&1 && hadolint services/param_controller/Dockerfile || true
 	@which hadolint >/dev/null 2>&1 && hadolint services/backtest_suite/Dockerfile || true
-	@echo "lint done"
+	@echo "docker-lint done"
 
-test:
+legacy-test:
 	@$(PYTHON) -m pytest -q --maxfail=1
 	@if command -v npm >/dev/null 2>&1; then \
 	  echo "Running frontend unit tests"; \
@@ -214,9 +268,6 @@ push:
 	@if [ -z "$(REGISTRY)" ]; then echo "REGISTRY is required"; exit 1; fi
 	@docker tag $(IMG:-=nautilus):$(TAG:-=dev) $(REGISTRY)/$(IMG:-=nautilus):$(TAG:-=dev)
 	@docker push $(REGISTRY)/$(IMG:-=nautilus):$(TAG:-=dev)
-
-ci: lint test
-
 .PHONY: docker-prune prune-ml-volumes
 docker-prune:
 	@echo "🧹 Pruning unused images, containers, networks, and dangling volumes…"

@@ -5,8 +5,11 @@ from loguru import logger
 from .config import settings
 from . import store
 from .bandit import LinTS
+from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 app = FastAPI(title="param-controller", version="0.1.0")
+install_dry_run_guard(app, allow_paths={"/health"})
+log_dry_run_banner("services.param_controller")
 
 
 @app.on_event("startup")

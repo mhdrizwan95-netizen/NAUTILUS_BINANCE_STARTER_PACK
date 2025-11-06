@@ -8,8 +8,11 @@ import pandas as pd
 
 from .config import settings
 from common import manifest
+from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 app = FastAPI(title="data-ingester", version="0.1.0")
+install_dry_run_guard(app, allow_paths={"/health"})
+log_dry_run_banner("services.data_ingester")
 
 
 def _client():

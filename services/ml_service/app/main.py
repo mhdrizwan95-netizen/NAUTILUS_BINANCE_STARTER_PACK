@@ -12,6 +12,7 @@ from .schemas import (
 from .trainer import train_once
 from .inference import start_watchdog, predict_proba
 from . import model_store
+from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 
 @asynccontextmanager
@@ -21,6 +22,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="ml-service (HMM)", version="0.2.0", lifespan=lifespan)
+install_dry_run_guard(app, allow_paths={"/health", "/model"})
+log_dry_run_banner("services.ml_service")
 
 
 @app.get("/health")
