@@ -1,0 +1,55 @@
+{
+  "api_guidelines": {
+    "doc": "docs/api_guidelines.md",
+    "resource_naming": [
+      "Prefer plural nouns for collections and nest subordinate resources (e.g. /strategies/{id}/positions).",
+      "Keep imperatives out of URIs; express actions via POST body enums or /actions/{verb} suffix when unavoidable."
+    ],
+    "versioning": {
+      "strategy": "Path-based namespace (/api/v1) with optional X-API-Version header for forward negotiation.",
+      "sunset_policy": "Advertise supported versions via X-API-Versions response header and publish deprecation timelines in docs/CHANGELOG.md.",
+      "status": "Header added to OpenAPI; runtime still serves unversioned /api routes."
+    },
+    "error_model": {
+      "schema": "error.code + error.message + optional details + requestId.",
+      "status": "Documented in OpenAPI components; FastAPI handlers still emit bare detail strings."
+    },
+    "pagination": {
+      "pattern": {
+        "cursor": "cursor",
+        "limit": "limit",
+        "sort": "sort",
+        "filters": "filter[field]=value"
+      },
+      "response_envelope": "data + page.nextCursor/page.prevCursor/page.limit/page.totalHint",
+      "status": "Strategies, governance weights, open orders, positions, trades, alerts, and metrics model feeds now emit cursor-based envelopes with UI load-more affordances. Remaining legacy exports (e.g. aggregate metrics snapshots) still use dump-all responses."
+    },
+    "idempotency": {
+      "required_headers": [
+        "Idempotency-Key"
+      ],
+      "gaps": [
+        "/api/orders/cancel",
+        "/api/account/transfer",
+        "/api/events/trade"
+      ]
+    }
+  },
+  "openapi_updates": {
+    "file": "docs/command_center_openapi.yaml",
+      "changes": [
+        "Removed two-man approval references; documented single-operator guardrails.",
+        "Added X-API-Version header parameter and default error response schema.",
+        "Documented paginated responses for strategy governance weights, open orders, trades, alerts, positions, and metrics model feeds."
+      ]
+  },
+  "gaps": [
+    "Runtime has not yet issued X-API-Versions headers or enforced version negotiation.",
+    "Control mutations lack uniform error envelopes; FastAPI should marshal exceptions into ErrorResponse.",
+    "Aggregate metrics exports (/aggregate/*) are fixed-cardinality summaries documented in OpenAPI; monitor venue counts but no pagination required."
+  ],
+  "policy_guards": [
+    "api_versioning_policy",
+    "pagination_standardized"
+  ]
+}

@@ -2,9 +2,9 @@
   "readme": {
     "file": "frontend/README.md",
     "highlights": [
-      "Documented the dev-only loop detector hooks and how to observe render counts/prop diffs.",
-      "Explained the VITE_LIVE_OFF flag for disabling WebSockets and polling during tests.",
-      "Added a reviewer checklist focused on render-loop regressions."
+      "Documented dev-only loop detectors and render counter usage in frontend/README.md",
+      "Explained VITE_LIVE_OFF flag for disabling live updates during tests",
+      "Added reviewer checklist for loop regression guardrails"
     ]
   },
   "flags": {

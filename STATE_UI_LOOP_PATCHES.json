@@ -1,22 +1,34 @@
 {
   "patches": [
     {
-      "id": "loop_dynamic_param_form",
-      "file": "frontend/src/components/forms/DynamicParamForm.tsx",
-      "summary": "Debounce watch() emissions using serialized snapshot tracking to avoid redundant upstream state writes.",
-      "details": "On every render the react-hook-form watch proxy produced a new reference; we serialize values, compare with the last emitted snapshot, and only invoke onChange when meaningful differences exist, emitting a cloned payload to keep parents pure."
-    },
-    {
       "id": "loop_websocket_metrics",
       "file": "frontend/src/App.tsx",
-      "summary": "Route WebSocket frames through merge helpers that preserve references when data is unchanged.",
-      "details": "Factored KPI and venue merging into lib/streamMergers so setQueryData can return existing snapshots when payloads match (using shallow object and array comparisons), preventing React Query cascades on every WS tick."
+      "summary": "Strong hash-based dedupe with deferred query writes.",
+      "details": "Compute a deterministic signature via stableHash, record digests before scheduling a microtask, compare the merged snapshot against the current cache, and only call queryClient.setQueryData when the reference actually changes."
     },
     {
       "id": "loop_polling_hook",
       "file": "frontend/src/lib/hooks.ts",
-      "summary": "Augmented usePolling with equality guard, last-value tracking, and live-update kill switch support.",
-      "details": "The hook now accepts a comparator (default Object.is), skips state writes if the comparator deems results equal, resets memoized data on teardown, and respects VITE_LIVE_OFF to disable timers during tests."
+      "summary": "Stable hash guard inside usePolling so identical payloads do not fan out.",
+      "details": "Remember the hash of the last resolved value and treat structural matches as no-ops, while still supporting custom comparators and wiping state cleanly on teardown."
+    },
+    {
+      "id": "loop_backtesting_overrides",
+      "file": "frontend/src/components/tabs/BacktestingTab.tsx",
+      "summary": "Set overrides only when structural hash changes.",
+      "details": "Pipeline DynamicParamForm onChange through a hashed guard so repeated emissions skip React state updates and the overrides panel settles promptly."
+    },
+    {
+      "id": "loop_dynamic_param_form",
+      "file": "frontend/src/components/forms/DynamicParamForm.tsx",
+      "summary": "Clone and hash watched values before firing onChange.",
+      "details": "Cache the last emitted hash, shallow clone the payload so parents never receive mutable proxies, and only invoke onChange when the hash changes, shielding consumers from watch() churn."
+    },
+    {
+      "id": "loop_test_env_storage",
+      "file": "frontend/src/test/setup.ts",
+      "summary": "Provide deterministic Storage polyfill and allow MSW opt-out for loop tests.",
+      "details": "Introduce an in-memory Storage implementation, wire it to both globalThis and window, and gate MSW bootstrapping behind an env flag so structural hash tests can run in isolation without websocket/cookie noise."
     },
     {
       "id": "loop_dev_instrumentation",
@@ -28,7 +40,8 @@
   "helpers": {
     "files": [
       "frontend/src/lib/equality.ts",
-      "frontend/src/lib/streamMergers.ts"
+      "frontend/src/lib/streamMergers.ts",
+      "frontend/src/test/setup.ts"
     ],
     "purpose": "Shared shallow comparison utilities and deterministic merge helpers ensure query cache updates remain referentially stable."
   }

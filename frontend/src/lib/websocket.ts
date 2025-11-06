@@ -162,6 +162,7 @@ class WebSocketManager {
 // Global WebSocket manager instance
 let wsManager: WebSocketManager | null = null;
 let currentUrl: string | null = null;
+let liveDisabledOverride: boolean | null = null;
 
 const buildWebSocketUrl = (base: string, session: string): string => {
   try {
@@ -172,6 +173,17 @@ const buildWebSocketUrl = (base: string, session: string): string => {
     const delimiter = base.includes('?') ? '&' : '?';
     return `${base}${delimiter}session=${encodeURIComponent(session)}`;
   }
+};
+
+export const __setLiveDisabledOverride = (value: boolean | null) => {
+  liveDisabledOverride = value;
+};
+
+const resolveLiveDisabled = (): boolean => {
+  if (liveDisabledOverride !== null) {
+    return liveDisabledOverride;
+  }
+  return import.meta.env.VITE_LIVE_OFF === 'true';
 };
 
 export function initializeWebSocket(
@@ -195,7 +207,7 @@ export function initializeWebSocket(
 }
 
 export function useWebSocket(): WebSocketHookResult {
-  const liveDisabled = import.meta.env.VITE_LIVE_OFF === 'true';
+  const liveDisabled = resolveLiveDisabled();
   const disabledResult = useMemo<WebSocketHookResult>(
     () => ({
       isConnected: false,

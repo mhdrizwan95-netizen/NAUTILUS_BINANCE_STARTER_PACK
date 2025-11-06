@@ -4,8 +4,6 @@ This helper consolidates token verification, two-man approval, and
 idempotency enforcement so individual route handlers stay lean.
 """
 
-from __future__ import annotations
-
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -75,9 +73,11 @@ class ControlGuard:
     async def __call__(
         self,
         request: Request,
-        x_ops_token: Optional[str] = Header(None, convert_underscores=False),
-        x_ops_actor: Optional[str] = Header(None, convert_underscores=False),
-        x_ops_approver: Optional[str] = Header(None, convert_underscores=False),
+        x_ops_token: Optional[str] = Header(None, alias="X-Ops-Token", convert_underscores=False),
+        x_ops_actor: Optional[str] = Header(None, alias="X-Ops-Actor", convert_underscores=False),
+        x_ops_approver: Optional[str] = Header(
+            None, alias="X-Ops-Approver", convert_underscores=False
+        ),
         idempotency_key: Optional[str] = Header(
             None, alias="Idempotency-Key", convert_underscores=False
         ),
@@ -86,7 +86,10 @@ class ControlGuard:
         if x_ops_token != expected_token:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Unauthorized control request",
+                detail={
+                    "code": "auth.invalid_token",
+                    "message": "Unauthorized control request",
+                },
             )
 
         approver_token: Optional[str] = None
@@ -96,7 +99,10 @@ class ControlGuard:
                 if not x_ops_approver or x_ops_approver not in allowed:
                     raise HTTPException(
                         status_code=status.HTTP_403_FORBIDDEN,
-                        detail="Approver token required",
+                        detail={
+                            "code": "auth.approver_required",
+                            "message": "Secondary approver token required for this action",
+                        },
                     )
                 approver_token = x_ops_approver
 
@@ -104,7 +110,10 @@ class ControlGuard:
             if not idempotency_key:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Missing Idempotency-Key header",
+                    detail={
+                        "code": "idempotency.missing_header",
+                        "message": "Missing Idempotency-Key header",
+                    },
                 )
         else:
             if idempotency_key:
@@ -119,5 +128,6 @@ class ControlGuard:
 
 
 # Convenience instances mirroring common guard profiles used across handlers.
+IdempotentGuard = ControlGuard(require_idempotency=True, require_two_man=False)
 IdempotentTwoManGuard = ControlGuard(require_idempotency=True, require_two_man=True)
 TokenOnlyGuard = ControlGuard(require_idempotency=False, require_two_man=False)

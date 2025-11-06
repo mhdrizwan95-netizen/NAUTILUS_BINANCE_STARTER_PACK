@@ -13,7 +13,7 @@
   "gates": {
     "healthchecks": "docker-compose.yml defines curl-based health probes for engine and ops (readyz endpoints) with generous start periods.",
     "logging": "All services use json-file logging with 10MB/3-file rotation to cap Docker.raw growth.",
-    "secrets": "Grafana admin password expected via GF_SECURITY_ADMIN_PASSWORD__FILE; OPS_APPROVER_TOKENS enforced via compose env (ops service)."
+    "secrets": "Grafana admin password expected via GF_SECURITY_ADMIN_PASSWORD__FILE; OPS_API_TOKEN sourced via env or secret file for the ops service."
   },
   "smoke_checks": [
     "docker compose ps",
@@ -24,7 +24,6 @@
     "curl -fsS http://localhost:8011/health"
   ],
   "policy_guards": [
-    "ops_requires_approver_env",
     "engine_tmpfs_prometheus",
     "compose_logging_limits"
   ],

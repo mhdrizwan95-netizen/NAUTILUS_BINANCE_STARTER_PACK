@@ -10,7 +10,7 @@
         ]
       },
       "operator": {
-        "description": "Authenticated operator with OPS token and call-sign",
+        "description": "Single-operator mode with OPS token and call-sign",
         "capabilities": [
           "viewer",
           "control:pause",
@@ -19,124 +19,91 @@
           "config:patch",
           "ws:session"
         ]
-      },
-      "approver": {
-        "description": "Second approver token required for high-risk commands",
-        "capabilities": [
-          "operator",
-          "approve:kill-switch",
-          "approve:config",
-          "approve:flatten"
-        ]
       }
     },
     "ui_requirements": [
-      {
-        "control": "TopHUD.pause",
-        "requires": "operator+approver"
-      },
-      {
-        "control": "TopHUD.resume",
-        "requires": "operator+approver"
-      },
-      {
-        "control": "TopHUD.flatten",
-        "requires": "operator+approver"
-      },
-      {
-        "control": "TopHUD.kill",
-        "requires": "operator+approver"
-      },
-      {
-        "control": "SettingsTab.saveOverrides",
-        "requires": "operator+approver"
-      },
-      {
-        "control": "WebSocket.connect",
-        "requires": "operator"
-      }
+      { "control": "TopHUD.pause", "requires": "operator" },
+      { "control": "TopHUD.resume", "requires": "operator" },
+      { "control": "TopHUD.flatten", "requires": "operator" },
+      { "control": "TopHUD.kill", "requires": "operator" },
+      { "control": "SettingsTab.saveOverrides", "requires": "operator" },
+      { "control": "WebSocket.connect", "requires": "operator" }
     ],
     "storage": {
       "opsAuth": {
         "persisted": false,
-        "source": "frontend/src/lib/store.ts:212",
-        "notes": "OPS credentials remain in-memory and are never stored in localStorage"
+        "source": "frontend/src/lib/store.ts:84",
+        "notes": "OPS token + actor live only in-memory; refreshing clears credentials."
       }
     },
     "permissions": [
       {
         "capability": "control:config_patch",
         "endpoint": "PUT /api/config",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:337-370"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:339-356"
       },
       {
         "capability": "control:kill_switch",
         "endpoint": "POST /api/ops/kill-switch",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:442-470"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:444-466"
       },
       {
         "capability": "control:flatten",
         "endpoint": "POST /api/ops/flatten",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:468-494"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:470-495"
       },
       {
         "capability": "strategy:lifecycle",
         "endpoint": "POST /api/strategies/{id}/start|stop|update",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:667-760"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:673-760"
       },
       {
         "capability": "backtest:start",
         "endpoint": "POST /api/backtests",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:846-908"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:832-908"
       },
       {
         "capability": "config:reload",
         "endpoint": "POST /api/governance/reload",
         "guard": "TokenOnlyGuard",
-        "source": "ops/ui_api.py:497-520"
+        "source": "ops/ui_api.py:499-520"
       },
       {
         "capability": "strategy:patch",
         "endpoint": "PATCH /api/strategies/{id}",
         "guard": "require_ops_token",
-        "source": "ops/ui_api.py:386-393"
+        "source": "ops/ui_api.py:369-376"
       },
       {
         "capability": "funds:transfer",
         "endpoint": "POST /api/account/transfer",
         "guard": "require_ops_token",
-        "source": "ops/ui_api.py:545-552"
+        "source": "ops/ui_api.py:547-552"
       }
     ],
     "gaps": [
       {
-        "issue": "strategy_patch_missing_two_man",
+        "issue": "strategy_patch_missing_idempotency",
         "endpoint": "PATCH /api/strategies/{id}",
-        "impact": "Single OPS token may disable/retune strategies without second approver.",
-        "source": "ops/ui_api.py:386-393"
+        "impact": "Single operator can patch strategies without an idempotency key or audit payload.",
+        "source": "ops/ui_api.py:369-376"
       },
       {
-        "issue": "fund_transfer_single_token",
+        "issue": "fund_transfer_no_idempotency",
         "endpoint": "POST /api/account/transfer",
-        "impact": "Internal transfers can execute without dual approval or idempotency.",
-        "source": "ops/ui_api.py:545-552"
-      },
-      {
-        "issue": "governance_reload_single_token",
-        "endpoint": "POST /api/governance/reload",
-        "impact": "Policy reload can apply unsafe changes without approver oversight.",
-        "source": "ops/ui_api.py:497-520"
+        "impact": "Transfers execute with a single OPS token and no idempotency tracking.",
+        "source": "ops/ui_api.py:547-552"
       },
       {
         "issue": "viewer_role_not_distinct",
         "endpoint": "POST /api/ops/ws-session",
-        "impact": "Backend cannot distinguish viewers from operators; X-Ops-Actor is optional and unauthenticated.",
-        "source": "ops/ui_api.py:243-258"
+        "impact": "Backend cannot distinguish viewers from operators; X-Ops-Actor remains optional and unverified.",
+        "source": "ops/ui_api.py:245-260"
       }
     ],
     "session": {
@@ -146,20 +113,14 @@
     }
   },
   "policy_guards": [
-    "universe_age_cooldown",
-    "quarantine_promotion_checks",
-    "authz_two_man_required",
     "ops_token_rotation_gap"
   ],
   "policy_guard_details": {
-    "authz_two_man_required": "Extend IdempotentTwoManGuard + idempotency to PATCH /api/strategies/{id} and POST /api/account/transfer.",
-    "ops_token_rotation_gap": "OPS_API_TOKEN and OPS_APPROVER_TOKENS cache in-process (ops/middleware/control_guard.py:22-56); add file watcher or reload endpoint for rotation."
+    "ops_token_rotation_gap": "OPS_API_TOKEN is cached in-process (ops/middleware/control_guard.py:20-82); add a reload endpoint or watcher to rotate secrets without restart."
   },
   "authz_findings": [
-    "PATCH /api/strategies/{strategy_id} only requires X-Ops-Token (ops/ui_api.py:386-393), allowing one credential to toggle strategies without secondary approval.",
-    "POST /api/account/transfer uses require_ops_token (ops/ui_api.py:545-552) so funds can move without dual approval or idempotency.",
-    "POST /api/governance/reload relies on TokenOnlyGuard (ops/ui_api.py:497-520), letting a solo operator reload policies.",
-    "Control guards cache OPS token + approver secrets until restart (ops/middleware/control_guard.py:22-56), blocking secret rotation/revocation.",
-    "Viewer/operator roles share the same credential; X-Ops-Actor header is optional and unverified (ops/ui_api.py:243-258)."
+    "Strategic PATCH operations use single-token auth without idempotency or dual-signature, allowing accidental double submits.",
+    "POST /api/account/transfer reuses require_ops_token with no replay protection; consider adding IdempotentGuard.",
+    "WS session issuance still trusts optional X-Ops-Actor and does not separate viewer credentials."
   ]
 }

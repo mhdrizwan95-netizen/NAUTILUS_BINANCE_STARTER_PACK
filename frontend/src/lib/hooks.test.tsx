@@ -55,6 +55,42 @@ describe('usePolling', () => {
     expect(comparator).toHaveBeenCalled();
   });
 
+  it('avoids duplicate updates for structurally identical payloads by default', async () => {
+    vi.unstubAllEnvs();
+    const frames = [
+      { status: 'running', progress: 0 },
+      { status: 'running', progress: 0 },
+      { status: 'done', progress: 1 },
+    ];
+    let index = 0;
+    const poller = vi.fn(() => {
+      const next = frames[Math.min(index, frames.length - 1)];
+      index += 1;
+      return Promise.resolve({ ...next });
+    });
+
+    const { result } = renderHook(() => usePolling(poller, 100));
+
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+      await Promise.resolve();
+    });
+    const firstValue = result.current.data;
+    expect(firstValue).toMatchObject({ status: 'running', progress: 0 });
+
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+      await Promise.resolve();
+    });
+    expect(result.current.data).toBe(firstValue);
+
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+      await Promise.resolve();
+    });
+    expect(result.current.data).toMatchObject({ status: 'done', progress: 1 });
+  });
+
   it('disables polling when VITE_LIVE_OFF flag is true', async () => {
     vi.stubEnv('VITE_LIVE_OFF', 'true');
     const poller = vi.fn();

@@ -1,20 +1,19 @@
 {
   "hitl": {
-    "two_man_rule": "High-risk endpoints in ops/ui_api.py:431-525 require OPS_TOKEN plus OPS_APPROVER_TOKENS; frontend/App.tsx:146-335 refuses to send controls without both.",
+    "single_operator": "Critical controls now rely on a single OPS token plus audit call-sign (ops/ui_api.py:444-495; frontend/src/App.tsx:160-207).",
     "kill_reason_prompt": "frontend/src/App.tsx:126-144 requires operators to enter a reason before invoking the kill switch.",
-    "control_audit_log": "ops/ui_api.py:352-525 logs every mutation to ops/logs/control_actions.jsonl via _record_control_action.",
-    "runbook_handoffs": "docs/OPS_RUNBOOK.md:20-63 spells out operator + approver workflow for pause/resume and strategy weight changes."
+    "control_audit_log": "ops/ui_api.py:346-520 logs every mutation to ops/logs/control_actions.jsonl via _record_control_action.",
+    "runbook_handoffs": "docs/OPS_RUNBOOK.md:20-63 documents pause/resume workflows with optional audit call-signs."
   },
   "cooldowns": {
     "governance_actions": "ops/governance_daemon.py:176-212 tracks last_actions per rule and enforces cooldown_seconds before re-triggering.",
     "ui_control_state": "frontend/src/App.tsx:179-188 holds controlState to prevent duplicate submissions while awaiting response."
   },
   "policy_guards": [
-    "two_man_required",
     "kill_reason_required"
   ],
   "notes": {
-    "middleware_gap": "High-risk control endpoints now use ops.middleware.control_guard.IdempotentTwoManGuard (ops/ui_api.py:320-520) for consistent enforcement.",
-    "audit_persistence": "Governance daemon writes audits to ops/logs/governance_audit.jsonl while retaining the in-memory ring buffer (ops/governance_daemon.py:360-386)." 
+    "middleware_guard": "High-risk control endpoints now use ops.middleware.control_guard.IdempotentGuard (ops/ui_api.py:339-520) with optional actor headers for audit context.",
+    "audit_persistence": "Governance daemon writes audits to ops/logs/governance_audit.jsonl while retaining the in-memory ring buffer (ops/governance_daemon.py:360-386)."
   }
 }

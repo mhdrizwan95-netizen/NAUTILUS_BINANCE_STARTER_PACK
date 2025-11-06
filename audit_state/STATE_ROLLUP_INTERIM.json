@@ -1,0 +1,9 @@
+{
+  "top5": [
+    "strategy_patch_missing_idempotency",
+    "fund_transfer_no_idempotency",
+    "ops_token_rotation_gap",
+    "viewer_role_not_distinct",
+    "ws_actor_optional"
+  ]
+}

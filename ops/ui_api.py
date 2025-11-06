@@ -8,10 +8,11 @@ import os
 import random
 import secrets
 import time
+import base64
 from collections import OrderedDict, deque
 from pathlib import Path
 from threading import RLock
-from typing import Any, Deque, Dict, List, Optional, Set
+from typing import Any, Deque, Dict, List, Optional
 
 import httpx
 import yaml
@@ -20,6 +21,7 @@ from fastapi import (
     Depends,
     Header,
     HTTPException,
+    Query,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -29,9 +31,10 @@ from pydantic import BaseModel
 
 from ops import pnl_dashboard as pnl
 from ops import ui_state
+from ops.env import engine_endpoints
 from ops.middleware.control_guard import (
     ControlContext,
-    IdempotentTwoManGuard,
+    IdempotentGuard,
     TokenOnlyGuard,
 )
 from ops.governance_daemon import (
@@ -53,33 +56,30 @@ def _load_ops_token() -> str:
 
 
 OPS_TOKEN = _load_ops_token()
-WS_TOKEN = OPS_TOKEN
+DEFAULT_PAGE_LIMIT = 50
+MAX_PAGE_LIMIT = 500
 
-def _load_approver_tokens() -> Set[str]:
-    raw = os.getenv("OPS_APPROVER_TOKENS") or os.getenv("OPS_APPROVER_TOKEN")
-    if not raw:
-        return set()
-    return {token.strip() for token in raw.split(",") if token.strip()}
 
-OPS_APPROVER_TOKENS = _load_approver_tokens()
-
-def _require_approver(header: str | None) -> Optional[str]:
-    if not OPS_APPROVER_TOKENS:
-        return None
-    if not header or header not in OPS_APPROVER_TOKENS:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Approver token required",
-        )
-    return header
+def http_error(
+    status_code: int,
+    code: str,
+    message: str,
+    details: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Raise an HTTPException with a structured payload."""
+    raise HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": message, "details": details},
+    )
 
 
 def _require_idempotency(request: Request) -> tuple[str, Optional[Dict[str, Any]]]:
     key = request.headers.get("Idempotency-Key")
     if not key:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing Idempotency-Key header",
+        http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "idempotency.missing_header",
+            "Missing Idempotency-Key header",
         )
     cached = _idempotency_lookup(key)
     return key, cached
@@ -131,8 +131,10 @@ class FlattenRequest(BaseModel):
 
 def require_ops_token(x_ops_token: Optional[str] = Header(None)) -> None:
     if x_ops_token != OPS_TOKEN:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED, detail="Unauthorized"
+        http_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "auth.invalid_token",
+            "Unauthorized",
         )
 
 
@@ -189,6 +191,34 @@ def _idempotency_cached_response(idem_key: str) -> Optional[Dict[str, Any]]:
     return _idempotency_lookup(idem_key)
 
 
+def _encode_cursor(offset: int) -> str:
+    payload = json.dumps({"o": offset}).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("utf-8").rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> int:
+    padding = "=" * (-len(cursor) % 4)
+    try:
+        raw = base64.urlsafe_b64decode(cursor + padding)
+        data = json.loads(raw.decode("utf-8"))
+        offset = int(data.get("o", 0))
+    except Exception as exc:  # pragma: no cover - defensive guard
+        http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "pagination.invalid_cursor",
+            "Cursor is malformed or expired.",
+            {"cursor": cursor},
+        )
+    if offset < 0:
+        http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "pagination.invalid_cursor",
+            "Cursor offset must be positive.",
+            {"cursor": cursor},
+        )
+    return offset
+
+
 def _record_control_action(
     action: str,
     actor: Optional[str],
@@ -213,6 +243,91 @@ def _record_control_action(
     except Exception:
         # Audit logging best-effort; avoid interrupting control flow
         pass
+
+
+def _paginate_items(
+    items: List[Dict[str, Any]] | List[Any],
+    cursor: Optional[str],
+    limit: int,
+) -> Dict[str, Any]:
+    sequence = list(items)
+    total = len(sequence)
+    start = 0
+    if cursor:
+        start = _decode_cursor(cursor)
+        if total == 0:
+            start = 0
+        elif start > total:
+            start = max(total - limit, 0)
+
+    end = start + limit
+    window = sequence[start:end]
+
+    next_cursor = _encode_cursor(end) if end < total else None
+    prev_cursor = _encode_cursor(max(start - limit, 0)) if start > 0 else None
+
+    return {
+        "data": window,
+        "page": {
+            "nextCursor": next_cursor,
+            "prevCursor": prev_cursor,
+            "limit": limit,
+            "totalHint": total,
+            "hasMore": next_cursor is not None,
+        },
+    }
+
+
+def _normalize_positions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    sanitized: List[Dict[str, Any]] = []
+    for idx, p in enumerate(rows):
+        symbol = (
+            p.get("symbol")
+            or p.get("product")
+            or p.get("instrument")
+            or "UNKNOWN"
+        )
+        sanitized.append(
+            {
+                "id": p.get("id")
+                or f"position-{symbol.lower()}-{idx}",
+                "symbol": symbol,
+                "qty": float(
+                    p.get("qty")
+                    or p.get("quantity")
+                    or p.get("size")
+                    or 0
+                ),
+                "entry": float(
+                    p.get("entry")
+                    or p.get("entry_price")
+                    or p.get("avgEntryPrice")
+                    or 0
+                ),
+                "mark": float(
+                    p.get("mark")
+                    or p.get("mark_price")
+                    or p.get("markPrice")
+                    or 0
+                ),
+                "pnl": float(
+                    p.get("pnl")
+                    or p.get("unrealizedPnl")
+                    or p.get("unrealized_pnl")
+                    or 0
+                ),
+            }
+        )
+    sanitized.sort(key=lambda item: item["symbol"])
+    return sanitized
+
+
+async def _collect_positions(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+    try:
+        raw = await state["portfolio"].list_open_positions()
+    except Exception:
+        raw = []
+    return _normalize_positions(raw)
 
 
 def _issue_ws_session() -> tuple[str, float]:
@@ -339,7 +454,7 @@ async def config_effective(state: Dict[str, Any] = Depends(get_state)) -> Any:
 @router.put("/config")
 async def config_update(
     patch: ConfigPatch,
-    guard: ControlContext = Depends(IdempotentTwoManGuard),
+    guard: ControlContext = Depends(IdempotentGuard),
     state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     idem_key = guard.idempotency_key or ""
@@ -376,13 +491,41 @@ async def config_update(
 
 
 @router.get("/strategies/governance")
-async def strategies_list(state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def strategies_list(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    state: Dict[str, Any] = Depends(get_state),
+) -> Any:
     """Original governance view of strategies (weights, enabled).
 
     Kept for compatibility; the Command Center UI consumes /api/strategies
     which returns schema-driven cards.
     """
-    return await state["strategy"].list()
+    payload = await state["strategy"].list()
+    entries = payload.get("strategies") or []
+    normalized: List[Dict[str, Any]] = []
+    for idx, entry in enumerate(entries):
+        item = dict(entry)
+        strategy_id = entry.get("id") or f"strategy-{idx}"
+        item["id"] = str(strategy_id)
+        weight = entry.get("weight")
+        item["weight"] = float(weight) if weight is not None else 0.0
+        if "enabled" in entry:
+            item["enabled"] = bool(entry.get("enabled"))
+        else:
+            item["enabled"] = item["weight"] > 0.0
+        item["is_current"] = bool(entry.get("is_current")) or (
+            str(strategy_id) == str(payload.get("current"))
+        )
+        normalized.append(item)
+
+    normalized.sort(key=lambda entry: entry.get("id", ""))
+    paged = _paginate_items(normalized, cursor, limit)
+    paged["meta"] = {
+        "current": payload.get("current"),
+        "updatedAt": payload.get("updated_at"),
+    }
+    return paged
 
 
 @router.patch("/strategies/{strategy_id}")
@@ -412,8 +555,63 @@ async def universe_refresh(
 
 
 @router.get("/orders/open")
-async def orders_open(state: Dict[str, Any] = Depends(get_state)) -> Any:
-    return await state["orders"].list_open_orders()
+async def orders_open(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
+    state: Dict[str, Any] = Depends(get_state),
+) -> Any:
+    try:
+        orders = await state["orders"].list_open_orders()
+    except Exception:
+        orders = []
+
+    sanitized: list[dict[str, Any]] = []
+    now = int(time.time() * 1000)
+    for idx, order in enumerate(orders):
+        created_at = (
+            order.get("createdAt")
+            or order.get("time")
+            or order.get("timestamp")
+            or order.get("transactTime")
+            or order.get("updateTime")
+            or (now - idx * 1000)
+        )
+        try:
+            created_at_int = int(created_at)
+        except Exception:
+            created_at_int = now - idx * 1000
+        symbol = order.get("symbol") or order.get("instrument") or "UNKNOWN"
+        sanitized.append(
+            {
+                "id": str(
+                    order.get("id")
+                    or order.get("orderId")
+                    or order.get("clientOrderId")
+                    or f"order-{created_at_int}-{symbol}-{idx}"
+                ),
+                "symbol": symbol,
+                "side": (order.get("side") or "buy").lower(),
+                "type": (order.get("type") or "limit").lower(),
+                "qty": float(
+                    order.get("qty")
+                    or order.get("quantity")
+                    or order.get("origQty")
+                    or 0
+                ),
+                "filled": float(
+                    order.get("filled")
+                    or order.get("executedQty")
+                    or order.get("cumulativeFilled")
+                    or 0
+                ),
+                "price": float(order.get("price") or order.get("avgPrice") or 0),
+                "status": (order.get("status") or "open").lower(),
+                "createdAt": created_at_int,
+            }
+        )
+
+    sanitized.sort(key=lambda item: item["createdAt"], reverse=True)
+    return _paginate_items(sanitized, cursor, limit)
 
 
 @router.post("/orders/cancel")
@@ -429,8 +627,13 @@ async def orders_cancel(
 
 
 @router.get("/positions/open")
-async def positions_open(state: Dict[str, Any] = Depends(get_state)) -> Any:
-    return await state["portfolio"].list_open_positions()
+async def positions_open(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
+    state: Dict[str, Any] = Depends(get_state),
+) -> Any:
+    sanitized = await _collect_positions(state)
+    return _paginate_items(sanitized, cursor, limit)
 
 
 @router.post("/risk/soft-breach/now")
@@ -444,7 +647,7 @@ async def soft_breach(
 @router.post("/ops/kill-switch")
 async def killswitch(
     payload: KillSwitchRequest,
-    guard: ControlContext = Depends(IdempotentTwoManGuard),
+    guard: ControlContext = Depends(IdempotentGuard),
     state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     idem_key = guard.idempotency_key or ""
@@ -454,7 +657,7 @@ async def killswitch(
 
     result = await state["ops"].set_trading_enabled(payload.enabled)
     action = "resume" if payload.enabled else "pause"
-    response = {"ok": True, "action": action, "result": result, "approver": guard.approver}
+    response = {"ok": True, "action": action, "result": result}
     _record_control_action(
         action,
         guard.actor,
@@ -470,7 +673,7 @@ async def killswitch(
 @router.post("/ops/flatten")
 async def flatten_portfolio(
     _body: FlattenRequest,
-    guard: ControlContext = Depends(IdempotentTwoManGuard),
+    guard: ControlContext = Depends(IdempotentGuard),
     state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     idem_key = guard.idempotency_key or ""
@@ -483,7 +686,7 @@ async def flatten_portfolio(
     except RuntimeError as exc:  # pragma: no cover - defensive
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
-    response = {"ok": True, "action": "flatten", "approver": guard.approver, **result}
+    response = {"ok": True, "action": "flatten", **result}
     _record_control_action(
         "flatten",
         guard.actor,
@@ -585,7 +788,11 @@ async def post_trade_event(
 
 
 @router.get("/strategies")
-async def cc_strategies_list(state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def cc_strategies_list(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    state: Dict[str, Any] = Depends(get_state),
+) -> Any:
     """Return strategy cards with paramsSchema and current params for the UI."""
     gov = await state["strategy"].list()
     params_store = _load_params()
@@ -641,7 +848,8 @@ async def cc_strategies_list(state: Dict[str, Any] = Depends(get_state)) -> Any:
             }
         )
 
-    return items
+    items.sort(key=lambda entry: entry.get("id", ""))
+    return _paginate_items(items, cursor, limit)
 
 
 @router.get("/strategies/{strategy_id}")
@@ -670,7 +878,7 @@ async def cc_strategy_get(
 async def cc_strategy_start(
     strategy_id: str,
     body: Dict[str, Any] | None = None,
-    guard: ControlContext = Depends(IdempotentTwoManGuard),
+    guard: ControlContext = Depends(IdempotentGuard),
     state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     idem_key = guard.idempotency_key or ""
@@ -704,7 +912,7 @@ async def cc_strategy_start(
 @router.post("/strategies/{strategy_id}/stop")
 async def cc_strategy_stop(
     strategy_id: str,
-    guard: ControlContext = Depends(IdempotentTwoManGuard),
+    guard: ControlContext = Depends(IdempotentGuard),
     state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     idem_key = guard.idempotency_key or ""
@@ -735,7 +943,7 @@ async def cc_strategy_stop(
 async def cc_strategy_update(
     strategy_id: str,
     body: Dict[str, Any],
-    guard: ControlContext = Depends(IdempotentTwoManGuard),
+    guard: ControlContext = Depends(IdempotentGuard),
     state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     idem_key = guard.idempotency_key or ""
@@ -848,7 +1056,7 @@ def _synth_backtest_result(strategy_name: str) -> Dict[str, Any]:
 @router.post("/backtests")
 async def cc_backtest_start(
     payload: Dict[str, Any],
-    guard: ControlContext = Depends(IdempotentTwoManGuard),
+    guard: ControlContext = Depends(IdempotentGuard),
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
@@ -911,8 +1119,59 @@ async def cc_backtest_start(
 async def cc_backtest_poll(job_id: str) -> Any:
     job = _load_job(job_id)
     if not job:
-        raise HTTPException(status_code=404, detail="job not found")
+        http_error(
+            status.HTTP_404_NOT_FOUND,
+            "backtest.not_found",
+            "Requested backtest job was not found.",
+            {"jobId": job_id},
+        )
     return job
+
+
+async def _collect_metrics_bundle(
+    state: Dict[str, Any]
+) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+    metrics_source = os.getenv("UI_METRICS_SOURCE", "prom").lower()
+    fetched_at = time.time()
+    metrics_text = ""
+    enhanced_data: List[Dict[str, Any]] = []
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            if metrics_source in {"direct", "engine"}:
+                texts: list[str] = []
+                for base in engine_endpoints():
+                    try:
+                        resp = await client.get(f"{base.rstrip('/')}/metrics")
+                        if resp.status_code == 200:
+                            texts.append(resp.text)
+                    except Exception:
+                        continue
+                metrics_text = "\n".join(texts)
+            else:
+                r = await client.get(pnl.METRICS_URL)
+                r.raise_for_status()
+                metrics_text = r.text
+        if metrics_text:
+            parsed = pnl.parse_prometheus_metrics(metrics_text)
+            enhanced_data = pnl.enhance_with_registry_data(parsed)
+    except Exception:
+        enhanced_data = []
+
+    try:
+        snapshot = await state["portfolio"].snapshot()
+    except Exception:
+        snapshot = {}
+
+    context: Dict[str, Any] = {
+        "metricsSource": metrics_source,
+        "registryPath": str(pnl.REGISTRY_PATH),
+        "fetchedAt": fetched_at,
+        "records": len(enhanced_data),
+    }
+    ts = snapshot.get("ts")
+    if ts:
+        context["snapshotTimestamp"] = ts
+    return enhanced_data, snapshot, context
 
 
 @router.get("/metrics/summary")
@@ -924,36 +1183,7 @@ async def cc_metrics_summary(
     state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     # Pull live metrics from Prometheus (via pnl_dashboard helpers)
-    enhanced_data: list[dict[str, Any]] = []
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            metrics_source = os.getenv("UI_METRICS_SOURCE", "prom").lower()
-            if metrics_source in {"direct", "engine"}:
-                # Bypass Prometheus: pull /metrics from each engine and concatenate
-                texts: list[str] = []
-                for base in engine_endpoints():
-                    try:
-                        resp = await client.get(f"{base.rstrip('/')}/metrics")
-                        if resp.status_code == 200:
-                            texts.append(resp.text)
-                    except Exception:
-                        continue
-                metrics_text = "\n".join(texts)
-            else:
-                # Default: use configured Prometheus/registry endpoint
-                r = await client.get(pnl.METRICS_URL)
-                r.raise_for_status()
-                metrics_text = r.text
-        parsed = pnl.parse_prometheus_metrics(metrics_text)
-        enhanced_data = pnl.enhance_with_registry_data(parsed)
-    except Exception:
-        enhanced_data = []
-
-    # Basic KPIs from portfolio snapshot when available
-    try:
-        snap = await state["portfolio"].snapshot()
-    except Exception:
-        snap = {}
+    enhanced_data, snap, _context = await _collect_metrics_bundle(state)
     positions = snap.get("positions") or []
     open_positions = len(positions)
 
@@ -1031,44 +1261,62 @@ async def cc_metrics_summary(
     }
 
 
-@router.get("/positions")
-async def cc_positions(state: Dict[str, Any] = Depends(get_state)) -> Any:
-    try:
-        pos = await state["portfolio"].list_open_positions()
-    except Exception:
-        pos = []
-    out: list[dict[str, Any]] = []
-    for p in pos:
-        out.append(
+@router.get("/metrics/models")
+async def cc_metrics_models(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+    state: Dict[str, Any] = Depends(get_state),
+) -> Any:
+    enhanced_data, _snap, context = await _collect_metrics_bundle(state)
+    normalized: List[Dict[str, Any]] = []
+    for item in enhanced_data:
+        model = str(item.get("model") or "unknown")
+        venue = str(item.get("venue") or "global")
+        identifier = item.get("id") or f"{model}:{venue}"
+        normalized.append(
             {
-                "symbol": p.get("symbol")
-                or p.get("product")
-                or p.get("instrument")
-                or "UNKNOWN",
-                "qty": float(p.get("qty") or p.get("quantity") or p.get("size") or 0),
-                "entry": float(
-                    p.get("entry")
-                    or p.get("entry_price")
-                    or p.get("avgEntryPrice")
-                    or 0
-                ),
-                "mark": float(
-                    p.get("mark") or p.get("mark_price") or p.get("markPrice") or 0
-                ),
-                "pnl": float(
-                    p.get("pnl")
-                    or p.get("unrealizedPnl")
-                    or p.get("unrealized_pnl")
-                    or 0
-                ),
+                "id": str(identifier),
+                "model": model,
+                "venue": venue,
+                "ordersSubmitted": float(item.get("orders_submitted_total") or 0),
+                "ordersFilled": float(item.get("orders_filled_total") or 0),
+                "trades": float(item.get("trades") or 0),
+                "pnlRealized": float(item.get("pnl_realized_total") or 0),
+                "pnlUnrealized": float(item.get("pnl_unrealized_total") or 0),
+                "totalPnl": float(item.get("total_pnl") or 0),
+                "winRate": float(item.get("win_rate") or 0),
+                "returnPct": float(item.get("return_pct") or 0),
+                "sharpe": float(item.get("sharpe") or 0),
+                "drawdown": float(item.get("drawdown") or 0),
+                "maxDrawdown": float(item.get("max_drawdown") or 0),
+                "strategyType": item.get("strategy_type"),
+                "version": item.get("version"),
+                "tradingDays": item.get("trading_days"),
             }
         )
-    return out
+
+    normalized.sort(key=lambda row: row.get("totalPnl", 0.0), reverse=True)
+    paged = _paginate_items(normalized, cursor, limit)
+    paged["meta"] = context
+    return paged
+
+
+@router.get("/positions")
+async def cc_positions(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
+    state: Dict[str, Any] = Depends(get_state),
+) -> Any:
+    sanitized = await _collect_positions(state)
+    return _paginate_items(sanitized, cursor, limit)
 
 
 @router.get("/trades/recent")
-async def cc_trades_recent(limit: int = 100) -> Any:
-    rows = list(RECENT_TRADES)[-limit:]
+async def cc_trades_recent(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
+) -> Any:
+    rows = list(RECENT_TRADES)
     if not rows:
         # Dev seed a few example trades for UI when no feed present
         now = int(time.time())
@@ -1090,23 +1338,31 @@ async def cc_trades_recent(limit: int = 100) -> Any:
                 "pnl": -12.3,
             },
         ]
-    # Ensure shape matches frontend expectations
-    return [
-        {
-            "time": r.get("time"),
-            "symbol": r.get("symbol"),
-            "side": r.get("side"),
-            "qty": r.get("qty"),
-            "price": r.get("price"),
+    sanitized = []
+    for idx, r in enumerate(rows):
+        timestamp = r.get("time") or r.get("timestamp") or int(time.time() * 1000)
+        symbol = r.get("symbol") or "UNKNOWN"
+        entry = {
+            "id": r.get("id") or f"trade-{timestamp}-{symbol}-{idx}",
+            "time": timestamp,
+            "timestamp": timestamp,
+            "symbol": symbol,
+            "side": (r.get("side") or "buy").lower(),
+            "quantity": float(r.get("qty") or r.get("quantity") or 0),
+            "price": float(r.get("price") or 0),
             "pnl": r.get("pnl"),
         }
-        for r in rows
-    ]
+        sanitized.append(entry)
+    sanitized.sort(key=lambda item: item.get("timestamp") or 0, reverse=True)
+    return _paginate_items(sanitized, cursor, limit)
 
 
 @router.get("/alerts")
-async def cc_alerts(limit: int = 50) -> Any:
-    rows = list(ALERTS_FEED)[-limit:]
+async def cc_alerts(
+    cursor: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=MAX_PAGE_LIMIT),
+) -> Any:
+    rows = list(ALERTS_FEED)
     if not rows:
         now = int(time.time())
         rows = [
@@ -1121,7 +1377,23 @@ async def cc_alerts(limit: int = 50) -> Any:
                 "text": "Exporter heartbeat lag detected",
             },
         ]
-    return rows
+    # Ensure deterministic order newest first
+    normalized = []
+    for idx, row in enumerate(rows):
+        timestamp = row.get("time") or row.get("timestamp") or int(time.time() * 1000)
+        level = (row.get("level") or row.get("type") or "info").lower()
+        normalized.append(
+            {
+                "id": row.get("id") or f"alert-{timestamp}-{idx}",
+                "time": timestamp,
+                "timestamp": timestamp,
+                "type": level,
+                "message": row.get("text") or row.get("message") or "",
+            }
+        )
+
+    normalized.sort(key=lambda item: item.get("timestamp", 0), reverse=True)
+    return _paginate_items(normalized, cursor, limit)
 
 
 @router.post("/alerts")

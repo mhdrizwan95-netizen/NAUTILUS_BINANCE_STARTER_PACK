@@ -221,6 +221,92 @@
     }
   ],
   "env_map": {
+    "engine": {
+      "defaults": [
+        "engine/config/defaults.py:22",
+        "engine/config/defaults.py:48",
+        "config.schema.json:6"
+      ],
+      "examples": [
+        "config.example.env:3",
+        "env.example:5"
+      ],
+      "overrides": [
+        ".env:1",
+        "docker-compose.yml:88"
+      ],
+      "secrets": [
+        "compose.hardening.override.yaml:22"
+      ]
+    },
+    "ops_api": {
+      "defaults": [
+        "config.example.env:21"
+      ],
+      "overrides": [
+        ".env:94"
+      ],
+      "required": [
+        "OPS_API_TOKEN"
+      ],
+      "secrets": [
+        "compose.hardening.override.yaml:4"
+      ],
+      "secret_file": "config.example.env:24"
+    },
+    "observability": {
+      "defaults": [
+        "config.example.env:31"
+      ],
+      "overrides": [
+        ".env:307",
+        "ops/observability/docker-compose.observability.yml:31"
+      ],
+      "secrets": [
+        "compose.hardening.override.yaml:15"
+      ],
+      "notes": "Grafana admin password provided via secret file per config.example.env:33"
+    },
+    "ml_service": {
+      "defaults": [
+        "config.example.env:35",
+        "engine/config/defaults.py:205"
+      ],
+      "overrides": [
+        "compose.ml.yml:12",
+        "compose.autotrain.yml:27"
+      ],
+      "ledger": [
+        "compose.autotrain.yml:29",
+        "compose.autotrain.yml:49"
+      ],
+      "compose_env": "compose.ml.yml"
+    },
+    "data_ingester": {
+      "defaults": [
+        "config.example.env:44",
+        "engine/config/defaults.py:189"
+      ],
+      "overrides": [
+        "compose.autotrain.yml:9",
+        "compose.backfill.yml:10"
+      ],
+      "notes": "Shared ledger path reused by ML + ingester"
+    },
+    "param_controller": {
+      "defaults": [
+        "config.schema.json:234"
+      ],
+      "overrides": [
+        "compose.autotrain.yml:64"
+      ]
+    },
+    "dex_bridge": {
+      "overrides": [
+        ".env:220"
+      ],
+      "notes": "DEX_* variables only present in operator .env; keep private keys injected via external secret manager."
+    },
     "engine_core": {
       "defaults": [
         "config.example.env:3",
@@ -243,38 +329,6 @@
         ".env:81"
       ],
       "secrets_path": "compose.hardening.override.yaml mounts /run/secrets"
-    },
-    "ops_api": {
-      "defaults": [
-        "config.example.env:21"
-      ],
-      "overrides": [
-        ".env:94"
-      ],
-      "required": [
-        "OPS_API_TOKEN"
-      ],
-      "secret_file": "config.example.env:24"
-    },
-    "observability": {
-      "defaults": [
-        "config.example.env:31"
-      ],
-      "notes": "Grafana admin password provided via secret file per config.example.env:33"
-    },
-    "ml_service": {
-      "defaults": [
-        "config.example.env:35",
-        "engine/config/defaults.py:205"
-      ],
-      "compose_env": "compose.ml.yml"
-    },
-    "data_ingester": {
-      "defaults": [
-        "config.example.env:44",
-        "engine/config/defaults.py:189"
-      ],
-      "notes": "Shared ledger path reused by ML + ingester"
     },
     "strategies": {
       "defaults": [
@@ -308,7 +362,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('mode-${newMode}')"
@@ -323,7 +376,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('pause')"
@@ -338,7 +390,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('resume')"
@@ -350,7 +401,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('flatten')"
@@ -362,7 +412,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": [
@@ -378,7 +427,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('config')"
@@ -418,37 +466,28 @@
           "config:patch",
           "ws:session"
         ]
-      },
-      "approver": {
-        "description": "Second approver token required for high-risk commands",
-        "capabilities": [
-          "operator",
-          "approve:kill-switch",
-          "approve:config",
-          "approve:flatten"
-        ]
       }
     },
     "ui_requirements": [
       {
         "control": "TopHUD.pause",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "TopHUD.resume",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "TopHUD.flatten",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "TopHUD.kill",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "SettingsTab.saveOverrides",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "WebSocket.connect",
@@ -458,7 +497,7 @@
     "storage": {
       "opsAuth": {
         "persisted": false,
-        "source": "frontend/src/lib/store.ts:212",
+        "source": "frontend/src/lib/store.ts:84",
         "notes": "OPS credentials remain in-memory and are never stored in localStorage"
       }
     },
@@ -466,76 +505,70 @@
       {
         "capability": "control:config_patch",
         "endpoint": "PUT /api/config",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:337-370"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:339-356"
       },
       {
         "capability": "control:kill_switch",
         "endpoint": "POST /api/ops/kill-switch",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:442-470"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:444-466"
       },
       {
         "capability": "control:flatten",
         "endpoint": "POST /api/ops/flatten",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:468-494"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:470-495"
       },
       {
         "capability": "strategy:lifecycle",
         "endpoint": "POST /api/strategies/{id}/start|stop|update",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:667-760"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:673-760"
       },
       {
         "capability": "backtest:start",
         "endpoint": "POST /api/backtests",
-        "guard": "IdempotentTwoManGuard",
-        "source": "ops/ui_api.py:846-908"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:832-908"
       },
       {
         "capability": "config:reload",
         "endpoint": "POST /api/governance/reload",
         "guard": "TokenOnlyGuard",
-        "source": "ops/ui_api.py:497-520"
+        "source": "ops/ui_api.py:499-520"
       },
       {
         "capability": "strategy:patch",
         "endpoint": "PATCH /api/strategies/{id}",
         "guard": "require_ops_token",
-        "source": "ops/ui_api.py:386-393"
+        "source": "ops/ui_api.py:369-376"
       },
       {
         "capability": "funds:transfer",
         "endpoint": "POST /api/account/transfer",
         "guard": "require_ops_token",
-        "source": "ops/ui_api.py:545-552"
+        "source": "ops/ui_api.py:547-552"
       }
     ],
     "gaps": [
       {
-        "issue": "strategy_patch_missing_two_man",
+        "issue": "strategy_patch_missing_idempotency",
         "endpoint": "PATCH /api/strategies/{id}",
-        "impact": "Single OPS token may disable/retune strategies without second approver.",
-        "source": "ops/ui_api.py:386-393"
+        "impact": "Single operator can patch strategies without an idempotency key or audit payload.",
+        "source": "ops/ui_api.py:369-376"
       },
       {
-        "issue": "fund_transfer_single_token",
+        "issue": "fund_transfer_no_idempotency",
         "endpoint": "POST /api/account/transfer",
-        "impact": "Internal transfers can execute without dual approval or idempotency.",
-        "source": "ops/ui_api.py:545-552"
-      },
-      {
-        "issue": "governance_reload_single_token",
-        "endpoint": "POST /api/governance/reload",
-        "impact": "Policy reload can apply unsafe changes without approver oversight.",
-        "source": "ops/ui_api.py:497-520"
+        "impact": "Transfers execute with a single OPS token and no idempotency tracking.",
+        "source": "ops/ui_api.py:547-552"
       },
       {
         "issue": "viewer_role_not_distinct",
         "endpoint": "POST /api/ops/ws-session",
-        "impact": "Backend cannot distinguish viewers from operators; X-Ops-Actor is optional and unauthenticated.",
-        "source": "ops/ui_api.py:243-258"
+        "impact": "Backend cannot distinguish viewers from operators; X-Ops-Actor remains optional and unverified.",
+        "source": "ops/ui_api.py:245-260"
       }
     ],
     "session": {
@@ -568,7 +601,7 @@
   "gates": {
     "healthchecks": "docker-compose.yml defines curl-based health probes for engine and ops (readyz endpoints) with generous start periods.",
     "logging": "All services use json-file logging with 10MB/3-file rotation to cap Docker.raw growth.",
-    "secrets": "Grafana admin password expected via GF_SECURITY_ADMIN_PASSWORD__FILE; OPS_APPROVER_TOKENS enforced via compose env (ops service).",
+    "secrets": "Grafana admin password expected via GF_SECURITY_ADMIN_PASSWORD__FILE; OPS_API_TOKEN sourced via env or secret file for the ops service.",
     "min_samples": 3,
     "min_trades": 50,
     "improvement_threshold": 0.05,
@@ -620,10 +653,10 @@
     "promotion_delta": 1.0
   },
   "hitl": {
-    "two_man_rule": "High-risk endpoints in ops/ui_api.py:431-525 require OPS_TOKEN plus OPS_APPROVER_TOKENS; frontend/App.tsx:146-335 refuses to send controls without both.",
+    "single_operator": "Critical controls now rely on a single OPS token plus audit call-sign (ops/ui_api.py:444-495; frontend/src/App.tsx:160-207).",
     "kill_reason_prompt": "frontend/src/App.tsx:126-144 requires operators to enter a reason before invoking the kill switch.",
-    "control_audit_log": "ops/ui_api.py:352-525 logs every mutation to ops/logs/control_actions.jsonl via _record_control_action.",
-    "runbook_handoffs": "docs/OPS_RUNBOOK.md:20-63 spells out operator + approver workflow for pause/resume and strategy weight changes."
+    "control_audit_log": "ops/ui_api.py:346-520 logs every mutation to ops/logs/control_actions.jsonl via _record_control_action.",
+    "runbook_handoffs": "docs/OPS_RUNBOOK.md:20-63 documents pause/resume workflows with optional audit call-signs."
   },
   "cooldowns": {
     "governance_actions": "ops/governance_daemon.py:176-212 tracks last_actions per rule and enforces cooldown_seconds before re-triggering.",
@@ -664,17 +697,63 @@
   "perf_hotspots": [
     "signal_queue_unbounded"
   ],
+  "api_guidelines": {
+    "doc": "docs/api_guidelines.md",
+    "resource_naming": [
+      "Prefer plural nouns for collections and nest subordinate resources (e.g. /strategies/{id}/positions).",
+      "Keep imperatives out of URIs; express actions via POST body enums or /actions/{verb} suffix when unavoidable."
+    ],
+    "versioning": {
+      "strategy": "Path-based namespace (/api/v1) with optional X-API-Version header for forward negotiation.",
+      "sunset_policy": "Advertise supported versions via X-API-Versions response header and publish deprecation timelines in docs/CHANGELOG.md.",
+      "status": "Header added to OpenAPI; runtime still serves unversioned /api routes."
+    },
+    "error_model": {
+      "schema": "error.code + error.message + optional details + requestId.",
+      "status": "Documented in OpenAPI components; FastAPI handlers still emit bare detail strings."
+    },
+    "pagination": {
+      "pattern": {
+        "cursor": "cursor",
+        "limit": "limit",
+        "sort": "sort",
+        "filters": "filter[field]=value"
+      },
+      "response_envelope": "data + page.nextCursor/page.prevCursor/page.limit/page.totalHint",
+      "status": "Strategies, positions, trades, and alerts now emit cursor-based envelopes; remaining collections (e.g. metrics detail feeds) still pending."
+    },
+    "idempotency": {
+      "required_headers": [
+        "Idempotency-Key"
+      ],
+      "gaps": [
+        "/api/orders/cancel",
+        "/api/account/transfer",
+        "/api/events/trade"
+      ]
+    }
+  },
+  "openapi_updates": {
+    "file": "docs/command_center_openapi.yaml",
+    "changes": [
+      "Removed two-man approval references; documented single-operator guardrails.",
+      "Added X-API-Version header parameter and default error response schema.",
+      "Documented paginated responses for strategies, trades, alerts, and positions."
+    ]
+  },
+  "gaps": [
+    "Runtime has not yet issued X-API-Versions headers or enforced version negotiation.",
+    "Control mutations lack uniform error envelopes; FastAPI should marshal exceptions into ErrorResponse.",
+    "Additional collections (e.g. dashboard metrics) remain unpaginated; extend cursor helpers before v1 freeze."
+  ],
   "policy_guard_details": {
-    "authz_two_man_required": "Extend IdempotentTwoManGuard + idempotency to PATCH /api/strategies/{id} and POST /api/account/transfer.",
-    "ops_token_rotation_gap": "OPS_API_TOKEN and OPS_APPROVER_TOKENS cache in-process (ops/middleware/control_guard.py:22-56); add file watcher or reload endpoint for rotation.",
+    "ops_token_rotation_gap": "OPS_API_TOKEN is cached in-process (ops/middleware/control_guard.py:20-82); add a reload endpoint or watcher to rotate secrets without restart.",
     "ws_message_once_guard": "App.tsx (frontend/src/App.tsx:193-200) memoizes the last processed WebSocket payload so React Query hydration runs at most once per message, preventing nested rerender loops."
   },
   "authz_findings": [
-    "PATCH /api/strategies/{strategy_id} only requires X-Ops-Token (ops/ui_api.py:386-393), allowing one credential to toggle strategies without secondary approval.",
-    "POST /api/account/transfer uses require_ops_token (ops/ui_api.py:545-552) so funds can move without dual approval or idempotency.",
-    "POST /api/governance/reload relies on TokenOnlyGuard (ops/ui_api.py:497-520), letting a solo operator reload policies.",
-    "Control guards cache OPS token + approver secrets until restart (ops/middleware/control_guard.py:22-56), blocking secret rotation/revocation.",
-    "Viewer/operator roles share the same credential; X-Ops-Actor header is optional and unverified (ops/ui_api.py:243-258)."
+    "Strategic PATCH operations use single-token auth without idempotency or dual-signature, allowing accidental double submits.",
+    "POST /api/account/transfer reuses require_ops_token with no replay protection; consider adding IdempotentGuard.",
+    "WS session issuance still trusts optional X-Ops-Actor and does not separate viewer credentials."
   ],
   "config_files": [
     {
@@ -731,32 +810,117 @@
     "distribution": "manual file sync (no remote store)"
   },
   "audit_trail": true,
-  "notes": {
-    "reload": "Operators can call POST /api/governance/reload (ops/ui_api.py:520-533) to apply policy edits without a restart.",
-    "backup": "Backup YAML ships with repo but no automation to sync from remote source.",
-    "daemon": "Governance daemon persists audit events to ops/logs/governance_audit.jsonl in addition to the in-memory ring buffer.",
-    "overlays": "compose.autotrain.yml adds data_ingester, ml_service, param_controller; compose.ml.yml exposes ml_service on 8017 with healthcheck; compose.backfill.yml runs data backfill job.",
-    "tmpfs": "Engine/ops containers mount /tmp/prom_multiproc tmpfs to avoid stale Prometheus files on restart.",
-    "networks": "All services share trading_net for service discovery; external DNS 1.1.1.1/8.8.8.8 configured for engines.",
-    "restart_flows": "Use 'docker compose up -d --no-deps --force-recreate ops' for API recycle per docs/OPS_RUNBOOK.md restart instructions.",
-    "middleware_gap": "High-risk control endpoints now use ops.middleware.control_guard.IdempotentTwoManGuard (ops/ui_api.py:320-520) for consistent enforcement.",
-    "audit_persistence": "Governance daemon writes audits to ops/logs/governance_audit.jsonl while retaining the in-memory ring buffer (ops/governance_daemon.py:360-386).",
-    "ingester": "CCXT fetch_ohlcv -> ledger watermark, deletes duplicate files",
-    "scheduler": "APS cron (0 */6 * * *) drives retrains, requeues failures",
-    "watchdog": "Filesystem observer reloads /models/current symlink for online inference",
-    "bandit": "LinTS registry in /shared/param_controller.sqlite with outcome logging",
-    "exactly_once": "EXACTLY_ONCE can be toggled via ML_EXACTLY_ONCE env; compose overlays default to the application setting.",
-    "prometheus": "ops/observability/prometheus/prometheus.yml scrapes engines, ops API, executor, ML services with 5s/15s cadence; relabeling sets job label from host.",
-    "grafana": "Dashboards auto-provisioned via ops/observability/grafana/provisioning with datasource UID 'prometheus' and 5s refresh.",
-    "alertmanager": "ops/observability/alertmanager/alertmanager.yml posts to Telegram using env tokens; group wait 10s and repeat interval 2h.",
-    "logging": "Promtail pushes Docker logs to Loki (ops/observability/promtail/config.yml) with json stage and RFC3339Nano timestamps.",
-    "slo_registry": "ops/observability/slo.yaml declares three SLOs with burn-rate alert guidance.",
-    "http_retry_backoff": "Ops network clients share HTTPX limits + capped exponential backoff (ops/net.py:1-108); Binance REST helper retries with jitter (shared/binance_http.py:7-47).",
-    "sqlite_async_queue": "Engine persistence writes through a background queue with WAL + busy_timeout to avoid 'database is locked' errors (engine/storage/sqlite.py:2-109).",
-    "signal_queue_priority": "Strategy/event pipeline runs off a cooperative priority queue with expiry support to prevent stale signals (engine/core/signal_queue.py:1-74).",
-    "ops_healthchecks": "docker-compose healthchecks for engine/ops hit `/readyz` and allow generous start periods (docker-compose.yml:53-108,160-214).",
-    "selector": "ops/strategy_selector.py ranks strategies by Sharpe - drawdown penalty and promotes when improvement > 0.05",
-    "weights": "ops/strategy_weights.json enforces 80/20 weighting with max_canary_weight guard",
-    "registry": "ops/strategy_registry.json lists eligible models with manual flags"
-  }
+  "notes": [
+    "All updates preserve public APIs; changes limited to guarding equality and throttling repeated side effects."
+  ],
+  "top5": [
+    "strategy_patch_missing_idempotency",
+    "fund_transfer_no_idempotency",
+    "ops_token_rotation_gap",
+    "viewer_role_not_distinct",
+    "ws_actor_optional"
+  ],
+  "framework": "React 18 + Vite + TypeScript + TanStack Query 5 + Zustand",
+  "frontend_root": "frontend",
+  "live_flags": {
+    "websocket": "VITE_WS_URL (defaults to ws://localhost:8002/ws)",
+    "polling_disable": "VITE_LIVE_OFF=true disables usePolling timers and WebSocket hydrate"
+  },
+  "suspects": [
+    {
+      "id": "ws-app-query-hydrate",
+      "type": "effect-dep-mutates-dep",
+      "source": "frontend/src/App.tsx:192-235",
+      "downstream": [
+        "TanStack Query cache for dashboard.summary/health",
+        "App render -> TopHUD metrics props -> React Query observers"
+      ],
+      "symptoms": [
+        "Stack trace references TanStack forceStoreRerender",
+        "Loop reproduces when websocket metrics stream is live"
+      ],
+      "notes": "WebSocket handler pushes every payload into query cache via setQueryData inside an effect that depends on lastMessage. Message objects lack stable identity/diffing, so every notification rehydrates queries even when unchanged. React Query notifies subscribers synchronously, retriggering the same effect before the guard records a processed hash.",
+      "instrument_plan": [
+        "Wrap App with dev-only render counter (whyDidYouUpdate) to log metrics message ids",
+        "Log query cache writes for dashboard.summary to confirm duplicate writes"
+      ]
+    },
+    {
+      "id": "ws-session-recursion",
+      "type": "effect-dep-mutates-dep",
+      "source": "frontend/src/lib/websocket.ts:244-309",
+      "downstream": [
+        "useWebSocket state machine (wsSession, managerRef)",
+        "App re-render because hook returns new session state"
+      ],
+      "symptoms": [
+        "When OPS tokens missing or invalid, session issuance re-runs on every render",
+        "managerRef.disconnect() + setWsSession(null) fire before previous effect cleanup"
+      ],
+      "notes": "Effect recomputes trimmed token/actor each render. On error the catch sets wsSession(null) which is already null, but React still schedules state work. Combined with StrictMode double-invoke, the hook re-requests a session rapidly, keeping the component in an update loop once backend responds with errors.",
+      "instrument_plan": [
+        "Add console.count in dev to track session requests",
+        "Mock issueWebsocketSession in tests and assert no re-request without credentials"
+      ]
+    },
+    {
+      "id": "polling-fn-identity",
+      "type": "timer/subscription recreated without cleanup",
+      "source": "frontend/src/lib/hooks.ts:3-46",
+      "downstream": [
+        "Consumers passing inline poller functions (e.g. BacktestingTab)",
+        "Repeated timer setup tears down previous but can interleave updates leading to synchronous setState bursts"
+      ],
+      "symptoms": [
+        "When fn identity changes per render, tick() fires immediately and schedules the next timeout, stacking multiple pending promises",
+        "Combined with optimistic UI (setJobSnapshot) the component can oscillate between job states"
+      ],
+      "notes": "usePolling stores fn in dependency array. If consumers forget to memoize, every render recreates the timer, immediately calling tick() and setData(), causing clustered state updates. Need a stable fn or internal ref guard."
+    }
+  ],
+  "loop_graph": [
+    {
+      "source": "WebSocket message -> useWebSocket.handleMessage",
+      "edge": "updateGlobalMetrics/venues -> Zustand realTimeData",
+      "target": "App + dashboard queries recompute",
+      "risk": "Repeated query cache writes trigger React Query forceStoreRerender leading to depth overflow"
+    },
+    {
+      "source": "useWebSocket session effect",
+      "edge": "issueWebsocketSession retries -> setWsSession(null)",
+      "target": "App effect waiting on lastMessage re-invokes before cleanups finish",
+      "risk": "Credential-less mode spins session fetch loop"
+    },
+    {
+      "source": "usePolling tick timer",
+      "edge": "setData -> component state setter",
+      "target": "Component render -> re-creates polling fn",
+      "risk": "Timer churn causes back-to-back state updates without delays"
+    }
+  ],
+  "instrumentation_todo": [
+    "Add dev-only render counter hook (whyDidYouUpdate) to App, TopHUD, DashboardTab",
+    "Enable TanStack Query logger to confirm cache write frequency",
+    "Write Vitest harness that mounts App with mocked WS to observe render counts"
+  ],
+  "patches": [
+    {
+      "file": "frontend/src/App.tsx",
+      "summary": "Debounce WebSocket-derived React Query writes using message tokens and serialized digests so no-ops skip cache updates.",
+      "rationale": "Prevents identical metrics/health payloads from triggering new query cache objects, eliminating the effect-dep-mutates-dep loop that hit React’s maximum update depth.",
+      "loop_fixed": "ws-app-query-hydrate"
+    },
+    {
+      "file": "frontend/src/lib/websocket.ts",
+      "summary": "Throttle websocket session issuance per credential pair with in-flight guard and back-off after failures.",
+      "rationale": "Stops StrictMode double-run from repeatedly requesting sessions when ops credentials stay unchanged, preventing the session spin loop.",
+      "loop_fixed": "ws-session-recursion"
+    },
+    {
+      "file": "frontend/src/lib/hooks.ts",
+      "summary": "Stabilise polling timers by pinning async fn/comparator in refs so timer effect only depends on interval + enabled state.",
+      "rationale": "Avoids recreating timers/setState bursts when consumers inline the polling function, eliminating timer churn loops.",
+      "loop_fixed": "polling-fn-identity"
+    }
+  ]
 }

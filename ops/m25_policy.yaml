@@ -5,7 +5,7 @@ risk_limits:
   max_open_trades: 10
 
 human_review:
-  require_approval_for_promotion: true
+  require_approval_for_promotion: false
   approver_email: "compliance@yourdomain.com"
 
 compliance:

@@ -7,7 +7,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('mode-${newMode}')"
@@ -22,7 +21,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('pause')"
@@ -37,7 +35,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('resume')"
@@ -49,7 +46,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('flatten')"
@@ -61,7 +57,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": [
@@ -77,7 +72,6 @@
       "headers": [
         "X-Ops-Token",
         "X-Ops-Actor",
-        "X-Ops-Approver",
         "Idempotency-Key"
       ],
       "idempotency_source": "generateIdempotencyKey('config')"
@@ -103,10 +97,12 @@
     "issue_ws_session"
   ],
   "policy_guards": [
-    "ws_message_once_guard"
+    "ws_message_once_guard",
+    "dashboard_filters_reset_pagination"
   ],
   "policy_guard_details": {
-    "ws_message_once_guard": "App.tsx (frontend/src/App.tsx:193-200) memoizes the last processed WebSocket payload so React Query hydration runs at most once per message, preventing nested rerender loops."
+    "ws_message_once_guard": "App.tsx (frontend/src/App.tsx:193-200) memoizes the last processed WebSocket payload so React Query hydration runs at most once per message, preventing nested rerender loops.",
+    "dashboard_filters_reset_pagination": "DashboardTab (frontend/src/components/tabs/DashboardTab.tsx:74-212) now clears stored pagination cursors and removes TanStack Query caches whenever filters change, ensuring subsequent fetches restart at page one without manual reload."
   },
   "rbac": {
     "roles": {
@@ -128,37 +124,28 @@
           "config:patch",
           "ws:session"
         ]
-      },
-      "approver": {
-        "description": "Second approver token required for high-risk commands",
-        "capabilities": [
-          "operator",
-          "approve:kill-switch",
-          "approve:config",
-          "approve:flatten"
-        ]
       }
     },
     "ui_requirements": [
       {
         "control": "TopHUD.pause",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "TopHUD.resume",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "TopHUD.flatten",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "TopHUD.kill",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "SettingsTab.saveOverrides",
-        "requires": "operator+approver"
+        "requires": "operator"
       },
       {
         "control": "WebSocket.connect",
@@ -168,7 +155,7 @@
     "storage": {
       "opsAuth": {
         "persisted": false,
-        "source": "frontend/src/lib/store.ts:212",
+        "source": "frontend/src/lib/store.ts:84",
         "notes": "OPS credentials remain in-memory and are never stored in localStorage"
       }
     }

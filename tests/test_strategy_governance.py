@@ -255,16 +255,11 @@ def test_manual_promotion_override():
 
     client = TestClient(ops_app.app)
     token = getattr(ops_app, "OPS_TOKEN", os.getenv("OPS_API_TOKEN"))
-    approver = os.getenv("OPS_APPROVER_TOKENS")
-
     # Manual promotion request
     response = client.post(
         "/strategy/promote",
         json={"model_tag": "ensemble_v2"},
-        headers={
-            "X-OPS-TOKEN": token,
-            "X-Ops-Approver": approver,
-        },
+        headers={"X-OPS-TOKEN": token},
     )
 
     assert response.status_code == 200

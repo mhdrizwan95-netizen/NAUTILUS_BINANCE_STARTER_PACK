@@ -5,6 +5,8 @@ import {
   modeSchema,
   strategySummarySchema,
   dashboardSummarySchema,
+  ordersListResponseSchema,
+  metricsModelListResponseSchema,
 } from './validation';
 
 describe('Validation Functions', () => {
@@ -105,6 +107,76 @@ describe('Validation Functions', () => {
 
         expect(dashboardSummarySchema.safeParse(invalidData).success).toBe(false);
       });
+    });
+  });
+
+  describe('ordersListResponseSchema', () => {
+    it('should validate paginated orders', () => {
+      const payload = {
+        data: [
+          {
+            id: 'order-1',
+            symbol: 'BTCUSDT',
+            side: 'buy',
+            type: 'limit',
+            qty: 1,
+            filled: 0.5,
+            price: 42000,
+            status: 'open',
+            createdAt: Date.now(),
+          },
+        ],
+        page: {
+          nextCursor: null,
+          prevCursor: null,
+          limit: 50,
+          totalHint: 1,
+          hasMore: false,
+        },
+      };
+
+      expect(ordersListResponseSchema.safeParse(payload).success).toBe(true);
+    });
+  });
+
+  describe('metricsModelListResponseSchema', () => {
+    it('should validate paginated model metrics', () => {
+      const payload = {
+        data: [
+          {
+            id: 'trend:binance',
+            model: 'trend',
+            venue: 'binance',
+            ordersSubmitted: 10,
+            ordersFilled: 9,
+            trades: 9,
+            pnlRealized: 120.5,
+            pnlUnrealized: 30.2,
+            totalPnl: 150.7,
+            winRate: 0.6,
+            returnPct: 3.2,
+            sharpe: 1.1,
+            drawdown: 0.08,
+            maxDrawdown: 0.12,
+            strategyType: 'momentum',
+            version: '1.0',
+            tradingDays: 14,
+          },
+        ],
+        page: {
+          nextCursor: null,
+          prevCursor: null,
+          limit: 50,
+          hasMore: false,
+        },
+        meta: {
+          metricsSource: 'stub',
+          fetchedAt: Date.now(),
+          records: 1,
+        },
+      };
+
+      expect(metricsModelListResponseSchema.safeParse(payload).success).toBe(true);
     });
   });
 });

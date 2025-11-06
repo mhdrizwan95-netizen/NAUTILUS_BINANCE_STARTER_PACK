@@ -6,7 +6,7 @@
     },
     {
       "file": "frontend/src/lib/hooks.test.tsx",
-      "purpose": "Verifies usePolling skips redundant state writes and honors the VITE_LIVE_OFF flag."
+      "purpose": "Augmented to assert structural hashing prevents redundant polling updates and continues honoring VITE_LIVE_OFF."
     },
     {
       "file": "frontend/src/lib/streamMergers.test.ts",
@@ -15,9 +15,14 @@
     {
       "file": "frontend/src/lib/websocket.test.ts",
       "purpose": "Adds regression coverage for WebSocket URL construction and the live-update disable flag."
+    },
+    {
+      "file": "frontend/src/lib/equality.test.ts",
+      "purpose": "Covers stableHash determinism and guards against structural regressions."
     }
   ],
   "commands": [
-    "cd frontend && npm run test"
+    "cd frontend && npm run test -- --run src/components/TopHUD.test.tsx",
+    "cd frontend && npm run test -- --run src/lib/hooks.test.tsx src/lib/equality.test.ts"
   ]
 }

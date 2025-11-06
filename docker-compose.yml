@@ -188,9 +188,8 @@ services:
       # LIVE-3: Environment variables for live metrics
       OPS_API_TOKEN: ${OPS_API_TOKEN:-}
       OPS_API_TOKEN_FILE: ${OPS_API_TOKEN_FILE:-}
-      OPS_APPROVER_TOKENS: ${OPS_APPROVER_TOKENS:?OPS_APPROVER_TOKENS must be provided (comma-separated approver tokens)}
-
       ENGINE_ENDPOINTS: "${ENGINE_ENDPOINTS:-http://engine_binance:8003}"
+      OPS_METRICS_URL: "http://ops:8002/metrics"
 
       # Situations SSE (use service name DNS)
       SITUATIONS_SSE_URL: "http://situations:8011/events/stream"

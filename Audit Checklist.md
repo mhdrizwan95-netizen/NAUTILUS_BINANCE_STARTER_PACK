@@ -186,10 +186,10 @@ OUTPUT: Output Contract + orchestrator.yaml + trainer.py + candidate_config.json
 STATE_UPDATE: { "closed_loop": true, "gates_live": {...} }
 
 [T-HITL] Human-in-the-Loop Safety
-TASK: Two-man rule + cooling-off + rollback.
+TASK: Single-operator guardrails + cooling-off + rollback.
 INPUTS: POLICY_SNIPPETS
 OUTPUT: Output Contract + approval_flow.md + middleware stub
-STATE_UPDATE: { "hitl": { "two_man": true, "cooldowns": ... } }
+STATE_UPDATE: { "hitl": { "single_operator": true, "cooldowns": ... } }
 
 Appendix: Additional Slices
 🔁 Required ritual for every slice in this appendix
@@ -530,7 +530,7 @@ Idempotency on all control APIs
 
 Policy guard enforcement
 
-Two-man approval on high-risk actions
+Single-operator guardrails on high-risk actions
 
 Universe/selector gates enforced
 

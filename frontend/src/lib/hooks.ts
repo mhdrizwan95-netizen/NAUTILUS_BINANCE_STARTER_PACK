@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { stableHash } from './equality';
 
 export function usePolling<T>(
   fn: () => Promise<T>,
@@ -10,6 +11,7 @@ export function usePolling<T>(
   const [error, setError] = useState<Error | null>(null);
   const timer = useRef<number | null>(null);
   const lastData = useRef<T | null>(null);
+  const lastHash = useRef<string | null>(null);
   const fnRef = useRef(fn);
   const comparatorRef = useRef(isEqual);
   const liveDisabled = (import.meta as any)?.env?.VITE_LIVE_OFF === 'true';
@@ -30,10 +32,21 @@ export function usePolling<T>(
     const tick = async () => {
       try {
         const result = await fnRef.current();
-        if (!cancelled && !comparatorRef.current(lastData.current, result)) {
-          lastData.current = result;
-          setData(result);
+        if (cancelled) {
+          return;
         }
+        const nextHash = stableHash(result);
+        if (
+          comparatorRef.current(lastData.current, result) ||
+          lastHash.current === nextHash
+        ) {
+          lastHash.current = nextHash;
+          lastData.current = result;
+          return;
+        }
+        lastHash.current = nextHash;
+        lastData.current = result;
+        setData(result);
       } catch (err) {
         if (!cancelled && err instanceof Error) {
           setError(err);
@@ -51,6 +64,7 @@ export function usePolling<T>(
       cancelled = true;
       if (timer.current) window.clearTimeout(timer.current);
       lastData.current = null;
+      lastHash.current = null;
     };
   }, [ms, pollingEnabled]);
 

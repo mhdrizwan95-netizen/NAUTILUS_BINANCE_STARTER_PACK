@@ -6,6 +6,8 @@ import type {
   PnlSnapshot,
   Trade,
   Alert,
+  Order,
+  MetricsModel,
 } from '@/types/trading';
 import type { ConfigEffective } from './validation';
 
@@ -14,12 +16,20 @@ export interface ControlRequestOptions {
   token?: string;
   actor?: string;
   idempotencyKey?: string;
-  approverToken?: string;
 }
 
 const BASE = '';
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const API_VERSION = 'v1';
+ 
+export interface FetchPageOptions {
+  cursor?: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+export type FetchStrategiesOptions = FetchPageOptions;
 
 interface TimeoutSignal {
   signal: AbortSignal;
@@ -63,15 +73,44 @@ async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): P
       ...init,
       headers: {
         'Content-Type': 'application/json',
+        'X-API-Version': API_VERSION,
         ...(init?.headers ?? {}),
       },
       signal: timeoutSignal,
     });
 
     if (!response.ok) {
-      const body = await response.text();
-      const error = new Error(body || `Request to ${path} failed with ${response.status}`);
-      (error as Error & { status?: number }).status = response.status;
+      let message = `Request to ${path} failed with ${response.status}`;
+      let code: string | undefined;
+      let details: unknown;
+      let requestId: string | undefined;
+      try {
+        const body = await response.json();
+        if (body?.error) {
+          code = body.error.code;
+          message = body.error.message ?? message;
+          details = body.error.details;
+          requestId = body.error.requestId;
+        } else if (body) {
+          message = JSON.stringify(body);
+        }
+      } catch {
+        const fallback = await response.text();
+        if (fallback) {
+          message = fallback;
+        }
+      }
+
+      const error = new Error(message) as Error & {
+        status?: number;
+        code?: string;
+        details?: unknown;
+        requestId?: string;
+      };
+      error.status = response.status;
+      if (code) error.code = code;
+      if (details !== undefined) error.details = details;
+      if (requestId) error.requestId = requestId;
       throw error;
     }
 
@@ -97,15 +136,40 @@ const buildControlHeaders = (options?: ControlRequestOptions): Record<string, st
   if (options?.actor) {
     headers['X-Ops-Actor'] = options.actor;
   }
-  if (options?.approverToken) {
-    headers['X-Ops-Approver'] = options.approverToken;
-  }
   return headers;
 };
 
+const buildPageQuery = (options?: FetchPageOptions): URLSearchParams => {
+  const params = new URLSearchParams();
+  if (options?.cursor) {
+    params.set('cursor', options.cursor);
+  }
+  if (options?.limit) {
+    params.set('limit', String(options.limit));
+  }
+  return params;
+};
+
+export interface PageMetadata {
+  nextCursor: string | null;
+  prevCursor: string | null;
+  limit: number;
+  totalHint?: number | null;
+  hasMore?: boolean;
+}
+
+export interface PageResponse<T> {
+  data: T[];
+  page: PageMetadata;
+}
+
 // Strategies
-export const getStrategies = (signal?: AbortSignal) =>
-  api<StrategySummary[]>('/api/strategies', undefined, signal);
+export const getStrategies = (options?: FetchStrategiesOptions) => {
+  const params = buildPageQuery(options);
+  const query = params.toString();
+  const path = query ? `/api/strategies?${query}` : '/api/strategies';
+  return api<PageResponse<StrategySummary>>(path, undefined, options?.signal);
+};
 export const getStrategy = (id: string, signal?: AbortSignal) =>
   api<StrategySummary>(`/api/strategies/${id}`, undefined, signal);
 export const startStrategy = (
@@ -174,18 +238,44 @@ export const getDashboardSummary = (q: URLSearchParams, signal?: AbortSignal) =>
     returns: number[];
   }>(`/api/metrics/summary?${q.toString()}`, undefined, signal);
 
-export const getPositions = (signal?: AbortSignal) =>
-  api<Array<{ symbol: string; qty: number; entry: number; mark: number; pnl: number }>>(
-    '/api/positions',
+export const getPositions = (options?: FetchPageOptions) => {
+  const params = buildPageQuery(options);
+  const query = params.toString();
+  const path = query ? `/api/positions?${query}` : '/api/positions';
+  return api<PageResponse<{ symbol: string; qty: number; entry: number; mark: number; pnl: number }>>(
+    path,
     undefined,
-    signal,
+    options?.signal,
   );
+};
 
-export const getRecentTrades = (signal?: AbortSignal) =>
-  api<Trade[]>('/api/trades/recent?limit=100', undefined, signal);
+export const getRecentTrades = (options?: FetchPageOptions) => {
+  const params = buildPageQuery({ limit: options?.limit ?? 100, cursor: options?.cursor });
+  const query = params.toString();
+  const path = query ? `/api/trades/recent?${query}` : '/api/trades/recent';
+  return api<PageResponse<Trade>>(path, undefined, options?.signal);
+};
 
-export const getAlerts = (signal?: AbortSignal) =>
-  api<Alert[]>('/api/alerts?limit=50', undefined, signal);
+export const getAlerts = (options?: FetchPageOptions) => {
+  const params = buildPageQuery({ limit: options?.limit ?? 50, cursor: options?.cursor });
+  const query = params.toString();
+  const path = query ? `/api/alerts?${query}` : '/api/alerts';
+  return api<PageResponse<Alert>>(path, undefined, options?.signal);
+};
+
+export const getOpenOrders = (options?: FetchPageOptions) => {
+  const params = buildPageQuery({ cursor: options?.cursor, limit: options?.limit ?? 100 });
+  const query = params.toString();
+  const path = query ? `/api/orders/open?${query}` : '/api/orders/open';
+  return api<PageResponse<Order>>(path, undefined, options?.signal);
+};
+
+export const getMetricsModels = (options?: FetchPageOptions) => {
+  const params = buildPageQuery({ cursor: options?.cursor, limit: options?.limit ?? 50 });
+  const query = params.toString();
+  const path = query ? `/api/metrics/models?${query}` : '/api/metrics/models';
+  return api<PageResponse<MetricsModel>>(path, undefined, options?.signal);
+};
 
 export const getHealth = (signal?: AbortSignal) =>
   api<{

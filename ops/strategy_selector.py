@@ -4,11 +4,18 @@ import logging
 import asyncio
 from pathlib import Path
 from datetime import datetime, timezone
+
+import yaml
+
 from ops.env import engine_endpoints
 from ops.net import create_async_client, request_with_retry
+from ops import m25_governor
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 WEIGHTS_PATH = Path("ops/strategy_weights.json")
+POLICY_PATH = Path("ops/m25_policy.yaml")
+RISK_SNAPSHOT_PATH = Path("data/processed/m19/metrics_snapshot.json")
+PROMOTION_AUDIT_PATH = Path("ops/logs/promotion_audit.jsonl")
 logging.basicConfig(
     level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
 )
@@ -29,6 +36,16 @@ def save_registry(d: dict):
     tmp = REGISTRY_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(d, indent=2))
     tmp.replace(REGISTRY_PATH)
+
+
+def _append_promotion_audit(entry: dict) -> None:
+    """Persist promotion and approval activity for long-term compliance."""
+    try:
+        PROMOTION_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with PROMOTION_AUDIT_PATH.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry) + "\n")
+    except Exception as exc:  # noqa: BLE001
+        logging.error("[Governance] Failed to append promotion audit log: %s", exc)
 
 
 def _as_float(x, default: float = 0.0) -> float:
@@ -90,6 +107,50 @@ def rank_strategies(registry: dict) -> list:
     return ranked
 
 
+def _load_promotion_policy() -> dict:
+    """Read M25 policy file safely."""
+    if not POLICY_PATH.exists():
+        return {}
+    try:
+        return yaml.safe_load(POLICY_PATH.read_text()) or {}
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("[Governance] Failed to parse %s: %s", POLICY_PATH, exc)
+        return {}
+
+
+def _load_risk_snapshot() -> dict:
+    """Load latest risk metrics for compliance checks."""
+    if not RISK_SNAPSHOT_PATH.exists():
+        return {}
+    try:
+        return json.loads(RISK_SNAPSHOT_PATH.read_text())
+    except Exception as exc:  # noqa: BLE001
+        logging.warning(
+            "[Governance] Failed to load risk snapshot %s: %s",
+            RISK_SNAPSHOT_PATH,
+            exc,
+        )
+        return {}
+
+
+def _compliance_allows_promotion() -> tuple[bool, list[str]]:
+    """Evaluate risk policy before promoting a new strategy."""
+    try:
+        policy = m25_governor.load_policy()
+    except Exception as exc:  # noqa: BLE001
+        logging.warning("[Governance] Could not load risk policy: %s", exc)
+        return True, []
+
+    metrics = _load_risk_snapshot()
+    alerts = m25_governor.check_risk_limits(metrics, policy)
+    if alerts:
+        logging.warning(
+            "[Governance] Promotion blocked by risk alerts: %s", ",".join(alerts)
+        )
+        return False, alerts
+    return True, []
+
+
 def promote_best():
     """Evaluate current performance and promote the best strategy if it's a significant improvement."""
     registry = load_registry()
@@ -121,9 +182,61 @@ def promote_best():
         should_promote = best_model != current
 
     if should_promote:
+        policy = _load_promotion_policy()
+        require_approval = (
+            policy.get("human_review", {}).get("require_approval_for_promotion", False)
+        )
+
+        compliant, alerts = _compliance_allows_promotion()
+        if not compliant:
+            registry.setdefault("pending_promotions", {})
+            registry["pending_promotions"][best_model] = {
+                "time": utc_now(),
+                "from": current,
+                "score": best_score,
+                "reason": "risk_alerts",
+                "alerts": alerts,
+            }
+            save_registry(registry)
+            _append_promotion_audit(
+                {
+                    "time": utc_now(),
+                    "from": current,
+                    "to": best_model,
+                    "status": "blocked_risk",
+                    "alerts": alerts,
+                }
+            )
+            return
+
+        if require_approval and not best_stats.get("approved", False):
+            registry.setdefault("pending_promotions", {})
+            registry["pending_promotions"][best_model] = {
+                "time": utc_now(),
+                "from": current,
+                "score": best_score,
+                "reason": "pending_approval",
+            }
+            save_registry(registry)
+            logging.info(
+                "[Governance] Promotion queued for approval: %s requires human review",
+                best_model,
+            )
+            _append_promotion_audit(
+                {
+                    "time": utc_now(),
+                    "from": current,
+                    "to": best_model,
+                    "status": "pending_approval",
+                }
+            )
+            return
+
         # version bump for promotion
         best_stats["version"] = best_stats.get("version", 0) + 1
         best_stats["last_promotion"] = utc_now()
+        if "approved" in best_stats:
+            best_stats.pop("approved")
 
         # Initialize promotion log if it doesn't exist
         if "promotion_log" not in registry:
@@ -145,6 +258,10 @@ def promote_best():
         # Keep only last 50 promotions for log size management
         registry["promotion_log"] = registry["promotion_log"][-50:]
 
+        pending = registry.get("pending_promotions", {})
+        if pending.pop(best_model, None) is not None:
+            registry["pending_promotions"] = pending
+
         registry["current_model"] = best_model
         save_registry(registry)
 
@@ -154,6 +271,15 @@ def promote_best():
         _sync_router_weights(best_model)
         # Broadcast promotion to engines
         asyncio.run(push_model_update(best_model))
+        _append_promotion_audit(
+            {
+                "time": best_stats["last_promotion"],
+                "from": current,
+                "to": best_model,
+                "status": "promoted",
+                "score": best_score,
+            }
+        )
     elif len(ranked) >= 1 and current is None:
         # No current model set, initialize
         registry["current_model"] = best_model
@@ -175,12 +301,10 @@ def _sync_router_weights(current_model: str) -> None:
         config = {}
 
     weights = config.get("weights") or {}
-    # Ensure promoted model is present and dominates routing
-    weights = {model: (1.0 if model == current_model else 0.0) for model in weights}
-    if current_model not in weights:
-        weights[current_model] = 1.0
+    new_weights = {model: 0.0 for model in weights}
+    new_weights[current_model] = 1.0
 
-    config.update({"current": current_model, "weights": weights})
+    config.update({"current": current_model, "weights": new_weights})
 
     try:
         WEIGHTS_PATH.write_text(json.dumps(config, indent=2))

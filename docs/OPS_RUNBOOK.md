@@ -21,9 +21,9 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 
 | Action | Command | Notes |
 |--------|---------|-------|
-| Pause trading | `curl -X POST http://localhost:8002/kill -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" -H "X-Ops-Approver: ${OPS_APPROVER_TOKEN}" -d '{"enabled": false}'` | Sets `TRADING_ENABLED=false` in engine via governance. |
-| Resume trading | Same as above with `{"enabled": true}` (keep `X-Ops-Approver`) | Confirm by checking `/status` and `metrics_trading_enabled`. |
-| Adjust strategy weights | `curl -X POST http://localhost:8002/strategy/weights -H "X-OPS-TOKEN: ${OPS_API_TOKEN}" -H "X-Ops-Approver: ${OPS_APPROVER_TOKEN}" -H "Content-Type: application/json" -d '{"weights":{"ma_v1":0.3,"hmm_v1":0.7}}'` | Updates `ops/strategy_weights.json`; allocator loop reflects on next tick. |
+| Pause trading | `curl -X POST http://localhost:8002/kill -H "X-Ops-Token: ${OPS_API_TOKEN}" -H "Idempotency-Key: kill-$(date +%s)" -d '{"enabled": false}'` | Sets `TRADING_ENABLED=false` in engine via governance; include `X-Ops-Actor` if you want the audit log to capture your call-sign. |
+| Resume trading | Same as above with `{"enabled": true}` | Confirm by checking `/status` and `metrics_trading_enabled`. |
+| Adjust strategy weights | `curl -X POST http://localhost:8002/strategy/weights -H "X-Ops-Token: ${OPS_API_TOKEN}" -H "Content-Type: application/json" -d '{"weights":{"stable_model":0.7,"canary_model":0.3}}'` | Updates `ops/strategy_weights.json`; allocator loop reflects on next tick. |
 | Update HMM calibration | Edit `engine/models/hmm_calibration.json` (or `HMM_CALIBRATION_PATH`), wait 60 s or restart engine | Controls confidence gain, quote multiplier, cooldown scale; shared between backtests and live. |
 | Trigger manual reconciliation | `curl -X POST http://localhost:8003/reconcile/manual` | Returns counts of fills applied; safe to run any time. |
 | Inject external signal | `BODY='{"source":"test_harness","payload":{"symbol":"FOOUSDT"}}'; curl -X POST http://localhost:8003/events/external -H "Content-Type: application/json" -H "X-Events-Signature: sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$EXTERNAL_EVENTS_SECRET" -binary | xxd -p -c 256)" -d "$BODY"` | Publishes an event onto `events.external_feed`; include the signature header when `EXTERNAL_EVENTS_SECRET` is set. |

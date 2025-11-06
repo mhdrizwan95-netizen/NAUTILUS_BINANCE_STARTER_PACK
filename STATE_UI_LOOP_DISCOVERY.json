@@ -1,46 +1,83 @@
 {
   "framework": {
     "root": "frontend",
-    "stack": "React 18 + Vite + TypeScript + Zustand + React Query + motion",
+    "stack": "React 18 + Vite + TypeScript + TanStack Query + Zustand + Framer Motion",
     "tests": {
       "unit": "vitest",
       "e2e": "playwright",
-      "config": ["frontend/vitest.config.ts", "frontend/playwright.config.ts"]
+      "config": [
+        "frontend/vitest.config.ts",
+        "frontend/playwright.config.ts"
+      ]
     },
-    "liveFlags": ["VITE_WS_URL", "VITE_API_URL", "__NAUTILUS_DISABLE_PERSIST__"]
+    "liveFlags": [
+      "VITE_WS_URL",
+      "VITE_LIVE_OFF",
+      "__NAUTILUS_DISABLE_PERSIST__"
+    ]
+  },
+  "loop_sources": {
+    "effects": [
+      "frontend/src/App.tsx:62-246 (boot state, WS ingestion, config sync)",
+      "frontend/src/components/forms/DynamicParamForm.tsx:40-59 (propagate form changes upstream)",
+      "frontend/src/components/tabs/BacktestingTab.tsx:82-149,168-199 (strategy bootstrap, poll consumption)",
+      "frontend/src/components/tabs/FundingTab.tsx:78-119 (runtime config hydrate)",
+      "frontend/src/components/tabs/SettingsTab.tsx:61-116 (ops cred mirror + override hydrate)",
+      "frontend/src/lib/websocket.ts:223-361 (session lifecycle + connection management)",
+      "frontend/src/lib/hooks.ts:18-55 (polling timer loop)",
+      "frontend/src/components/ui/sidebar.tsx:87-121 (keydown listener + controlled state)"
+    ],
+    "timers": [
+      "frontend/src/App.tsx:70-75 (boot splash timeout)",
+      "frontend/src/lib/hooks.ts:26-55 (setTimeout polling loop)",
+      "frontend/src/lib/websocket.ts:104-161 (heartbeat interval/timeout, reconnect backoff)",
+      "frontend/src/lib/security.ts:430-458 (30s threat scan interval)"
+    ],
+    "subscriptions": [
+      "frontend/src/lib/websocket.ts:265-361 (WS manager shared across components)",
+      "frontend/src/lib/monitoring.ts:206-214 (React Query cache subscription)",
+      "frontend/src/components/ui/carousel.tsx:90-120 (Embla select/reInit events)",
+      "frontend/src/components/ui/sidebar.tsx:102-117 (window keydown listener)"
+    ]
   },
   "suspects": [
     {
-      "id": "loop_dynamic_param_form",
-      "location": "frontend/src/components/forms/DynamicParamForm.tsx:29-54",
-      "type": "effect-dep-mutates-dep",
-      "graph": "watch() \u2192 useEffect(onChange) \u2192 BacktestingTab.setOverrides \u2192 re-render DynamicParamForm",
-      "notes": "react-hook-form watch() returns a new object each render; effect pushes it upstream without equality guard, so BacktestingTab state is rewritten on every render causing a tight render cycle when overrides are open."
+      "id": "resolved_ws_metrics",
+      "location": "frontend/src/App.tsx:216",
+      "type": "fixed",
+      "graph": "WebSocket metrics \u2192 stableHash guard \u2192 query cache only updates on structural change",
+      "notes": "stableHash replaces JSON stringify; query cache updates are skipped unless merge returns new reference"
     },
     {
-      "id": "loop_websocket_metrics",
-      "location": "frontend/src/App.tsx:120-170",
-      "type": "effect-dep-mutates-cache",
-      "graph": "WebSocket message \u2192 App.useEffect \u2192 queryClient.setQueryData(summary|health) \u2192 useQuery subscribers \u2192 App re-render",
-      "notes": "setQueryData runs for every metrics/health frame without checking whether payloads changed; downstream components (TopHUD, DashboardTab) re-render even for identical snapshots, creating an unbounded update loop at WS cadence."
+      "id": "resolved_backtesting_overrides",
+      "location": "frontend/src/components/tabs/BacktestingTab.tsx:359",
+      "type": "fixed",
+      "graph": "DynamicParamForm \u2192 hashed guard \u2192 setOverrides only runs on new data",
+      "notes": "setOverrides uses stableHash to prevent duplicate state writes"
     },
     {
-      "id": "loop_polling_hook",
-      "location": "frontend/src/lib/hooks.ts:1-29",
-      "type": "timer-subscription",
-      "graph": "setTimeout tick \u2192 fn() \u2192 setData/setError \u2192 component re-render \u2192 effect schedules next tick",
-      "notes": "usePolling sets local state on every poll result regardless of equality and reschedules immediately, so when fn resolves rapidly with same payload it causes continuous renders."
+      "id": "resolved_polling_identity",
+      "location": "frontend/src/lib/hooks.ts:33",
+      "type": "fixed",
+      "graph": "usePolling tick \u2192 stableHash dedupe \u2192 setData only on changed payload",
+      "notes": "hash guard ensures structurally identical objects skip state updates"
     }
   ],
+  "top_loops": [
+    "resolved_ws_metrics",
+    "resolved_backtesting_overrides",
+    "resolved_polling_identity"
+  ],
   "instrumentation": {
-    "renderCounterPlan": [
-      "Wrap BacktestingTab and DynamicParamForm with a dev-only render counter to confirm the overrides form never settles.",
-      "Add console.count in App metrics effect to quantify WS-driven re-render cadence.",
-      "Instrument usePolling with a ref to record consecutive identical payloads that still trigger state writes."
+    "render_counter": [
+      "Add useRenderCounter to BacktestingTab and DynamicParamForm when overrides dialog open to verify settle time.",
+      "Console.count inside App metrics effect keyed by summaryQueryKey to observe WS cadence vs render cadence.",
+      "Wrap usePolling inside a dev flag that logs consecutive identical payloads that still trigger setData."
     ],
-    "openQuestions": [
-      "Should WebSocket metric updates bypass React Query entirely in favor of Zustand real-time slices?",
-      "Do we need to dedupe poll responses or shorten interval only when job states change?"
+    "questions": [
+      "Should metrics/health WS payloads flow through the Zustand realTimeData slice (already deduped) instead of writing into React Query every frame?",
+      "Do overrides need a stable equality check (deep compare) before dispatching setOverrides to avoid redundant state writes?",
+      "Would a structural comparator (deep-equal) be safer as usePolling default to prevent accidental loops in new consumers?"
     ]
   }
 }

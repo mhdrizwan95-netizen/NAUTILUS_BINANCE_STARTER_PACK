@@ -1,129 +1,171 @@
 {
-  "slices": [
-    {"name": "T-00 Recon & Inventory", "paths": ["."]},
-    {"name": "T-ARCH Architecture Alignment", "paths": ["docs/SYSTEM_DESIGN.md", "engine", "services"]},
-    {"name": "T-CFG Config & Settings", "paths": ["config", "config.schema.json", "env.example", "ops/observability"]},
-    {"name": "T-CTRL-API Control Plane", "paths": ["ops/ui_api.py", "ops/strategy_router.py", "tests/ui"]},
-    {"name": "T-CTRL-UI Ops Dashboard", "paths": ["frontend/src/components", "frontend/src/lib", "frontend/src/App.tsx"]},
-    {"name": "T-FUNDS Dynamic Funds", "paths": ["ops/capital_allocator.py", "ops/policies.yaml", "ops/capital_policy.json"]},
-    {"name": "T-SELECT Strategy Selection", "paths": ["ops/strategy_registry.json", "ops/m25_governor.py", "engine"]},
-    {"name": "T-CFG-DYN Remote Config", "paths": ["ops/policies.backup.yaml", "ops/observability/grafana", "config"]},
-    {"name": "T-SYMBOLS Universe", "paths": ["universe", "ops/universe_state.json", "ops/policies.yaml"]},
-    {"name": "T-LOOP-LEARN ML Loop", "paths": ["ml_service", "ops/train_backfill_one.py", "backtests"]},
-    {"name": "T-HITL Human Safeguards", "paths": ["ops/governance_daemon.py", "docs/OPS_RUNBOOK.md", "ops/runbook.md"]},
-    {"name": "Observability, Resilience & Deployment", "paths": ["ops/observability", "docker-compose.yml", "compose.autotrain.yml", "compose.backfill.yml", "compose.ml.yml", "ops/quickcheck.sh"]}
-  ],
-  "arch_components": [
-    {
-      "component": "Strategy & ML Layer",
-      "docs": ["docs/SYSTEM_DESIGN.md#2-strategy-ml-layer"],
-      "code": ["engine/strategy.py", "engine/strategies/", "ml_service/app.py", "ops/strategy_router.py"],
-      "notes": "Strategy loop, ensemble policies, and optional external ML service align with documented flow."
-    },
-    {
-      "component": "Execution Engine & Risk",
-      "docs": ["docs/SYSTEM_DESIGN.md#1-execution-plane-engine"],
-      "code": ["engine/app.py", "engine/core/", "engine/risk.py", "engine/state/", "engine/storage/sqlite.py"],
-      "notes": "FastAPI engine, order router, risk rails, and persistence layers present as described."
-    },
-    {
-      "component": "Ops Control Plane",
-      "docs": ["docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops"],
-      "code": ["ops/ops_api.py", "ops/ui_api.py", "ops/ui_state.py", "ops/prometheus.py"],
-      "notes": "Control endpoints and UI router live under ops, matching documentation."
-    },
-    {
-      "component": "Governance & Capital Allocation",
-      "docs": ["docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops"],
-      "code": ["ops/capital_allocator.py", "ops/m25_governor.py", "ops/governance_daemon.py", "ops/strategy_weights.json", "ops/capital_policy.json"],
-      "notes": "Capital allocator and governor daemons exist; configs mostly present."
-    },
-    {
-      "component": "Universe/Screener/Situations Services",
-      "docs": ["docs/SYSTEM_DESIGN.md#3-ops-governance-layer-ops", "docs/SYSTEM_DESIGN.md#5-data-event-flow"],
-      "code": ["universe/service.py", "screener/service.py", "situations/service.py"],
-      "notes": "Ancillary services align with data flow narrative."
-    },
-    {
-      "component": "Observability Stack",
-      "docs": ["docs/SYSTEM_DESIGN.md#4-observability-persistence", "docs/SYSTEM_DESIGN.md#observability-bundle"],
-      "code": ["ops/observability/", "docs/observability/"],
-      "notes": "Prometheus/Grafana/Loki configs exactly under documented directories."
-    },
-    {
-      "component": "Frontend Command Center",
-      "docs": ["docs/SYSTEM_DESIGN.md"],
-      "code": ["frontend/src/App.tsx", "frontend/src/components/", "frontend/src/lib/"]
-    },
-    {
-      "component": "Data Persistence",
-      "docs": ["docs/SYSTEM_DESIGN.md#4-observability-persistence"],
-      "code": ["engine/logs/", "engine/state/", "data/runtime/"],
-      "notes": "JSONL logs, snapshots, and SQLite queues match storage description."
-    }
-  ],
-  "broken_links": [
-    {
-      "doc": "docs/SYSTEM_DESIGN.md#governance-automation",
-      "reference": "ops/m20_playbook.py",
-      "issue": "File not present in repo; governance playbook path likely renamed or removed."
-    },
-    {
-      "doc": "docs/SYSTEM_DESIGN.md#configuration-surfaces",
-      "reference": "ops/capital_allocations.json",
-      "issue": "Config file absent; allocator now uses strategy_weights.json/capital_policy.json."
-    },
-    {
-      "doc": "docs/SYSTEM_DESIGN.md#built-in-strategy-loop",
-      "reference": "engine/models/active_hmm_policy.pkl",
-      "issue": "Runtime artifact not versioned; consider documenting storage location or publishing sample."
-    }
-  ],
   "env_map": {
-    "engine_core": {
-      "defaults": ["config.example.env:3", "engine/config/defaults.py:22"],
-      "overrides": [".env:1"],
-      "notes": "Risk rails & trading toggles derive from defaults.py and are lifted by env/config loaders."
-    },
-    "binance": {
-      "required": ["BINANCE_API_KEY", "BINANCE_API_SECRET"],
-      "defaults": ["config.example.env:11"],
-      "overrides": [".env:81"],
-      "secrets_path": "compose.hardening.override.yaml mounts /run/secrets"
+    "engine": {
+      "defaults": [
+        "engine/config/defaults.py:22",
+        "engine/config/defaults.py:48",
+        "config.schema.json:6"
+      ],
+      "examples": [
+        "config.example.env:3",
+        "env.example:5"
+      ],
+      "overrides": [
+        ".env:1",
+        "docker-compose.yml:88"
+      ],
+      "secrets": [
+        "compose.hardening.override.yaml:22"
+      ]
     },
     "ops_api": {
-      "defaults": ["config.example.env:21"],
-      "overrides": [".env:94"],
-      "required": ["OPS_API_TOKEN"],
-      "secret_file": "config.example.env:24"
+      "defaults": [
+        "config.example.env:24",
+        "config.schema.json:83"
+      ],
+      "overrides": [
+        ".env:94",
+        "docker-compose.yml:182"
+      ],
+      "required": [
+        "config.schema.json:115",
+        "config.schema.json:127"
+      ],
+      "secrets": [
+        "compose.hardening.override.yaml:4"
+      ]
     },
     "observability": {
-      "defaults": ["config.example.env:31"],
-      "notes": "Grafana admin password provided via secret file per config.example.env:33"
+      "defaults": [
+        "config.example.env:32",
+        "config.schema.json:133"
+      ],
+      "overrides": [
+        ".env:307",
+        "ops/observability/docker-compose.observability.yml:31"
+      ],
+      "secrets": [
+        "compose.hardening.override.yaml:15"
+      ]
     },
     "ml_service": {
-      "defaults": ["config.example.env:35", "engine/config/defaults.py:205"],
-      "compose_env": "compose.ml.yml"
+      "defaults": [
+        "config.schema.json:168"
+      ],
+      "overrides": [
+        "compose.ml.yml:12",
+        "compose.autotrain.yml:27"
+      ],
+      "ledger": [
+        "compose.autotrain.yml:29",
+        "compose.autotrain.yml:49"
+      ]
     },
     "data_ingester": {
-      "defaults": ["config.example.env:44", "engine/config/defaults.py:189"],
-      "notes": "Shared ledger path reused by ML + ingester"
+      "defaults": [
+        "config.schema.json:201"
+      ],
+      "overrides": [
+        "compose.autotrain.yml:9",
+        "compose.backfill.yml:10"
+      ],
+      "notes": "Shares ledger DB with ml_service; compose overlays set BATCH_LIMIT/SYMBOLS."
     },
-    "strategies": {
-      "defaults": ["engine/config/defaults.py:48", "engine/config/defaults.py:145"],
-      "overrides": [".env:22"],
-      "notes": "Feature switches for trend/momentum/meme/listing strategies centralised in defaults"
+    "param_controller": {
+      "defaults": [
+        "config.schema.json:234"
+      ],
+      "overrides": [
+        "compose.autotrain.yml:64"
+      ]
+    },
+    "dex_bridge": {
+      "overrides": [
+        ".env:220"
+      ],
+      "notes": "DEX_* variables only present in operator .env; keep private keys injected via external secret manager."
     }
   },
   "config_files": [
-    {"path": "config/runtime.yaml", "purpose": "Risk budgets, symbol buckets, futures leverage", "notes": "Overrides runtime.example.yaml and is consumed by ops/state loaders"},
-    {"path": "config/universe.yaml", "purpose": "Universe service filters & tiers", "notes": "Sits alongside runtime for symbol governance"},
-    {"path": "config/screener.yaml", "purpose": "Screener thresholds and data sources", "notes": "Piped into screener/service.py"},
-    {"path": "config/situations.json", "purpose": "Situational alerts definitions", "notes": "Used by situations/service.py"},
-    {"path": "config/external_feeds.yaml", "purpose": "Webhook/feed credentials", "notes": "Ops notify + external integrations"},
-    {"path": "ops/policies.yaml", "purpose": "Governance rules & kill-switches", "notes": "Read by ops/governance_daemon.py"},
-    {"path": "ops/policies.backup.yaml", "purpose": "Fallback copy for remote config", "notes": "Maintained by ops/policies tooling"},
-    {"path": "ops/observability/prometheus/prometheus.yml", "purpose": "Prometheus scrape config", "notes": "Augmented by docker-compose.observability.yml"},
-    {"path": "docker-compose.yml", "purpose": "Service env injection order", "notes": "Compose env & .env precedence"}
+    {
+      "path": "config/runtime.yaml",
+      "purpose": "Risk budgets, symbol buckets, futures leverage",
+      "notes": "Mounted into strategy_runtime via docker-compose.yml:133; governs governor + runtime services."
+    },
+    {
+      "path": "config/universe.yaml",
+      "purpose": "Universe service filters & tiers",
+      "notes": "Supports universe service default filters and ties to ops/universe_state.json."
+    },
+    {
+      "path": "config/screener.yaml",
+      "purpose": "Screener thresholds and data sources",
+      "notes": "Consumed by screener/service.py for auto scans."
+    },
+    {
+      "path": "config/situations.json",
+      "purpose": "Situational alerts definitions",
+      "notes": "Ingested by situations/service.py for SSE stream."
+    },
+    {
+      "path": "config/external_feeds.yaml",
+      "purpose": "Webhook/feed credentials",
+      "notes": "Controls external integrations used by ops notifications."
+    },
+    {
+      "path": "ops/policies.yaml",
+      "purpose": "Governance rules & kill-switches",
+      "notes": "Loaded by ops/governance_daemon.py:61 and reloadable via POST /api/governance/reload."
+    },
+    {
+      "path": "ops/policies.backup.yaml",
+      "purpose": "Fallback copy for remote config",
+      "notes": "Maintained by ops/policies tooling and referenced for disaster recovery."
+    },
+    {
+      "path": "ops/observability/prometheus/prometheus.yml",
+      "purpose": "Prometheus scrape config",
+      "notes": "Enabled via docker-compose.observability overlay; sets scrape intervals for engine/ops."
+    },
+    {
+      "path": "docker-compose.yml",
+      "purpose": "Service env injection order",
+      "notes": "Primary orchestrator, imports .env and pins safety overrides for engine/ops."
+    },
+    {
+      "path": "config.example.env",
+      "purpose": "Baseline compose defaults for safer local bring-up",
+      "notes": "Documents required secrets and mounts; referenced by developers before populating .env."
+    },
+    {
+      "path": "env.example",
+      "purpose": "Strategy toggle quickstart for standalone scripts",
+      "notes": "Only covers strategy knobs; operators must copy OPS/Grafana secrets from config.example.env."
+    },
+    {
+      "path": ".env",
+      "purpose": "Active compose overrides for local stack",
+      "notes": "Used by docker compose env_file; includes live strategy bias and ops credentials placeholders."
+    },
+    {
+      "path": "compose.hardening.override.yaml",
+      "purpose": "Secret file mounts + read-only hardening",
+      "notes": "Requires SECRETS_DIR; mounts OPS and Grafana secrets and overlays Binance API key files."
+    },
+    {
+      "path": "compose.autotrain.yml",
+      "purpose": "Autonomous ingestion→training→param controller overlay",
+      "notes": "Sets shared ledger/env for data_ingester, ml_service, and param_controller."
+    },
+    {
+      "path": "compose.ml.yml",
+      "purpose": "Standalone ML service overlay",
+      "notes": "Provides defaults for ml_service + scheduler when .env is absent."
+    },
+    {
+      "path": "compose.backfill.yml",
+      "purpose": "Historical backfill job overlay",
+      "notes": "Reuses .env but pins START_TS/END_TS for batch ingestion."
+    }
   ]
 }

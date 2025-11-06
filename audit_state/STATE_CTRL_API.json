@@ -347,56 +347,49 @@
       "path": "/api/config",
       "auth": "OpsToken",
       "idempotent": true,
-      "two_man": true,
-      "notes": "Patches runtime config via state['config'].patch with audit trail (ops/ui_api.py:325-361)"
+      "notes": "Patches runtime config via state['config'].patch with audit trail; enforced by IdempotentGuard (ops/ui_api.py:339-356)."
     },
     {
       "method": "POST",
       "path": "/api/ops/kill-switch",
       "auth": "OpsToken",
       "idempotent": true,
-      "two_man": true,
-      "notes": "Toggles trading enablement; requires Idempotency-Key and optional approver token (ops/ui_api.py:431-462)"
+      "notes": "Toggles trading enablement; requires Idempotency-Key via IdempotentGuard (ops/ui_api.py:444-466)."
     },
     {
       "method": "POST",
       "path": "/api/ops/flatten",
       "auth": "OpsToken",
       "idempotent": true,
-      "two_man": true,
-      "notes": "Flattens positions with audit logging and approver requirement (ops/ui_api.py:465-501)"
+      "notes": "Flattens positions with audit logging; guarded by IdempotentGuard (ops/ui_api.py:470-495)."
     },
     {
       "method": "POST",
       "path": "/api/strategies/{strategy_id}/start",
       "auth": "OpsToken",
       "idempotent": true,
-      "two_man": true,
-      "notes": "Enables strategy and stores params overrides; audit recorded (ops/ui_api.py:657-688)"
+      "notes": "Enables strategy and stores params overrides with single-operator IdempotentGuard (ops/ui_api.py:673-704)."
     },
     {
       "method": "POST",
       "path": "/api/strategies/{strategy_id}/stop",
       "auth": "OpsToken",
       "idempotent": true,
-      "two_man": true,
-      "notes": "Disables strategy safely with audit log (ops/ui_api.py:692-713)"
+      "notes": "Disables strategy safely with audit log; single-operator IdempotentGuard (ops/ui_api.py:707-724)."
     },
     {
       "method": "POST",
       "path": "/api/strategies/{strategy_id}/update",
       "auth": "OpsToken",
       "idempotent": true,
-      "two_man": true,
-      "notes": "Persists strategy params to disk with control log (ops/ui_api.py:715-736)"
+      "notes": "Persists strategy params to disk with control log under IdempotentGuard (ops/ui_api.py:728-760)."
     },
     {
       "method": "POST",
       "path": "/api/backtests",
       "auth": "OpsToken",
       "idempotent": true,
-      "two_man": true,
-      "notes": "Queues governance backtest jobs; writes status to data/ops_backtests (ops/ui_api.py:837-880)"
+      "notes": "Queues governance backtest jobs; IdempotentGuard enforces replay safety (ops/ui_api.py:832-908)."
     },
     {
       "method": "POST",
@@ -423,7 +416,7 @@
   "policy_guards": [
     "idempotency_enforced",
     "ops_token_required",
-    "two_man_required"
+    "single_operator_guardrails"
   ],
   "ops_actions": [
     "config_patch",

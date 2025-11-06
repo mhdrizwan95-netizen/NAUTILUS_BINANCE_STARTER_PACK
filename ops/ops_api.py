@@ -1,15 +1,27 @@
-from fastapi import FastAPI, HTTPException, Request, WebSocket
-from starlette.middleware.base import BaseHTTPMiddleware
-import uuid, contextvars
-from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
-from pydantic import BaseModel
+import asyncio
+import contextvars
+import glob
+import httpx
+import json
+import logging
+import os
+import re
+import shlex
+import subprocess
+import time
+import uuid
+from http import HTTPStatus
 from pathlib import Path
 from pathlib import Path as Path2
-import json, time, httpx, os, glob, subprocess, shlex, logging
-import asyncio
-from typing import List, Dict, Any
+from typing import Any, Dict, List
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from starlette.middleware.base import BaseHTTPMiddleware
 
 os.environ.setdefault("OBS_SERVICE_NAME", "ops-api")
 
@@ -69,11 +81,7 @@ from ops.routes.orders import router as orders_router
 from ops.strategy_router import router as strategy_router
 from ops.pnl_dashboard import router as pnl_router
 from ops.situations.router import router as situations_router
-from engine.logging_utils import (
-    setup_logging,
-    bind_request_id,
-    reset_request_context,
-)
+from engine.logging_utils import bind_request_id, reset_request_context, setup_logging
 from engine.middleware.redaction import RedactionMiddleware
 from engine.metrics import observe_http_request
 
@@ -93,6 +101,13 @@ class MetricsIn(BaseModel):
 
 setup_logging()
 
+logger = logging.getLogger(__name__)
+
+DEFAULT_API_VERSION = "v1"
+SUPPORTED_API_VERSIONS = {"v1"}
+API_VERSION_PATTERN = re.compile(r"^v\d+$")
+
+
 APP = FastAPI(title="Ops API")
 
 
@@ -106,6 +121,38 @@ if FastAPIInstrumentor:
 _REQ_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "REQ_ID", default=None
 )
+_API_VERSION: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "API_VERSION", default=DEFAULT_API_VERSION
+)
+
+
+def current_request_id() -> str | None:
+    return _REQ_ID.get()
+
+
+def _structured_error_payload(
+    code: str,
+    message: str,
+    *,
+    details: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"error": {"code": code, "message": message}}
+    if details:
+        payload["error"]["details"] = details
+    req_id = current_request_id()
+    if req_id:
+        payload["error"]["requestId"] = req_id
+    return payload
+
+
+def _structured_error_response(
+    status_code: int,
+    code: str,
+    message: str,
+    details: Dict[str, Any] | None = None,
+) -> JSONResponse:
+    payload = _structured_error_payload(code, message, details=details)
+    return JSONResponse(payload, status_code=status_code)
 
 
 class _RequestIDMiddleware(BaseHTTPMiddleware):
@@ -119,6 +166,45 @@ class _RequestIDMiddleware(BaseHTTPMiddleware):
             reset_request_context(token)
         try:
             response.headers["X-Request-ID"] = req_id
+        except Exception:
+            pass
+        return response
+
+
+class _ApiVersionMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        requested = request.headers.get("X-API-Version")
+        version = DEFAULT_API_VERSION
+        if requested:
+            requested = requested.strip()
+            if not API_VERSION_PATTERN.fullmatch(requested):
+                return _structured_error_response(
+                    status.HTTP_400_BAD_REQUEST,
+                    "api.invalid_version",
+                    "X-API-Version must match pattern v<number> (e.g. v1).",
+                    {"provided": requested},
+                )
+            if requested not in SUPPORTED_API_VERSIONS:
+                return _structured_error_response(
+                    status.HTTP_406_NOT_ACCEPTABLE,
+                    "api.unsupported_version",
+                    "Requested API version is not supported.",
+                    {
+                        "requested": requested,
+                        "supported": sorted(SUPPORTED_API_VERSIONS),
+                    },
+                )
+            version = requested
+
+        token = _API_VERSION.set(version)
+        try:
+            response = await call_next(request)
+        finally:
+            _API_VERSION.reset(token)
+
+        try:
+            response.headers["X-API-Version"] = version
+            response.headers["X-API-Versions"] = ",".join(sorted(SUPPORTED_API_VERSIONS))
         except Exception:
             pass
         return response
@@ -147,6 +233,7 @@ def _route_template(request: Request) -> str:
 
 
 APP.add_middleware(_RequestIDMiddleware)
+APP.add_middleware(_ApiVersionMiddleware)
 APP.add_middleware(_HttpMetricsMiddleware)
 APP.add_middleware(RedactionMiddleware)
 APP.include_router(orders_router)
@@ -154,6 +241,45 @@ APP.include_router(strategy_router)
 APP.include_router(pnl_router)
 APP.include_router(situations_router)
 APP.include_router(ui_router)
+
+
+@APP.exception_handler(HTTPException)
+async def _handle_http_exception(request: Request, exc: HTTPException) -> JSONResponse:
+    detail = exc.detail
+    code = f"http.{exc.status_code}"
+    message = HTTPStatus(exc.status_code).phrase
+    details: Dict[str, Any] | None = None
+    if isinstance(detail, dict):
+        code = detail.get("code", code)
+        message = str(detail.get("message", message))
+        details = detail.get("details")
+    elif isinstance(detail, str):
+        message = detail
+    return _structured_error_response(exc.status_code, code, message, details)
+
+
+@APP.exception_handler(RequestValidationError)
+async def _handle_validation_error(
+    request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    return _structured_error_response(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        "request.validation_failed",
+        "Request validation failed.",
+        {"fields": exc.errors()},
+    )
+
+
+@APP.exception_handler(Exception)
+async def _handle_unhandled_exception(
+    request: Request, exc: Exception
+) -> JSONResponse:
+    logger.exception("Unhandled exception during request processing", exc_info=exc)
+    return _structured_error_response(
+        status.HTTP_500_INTERNAL_SERVER_ERROR,
+        "internal.server_error",
+        "An internal server error occurred.",
+    )
 
 
 @APP.get("/readyz")

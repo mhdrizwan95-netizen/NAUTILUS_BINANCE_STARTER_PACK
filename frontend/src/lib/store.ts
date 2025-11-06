@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { shallow } from 'zustand/shallow';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import type { ModeType, GlobalMetrics, Venue, StrategyPerformance } from '../types/trading';
+import type { PageMetadata } from './api';
 import {
   createDefaultDashboardFilters,
   type DashboardFiltersState,
@@ -23,7 +24,6 @@ interface AppState {
   opsAuth: {
     token: string;
     actor: string;
-    approver: string;
   };
   // Real-time data
   realTimeData: {
@@ -38,6 +38,7 @@ interface AppState {
     activeTab: string;
     loadingStates: Record<string, boolean>;
     dashboardFilters: DashboardFiltersState;
+    pagination: Record<string, PageMetadata | null>;
   };
 }
 
@@ -53,7 +54,6 @@ interface AppActions {
   // Ops auth actions
   setOpsToken: (token: string) => void;
   setOpsActor: (actor: string) => void;
-  setOpsApprover: (approver: string) => void;
   clearOpsAuth: () => void;
 
   // Real-time data actions
@@ -68,6 +68,8 @@ interface AppActions {
   setLoadingState: (key: string, loading: boolean) => void;
   clearLoadingStates: () => void;
   setDashboardFilters: (filters: DashboardFiltersState) => void;
+  setPagination: (key: string, page: PageMetadata | null) => void;
+  clearPagination: (...keys: string[]) => void;
 
   // Utility actions
   reset: () => void;
@@ -86,7 +88,6 @@ const defaultState: AppState = {
   opsAuth: {
     token: '',
     actor: '',
-    approver: '',
   },
   realTimeData: {
     globalMetrics: null,
@@ -99,7 +100,20 @@ const defaultState: AppState = {
     activeTab: 'dashboard',
     loadingStates: {},
     dashboardFilters: createDefaultDashboardFilters(),
+    pagination: {},
   },
+};
+
+const isSamePage = (a: PageMetadata | null, b: PageMetadata | null): boolean => {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  return (
+    a.nextCursor === b.nextCursor &&
+    a.prevCursor === b.prevCursor &&
+    a.limit === b.limit &&
+    (a.totalHint ?? null) === (b.totalHint ?? null) &&
+    (a.hasMore ?? false) === (b.hasMore ?? false)
+  );
 };
 
 type StoreCreator = (
@@ -133,10 +147,6 @@ const createAppStore: StoreCreator = (set, get) => ({
       setOpsActor: (actor) =>
         set((state) => ({
           opsAuth: { ...state.opsAuth, actor },
-        })),
-      setOpsApprover: (approver) =>
-        set((state) => ({
-          opsAuth: { ...state.opsAuth, approver },
         })),
       clearOpsAuth: () =>
         set((state) => ({
@@ -204,6 +214,51 @@ const createAppStore: StoreCreator = (set, get) => ({
         set((state) => ({
           ui: { ...state.ui, dashboardFilters: filters },
         })),
+      setPagination: (key, page) =>
+        set((state) => {
+          const current = state.ui.pagination[key] ?? null;
+          const nextValue = page ?? null;
+          if (isSamePage(current, nextValue)) {
+            return {};
+          }
+          const nextPagination = { ...state.ui.pagination };
+          if (nextValue === null) {
+            delete nextPagination[key];
+          } else {
+            nextPagination[key] = nextValue;
+          }
+          return {
+            ui: { ...state.ui, pagination: nextPagination },
+          };
+        }),
+      clearPagination: (...keys) =>
+        set((state) => {
+          if (!keys.length) {
+            if (Object.keys(state.ui.pagination).length === 0) {
+              return {};
+            }
+            return {
+              ui: { ...state.ui, pagination: {} },
+            };
+          }
+
+          let changed = false;
+          const nextPagination = { ...state.ui.pagination };
+          keys.forEach((key) => {
+            if (key in nextPagination) {
+              delete nextPagination[key];
+              changed = true;
+            }
+          });
+
+          if (!changed) {
+            return {};
+          }
+
+          return {
+            ui: { ...state.ui, pagination: nextPagination },
+          };
+        }),
 
       // Utility actions
       reset: () => set(defaultState),
@@ -223,6 +278,7 @@ const storeInitializer = shouldPersist()
           sidebarOpen: state.ui.sidebarOpen,
           activeTab: state.ui.activeTab,
           dashboardFilters: state.ui.dashboardFilters,
+          pagination: state.ui.pagination,
         },
       }),
     })
@@ -278,3 +334,15 @@ export const useDashboardFilters = () =>
 
 export const useDashboardFilterActions = () =>
   useAppStore((state) => ({ setDashboardFilters: state.setDashboardFilters }), shallow);
+
+export const usePagination = (key: string) =>
+  useAppStore((state) => state.ui.pagination[key] ?? null);
+
+export const usePaginationActions = () =>
+  useAppStore(
+    (state) => ({
+      setPagination: state.setPagination,
+      clearPagination: state.clearPagination,
+    }),
+    shallow,
+  );

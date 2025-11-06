@@ -21,7 +21,7 @@ import os
 import random
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -401,29 +401,13 @@ def _load_ops_token() -> str:
     return token
 
 
-def _load_approver_tokens() -> Set[str]:
-    raw = os.getenv("OPS_APPROVER_TOKENS") or os.getenv("OPS_APPROVER_TOKEN")
-    if not raw:
-        return set()
-    return {token.strip() for token in raw.split(",") if token.strip()}
-
-
 OPS_TOKEN = _load_ops_token()
-OPS_APPROVER_TOKENS = _load_approver_tokens()
 
 
 def _require_ops_token(request: Request) -> None:
     header = request.headers.get("X-Ops-Token") or request.headers.get("X-OPS-TOKEN")
     if not header or not hmac.compare_digest(header, OPS_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid or missing X-Ops-Token")
-
-
-def _require_ops_approver(request: Request) -> None:
-    if not OPS_APPROVER_TOKENS:
-        return
-    approver = request.headers.get("X-Ops-Approver")
-    if not approver or approver not in OPS_APPROVER_TOKENS:
-        raise HTTPException(status_code=403, detail="Approver token required")
 
 
 def _engine_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -485,7 +469,6 @@ async def set_weights_endpoint(body: Dict[str, Any], request: Request):
     """Update strategy weights (admin operation)."""
     try:
         _require_ops_token(request)
-        _require_ops_approver(request)
         config = _load_weights()
 
         # Validate manual override permission
@@ -547,7 +530,6 @@ async def promote_canary_endpoint(body: Dict[str, Any], request: Request):
     """Manually promote a canary model (forced operation)."""
     try:
         _require_ops_token(request)
-        _require_ops_approver(request)
         candidate = body.get("model")
         if not candidate:
             raise HTTPException(status_code=400, detail="model required")

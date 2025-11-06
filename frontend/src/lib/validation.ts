@@ -79,8 +79,8 @@ export const tradeSchema = z.object({
   quantity: z.number().positive(),
   price: z.number().positive(),
   pnl: z.number().optional(),
-  strategyId: z.string(),
-  venueId: z.string(),
+  strategyId: z.string().optional(),
+  venueId: z.string().optional(),
 });
 
 // Alert validation
@@ -92,14 +92,28 @@ export const alertSchema = z.object({
   strategyId: z.string().optional(),
 });
 
+export const orderSchema = z.object({
+  id: z.string(),
+  symbol: z.string(),
+  side: z.string(),
+  type: z.string(),
+  qty: z.number(),
+  filled: z.number(),
+  price: z.number(),
+  status: z.string(),
+  createdAt: z.number(),
+});
+
 // Position validation
 export const positionSchema = z.object({
+  id: z.string(),
   symbol: z.string(),
   qty: z.number(),
   entry: z.number().positive(),
   mark: z.number().positive(),
   pnl: z.number(),
 });
+
 
 // Dashboard summary validation
 export const dashboardSummarySchema = z.object({
@@ -177,6 +191,49 @@ export const strategySummarySchema = z.object({
     drawdown: z.number().optional(),
   }).optional(),
 });
+
+export const paginationMetadataSchema = z.object({
+  nextCursor: z.string().nullable(),
+  prevCursor: z.string().nullable(),
+  limit: z.number().min(1),
+  totalHint: z.number().nullable().optional(),
+  hasMore: z.boolean().optional(),
+});
+
+const paginatedResponseSchema = <T extends z.ZodTypeAny>(itemSchema: T) =>
+  z.object({
+    data: z.array(itemSchema),
+    page: paginationMetadataSchema,
+    meta: z.record(z.unknown()).optional(),
+  });
+
+export const strategyListResponseSchema = paginatedResponseSchema(strategySummarySchema);
+export const positionsListResponseSchema = paginatedResponseSchema(positionSchema);
+export const tradesListResponseSchema = paginatedResponseSchema(tradeSchema);
+export const alertsListResponseSchema = paginatedResponseSchema(alertSchema);
+export const ordersListResponseSchema = paginatedResponseSchema(orderSchema);
+
+export const metricsModelSchema = z.object({
+  id: z.string(),
+  model: z.string(),
+  venue: z.string(),
+  ordersSubmitted: z.number(),
+  ordersFilled: z.number(),
+  trades: z.number(),
+  pnlRealized: z.number(),
+  pnlUnrealized: z.number(),
+  totalPnl: z.number(),
+  winRate: z.number(),
+  returnPct: z.number(),
+  sharpe: z.number(),
+  drawdown: z.number(),
+  maxDrawdown: z.number(),
+  strategyType: z.string().nullable().optional(),
+  version: z.string().nullable().optional(),
+  tradingDays: z.number().nullable().optional(),
+});
+
+export const metricsModelListResponseSchema = paginatedResponseSchema(metricsModelSchema);
 
 export const configEffectiveSchema = z.object({
   base: z.record(z.unknown()),
@@ -304,6 +361,7 @@ export type PerformanceMetrics = z.infer<typeof performanceMetricsSchema>;
 export type StrategyPerformance = z.infer<typeof strategyPerformanceSchema>;
 export type Trade = z.infer<typeof tradeSchema>;
 export type Alert = z.infer<typeof alertSchema>;
+export type Order = z.infer<typeof orderSchema>;
 export type Position = z.infer<typeof positionSchema>;
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
 export type PortfolioAggregate = z.infer<typeof portfolioAggregateSchema>;
@@ -311,6 +369,14 @@ export type ExposureAggregate = z.infer<typeof exposureAggregateSchema>;
 export type PnlSnapshot = z.infer<typeof pnlSnapshotSchema>;
 export type HealthCheck = z.infer<typeof healthCheckSchema>;
 export type StrategySummary = z.infer<typeof strategySummarySchema>;
+export type PaginationMetadata = z.infer<typeof paginationMetadataSchema>;
+export type StrategyListResponse = z.infer<typeof strategyListResponseSchema>;
+export type PositionsListResponse = z.infer<typeof positionsListResponseSchema>;
+export type TradesListResponse = z.infer<typeof tradesListResponseSchema>;
+export type AlertsListResponse = z.infer<typeof alertsListResponseSchema>;
+export type OrdersListResponse = z.infer<typeof ordersListResponseSchema>;
+export type MetricsModel = z.infer<typeof metricsModelSchema>;
+export type MetricsModelListResponse = z.infer<typeof metricsModelListResponseSchema>;
 export type BacktestResult = z.infer<typeof backtestResultSchema>;
 export type BacktestStartRequest = z.infer<typeof backtestStartSchema>;
 export type StrategyUpdateRequest = z.infer<typeof strategyUpdateSchema>;

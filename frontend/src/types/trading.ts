@@ -62,6 +62,38 @@ export interface Alert {
   strategyId?: string;
 }
 
+export interface Order {
+  id: string;
+  symbol: string;
+  side: string;
+  type: string;
+  qty: number;
+  filled: number;
+  price: number;
+  status: string;
+  createdAt: number;
+}
+
+export interface MetricsModel {
+  id: string;
+  model: string;
+  venue: string;
+  ordersSubmitted: number;
+  ordersFilled: number;
+  trades: number;
+  pnlRealized: number;
+  pnlUnrealized: number;
+  totalPnl: number;
+  winRate: number;
+  returnPct: number;
+  sharpe: number;
+  drawdown: number;
+  maxDrawdown: number;
+  strategyType?: string | null;
+  version?: string | null;
+  tradingDays?: number | null;
+}
+
 export interface GlobalMetrics {
   totalPnL: number;
   totalPnLPercent: number;

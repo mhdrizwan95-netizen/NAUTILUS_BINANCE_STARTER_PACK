@@ -40,6 +40,7 @@ import {
 import type { StrategySummary } from '@/types/trading';
 import { useAppStore } from '@/lib/store';
 import { generateIdempotencyKey } from '@/lib/idempotency';
+import { stableHash } from '@/lib/equality';
 import { useRenderCounter } from '@/lib/debug/why';
 
 type BacktestPoll = Awaited<ReturnType<typeof pollBacktest>>;
@@ -74,7 +75,6 @@ export function BacktestingTab() {
   const [submitting, setSubmitting] = useState(false);
   const opsToken = useAppStore((state) => state.opsAuth.token);
   const opsActor = useAppStore((state) => state.opsAuth.actor);
-  const opsApprover = useAppStore((state) => state.opsAuth.approver);
 
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
@@ -83,13 +83,13 @@ export function BacktestingTab() {
 
   useEffect(() => {
     const controller = new AbortController();
-    getStrategies(controller.signal)
+    getStrategies({ signal: controller.signal })
       .then((payload) => {
-        setStrategies(payload);
-        if (!selectedStrategyId && payload.length) {
-          setSelectedStrategyId(payload[0].id);
-          setSelectedSymbols(payload[0].symbols);
-          setOverrides(payload[0].params ?? {});
+        setStrategies(payload.data);
+        if (!selectedStrategyId && payload.data.length) {
+          setSelectedStrategyId(payload.data[0].id);
+          setSelectedSymbols(payload.data[0].symbols);
+          setOverrides(payload.data[0].params ?? {});
         }
       })
       .catch((error) => {
@@ -157,10 +157,6 @@ export function BacktestingTab() {
       toast.error('Provide an operator call-sign before launching a backtest');
       return;
     }
-    if (!opsApprover.trim()) {
-      toast.error('Provide an approver token before launching a backtest');
-      return;
-    }
     if (!selectedStrategy) {
       toast.error('Select a strategy');
       return;
@@ -186,7 +182,6 @@ export function BacktestingTab() {
         {
           token: opsToken.trim(),
           actor: opsActor.trim(),
-          approverToken: opsApprover.trim() || undefined,
           idempotencyKey: generateIdempotencyKey(`backtest-${selectedStrategy.id}`),
         },
       );
@@ -350,17 +345,27 @@ export function BacktestingTab() {
           {selectedStrategy && (
             <div className="rounded-lg border border-border p-3">
               <h4 className="mb-2 text-sm font-medium">Parameters</h4>
-              <DynamicParamForm
-                key={selectedStrategy.id}
-                schema={selectedStrategy.paramsSchema}
-                initial={selectedStrategy.params}
-                submitLabel="Apply Overrides"
-                onChange={setOverrides}
-                onSubmit={(values) => {
-                  setOverrides(values);
-                  toast('Overrides saved');
-                }}
-              />
+          <DynamicParamForm
+            key={selectedStrategy.id}
+            schema={selectedStrategy.paramsSchema}
+            initial={selectedStrategy.params}
+            submitLabel="Apply Overrides"
+            onChange={(next) => {
+              setOverrides((prev) => {
+                const prevHash = stableHash(prev);
+                const nextHash = stableHash(next);
+                return prevHash === nextHash ? prev : next;
+              });
+            }}
+            onSubmit={(values) => {
+              setOverrides((prev) => {
+                const prevHash = stableHash(prev);
+                const nextHash = stableHash(values);
+                return prevHash === nextHash ? prev : values;
+              });
+              toast('Overrides saved');
+            }}
+          />
             </div>
           )}
 

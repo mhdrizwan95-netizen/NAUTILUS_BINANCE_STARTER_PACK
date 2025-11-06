@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Play, Square, Settings2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card } from '@/components/ui/card';
@@ -16,13 +16,14 @@ import { DynamicParamForm } from '@/components/forms/DynamicParamForm';
 import { MiniChart } from '@/components/MiniChart';
 import { Switch } from '@/components/ui/switch';
 import {
+  type PageMetadata,
   getStrategies,
   startStrategy,
   stopStrategy,
   updateStrategy,
 } from '@/lib/api';
 import type { StrategySummary } from '@/types/trading';
-import { useAppStore } from '@/lib/store';
+import { useAppStore, usePagination, usePaginationActions } from '@/lib/store';
 import { generateIdempotencyKey } from '@/lib/idempotency';
 
 function formatCurrency(value: number) {
@@ -40,13 +41,15 @@ export function StrategyTab() {
   const [configureTarget, setConfigureTarget] = useState<StrategySummary | null>(null);
   const opsToken = useAppStore((state) => state.opsAuth.token);
   const opsActor = useAppStore((state) => state.opsAuth.actor);
-  const opsApprover = useAppStore((state) => state.opsAuth.approver);
+  const pageInfo = usePagination('strategies');
+  const { setPagination, clearPagination } = usePaginationActions();
 
-  const refresh = async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const payload = await getStrategies();
-      setStrategies(payload);
+      setStrategies(payload.data);
+      setPagination('strategies', payload.page);
     } catch (error) {
       if (error instanceof Error) {
         toast.error('Unable to load strategies', { description: error.message });
@@ -54,11 +57,28 @@ export function StrategyTab() {
     } finally {
       setLoading(false);
     }
+  }, [setPagination]);
+
+  const loadMore = async () => {
+    if (!pageInfo?.nextCursor) return;
+    setLoading(true);
+    try {
+      const payload = await getStrategies({ cursor: pageInfo.nextCursor });
+      setStrategies((prev) => [...prev, ...payload.data]);
+      setPagination('strategies', payload.page);
+    } catch (error) {
+      if (error instanceof Error) {
+        toast.error('Unable to load additional strategies', { description: error.message });
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    refresh();
-  }, []);
+    clearPagination('strategies');
+    void refresh();
+  }, [clearPagination, refresh]);
 
   const requireCredentials = () => {
     if (!opsToken.trim()) {
@@ -69,17 +89,12 @@ export function StrategyTab() {
       toast.error('Provide an operator call-sign before issuing control actions');
       return false;
     }
-    if (!opsApprover.trim()) {
-      toast.error('Provide an approver token (two-man rule) before issuing control actions');
-      return false;
-    }
     return true;
   };
 
   const buildControlOptions = (prefix: string) => ({
     token: opsToken.trim(),
     actor: opsActor.trim(),
-    approverToken: opsApprover.trim() || undefined,
     idempotencyKey: generateIdempotencyKey(prefix),
   });
 
@@ -148,6 +163,12 @@ export function StrategyTab() {
     <div className="mx-auto max-w-6xl space-y-4 p-6">
       {loading && strategies.length === 0 ? (
         <div className="text-sm text-muted-foreground">Loading strategies…</div>
+      ) : null}
+
+      {pageInfo?.totalHint !== undefined ? (
+        <div className="text-xs text-muted-foreground">
+          Showing {strategies.length} of {pageInfo.totalHint ?? '∞'} strategies
+        </div>
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -277,6 +298,14 @@ export function StrategyTab() {
           );
         })}
       </div>
+
+      {pageInfo?.nextCursor ? (
+        <div className="flex justify-center">
+          <Button onClick={loadMore} disabled={loading} variant="outline">
+            {loading ? 'Loading…' : 'Load older strategies'}
+          </Button>
+        </div>
+      ) : null}
 
       <Dialog open={configureTarget !== null} onOpenChange={(open) => !open && setConfigureTarget(null)}>
         <DialogContent className="max-w-xl">

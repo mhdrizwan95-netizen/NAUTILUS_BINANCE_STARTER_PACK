@@ -19,6 +19,8 @@ CAPITAL_POLICY_PATH = Path("ops/capital_policy.json")
 DEFAULT_POLICY: Dict[str, Any] = {
     "refresh_sec": 30,
     "base_equity_frac": 0.20,
+    "min_pool_usd": 10000.0,
+    "reserve_equity_usd": 5000.0,
     "min_quota_usd": 250.0,
     "max_quota_usd": 25000.0,
     "step_up_pct": 0.15,

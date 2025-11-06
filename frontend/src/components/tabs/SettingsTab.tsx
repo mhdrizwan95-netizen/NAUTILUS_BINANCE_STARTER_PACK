@@ -58,11 +58,8 @@ export function SettingsTab() {
   const opsActor = useAppStore((state) => state.opsAuth.actor);
   const setOpsToken = useAppStore((state) => state.setOpsToken);
   const setOpsActor = useAppStore((state) => state.setOpsActor);
-  const setOpsApprover = useAppStore((state) => state.setOpsApprover);
-  const opsApprover = useAppStore((state) => state.opsAuth.approver);
   const [opsTokenInput, setOpsTokenInput] = useState(opsToken);
   const [opsActorInput, setOpsActorInput] = useState(opsActor);
-  const [opsApproverInput, setOpsApproverInput] = useState(opsApprover);
   const [overrideDraft, setOverrideDraft] = useState('{}');
   const [overrideTouched, setOverrideTouched] = useState(false);
 
@@ -87,10 +84,6 @@ export function SettingsTab() {
   useEffect(() => {
     setOpsActorInput(opsActor);
   }, [opsActor]);
-
-  useEffect(() => {
-    setOpsApproverInput(opsApprover);
-  }, [opsApprover]);
 
   const tightenPct = useMemo(() => {
     const raw =
@@ -146,10 +139,6 @@ export function SettingsTab() {
       toast.error('Provide an operator call-sign for audit logging');
       return;
     }
-    if (!opsApprover.trim()) {
-      toast.error('Provide an approver token (two-man rule) to update configuration');
-      return;
-    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(overrideDraft || '{}');
@@ -168,7 +157,6 @@ export function SettingsTab() {
       options: {
         token: opsToken.trim(),
         actor: opsActorInput.trim(),
-        approverToken: opsApproverInput.trim() || undefined,
         idempotencyKey: generateIdempotencyKey('config'),
       },
     });
@@ -251,18 +239,6 @@ export function SettingsTab() {
               setOpsActor(event.target.value);
             }}
             placeholder="Enter your call-sign or initials"
-            autoComplete="off"
-          />
-          <Label htmlFor="ops-approver" className="pt-2">Approver token</Label>
-          <Input
-            id="ops-approver"
-            type="password"
-            value={opsApproverInput}
-            onChange={(event) => {
-              setOpsApproverInput(event.target.value);
-              setOpsApprover(event.target.value);
-            }}
-            placeholder="Second approver token (two-man rule)"
             autoComplete="off"
           />
         </CardContent>

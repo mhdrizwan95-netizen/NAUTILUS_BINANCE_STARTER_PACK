@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, useId } from 'react';
+import { useCallback, useEffect, useMemo, useState, useId } from 'react';
 import { DateRange } from 'react-day-picker';
 import { Calendar as CalendarIcon, Filter, RefreshCcw } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { Calendar } from '../ui/calendar';
 import { Button } from '../ui/button';
 import { Card } from '../ui/card';
@@ -31,15 +31,16 @@ import {
   getPositions,
   getRecentTrades,
   getStrategies,
+  type PageMetadata,
 } from '../../lib/api';
 import { queryKeys } from '../../lib/queryClient';
 import { validateApiResponse } from '../../lib/validation';
 import {
   dashboardSummarySchema,
-  strategySummarySchema,
-  positionSchema,
-  tradeSchema,
-  alertSchema,
+  strategyListResponseSchema,
+  positionsListResponseSchema,
+  tradesListResponseSchema,
+  alertsListResponseSchema,
   healthCheckSchema
 } from '../../lib/validation';
 import type { StrategySummary } from '../../types/trading';
@@ -52,6 +53,8 @@ import {
 import {
   useDashboardFilterActions,
   useDashboardFilters,
+  usePagination,
+  usePaginationActions,
 } from '../../lib/store';
 
 function formatCurrency(value: number) {
@@ -69,6 +72,11 @@ function formatPercent(value: number) {
 export function DashboardTab() {
   const dashboardFilters = useDashboardFilters();
   const { setDashboardFilters } = useDashboardFilterActions();
+  const { setPagination, clearPagination } = usePaginationActions();
+  const positionsPageInfo = usePagination('positions');
+  const tradesPageInfo = usePagination('trades');
+  const alertsPageInfo = usePagination('alerts');
+  const queryClient = useQueryClient();
 
   const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() => toDateRange(dashboardFilters));
   const [selectedStrategies, setSelectedStrategies] = useState<string[]>(dashboardFilters.strategies);
@@ -83,6 +91,25 @@ export function DashboardTab() {
   const positionsHeadingId = useId();
   const tradesHeadingId = useId();
 
+  const describePage = (page: PageMetadata | null, count: number) => {
+    if (!page) return null;
+    const segments = [`Showing ${count}`];
+    if (typeof page.totalHint === 'number') {
+      segments.push(`of ${page.totalHint}`);
+    }
+    if (page.hasMore) {
+      segments.push('• more available');
+    }
+    return segments.join(' ');
+  };
+
+  const resetPagedFeeds = useCallback(() => {
+    clearPagination('positions', 'trades', 'alerts');
+    queryClient.removeQueries({ queryKey: queryKeys.dashboard.positions() });
+    queryClient.removeQueries({ queryKey: queryKeys.dashboard.trades() });
+    queryClient.removeQueries({ queryKey: queryKeys.dashboard.alerts() });
+  }, [clearPagination, queryClient]);
+
   // Build query parameters
   const summaryParams = useMemo(
     () => buildSummarySearchParams(dashboardFilters),
@@ -93,7 +120,11 @@ export function DashboardTab() {
   // React Query hooks for data fetching
   const strategiesQuery = useQuery({
     queryKey: queryKeys.strategies.list(),
-    queryFn: () => getStrategies().then(data => validateApiResponse(strategySummarySchema.array(), data)),
+    queryFn: () =>
+      getStrategies().then((data) => {
+        const parsed = validateApiResponse(strategyListResponseSchema, data);
+        return parsed.data;
+      }),
     staleTime: 5 * 60 * 1000, // 5 minutes
   });
 
@@ -103,23 +134,100 @@ export function DashboardTab() {
     staleTime: 30 * 1000, // 30 seconds for real-time data
   });
 
-  const positionsQuery = useQuery({
+  const positionsQuery = useInfiniteQuery({
     queryKey: queryKeys.dashboard.positions(),
-    queryFn: () => getPositions().then(data => validateApiResponse(positionSchema.array(), data)),
-    staleTime: 10 * 1000, // 10 seconds
+    queryFn: ({ pageParam }) =>
+      getPositions({ cursor: pageParam ?? undefined }).then((data) =>
+        validateApiResponse(positionsListResponseSchema, data),
+      ),
+    getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
+    staleTime: 10 * 1000,
+    initialPageParam: undefined,
   });
 
-  const tradesQuery = useQuery({
+  useEffect(() => {
+    const pages = positionsQuery.data?.pages;
+    if (!pages?.length) return;
+    const last = pages[pages.length - 1];
+    if (last?.page) {
+      setPagination('positions', last.page);
+    }
+  }, [positionsQuery.data, setPagination]);
+
+  const tradesQuery = useInfiniteQuery({
     queryKey: queryKeys.dashboard.trades(),
-    queryFn: () => getRecentTrades().then(data => validateApiResponse(tradeSchema.array(), data)),
-    staleTime: 10 * 1000, // 10 seconds
+    queryFn: ({ pageParam }) =>
+      getRecentTrades({ cursor: pageParam ?? undefined }).then((data) =>
+        validateApiResponse(tradesListResponseSchema, data),
+      ),
+    getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
+    staleTime: 10 * 1000,
+    initialPageParam: undefined,
   });
 
-  const alertsQuery = useQuery({
+  useEffect(() => {
+    const pages = tradesQuery.data?.pages;
+    if (!pages?.length) return;
+    const last = pages[pages.length - 1];
+    if (last?.page) {
+      setPagination('trades', last.page);
+    }
+  }, [setPagination, tradesQuery.data]);
+
+  const alertsQuery = useInfiniteQuery({
     queryKey: queryKeys.dashboard.alerts(),
-    queryFn: () => getAlerts().then(data => validateApiResponse(alertSchema.array(), data)),
-    staleTime: 10 * 1000, // 10 seconds
+    queryFn: ({ pageParam }) =>
+      getAlerts({ cursor: pageParam ?? undefined }).then((data) =>
+        validateApiResponse(alertsListResponseSchema, data),
+      ),
+    getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
+    staleTime: 10 * 1000,
+    initialPageParam: undefined,
   });
+
+  useEffect(() => {
+    const pages = alertsQuery.data?.pages;
+    if (!pages?.length) return;
+    const last = pages[pages.length - 1];
+    if (last?.page) {
+      setPagination('alerts', last.page);
+    }
+  }, [alertsQuery.data, setPagination]);
+
+  const positionsPages = positionsQuery.data?.pages ?? [];
+  const positions = positionsPages.flatMap((page) => page.data);
+  const tradesPages = tradesQuery.data?.pages ?? [];
+  const trades = tradesPages.flatMap((page) => page.data);
+  const alertsPages = alertsQuery.data?.pages ?? [];
+  const alerts = alertsPages.flatMap((page) => page.data);
+  const hasMorePositions =
+    Boolean(positionsPageInfo?.nextCursor) ||
+    Boolean(positionsPageInfo?.hasMore) ||
+    Boolean(positionsQuery.hasNextPage);
+  const hasMoreTrades =
+    Boolean(tradesPageInfo?.nextCursor) ||
+    Boolean(tradesPageInfo?.hasMore) ||
+    Boolean(tradesQuery.hasNextPage);
+  const hasMoreAlerts =
+    Boolean(alertsPageInfo?.nextCursor) ||
+    Boolean(alertsPageInfo?.hasMore) ||
+    Boolean(alertsQuery.hasNextPage);
+  const positionsSummary = describePage(positionsPageInfo, positions.length);
+  const tradesSummary = describePage(tradesPageInfo, trades.length);
+  const alertsSummary = describePage(alertsPageInfo, alerts.length);
+
+  const loadMorePositions = () => {
+    if (!hasMorePositions || positionsQuery.isFetchingNextPage) return;
+    void positionsQuery.fetchNextPage();
+  };
+  const loadMoreTrades = () => {
+    if (!hasMoreTrades || tradesQuery.isFetchingNextPage) return;
+    void tradesQuery.fetchNextPage();
+  };
+  const loadMoreAlerts = () => {
+    if (!hasMoreAlerts || alertsQuery.isFetchingNextPage) return;
+    void alertsQuery.fetchNextPage();
+  };
 
   const healthQuery = useQuery({
     queryKey: queryKeys.dashboard.health(),
@@ -144,6 +252,7 @@ export function DashboardTab() {
 
   const handleApplyFilters = () => {
     const normalizedRange = fromDateRange(pendingRange);
+    resetPagedFeeds();
     setDashboardFilters({
       from: normalizedRange.from,
       to: normalizedRange.to,
@@ -154,6 +263,7 @@ export function DashboardTab() {
 
   const handleResetFilters = () => {
     const defaults = createDefaultDashboardFilters();
+    resetPagedFeeds();
     setDashboardFilters(defaults);
     setPendingRange(toDateRange(defaults));
     setSelectedStrategies([]);
@@ -364,7 +474,12 @@ export function DashboardTab() {
 
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <Card className="p-4">
-          <h3 id={positionsHeadingId} className="mb-3 font-medium">Open Positions</h3>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 id={positionsHeadingId} className="font-medium">Open Positions</h3>
+            {positionsSummary ? (
+              <span className="text-xs text-muted-foreground text-right">{positionsSummary}</span>
+            ) : null}
+          </div>
           <Table aria-labelledby={positionsHeadingId}>
             <TableHeader>
               <TableRow>
@@ -376,8 +491,8 @@ export function DashboardTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {positionsQuery.data?.map((position) => (
-                <TableRow key={position.symbol}>
+              {positions.map((position) => (
+                <TableRow key={position.id}>
                   <TableCell>{position.symbol}</TableCell>
                   <TableCell>{position.qty}</TableCell>
                   <TableCell>{formatCurrency(position.entry)}</TableCell>
@@ -388,12 +503,29 @@ export function DashboardTab() {
                 </TableRow>
               ))}
             </TableBody>
-            <TableCaption>{positionsQuery.data?.length === 0 ? 'No open positions' : undefined}</TableCaption>
+            <TableCaption>{positions.length === 0 ? 'No open positions' : undefined}</TableCaption>
           </Table>
+          {hasMorePositions ? (
+            <div className="mt-3 flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadMorePositions}
+                disabled={positionsQuery.isFetchingNextPage || !hasMorePositions}
+              >
+                {positionsQuery.isFetchingNextPage ? 'Loading…' : 'Load older positions'}
+              </Button>
+            </div>
+          ) : null}
         </Card>
 
         <Card className="p-4">
-          <h3 id={tradesHeadingId} className="mb-3 font-medium">Recent Trades</h3>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 id={tradesHeadingId} className="font-medium">Recent Trades</h3>
+            {tradesSummary ? (
+              <span className="text-xs text-muted-foreground text-right">{tradesSummary}</span>
+            ) : null}
+          </div>
           <Table aria-labelledby={tradesHeadingId}>
             <TableHeader>
               <TableRow>
@@ -406,8 +538,8 @@ export function DashboardTab() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {tradesQuery.data?.map((trade) => (
-                <TableRow key={`${trade.timestamp}-${trade.symbol}-${trade.side}`}>
+              {trades.map((trade) => (
+                <TableRow key={trade.id}>
                   <TableCell>{new Date(trade.timestamp).toLocaleTimeString()}</TableCell>
                   <TableCell>{trade.symbol}</TableCell>
                   <TableCell className={trade.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}>
@@ -421,16 +553,33 @@ export function DashboardTab() {
                 </TableRow>
               ))}
             </TableBody>
-            <TableCaption>{tradesQuery.data?.length === 0 ? 'No recent trades' : undefined}</TableCaption>
+            <TableCaption>{trades.length === 0 ? 'No recent trades' : undefined}</TableCaption>
           </Table>
+          {hasMoreTrades ? (
+            <div className="mt-3 flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadMoreTrades}
+                disabled={tradesQuery.isFetchingNextPage || !hasMoreTrades}
+              >
+                {tradesQuery.isFetchingNextPage ? 'Loading…' : 'Load older trades'}
+              </Button>
+            </div>
+          ) : null}
         </Card>
 
         <Card className="p-4">
-          <h3 className="mb-3 font-medium">Alerts</h3>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3 className="font-medium">Alerts</h3>
+            {alertsSummary ? (
+              <span className="text-xs text-muted-foreground text-right">{alertsSummary}</span>
+            ) : null}
+          </div>
           <ScrollArea className="h-64 pr-2">
             <div className="space-y-3">
-              {alertsQuery.data?.map((alert) => (
-                <div key={`${alert.timestamp}-${alert.message}`} className="rounded-md border border-border p-3">
+              {alerts.map((alert) => (
+                <div key={alert.id} className="rounded-md border border-border p-3">
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>{new Date(alert.timestamp).toLocaleTimeString()}</span>
                     <Badge
@@ -449,9 +598,21 @@ export function DashboardTab() {
                   <p className="text-sm leading-tight text-muted-foreground">{alert.message}</p>
                 </div>
               ))}
-              {alertsQuery.data?.length === 0 && <p className="text-xs text-muted-foreground">No alerts</p>}
+              {alerts.length === 0 && <p className="text-xs text-muted-foreground">No alerts</p>}
             </div>
           </ScrollArea>
+          {hasMoreAlerts ? (
+            <div className="mt-3 flex justify-center">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={loadMoreAlerts}
+                disabled={alertsQuery.isFetchingNextPage || !hasMoreAlerts}
+              >
+                {alertsQuery.isFetchingNextPage ? 'Loading…' : 'Load older alerts'}
+              </Button>
+            </div>
+          ) : null}
         </Card>
 
         <Card className="p-4">

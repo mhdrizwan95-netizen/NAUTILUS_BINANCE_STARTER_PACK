@@ -1,7 +1,59 @@
 import '@testing-library/jest-dom';
 import { beforeAll, afterEach, afterAll } from 'vitest';
-import { setupServer } from 'msw/node';
-import { handlers } from './mocks/handlers';
+
+class MemoryStorage implements Storage {
+  private store = new Map<string, string>();
+
+  get length(): number {
+    return this.store.size;
+  }
+
+  clear(): void {
+    this.store.clear();
+  }
+
+  getItem(key: string): string | null {
+    return this.store.has(key) ? this.store.get(key)! : null;
+  }
+
+  key(index: number): string | null {
+    return Array.from(this.store.keys())[index] ?? null;
+  }
+
+  removeItem(key: string): void {
+    this.store.delete(key);
+  }
+
+  setItem(key: string, value: string): void {
+    this.store.set(key, value);
+  }
+}
+
+const createStorage = () => new MemoryStorage();
+
+const ensureStorage = (prop: 'localStorage' | 'sessionStorage') => {
+  const existing = (globalThis as Record<string, unknown>)[prop];
+  if (!existing || typeof (existing as Storage).getItem !== 'function') {
+    Object.defineProperty(globalThis, prop, {
+      value: createStorage(),
+      configurable: true,
+      writable: true,
+    });
+  }
+  if (typeof window !== 'undefined') {
+    const win = window as unknown as Record<string, unknown>;
+    if (!win[prop] || typeof (win[prop] as Storage).getItem !== 'function') {
+      Object.defineProperty(window, prop, {
+        value: (globalThis as Record<string, unknown>)[prop],
+        configurable: true,
+        writable: true,
+      });
+    }
+  }
+};
+
+ensureStorage('localStorage');
+ensureStorage('sessionStorage');
 
 // Mock WebSocket
 global.WebSocket = class MockWebSocket {
@@ -48,13 +100,21 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 // Setup MSW server
-export const server = setupServer(...handlers);
+const mswDisabled = process.env.MSW_DISABLED === 'true';
 
-// Start server before all tests
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
+export const server = await (async () => {
+  if (mswDisabled) {
+    return null;
+  }
+  const [{ setupServer }, { handlers }] = await Promise.all([
+    import('msw/node'),
+    import('./mocks/handlers'),
+  ]);
+  const instance = setupServer(...handlers);
 
-// Reset handlers after each test
-afterEach(() => server.resetHandlers());
+  beforeAll(() => instance.listen({ onUnhandledRequest: 'error' }));
+  afterEach(() => instance.resetHandlers());
+  afterAll(() => instance.close());
 
-// Clean up after all tests
-afterAll(() => server.close());
+  return instance;
+})();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import type { ParamSchema } from '@/types/settings';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,27 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { stableHash } from '@/lib/equality';
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date);
+
+const clonePlain = <T,>(value: T): T => {
+  if (Array.isArray(value)) {
+    return value.map((item) => clonePlain(item)) as unknown as T;
+  }
+  if (value instanceof Date) {
+    return new Date(value.getTime()) as unknown as T;
+  }
+  if (isPlainObject(value)) {
+    const entries: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      entries[key] = clonePlain(value[key]);
+    }
+    return entries as unknown as T;
+  }
+  return value;
+};
 
 type DynamicParamFormProps = {
   schema: ParamSchema;
@@ -40,23 +61,19 @@ export function DynamicParamForm({
   const { control, handleSubmit, watch } = useForm({ defaultValues: defaults });
 
   const watchedValues = watch();
-  const lastEmitted = useRef<string | null>(null);
-  const serialized = useMemo(() => JSON.stringify(watchedValues), [watchedValues]);
+  const lastHash = useRef<string | null>(null);
 
   useEffect(() => {
     if (!onChange) {
       return;
     }
-    if (serialized === lastEmitted.current) {
+    const nextHash = stableHash(watchedValues);
+    if (lastHash.current === nextHash) {
       return;
     }
-    lastEmitted.current = serialized;
-    try {
-      onChange(JSON.parse(serialized));
-    } catch {
-      onChange(watchedValues);
-    }
-  }, [serialized, watchedValues, onChange]);
+    lastHash.current = nextHash;
+    onChange(clonePlain(watchedValues));
+  }, [watchedValues, onChange]);
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">

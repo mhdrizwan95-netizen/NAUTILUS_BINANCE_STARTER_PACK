@@ -57,7 +57,6 @@ export function FundingTab() {
   const queryClient = useQueryClient();
   const opsToken = useAppStore((state) => state.opsAuth.token);
   const opsActor = useAppStore((state) => state.opsAuth.actor);
-  const opsApprover = useAppStore((state) => state.opsAuth.approver);
 
   const portfolioQuery = useQuery({
     queryKey: queryKeys.funding.portfolio(),
@@ -214,16 +213,11 @@ export function FundingTab() {
                 toast.error('Provide an operator call-sign before updating capital buckets');
                 return;
               }
-              if (!opsApprover.trim()) {
-                toast.error('Provide an approver token before updating capital buckets');
-                return;
-              }
               updateBudgetsMutation.mutate({
                 buckets: budgetDraft,
                 options: {
                   token: opsToken.trim(),
                   actor: opsActor.trim(),
-                  approverToken: opsApprover.trim() || undefined,
                   idempotencyKey: generateIdempotencyKey('buckets'),
                 },
               });

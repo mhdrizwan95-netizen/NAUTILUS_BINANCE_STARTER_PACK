@@ -3,13 +3,17 @@ info:
   title: Nautilus Command Center Control API
   version: 1.0.0
   description: Internal API exposed by ops/ui_api.py for manual overrides and governance
-    actions. High-risk mutations require OPS token, two-man approval, and Idempotency-Key
-    headers.
+    actions. High-risk mutations require the single-operator OPS token plus Idempotency-Key
+    headers; clients may request newer behaviours with X-API-Version.
 servers:
-- url: https://command-center.local
-  description: Command Center
+- url: https://command-center.local/api
+  description: Command Center (production)
+- url: http://localhost:8002/api
+  description: Local development
 paths:
   /api/ops/ws-session:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     post:
       summary: Issue a short-lived WebSocket session token
       tags:
@@ -21,6 +25,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WsSessionResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       description: Requires X-Ops-Token. Returns session token used as query param
         for WebSocket subscriptions.
       security:
@@ -28,6 +34,8 @@ paths:
       parameters:
       - $ref: '#/components/parameters/OpsActor'
   /api/engine/status:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     get:
       summary: Return engine health summary
       tags:
@@ -39,8 +47,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/config/effective:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     get:
       summary: Return current effective runtime configuration
       tags:
@@ -52,8 +64,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/config:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     put:
       summary: Patch runtime configuration toggles
       tags:
@@ -65,12 +81,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security:
       - OpsToken: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/OpsActor'
-      - $ref: '#/components/parameters/OpsApprover'
       requestBody:
         required: true
         content:
@@ -78,6 +95,10 @@ paths:
             schema:
               $ref: '#/components/schemas/ConfigPatch'
   /api/strategies/governance:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    - $ref: '#/components/parameters/PageCursor'
+    - $ref: '#/components/parameters/PageLimit'
     get:
       summary: List governance strategy registry
       tags:
@@ -88,7 +109,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericResponse'
+                $ref: '#/components/schemas/StrategyGovernanceListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/strategies/{strategy_id}:
     patch:
@@ -154,6 +177,10 @@ paths:
       parameters:
       - $ref: '#/components/parameters/OpsActor'
   /api/orders/open:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    - $ref: '#/components/parameters/PageCursor'
+    - $ref: '#/components/parameters/PageLimit'
     get:
       summary: List currently open orders
       tags:
@@ -164,7 +191,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericResponse'
+                $ref: '#/components/schemas/OrderListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/orders/cancel:
     post:
@@ -189,6 +218,10 @@ paths:
             schema:
               $ref: '#/components/schemas/CancelOrdersRequest'
   /api/positions/open:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    - $ref: '#/components/parameters/PageCursor'
+    - $ref: '#/components/parameters/PageLimit'
     get:
       summary: List open positions with PnL
       tags:
@@ -199,7 +232,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericResponse'
+                $ref: '#/components/schemas/PositionListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/risk/soft-breach/now:
     post:
@@ -218,6 +253,8 @@ paths:
       parameters:
       - $ref: '#/components/parameters/OpsActor'
   /api/ops/kill-switch:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     post:
       summary: Toggle global trading kill-switch
       tags:
@@ -229,12 +266,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security:
       - OpsToken: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/OpsActor'
-      - $ref: '#/components/parameters/OpsApprover'
       requestBody:
         required: true
         content:
@@ -242,6 +280,8 @@ paths:
             schema:
               $ref: '#/components/schemas/KillSwitchRequest'
   /api/ops/flatten:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     post:
       summary: Flatten all open positions
       tags:
@@ -253,12 +293,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security:
       - OpsToken: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/OpsActor'
-      - $ref: '#/components/parameters/OpsApprover'
       requestBody:
         required: true
         content:
@@ -367,8 +408,13 @@ paths:
             schema:
               $ref: '#/components/schemas/TradeEvent'
   /api/strategies:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    - $ref: '#/components/parameters/PageCursor'
+    - $ref: '#/components/parameters/PageLimit'
     get:
       summary: Return Command Center strategy cards
+      description: Returns a cursor-based envelope containing strategy cards, params schemas, and paging metadata.
       tags:
       - Strategies
       responses:
@@ -377,9 +423,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericResponse'
+                $ref: '#/components/schemas/StrategyListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/strategies/{strategy_id}/start:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     post:
       summary: Enable a strategy and optionally update params
       tags:
@@ -391,12 +441,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security:
       - OpsToken: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/OpsActor'
-      - $ref: '#/components/parameters/OpsApprover'
       requestBody:
         required: true
         content:
@@ -404,6 +455,8 @@ paths:
             schema:
               $ref: '#/components/schemas/StrategyStartRequest'
   /api/strategies/{strategy_id}/stop:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     post:
       summary: Disable a strategy
       tags:
@@ -415,13 +468,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security:
       - OpsToken: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/OpsActor'
-      - $ref: '#/components/parameters/OpsApprover'
   /api/strategies/{strategy_id}/update:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     post:
       summary: Persist strategy params overrides
       tags:
@@ -433,12 +489,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security:
       - OpsToken: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/OpsActor'
-      - $ref: '#/components/parameters/OpsApprover'
       requestBody:
         required: true
         content:
@@ -446,6 +503,8 @@ paths:
             schema:
               $ref: '#/components/schemas/StrategyUpdateRequest'
   /api/backtests:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     post:
       summary: Schedule a governance backtest job
       tags:
@@ -457,12 +516,13 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BacktestStartResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security:
       - OpsToken: []
       parameters:
       - $ref: '#/components/parameters/IdempotencyKey'
       - $ref: '#/components/parameters/OpsActor'
-      - $ref: '#/components/parameters/OpsApprover'
       requestBody:
         required: true
         content:
@@ -481,8 +541,12 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BacktestStatusResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/metrics/summary:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
     get:
       summary: Return aggregated portfolio metrics and KPIs
       tags:
@@ -494,8 +558,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/GenericResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security: []
+  /api/metrics/models:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    - $ref: '#/components/parameters/PageCursor'
+    - $ref: '#/components/parameters/PageLimit'
+    get:
+      summary: Return model-level performance metrics with pagination
+      tags:
+      - Metrics
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MetricsModelListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/positions:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    - $ref: '#/components/parameters/PageCursor'
+    - $ref: '#/components/parameters/PageLimit'
     get:
       summary: Return normalized positions list
       tags:
@@ -506,9 +595,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GenericResponse'
+                $ref: '#/components/schemas/PositionListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/trades/recent:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    - $ref: '#/components/parameters/PageCursor'
+    - $ref: '#/components/parameters/PageLimit'
     get:
       summary: Return recent trade feed
       tags:
@@ -519,9 +614,15 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TradesResponse'
+                $ref: '#/components/schemas/TradeListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
   /api/alerts:
+    parameters:
+    - $ref: '#/components/parameters/ApiVersion'
+    - $ref: '#/components/parameters/PageCursor'
+    - $ref: '#/components/parameters/PageLimit'
     get:
       summary: Return recent alerts
       tags:
@@ -532,7 +633,9 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AlertsResponse'
+                $ref: '#/components/schemas/AlertListResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
       security: []
     post:
       summary: Post alert into control feed
@@ -555,6 +658,86 @@ paths:
           application/json:
             schema:
               $ref: '#/components/schemas/AlertRequest'
+  /aggregate/health:
+    get:
+      summary: Aggregated venue health snapshot
+      description: Returns per-venue health documents for each configured engine endpoint. Result set is bounded by engine count; pagination is not required.
+      tags:
+      - Aggregates
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateHealthResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security: []
+  /aggregate/portfolio:
+    get:
+      summary: Consolidated portfolio across venues
+      description: Combines venue portfolio snapshots with cached Command Center metrics. Response cardinality equals number of venues.
+      tags:
+      - Aggregates
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregatePortfolioResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security: []
+  /aggregate/exposure:
+    get:
+      summary: Unified exposure totals
+      description: Returns total and per-symbol exposure compiled by the exposure collector. Dataset is constrained by actively tracked symbols.
+      tags:
+      - Aggregates
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateExposureResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security: []
+  /aggregate/metrics:
+    get:
+      summary: Raw /metrics payloads per venue
+      description: Streams each engine's Prometheus-formatted metrics text as parsed JSON. Dataset size equals engine count; pagination is not required.
+      tags:
+      - Aggregates
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregateMetricsResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security: []
+  /aggregate/pnl:
+    get:
+      summary: Venue PnL snapshot
+      description: Returns realized and unrealized PnL keyed by venue from the PnL collector gauges. Data set size is equal to venue count and does not require pagination.
+      tags:
+      - Aggregates
+      responses:
+        '200':
+          description: Successful response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AggregatePnlResponse'
+        default:
+          $ref: '#/components/responses/ErrorResponse'
+      security: []
   /api/health:
     get:
       summary: Return aggregated venue/engine health
@@ -584,6 +767,31 @@ components:
         minLength: 8
       description: Client-generated idempotency token (UUID recommended). Required
         for control mutations.
+    ApiVersion:
+      name: X-API-Version
+      in: header
+      required: false
+      schema:
+        type: string
+        pattern: '^v[0-9]+$'
+      description: Request explicit API behaviour (e.g. v1). Defaults to the latest supported minor version.
+    PageCursor:
+      name: cursor
+      in: query
+      required: false
+      schema:
+        type: string
+      description: Opaque cursor for pagination.
+    PageLimit:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 50
+      description: Maximum number of results to return for paginated endpoints.
     OpsActor:
       name: X-Ops-Actor
       in: header
@@ -591,17 +799,40 @@ components:
       schema:
         type: string
       description: Human operator identity for audit logging.
-    OpsApprover:
-      name: X-Ops-Approver
-      in: header
-      required: false
-      schema:
-        type: string
-      description: Secondary approver token when two-man rule is enforced.
+  responses:
+    ErrorResponse:
+      description: Structured error payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
   schemas:
     GenericResponse:
       type: object
       additionalProperties: true
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+              example: auth.invalid_token
+            message:
+              type: string
+              example: OPS token is invalid or expired
+            details:
+              type: object
+              additionalProperties: true
+            requestId:
+              type: string
+              description: Trace identifier for correlating server logs.
+      required:
+      - error
     WsSessionResponse:
       type: object
       properties:
@@ -681,6 +912,377 @@ components:
       - amount
       - source
       - target
+    StrategyPerformance:
+      type: object
+      properties:
+        pnl:
+          type: number
+        equitySeries:
+          type: array
+          items:
+            type: object
+            properties:
+              t:
+                type: string
+              equity:
+                type: number
+            required:
+            - t
+            - equity
+        winRate:
+          type: number
+        sharpe:
+          type: number
+        drawdown:
+          type: number
+      required:
+      - pnl
+    StrategySummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+        status:
+          type: string
+          enum:
+          - stopped
+          - running
+          - error
+        symbols:
+          type: array
+          items:
+            type: string
+        paramsSchema:
+          type: object
+        params:
+          type: object
+          additionalProperties: true
+        performance:
+          $ref: '#/components/schemas/StrategyPerformance'
+      required:
+      - id
+      - name
+      - kind
+      - status
+      - symbols
+      - paramsSchema
+    PaginationMetadata:
+      type: object
+      properties:
+        nextCursor:
+          type: string
+          nullable: true
+        prevCursor:
+          type: string
+          nullable: true
+        limit:
+          type: integer
+        totalHint:
+          type: integer
+          nullable: true
+        hasMore:
+          type: boolean
+      required:
+      - nextCursor
+      - prevCursor
+      - limit
+    StrategyListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/StrategySummary'
+        page:
+          $ref: '#/components/schemas/PaginationMetadata'
+      required:
+      - data
+      - page
+    PositionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        qty:
+          type: number
+        entry:
+          type: number
+        mark:
+          type: number
+        pnl:
+          type: number
+      required:
+      - id
+      - symbol
+      - qty
+      - entry
+      - mark
+      - pnl
+    TradeSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        time:
+          type: integer
+        timestamp:
+          type: integer
+        symbol:
+          type: string
+        side:
+          type: string
+          enum:
+          - buy
+          - sell
+        quantity:
+          type: number
+        price:
+          type: number
+        pnl:
+          type:
+          - number
+          - 'null'
+      required:
+      - id
+      - time
+      - timestamp
+      - symbol
+      - side
+      - quantity
+      - price
+    AlertSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        time:
+          type: integer
+        timestamp:
+          type: integer
+        level:
+          type: string
+        type:
+          type: string
+        message:
+          type: string
+      required:
+      - id
+      - time
+      - timestamp
+      - type
+      - message
+    PositionListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/PositionSummary'
+        page:
+          $ref: '#/components/schemas/PaginationMetadata'
+      required:
+      - data
+      - page
+    TradeListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/TradeSummary'
+        page:
+          $ref: '#/components/schemas/PaginationMetadata'
+      required:
+      - data
+      - page
+    AlertListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/AlertSummary'
+        page:
+          $ref: '#/components/schemas/PaginationMetadata'
+      required:
+      - data
+      - page
+    OrderSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+        type:
+          type: string
+        qty:
+          type: number
+        filled:
+          type: number
+        price:
+          type: number
+        status:
+          type: string
+        createdAt:
+          type: integer
+      required:
+      - id
+      - symbol
+      - side
+      - type
+      - qty
+      - filled
+      - price
+      - status
+      - createdAt
+    OrderListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/OrderSummary'
+        page:
+          $ref: '#/components/schemas/PaginationMetadata'
+      required:
+      - data
+      - page
+    StrategyGovernanceEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        weight:
+          type: number
+        enabled:
+          type: boolean
+        is_current:
+          type: boolean
+      additionalProperties: true
+      required:
+      - id
+      - weight
+      - enabled
+      - is_current
+    StrategyGovernanceListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/StrategyGovernanceEntry'
+        page:
+          $ref: '#/components/schemas/PaginationMetadata'
+        meta:
+          type: object
+          properties:
+            current:
+              type:
+              - string
+              - 'null'
+            updatedAt:
+              type:
+              - number
+              - 'null'
+          additionalProperties: true
+      required:
+      - data
+      - page
+    MetricsModelSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        model:
+          type: string
+        venue:
+          type: string
+        ordersSubmitted:
+          type: number
+        ordersFilled:
+          type: number
+        trades:
+          type: number
+        pnlRealized:
+          type: number
+        pnlUnrealized:
+          type: number
+        totalPnl:
+          type: number
+        winRate:
+          type: number
+        returnPct:
+          type: number
+        sharpe:
+          type: number
+        drawdown:
+          type: number
+        maxDrawdown:
+          type: number
+        strategyType:
+          type:
+          - string
+          - 'null'
+        version:
+          type:
+          - string
+          - 'null'
+        tradingDays:
+          type:
+          - integer
+          - 'null'
+      required:
+      - id
+      - model
+      - venue
+      - ordersSubmitted
+      - ordersFilled
+      - trades
+      - pnlRealized
+      - pnlUnrealized
+      - totalPnl
+      - winRate
+      - returnPct
+      - sharpe
+      - drawdown
+      - maxDrawdown
+    MetricsModelListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MetricsModelSummary'
+        page:
+          $ref: '#/components/schemas/PaginationMetadata'
+        meta:
+          type: object
+          properties:
+            metricsSource:
+              type: string
+            registryPath:
+              type: string
+            fetchedAt:
+              type: number
+            snapshotTimestamp:
+              type:
+              - number
+              - 'null'
+            records:
+              type: integer
+          additionalProperties: true
+      required:
+      - data
+      - page
     TradeEvent:
       type: object
       properties:
@@ -750,36 +1352,6 @@ components:
       required:
       - status
       - progress
-    TradesResponse:
-      type: array
-      items:
-        type: object
-        properties:
-          time:
-            type: integer
-          symbol:
-            type: string
-          side:
-            type: string
-          qty:
-            type: number
-          price:
-            type: number
-          pnl:
-            type:
-            - number
-            - 'null'
-    AlertsResponse:
-      type: array
-      items:
-        type: object
-        properties:
-          time:
-            type: integer
-          level:
-            type: string
-          text:
-            type: string
         required:
         - time
         - level
@@ -817,3 +1389,75 @@ components:
             - status
       required:
       - venues
+    AggregateHealthResponse:
+      $ref: '#/components/schemas/HealthResponse'
+    AggregatePortfolioResponse:
+      type: object
+      properties:
+        total_equity_usd:
+          type: number
+        venues:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        count:
+          type: integer
+        equity_usd:
+          type: number
+        cash_usd:
+          type: number
+        gain_usd:
+          type: number
+        return_pct:
+          type: number
+        baseline_equity_usd:
+          type: number
+        last_refresh_epoch:
+          type:
+          - number
+          - 'null'
+      required:
+      - total_equity_usd
+      - venues
+      - count
+    AggregateExposureResponse:
+      type: object
+      properties:
+        totals:
+          type: object
+          additionalProperties:
+            type: number
+        by_symbol:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: number
+      required:
+      - totals
+      - by_symbol
+    AggregateMetricsResponse:
+      type: object
+      properties:
+        venues:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+      required:
+      - venues
+    AggregatePnlResponse:
+      type: object
+      properties:
+        realized:
+          type: object
+          additionalProperties:
+            type: number
+        unrealized:
+          type: object
+          additionalProperties:
+            type: number
+      required:
+      - realized
+      - unrealized

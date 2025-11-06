@@ -38,21 +38,22 @@ const venues: TopHudVenue[] = [
   { name: 'OANDA', status: 'warn', latencyMs: 80, queue: 4 },
 ];
 
-const renderHUD = (overrides: Partial<ComponentProps<typeof TopHUD>> = {}) =>
-  render(
-    <TopHUD
-      mode="paper"
-      metrics={metrics}
-      venues={venues}
-      isConnected
-      onModeChange={vi.fn()}
-      onKillSwitch={vi.fn()}
-      onPause={vi.fn()}
-      onResume={vi.fn()}
-      onFlatten={vi.fn()}
-      {...overrides}
-    />,
-  );
+const renderHUD = (overrides: Partial<ComponentProps<typeof TopHUD>> = {}) => {
+  const props: ComponentProps<typeof TopHUD> = {
+    mode: 'paper',
+    metrics,
+    venues,
+    isConnected: true,
+    onModeChange: vi.fn(),
+    onKillSwitch: vi.fn(),
+    onPause: vi.fn(),
+    onResume: vi.fn(),
+    onFlatten: vi.fn(),
+    ...overrides,
+  };
+
+  return { ...render(<TopHUD {...props} />), props };
+};
 
 describe('TopHUD', () => {
   it('renders branding and formatted metrics', () => {
@@ -98,14 +99,22 @@ describe('TopHUD', () => {
     const onResume = vi.fn();
     const onFlatten = vi.fn();
     const user = userEvent.setup();
-    renderHUD({ onPause, onResume, onFlatten });
+    const { rerender, props } = renderHUD({ onPause, onResume, onFlatten });
 
     await user.click(screen.getByText('Pause'));
-    await user.click(screen.getByText('Resume'));
-    await user.click(screen.getByText('Flatten'));
-
     expect(onPause).toHaveBeenCalled();
+
+    rerender(
+      <TopHUD
+        {...props}
+        tradingEnabled={false}
+      />,
+    );
+
+    await user.click(screen.getByText('Resume'));
     expect(onResume).toHaveBeenCalled();
+
+    await user.click(screen.getByText('Flatten'));
     expect(onFlatten).toHaveBeenCalled();
   });
 

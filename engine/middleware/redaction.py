@@ -17,7 +17,6 @@ SENSITIVE_VALUES = {
         os.getenv("BINANCE_API_KEY"),
         os.getenv("BINANCE_API_SECRET"),
         os.getenv("OPS_API_TOKEN"),
-        os.getenv("OPS_APPROVER_TOKENS"),
     )
     if value
 }
