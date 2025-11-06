@@ -359,15 +359,21 @@ def _validate_ws_session(session: Optional[str]) -> bool:
 
 @router.post("/ops/ws-session")
 async def create_ws_session(
-    request: Request, _auth: None = Depends(require_ops_token)
+    guard: ControlContext = Depends(TokenOnlyGuard),
 ) -> Dict[str, Any]:
     """Issue a temporary session token for WebSocket subscriptions."""
+    actor = (guard.actor or "").strip()
+    if not actor:
+        http_error(
+            status.HTTP_400_BAD_REQUEST,
+            "auth.actor_required",
+            "Provide X-Ops-Actor header when requesting a WebSocket session.",
+        )
     session, expiry = _issue_ws_session()
-    actor = request.headers.get("X-Ops-Actor")
     _record_control_action(
         "ws_session.issue",
         actor,
-        None,
+        guard.approver,
         session,
         {},
         {"expires": expiry},
@@ -532,10 +538,28 @@ async def strategies_list(
 async def strategies_patch(
     strategy_id: str,
     patch: StrategyPatch,
+    guard: ControlContext = Depends(IdempotentGuard),
     state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
 ) -> Any:
-    return await state["strategy"].patch(strategy_id, patch.dict(exclude_none=True))
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
+    if cached:
+        return cached
+
+    updates = patch.dict(exclude_none=True)
+    result = await state["strategy"].patch(strategy_id, updates)
+
+    _record_control_action(
+        "strategy.patch",
+        guard.actor,
+        guard.approver,
+        idem_key,
+        {"strategyId": strategy_id, **updates},
+        {"ok": True, "result": result},
+    )
+    if idem_key:
+        _idempotency_store(idem_key, result)
+    return result
 
 
 @router.get("/universe/{strategy_id}")
@@ -750,12 +774,34 @@ async def feeds_meme(
 @router.post("/account/transfer")
 async def account_transfer(
     body: TransferRequest,
+    guard: ControlContext = Depends(IdempotentGuard),
     state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
 ) -> Any:
-    return await state["ops"].transfer_internal(
-        body.asset, body.amount, body.source, body.target
+    idem_key = guard.idempotency_key or ""
+    cached = _idempotency_cached_response(idem_key)
+    if cached:
+        return cached
+
+    try:
+        result = await state["ops"].transfer_internal(
+            body.asset, body.amount, body.source, body.target
+        )
+    except RuntimeError as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, f"Transfer failed: {exc}"
+        ) from exc
+
+    _record_control_action(
+        "account.transfer",
+        guard.actor,
+        guard.approver,
+        idem_key,
+        body.dict(),
+        result,
     )
+    if idem_key:
+        _idempotency_store(idem_key, result)
+    return result
 
 
 @router.post("/events/trade")

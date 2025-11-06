@@ -13,45 +13,55 @@ from typing import Optional, Set
 from fastapi import Header, HTTPException, Request, status
 
 _TOKEN_LOCK = RLock()
-_OPS_TOKEN: Optional[str] = None
-_APPROVER_TOKENS: Optional[Set[str]] = None
+_OPS_TOKEN_VALUE: Optional[str] = None
+_OPS_TOKEN_PATH: Optional[Path] = None
+_OPS_TOKEN_MTIME: Optional[float] = None
 
 
 def _load_ops_token() -> str:
-    """Resolve the control token from env vars or mounted secret file."""
-    global _OPS_TOKEN  # noqa: PLW0603
-    with _TOKEN_LOCK:
-        if _OPS_TOKEN is not None:
-            return _OPS_TOKEN
-        token = os.getenv("OPS_API_TOKEN")
-        token_file = os.getenv("OPS_API_TOKEN_FILE")
-        if token_file:
-            try:
-                token = Path(token_file).read_text(encoding="utf-8").strip()
-            except OSError as exc:  # pragma: no cover - defensive
-                raise RuntimeError(
-                    f"Failed to read OPS_API_TOKEN_FILE: {token_file}"
-                ) from exc
-        if not token:
+    """Resolve the control token from env vars or mounted secret file, supporting rotation."""
+    global _OPS_TOKEN_VALUE, _OPS_TOKEN_PATH, _OPS_TOKEN_MTIME  # noqa: PLW0603
+    token_file = os.getenv("OPS_API_TOKEN_FILE")
+    if token_file:
+        path = Path(token_file)
+        try:
+            with _TOKEN_LOCK:
+                mtime = path.stat().st_mtime
+                if _OPS_TOKEN_PATH == path and _OPS_TOKEN_MTIME == mtime and _OPS_TOKEN_VALUE:
+                    return _OPS_TOKEN_VALUE
+                token = path.read_text(encoding="utf-8").strip()
+                if not token:
+                    raise RuntimeError("OPS_API_TOKEN_FILE is empty")
+                _OPS_TOKEN_VALUE = token
+                _OPS_TOKEN_PATH = path
+                _OPS_TOKEN_MTIME = mtime
+                return token
+        except OSError as exc:  # pragma: no cover - defensive
             raise RuntimeError(
-                "OPS_API_TOKEN or OPS_API_TOKEN_FILE must be configured for control endpoints"
-            )
-        _OPS_TOKEN = token
+                f"Failed to read OPS_API_TOKEN_FILE: {token_file}"
+            ) from exc
+
+    token = os.getenv("OPS_API_TOKEN")
+    if token:
+        with _TOKEN_LOCK:
+            _OPS_TOKEN_VALUE = token
+            _OPS_TOKEN_PATH = None
+            _OPS_TOKEN_MTIME = None
         return token
+    with _TOKEN_LOCK:
+        if _OPS_TOKEN_VALUE:
+            return _OPS_TOKEN_VALUE
+    raise RuntimeError(
+        "OPS_API_TOKEN or OPS_API_TOKEN_FILE must be configured for control endpoints"
+    )
 
 
 def _load_approver_tokens() -> Set[str]:
     """Return the configured secondary approval secrets, if any."""
-    global _APPROVER_TOKENS  # noqa: PLW0603
-    with _TOKEN_LOCK:
-        if _APPROVER_TOKENS is not None:
-            return _APPROVER_TOKENS
-        raw = os.getenv("OPS_APPROVER_TOKENS") or os.getenv("OPS_APPROVER_TOKEN", "")
-        if not raw:
-            _APPROVER_TOKENS = set()
-        else:
-            _APPROVER_TOKENS = {item.strip() for item in raw.split(",") if item.strip()}
-        return _APPROVER_TOKENS
+    raw = os.getenv("OPS_APPROVER_TOKENS") or os.getenv("OPS_APPROVER_TOKEN", "")
+    if not raw:
+        return set()
+    return {item.strip() for item in raw.split(",") if item.strip()}
 
 
 @dataclass(frozen=True)

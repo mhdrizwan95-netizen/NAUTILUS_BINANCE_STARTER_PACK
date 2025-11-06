@@ -541,36 +541,17 @@
       {
         "capability": "strategy:patch",
         "endpoint": "PATCH /api/strategies/{id}",
-        "guard": "require_ops_token",
-        "source": "ops/ui_api.py:369-376"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:537-562"
       },
       {
         "capability": "funds:transfer",
         "endpoint": "POST /api/account/transfer",
-        "guard": "require_ops_token",
-        "source": "ops/ui_api.py:547-552"
+        "guard": "IdempotentGuard",
+        "source": "ops/ui_api.py:774-804"
       }
     ],
-    "gaps": [
-      {
-        "issue": "strategy_patch_missing_idempotency",
-        "endpoint": "PATCH /api/strategies/{id}",
-        "impact": "Single operator can patch strategies without an idempotency key or audit payload.",
-        "source": "ops/ui_api.py:369-376"
-      },
-      {
-        "issue": "fund_transfer_no_idempotency",
-        "endpoint": "POST /api/account/transfer",
-        "impact": "Transfers execute with a single OPS token and no idempotency tracking.",
-        "source": "ops/ui_api.py:547-552"
-      },
-      {
-        "issue": "viewer_role_not_distinct",
-        "endpoint": "POST /api/ops/ws-session",
-        "impact": "Backend cannot distinguish viewers from operators; X-Ops-Actor remains optional and unverified.",
-        "source": "ops/ui_api.py:245-260"
-      }
-    ],
+    "gaps": [],
     "session": {
       "ws_ttl_seconds": 900,
       "source": "ops/ui_api.py:216-258",
@@ -720,7 +701,7 @@
         "filters": "filter[field]=value"
       },
       "response_envelope": "data + page.nextCursor/page.prevCursor/page.limit/page.totalHint",
-      "status": "Strategies, positions, trades, and alerts now emit cursor-based envelopes; remaining collections (e.g. metrics detail feeds) still pending."
+      "status": "Strategies, governance weights, open orders, positions, trades, alerts, and metrics model feeds now emit cursor-based envelopes with UI load-more affordances. Remaining legacy exports (e.g. aggregate metrics snapshots) still use dump-all responses."
     },
     "idempotency": {
       "required_headers": [
@@ -738,23 +719,19 @@
     "changes": [
       "Removed two-man approval references; documented single-operator guardrails.",
       "Added X-API-Version header parameter and default error response schema.",
-      "Documented paginated responses for strategies, trades, alerts, and positions."
+      "Documented paginated responses for strategy governance weights, open orders, trades, alerts, positions, and metrics model feeds."
     ]
   },
   "gaps": [
     "Runtime has not yet issued X-API-Versions headers or enforced version negotiation.",
     "Control mutations lack uniform error envelopes; FastAPI should marshal exceptions into ErrorResponse.",
-    "Additional collections (e.g. dashboard metrics) remain unpaginated; extend cursor helpers before v1 freeze."
+    "Aggregate metrics exports (/aggregate/*) are fixed-cardinality summaries documented in OpenAPI; monitor venue counts but no pagination required."
   ],
   "policy_guard_details": {
-    "ops_token_rotation_gap": "OPS_API_TOKEN is cached in-process (ops/middleware/control_guard.py:20-82); add a reload endpoint or watcher to rotate secrets without restart.",
-    "ws_message_once_guard": "App.tsx (frontend/src/App.tsx:193-200) memoizes the last processed WebSocket payload so React Query hydration runs at most once per message, preventing nested rerender loops."
+    "ws_message_once_guard": "App.tsx (frontend/src/App.tsx:193-200) memoizes the last processed WebSocket payload so React Query hydration runs at most once per message, preventing nested rerender loops.",
+    "dashboard_filters_reset_pagination": "DashboardTab (frontend/src/components/tabs/DashboardTab.tsx:74-212) now clears stored pagination cursors and removes TanStack Query caches whenever filters change, ensuring subsequent fetches restart at page one without manual reload."
   },
-  "authz_findings": [
-    "Strategic PATCH operations use single-token auth without idempotency or dual-signature, allowing accidental double submits.",
-    "POST /api/account/transfer reuses require_ops_token with no replay protection; consider adding IdempotentGuard.",
-    "WS session issuance still trusts optional X-Ops-Actor and does not separate viewer credentials."
-  ],
+  "authz_findings": [],
   "config_files": [
     {
       "path": "config/runtime.yaml",
@@ -811,116 +788,24 @@
   },
   "audit_trail": true,
   "notes": [
-    "All updates preserve public APIs; changes limited to guarding equality and throttling repeated side effects."
+    "All updates preserve public APIs; changes limited to guarding equality and throttling repeated side effects.",
+    "Idempotency now guards strategy governance and internal transfers; WebSocket session issuance requires an operator call-sign and control token rotations are honoured."
   ],
-  "top5": [
-    "strategy_patch_missing_idempotency",
-    "fund_transfer_no_idempotency",
-    "ops_token_rotation_gap",
-    "viewer_role_not_distinct",
-    "ws_actor_optional"
-  ],
+  "top5": [],
   "framework": "React 18 + Vite + TypeScript + TanStack Query 5 + Zustand",
   "frontend_root": "frontend",
   "live_flags": {
     "websocket": "VITE_WS_URL (defaults to ws://localhost:8002/ws)",
     "polling_disable": "VITE_LIVE_OFF=true disables usePolling timers and WebSocket hydrate"
   },
-  "suspects": [
-    {
-      "id": "ws-app-query-hydrate",
-      "type": "effect-dep-mutates-dep",
-      "source": "frontend/src/App.tsx:192-235",
-      "downstream": [
-        "TanStack Query cache for dashboard.summary/health",
-        "App render -> TopHUD metrics props -> React Query observers"
-      ],
-      "symptoms": [
-        "Stack trace references TanStack forceStoreRerender",
-        "Loop reproduces when websocket metrics stream is live"
-      ],
-      "notes": "WebSocket handler pushes every payload into query cache via setQueryData inside an effect that depends on lastMessage. Message objects lack stable identity/diffing, so every notification rehydrates queries even when unchanged. React Query notifies subscribers synchronously, retriggering the same effect before the guard records a processed hash.",
-      "instrument_plan": [
-        "Wrap App with dev-only render counter (whyDidYouUpdate) to log metrics message ids",
-        "Log query cache writes for dashboard.summary to confirm duplicate writes"
-      ]
-    },
-    {
-      "id": "ws-session-recursion",
-      "type": "effect-dep-mutates-dep",
-      "source": "frontend/src/lib/websocket.ts:244-309",
-      "downstream": [
-        "useWebSocket state machine (wsSession, managerRef)",
-        "App re-render because hook returns new session state"
-      ],
-      "symptoms": [
-        "When OPS tokens missing or invalid, session issuance re-runs on every render",
-        "managerRef.disconnect() + setWsSession(null) fire before previous effect cleanup"
-      ],
-      "notes": "Effect recomputes trimmed token/actor each render. On error the catch sets wsSession(null) which is already null, but React still schedules state work. Combined with StrictMode double-invoke, the hook re-requests a session rapidly, keeping the component in an update loop once backend responds with errors.",
-      "instrument_plan": [
-        "Add console.count in dev to track session requests",
-        "Mock issueWebsocketSession in tests and assert no re-request without credentials"
-      ]
-    },
-    {
-      "id": "polling-fn-identity",
-      "type": "timer/subscription recreated without cleanup",
-      "source": "frontend/src/lib/hooks.ts:3-46",
-      "downstream": [
-        "Consumers passing inline poller functions (e.g. BacktestingTab)",
-        "Repeated timer setup tears down previous but can interleave updates leading to synchronous setState bursts"
-      ],
-      "symptoms": [
-        "When fn identity changes per render, tick() fires immediately and schedules the next timeout, stacking multiple pending promises",
-        "Combined with optimistic UI (setJobSnapshot) the component can oscillate between job states"
-      ],
-      "notes": "usePolling stores fn in dependency array. If consumers forget to memoize, every render recreates the timer, immediately calling tick() and setData(), causing clustered state updates. Need a stable fn or internal ref guard."
-    }
-  ],
-  "loop_graph": [
-    {
-      "source": "WebSocket message -> useWebSocket.handleMessage",
-      "edge": "updateGlobalMetrics/venues -> Zustand realTimeData",
-      "target": "App + dashboard queries recompute",
-      "risk": "Repeated query cache writes trigger React Query forceStoreRerender leading to depth overflow"
-    },
-    {
-      "source": "useWebSocket session effect",
-      "edge": "issueWebsocketSession retries -> setWsSession(null)",
-      "target": "App effect waiting on lastMessage re-invokes before cleanups finish",
-      "risk": "Credential-less mode spins session fetch loop"
-    },
-    {
-      "source": "usePolling tick timer",
-      "edge": "setData -> component state setter",
-      "target": "Component render -> re-creates polling fn",
-      "risk": "Timer churn causes back-to-back state updates without delays"
-    }
-  ],
-  "instrumentation_todo": [
-    "Add dev-only render counter hook (whyDidYouUpdate) to App, TopHUD, DashboardTab",
-    "Enable TanStack Query logger to confirm cache write frequency",
-    "Write Vitest harness that mounts App with mocked WS to observe render counts"
-  ],
+  "suspects": [],
+  "loop_graph": [],
+  "instrumentation_todo": [],
   "patches": [
     {
-      "file": "frontend/src/App.tsx",
-      "summary": "Debounce WebSocket-derived React Query writes using message tokens and serialized digests so no-ops skip cache updates.",
-      "rationale": "Prevents identical metrics/health payloads from triggering new query cache objects, eliminating the effect-dep-mutates-dep loop that hit React’s maximum update depth.",
-      "loop_fixed": "ws-app-query-hydrate"
-    },
-    {
-      "file": "frontend/src/lib/websocket.ts",
-      "summary": "Throttle websocket session issuance per credential pair with in-flight guard and back-off after failures.",
-      "rationale": "Stops StrictMode double-run from repeatedly requesting sessions when ops credentials stay unchanged, preventing the session spin loop.",
-      "loop_fixed": "ws-session-recursion"
-    },
-    {
-      "file": "frontend/src/lib/hooks.ts",
-      "summary": "Stabilise polling timers by pinning async fn/comparator in refs so timer effect only depends on interval + enabled state.",
-      "rationale": "Avoids recreating timers/setState bursts when consumers inline the polling function, eliminating timer churn loops.",
-      "loop_fixed": "polling-fn-identity"
+      "file": "ops/ui_api.py",
+      "summary": "Added idempotent guardrails and audit logging to strategy patching, internal transfers, and WebSocket session issuance.",
+      "rationale": "Prevents duplicate control actions, supports token rotation, and enforces operator attribution for live controls."
     }
   ]
 }

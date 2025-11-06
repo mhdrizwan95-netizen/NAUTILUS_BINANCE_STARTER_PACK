@@ -340,7 +340,7 @@
       "path": "/api/ops/ws-session",
       "auth": "OpsToken",
       "idempotent": false,
-      "notes": "Issues temporary token gating WebSocket subscriptions; audit log via control_actions.jsonl"
+      "notes": "Issues temporary token gating WebSocket subscriptions; requires X-Ops-Actor and logs to control_actions.jsonl."
     },
     {
       "method": "PUT",
@@ -362,6 +362,13 @@
       "auth": "OpsToken",
       "idempotent": true,
       "notes": "Flattens positions with audit logging; guarded by IdempotentGuard (ops/ui_api.py:470-495)."
+    },
+    {
+      "method": "PATCH",
+      "path": "/api/strategies/{strategy_id}",
+      "auth": "OpsToken",
+      "idempotent": true,
+      "notes": "Updates strategy weights/enabled flag with audit trail; requires Idempotency-Key (ops/ui_api.py:537-562)."
     },
     {
       "method": "POST",
@@ -402,8 +409,8 @@
       "method": "POST",
       "path": "/api/account/transfer",
       "auth": "OpsToken",
-      "idempotent": false,
-      "notes": "Internal transfer across wallets/exchanges (ops/ui_api.py:527-535)"
+      "idempotent": true,
+      "notes": "Internal transfer across wallets/exchanges; guarded by IdempotentGuard and audited (ops/ui_api.py:774-804)."
     },
     {
       "method": "POST",
@@ -416,7 +423,8 @@
   "policy_guards": [
     "idempotency_enforced",
     "ops_token_required",
-    "single_operator_guardrails"
+    "single_operator_guardrails",
+    "ws_actor_required"
   ],
   "ops_actions": [
     "config_patch",

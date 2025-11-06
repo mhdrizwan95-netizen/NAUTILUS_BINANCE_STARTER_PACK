@@ -168,6 +168,102 @@ def test_alerts_returns_paginated_envelope(client: TestClient) -> None:
         ui_api.ALERTS_FEED.extend(original)
 
 
+def test_strategy_patch_enforces_idempotency(client: TestClient) -> None:
+    class _StubStrategyService:
+        async def patch(self, strategy_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+            return {"strategyId": strategy_id, "applied": updates}
+
+    original_strategy = ui_state.get_service("strategy")
+    ui_state.configure(strategy=_StubStrategyService())
+    try:
+        resp_missing = client.patch(
+            "/api/strategies/demo-strategy",
+            json={"enabled": True},
+            headers={"X-Ops-Token": OPS_TOKEN},
+        )
+        assert resp_missing.status_code == 400
+
+        idem = f"test-{uuid.uuid4()}"
+        headers = {
+            "X-Ops-Token": OPS_TOKEN,
+            "X-Ops-Actor": "auditor",
+            "Idempotency-Key": idem,
+        }
+        resp = client.patch(
+            "/api/strategies/demo-strategy",
+            json={"enabled": True},
+            headers=headers,
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload == {"strategyId": "demo-strategy", "applied": {"enabled": True}}
+
+        replay = client.patch(
+            "/api/strategies/demo-strategy",
+            json={"enabled": True},
+            headers=headers,
+        )
+        assert replay.status_code == 200
+        assert replay.json() == payload
+    finally:
+        ui_state.configure(strategy=original_strategy)
+
+
+def test_account_transfer_enforces_idempotency(client: TestClient) -> None:
+    transfer_payload = {
+        "asset": "USDT",
+        "amount": 25.0,
+        "source": "spot",
+        "target": "margin",
+    }
+    resp_missing = client.post(
+        "/api/account/transfer",
+        json=transfer_payload,
+        headers={"X-Ops-Token": OPS_TOKEN},
+    )
+    assert resp_missing.status_code == 400
+
+    idem = f"test-{uuid.uuid4()}"
+    headers = {
+        "X-Ops-Token": OPS_TOKEN,
+        "X-Ops-Actor": "auditor",
+        "Idempotency-Key": idem,
+    }
+    resp = client.post(
+        "/api/account/transfer",
+        json=transfer_payload,
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    first_payload = resp.json()
+    assert first_payload["ok"] is True
+    repeat = client.post(
+        "/api/account/transfer",
+        json=transfer_payload,
+        headers=headers,
+    )
+    assert repeat.status_code == 200
+    assert repeat.json() == first_payload
+
+
+def test_ws_session_requires_actor(client: TestClient) -> None:
+    resp_missing = client.post(
+        "/api/ops/ws-session",
+        headers={"X-Ops-Token": OPS_TOKEN},
+    )
+    assert resp_missing.status_code == 400
+    body = resp_missing.json()
+    assert body["error"]["code"] == "auth.actor_required"
+
+    resp = client.post(
+        "/api/ops/ws-session",
+        headers={"X-Ops-Token": OPS_TOKEN, "X-Ops-Actor": "observer"},
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert "session" in payload and "expires" in payload
+
+
 def test_orders_open_returns_paginated_envelope(client: TestClient) -> None:
     ORDERS_SERVICE.update_orders(
         [
