@@ -35,9 +35,7 @@ class EventBORollup:
 class EventBOBuckets:
     """Rolling fixed-size time buckets for intraday (e.g., 6h) rollups."""
 
-    def __init__(
-        self, clock=time, bucket_minutes: int = 360, max_buckets: int = 4
-    ) -> None:
+    def __init__(self, clock=time, bucket_minutes: int = 360, max_buckets: int = 4) -> None:
         self.clock = clock
         self.bucket_sec = int(bucket_minutes) * 60
         self.max_buckets = int(max_buckets)
@@ -69,9 +67,7 @@ class EventBOBuckets:
                 {
                     "start": int(start),
                     "cnt": dict(cnt),
-                    "by_symbol": {
-                        sym: v for (k, sym), v in cnt_sym.items() if k == "trades"
-                    },
+                    "by_symbol": {sym: v for (k, sym), v in cnt_sym.items() if k == "trades"},
                 }
             )
         return out

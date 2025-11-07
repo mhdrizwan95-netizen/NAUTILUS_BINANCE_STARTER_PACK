@@ -4,9 +4,7 @@ from .ml import HMMModel
 
 
 class Trade:
-    def __init__(
-        self, ts_open, ts_close, side, entry, exit, qty, symbol, params, features
-    ):
+    def __init__(self, ts_open, ts_close, side, entry, exit, qty, symbol, params, features):
         self.ts_open = ts_open
         self.ts_close = ts_close
         self.side = side
@@ -20,9 +18,7 @@ class Trade:
 
     @property
     def pnl(self):
-        gross = (self.exit - self.entry) * (
-            self.qty if self.side == "long" else -self.qty
-        )
+        gross = (self.exit - self.entry) * (self.qty if self.side == "long" else -self.qty)
         return gross - self.cost
 
 

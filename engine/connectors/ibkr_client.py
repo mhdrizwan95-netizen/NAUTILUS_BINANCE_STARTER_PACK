@@ -12,9 +12,7 @@ def _enabled() -> bool:
 class IbkrClient:
     def __init__(self):
         if not _enabled():
-            raise RuntimeError(
-                "IBKR client disabled. Set IBKR_ENABLED=true to initialize."
-            )
+            raise RuntimeError("IBKR client disabled. Set IBKR_ENABLED=true to initialize.")
         self.ib = None
         self._connected = False
         try:

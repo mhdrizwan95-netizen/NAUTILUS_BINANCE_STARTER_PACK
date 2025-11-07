@@ -33,9 +33,7 @@ METRICS_URL = os.getenv("OPS_METRICS_URL", "http://localhost:8002/metrics")
 EQUITY_METRIC = "portfolio_equity_usd"
 
 # Setup logging
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 
 def load_json(path: Path, default: Dict = None) -> Dict:
@@ -156,9 +154,7 @@ def fetch_registry_fallback() -> Dict[str, Any]:
     allocations = load_json(ALLOCATIONS_PATH, {})
     last_equity = float(allocations.get("equity_usd") or 0.0)
     if last_equity <= 0.0:
-        last_equity = float(
-            sum((allocations.get("capital_quota_usd") or {}).values())
-        )
+        last_equity = float(sum((allocations.get("capital_quota_usd") or {}).values()))
     fallback = {"portfolio_equity_usd": last_equity, "models": {}}
 
     for model_name, model_data in registry.items():
@@ -322,9 +318,7 @@ async def allocation_loop():
     )
 
     # Initial state
-    allocations = load_json(
-        ALLOCATIONS_PATH, {"capital_quota_usd": {}, "updated_at": {}}
-    )
+    allocations = load_json(ALLOCATIONS_PATH, {"capital_quota_usd": {}, "updated_at": {}})
     refresh_interval = policy.get("refresh_sec", 30)
 
     logging.info("[ALLOC] Starting dynamic capital allocator")
@@ -338,18 +332,14 @@ async def allocation_loop():
             metrics = await fetch_live_metrics()
 
             if not metrics.get("models"):
-                logging.warning(
-                    "[ALLOC] No model metrics available, skipping allocation"
-                )
+                logging.warning("[ALLOC] No model metrics available, skipping allocation")
                 await asyncio.sleep(refresh_interval)
                 continue
 
             equity = metrics.get("portfolio_equity_usd", 0.0)
 
             # Calculate target allocations
-            target_allocations = calculate_target_allocation(
-                policy, equity, metrics["models"]
-            )
+            target_allocations = calculate_target_allocation(policy, equity, metrics["models"])
 
             # Apply new allocations
             new_quota_usd = {}
@@ -361,8 +351,7 @@ async def allocation_loop():
                 {
                     "capital_quota_usd": new_quota_usd,
                     "updated_at": {
-                        model: alloc["last_update"]
-                        for model, alloc in target_allocations.items()
+                        model: alloc["last_update"] for model, alloc in target_allocations.items()
                     },
                     "equity_usd": equity,
                     "ts": time.time(),
@@ -412,9 +401,7 @@ def get_all_allocations() -> Dict[str, Any]:
     )
 
 
-async def simulate_allocation_cycle(
-    policy: Dict = None, metrics: Dict = None
-) -> Dict[str, Any]:
+async def simulate_allocation_cycle(policy: Dict = None, metrics: Dict = None) -> Dict[str, Any]:
     """
     Simulate a single allocation cycle for testing.
 
@@ -449,9 +436,7 @@ async def simulate_allocation_cycle(
     target_allocations = calculate_target_allocation(policy, equity, metrics["models"])
 
     # Apply allocations
-    new_quota_usd = {
-        model: alloc["target_quota"] for model, alloc in target_allocations.items()
-    }
+    new_quota_usd = {model: alloc["target_quota"] for model, alloc in target_allocations.items()}
 
     result = {
         "policy": policy,

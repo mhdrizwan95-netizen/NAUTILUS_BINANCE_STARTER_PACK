@@ -34,9 +34,7 @@ class MarketDataDispatcher:
         enriched.setdefault("ts", time.time())
         try:
             evt_type = str(enriched.get("type") or "tick").lower()
-            metrics.market_data_events_total.labels(
-                source=self.source, type=evt_type
-            ).inc()
+            metrics.market_data_events_total.labels(source=self.source, type=evt_type).inc()
         except Exception:
             pass
         try:
@@ -71,9 +69,7 @@ class MarketDataLogger:
         self.bus = bus
         self._log = logger or logging.getLogger("engine.market_data.logger")
         self._handler: Optional[Callable[[Dict[str, Any]], Any]] = None
-        self._min_interval = (
-            0.0 if sample_rate_hz <= 0 else max(0.01, 1.0 / float(sample_rate_hz))
-        )
+        self._min_interval = 0.0 if sample_rate_hz <= 0 else max(0.01, 1.0 / float(sample_rate_hz))
         self._last_logged = 0.0
 
     def start(self) -> None:

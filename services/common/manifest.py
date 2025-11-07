@@ -136,9 +136,7 @@ def claim_unprocessed(limit: int = 50, db_path: str = DEFAULT_DB) -> list:
         )
         conn.commit()
         # fetch details
-        cur.execute(
-            f"SELECT * FROM files WHERE file_id IN ({','.join(['?']*len(ids))})", ids
-        )
+        cur.execute(f"SELECT * FROM files WHERE file_id IN ({','.join(['?']*len(ids))})", ids)
         rows = [dict(r) for r in cur.fetchall()]
         return rows
     finally:

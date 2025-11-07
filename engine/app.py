@@ -421,22 +421,16 @@ async def _kraken_refresh_mark_prices(now: float) -> None:
         last_ts = _kraken_mark_ts.get(base)
         freshness = float("inf") if last_ts is None else max(0.0, now - last_ts)
         try:
-            metrics.mark_price_freshness_sec.labels(symbol=base, venue="kraken").set(
-                freshness
-            )
+            metrics.mark_price_freshness_sec.labels(symbol=base, venue="kraken").set(freshness)
         except Exception:
             pass
 
         state = _kraken_mark_alert_state.get(base, 0)
         if freshness >= _KRAKEN_MARK_PAGE_SEC and state < 2:
-            _kraken_risk_logger.error(
-                "Kraken mark stale %.1fs (paging) for %s", freshness, base
-            )
+            _kraken_risk_logger.error("Kraken mark stale %.1fs (paging) for %s", freshness, base)
             state = 2
         elif freshness >= _KRAKEN_MARK_WARN_SEC and state < 1:
-            _kraken_risk_logger.warning(
-                "Kraken mark stale %.1fs for %s", freshness, base
-            )
+            _kraken_risk_logger.warning("Kraken mark stale %.1fs for %s", freshness, base)
             state = 1
         force_rest = freshness >= _KRAKEN_MARK_FORCE_SEC
         if force_rest and state < 3:
@@ -457,21 +451,15 @@ async def _kraken_refresh_mark_prices(now: float) -> None:
                     candidate = ticker(base)
                     if inspect.isawaitable(candidate):
                         candidate = await candidate
-                    if isinstance(candidate, (int, float)) and math.isfinite(
-                        float(candidate)
-                    ):
+                    if isinstance(candidate, (int, float)) and math.isfinite(float(candidate)):
                         price = float(candidate)
             else:
                 price = await _kraken_safe_price(base)
         except Exception as exc:
             if force_rest:
-                _kraken_risk_logger.error(
-                    "Kraken REST price fetch failed for %s: %s", base, exc
-                )
+                _kraken_risk_logger.error("Kraken REST price fetch failed for %s: %s", base, exc)
             else:
-                _kraken_risk_logger.debug(
-                    "Kraken safe_price failed for %s: %s", base, exc
-                )
+                _kraken_risk_logger.debug("Kraken safe_price failed for %s: %s", base, exc)
             price = None
 
         if isinstance(price, (int, float)) and price > 0.0:
@@ -550,9 +538,7 @@ async def wallet_balance_worker() -> None:
                 futures_total = _as_float(futures_snapshot.get("totalWalletBalance"))
                 futures_available = _as_float(futures_snapshot.get("availableBalance"))
             except Exception as fut_exc:
-                _WALLET_LOG.debug(
-                    "wallet monitor: futures snapshot failed (%s)", fut_exc
-                )
+                _WALLET_LOG.debug("wallet monitor: futures snapshot failed (%s)", fut_exc)
 
             spot_free = spot_locked = 0.0
             spot_snapshot: dict[str, Any] = {}
@@ -566,14 +552,10 @@ async def wallet_balance_worker() -> None:
                     try:
                         btc_px = await rest.ticker_price("BTCUSDT", market="spot")
                     except Exception:
-                        btc_px = (
-                            spot_snapshot.get("lastPrice") if spot_snapshot else 0.0
-                        )
+                        btc_px = spot_snapshot.get("lastPrice") if spot_snapshot else 0.0
                     margin_liability_usd = liability_btc * _as_float(btc_px)
             except Exception as margin_exc:
-                _WALLET_LOG.debug(
-                    "wallet monitor: margin snapshot failed (%s)", margin_exc
-                )
+                _WALLET_LOG.debug("wallet monitor: margin snapshot failed (%s)", margin_exc)
 
             try:
                 spot_snapshot = await rest.account_snapshot(market="spot") or {}
@@ -589,9 +571,7 @@ async def wallet_balance_worker() -> None:
             try:
                 funding_free = _as_float(await rest.funding_balance("USDT"))
             except Exception as fund_exc:
-                _WALLET_LOG.debug(
-                    "wallet monitor: funding balance failed (%s)", fund_exc
-                )
+                _WALLET_LOG.debug("wallet monitor: funding balance failed (%s)", fund_exc)
 
             spot_total = spot_free + spot_locked
             total_equity = futures_total + funding_free + spot_total
@@ -764,9 +744,7 @@ def _maybe_emit_strategy_tick(
             strategy.on_tick(qualified, float(price), event_ts, volume)
     except Exception:
         try:
-            _refresh_logger.debug(
-                "Strategy tick emit failed for %s", symbol, exc_info=True
-            )
+            _refresh_logger.debug("Strategy tick emit failed for %s", symbol, exc_info=True)
         except Exception:
             pass
 
@@ -807,9 +785,7 @@ def _verify_external_signature(body: bytes, header_value: str) -> bool:
         return False
     if not header_value or not header_value.startswith("sha256="):
         return False
-    expected = hmac.new(
-        EXTERNAL_EVENTS_SECRET.encode(), body, hashlib.sha256
-    ).hexdigest()
+    expected = hmac.new(EXTERNAL_EVENTS_SECRET.encode(), body, hashlib.sha256).hexdigest()
     received = header_value.split("=", 1)[1]
     return hmac.compare_digest(expected, received)
 
@@ -846,9 +822,7 @@ async def ingest_external_event(
             exc,
             exc_info=True,
         )
-        raise HTTPException(
-            status_code=500, detail="failed to enqueue external event"
-        ) from exc
+        raise HTTPException(status_code=500, detail="failed to enqueue external event") from exc
 
     return {"status": "queued", "id": event_id, "topic": "events.external_feed"}
 
@@ -873,15 +847,11 @@ class ExternalEventRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     source: str = Field(..., min_length=1, description="Canonical feed identifier")
-    payload: dict[str, Any] = Field(
-        default_factory=dict, description="Arbitrary event payload"
-    )
+    payload: dict[str, Any] = Field(default_factory=dict, description="Arbitrary event payload")
     asset_hints: list[str] = Field(
         default_factory=list, description="Optional trading symbols impacted"
     )
-    priority: float = Field(
-        0.5, ge=0.0, le=1.0, description="Queue priority [0.0, 1.0]"
-    )
+    priority: float = Field(0.5, ge=0.0, le=1.0, description="Queue priority [0.0, 1.0]")
     expires_at: float | None = Field(
         default=None,
         description="Optional epoch timestamp at which the event becomes stale",
@@ -963,16 +933,12 @@ class MarketOrderRequest(BaseModel):
 
     symbol: str = Field(..., description="e.g., BTCUSDT.BINANCE")
     side: Literal["BUY", "SELL"]
-    quote: float | None = Field(
-        None, gt=0, description="Quote currency amount (USDT)."
-    )
+    quote: float | None = Field(None, gt=0, description="Quote currency amount (USDT).")
     quantity: float | None = Field(None, gt=0, description="Base asset quantity.")
     market: str | None = Field(
         None, description="Preferred market within venue (spot/futures/margin)."
     )
-    venue: str | None = Field(
-        None, description="Trading venue. Defaults to VENUE env var."
-    )
+    venue: str | None = Field(None, description="Trading venue. Defaults to VENUE env var.")
 
     @field_validator("venue")
     @classmethod
@@ -993,9 +959,7 @@ class LimitOrderRequest(BaseModel):
     side: Literal["BUY", "SELL"]
     price: float = Field(..., gt=0, description="Limit price")
     timeInForce: Literal["IOC", "FOK", "GTC"] = Field("IOC")
-    quote: float | None = Field(
-        None, gt=0, description="Quote currency amount (USDT)."
-    )
+    quote: float | None = Field(None, gt=0, description="Quote currency amount (USDT).")
     quantity: float | None = Field(None, gt=0, description="Base asset quantity.")
     market: str | None = Field(
         None, description="Preferred market within venue (spot/futures/margin)."
@@ -1033,9 +997,7 @@ def _record_venue_error(venue: str, exc: Exception) -> None:
 @app.on_event("startup")
 async def on_startup() -> None:
     async with startup_lock:
-        _startup_logger.info(
-            "Startup sequence started (role=%s, venue=%s)", ROLE, VENUE
-        )
+        _startup_logger.info("Startup sequence started (role=%s, venue=%s)", ROLE, VENUE)
         try:
             h = _config_hash()
             flags = {
@@ -1070,9 +1032,7 @@ async def on_startup() -> None:
 
             state = portfolio.state
             if state.cash is None or state.cash <= 0:
-                seed = os.getenv("STARTING_CASH_USD") or os.getenv(
-                    "ENGINE_STARTING_CASH_USD"
-                )
+                seed = os.getenv("STARTING_CASH_USD") or os.getenv("ENGINE_STARTING_CASH_USD")
                 if seed is not None:
                     val = float(seed)
                     if val > 0:
@@ -1080,9 +1040,7 @@ async def on_startup() -> None:
                         state.equity = val
                         _startup_logger.info("Seeded starting cash of %s USD", val)
         except Exception as exc:
-            _startup_logger.warning(
-                "Unable to seed starting cash: %s", exc, exc_info=True
-            )
+            _startup_logger.warning("Unable to seed starting cash: %s", exc, exc_info=True)
         # Initialize portfolio metrics
         state = portfolio.state
         metrics.reset_core_metrics()
@@ -1106,10 +1064,7 @@ async def _refresh_specs_periodically():
             global _last_specs_refresh
             _last_specs_refresh = time.time()
             # Update metric
-            if (
-                hasattr(metrics, "REGISTRY")
-                and "last_specs_refresh_epoch" in metrics.REGISTRY
-            ):
+            if hasattr(metrics, "REGISTRY") and "last_specs_refresh_epoch" in metrics.REGISTRY:
                 metrics.REGISTRY["last_specs_refresh_epoch"].set(_last_specs_refresh)
             logging.getLogger().info(
                 f"Venue specs refreshed at {datetime.datetime.utcfromtimestamp(_last_specs_refresh)}"
@@ -1251,9 +1206,7 @@ async def _start_guardian_and_feeds():
                 private_key=dex_cfg.wallet_private_key,
                 max_gas_price_wei=dex_cfg.max_gas_price_wei,
             )
-            dex_router = DexRouter(
-                web3=wallet.w3, router_address=dex_cfg.router_address
-            )
+            dex_router = DexRouter(web3=wallet.w3, router_address=dex_cfg.router_address)
             state = DexState(dex_cfg.state_path)
             executor = DexExecutor(
                 wallet=wallet,
@@ -1332,9 +1285,7 @@ async def _start_guardian_and_feeds():
         if momentum_cfg.enabled:
             global _MOMENTUM_BREAKOUT
             scanner = getattr(_strategy_mod, "SYMBOL_SCANNER", None)
-            _MOMENTUM_BREAKOUT = MomentumBreakout(
-                router, RAILS, momentum_cfg, scanner=scanner
-            )
+            _MOMENTUM_BREAKOUT = MomentumBreakout(router, RAILS, momentum_cfg, scanner=scanner)
             _MOMENTUM_BREAKOUT.start()
             _startup_logger.info(
                 "Momentum breakout module started (notional=%.0f, interval=%.1fs)",
@@ -1383,9 +1334,7 @@ async def _start_guardian_and_feeds():
         global _MEME_SENTIMENT
         if meme_cfg.enabled:
             if _MEME_SENTIMENT is None:
-                _MEME_SENTIMENT = MemeCoinSentiment(
-                    router, RAILS, rest_client, meme_cfg
-                )
+                _MEME_SENTIMENT = MemeCoinSentiment(router, RAILS, rest_client, meme_cfg)
                 BUS.subscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
                 _startup_logger.info(
                     "Meme sentiment strategy enabled (risk_pct=%.2f%%, min_score=%.2f, lock=%.0fs)",
@@ -1399,15 +1348,11 @@ async def _start_guardian_and_feeds():
                 _startup_logger.info("Meme sentiment strategy configuration refreshed")
         elif _MEME_SENTIMENT is not None:
             try:
-                BUS.unsubscribe(
-                    "events.external_feed", _MEME_SENTIMENT.on_external_event
-                )
+                BUS.unsubscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
             except Exception:
                 pass
             _MEME_SENTIMENT = None
-            _startup_logger.info(
-                "Meme sentiment strategy disabled via configuration"
-            )
+            _startup_logger.info("Meme sentiment strategy disabled via configuration")
     except Exception:
         _startup_logger.warning("Meme sentiment strategy wiring failed", exc_info=True)
 
@@ -1436,9 +1381,7 @@ async def _start_guardian_and_feeds():
                 _startup_logger.info("Listing sniper configuration refreshed")
         elif _LISTING_SNIPER is not None:
             try:
-                BUS.unsubscribe(
-                    "events.external_feed", _LISTING_SNIPER.on_external_event
-                )
+                BUS.unsubscribe("events.external_feed", _LISTING_SNIPER.on_external_event)
             except Exception:
                 pass
             try:
@@ -1461,9 +1404,7 @@ async def _start_guardian_and_feeds():
         global _AIRDROP_PROMO
         if airdrop_cfg.enabled:
             if _AIRDROP_PROMO is None:
-                _AIRDROP_PROMO = AirdropPromoWatcher(
-                    router, RAILS, rest_client, airdrop_cfg
-                )
+                _AIRDROP_PROMO = AirdropPromoWatcher(router, RAILS, rest_client, airdrop_cfg)
                 BUS.subscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
                 _startup_logger.info(
                     "Airdrop promo watcher enabled (default_notional=%.1f, min_reward=%.1f)",
@@ -1476,9 +1417,7 @@ async def _start_guardian_and_feeds():
                 _startup_logger.info("Airdrop promo watcher configuration refreshed")
         elif _AIRDROP_PROMO is not None:
             try:
-                BUS.unsubscribe(
-                    "events.external_feed", _AIRDROP_PROMO.on_external_event
-                )
+                BUS.unsubscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
             except Exception:
                 pass
             try:
@@ -1526,9 +1465,7 @@ async def _start_guardian_and_feeds():
                 hcfg = {
                     "HEALTH_TG_ENABLED": os.getenv("HEALTH_TG_ENABLED", "true").lower()
                     in {"1", "true", "yes"},
-                    "HEALTH_DEBOUNCE_SEC": int(
-                        float(os.getenv("HEALTH_DEBOUNCE_SEC", "10"))
-                    ),
+                    "HEALTH_DEBOUNCE_SEC": int(float(os.getenv("HEALTH_DEBOUNCE_SEC", "10"))),
                 }
                 HealthNotifier(hcfg, BUS, tg, _startup_logger, _t, metrics)
                 _startup_logger.info("Telegram health notifier wired")
@@ -1565,9 +1502,7 @@ async def _start_guardian_and_feeds():
                 BUS.subscribe("event_bo.plan_dry", lambda data: fn("plans_dry", data))
                 BUS.subscribe("event_bo.plan_live", lambda data: fn("plans_live", data))
                 BUS.subscribe("event_bo.trade", lambda data: fn("trades", data))
-                BUS.subscribe(
-                    "event_bo.skip", lambda data: fn(f"skip_{data.get('reason')}", data)
-                )
+                BUS.subscribe("event_bo.skip", lambda data: fn(f"skip_{data.get('reason')}", data))
                 BUS.subscribe("event_bo.half", lambda data: fn("half_applied", data))
                 BUS.subscribe("event_bo.trail", lambda data: fn("trail_update", data))
 
@@ -1640,9 +1575,7 @@ async def _start_guardian_and_feeds():
             )
             BUS.subscribe(
                 "exec.slippage",
-                lambda d: ov.record_slippage_sample(
-                    d.get("symbol", ""), float(d.get("bps", 0.0))
-                ),
+                lambda d: ov.record_slippage_sample(d.get("symbol", ""), float(d.get("bps", 0.0))),
             )
             # attach to router for place_entry consult
             try:
@@ -1663,9 +1596,7 @@ async def manual_reconciliation():
         stats = await reconcile_once()
         return {"status": "completed", **stats}
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Manual reconciliation failed: {e}"
-        )
+        raise HTTPException(status_code=500, detail=f"Manual reconciliation failed: {e}")
 
 
 # Startup restoration: load snapshot and best-effort reconcile
@@ -1673,9 +1604,7 @@ def _startup_load_snapshot_and_reconcile():
     # 1) Load prior snapshot (if present) so UI has immediate state
     snap = _store.load()
     if snap:
-        _startup_logger.info(
-            "Loaded persisted portfolio snapshot (ts_ms=%s)", snap.get("ts_ms")
-        )
+        _startup_logger.info("Loaded persisted portfolio snapshot (ts_ms=%s)", snap.get("ts_ms"))
         _boot_status["snapshot_loaded"] = True
         try:
             state = portfolio.state
@@ -1710,9 +1639,7 @@ def _startup_load_snapshot_and_reconcile():
                 state.cash, state.realized, state.unrealized, state.exposure
             )
         except Exception:
-            _startup_logger.warning(
-                "Failed to hydrate portfolio from snapshot", exc_info=True
-            )
+            _startup_logger.warning("Failed to hydrate portfolio from snapshot", exc_info=True)
     else:
         _startup_logger.info("No persisted portfolio snapshot found; starting fresh")
     # 2) Best-effort reconcile to catch up with missed fills
@@ -1766,9 +1693,7 @@ try:
         try:
             _strategy_mod.register_tick_listener(_momentum_listener)
         except Exception:
-            _startup_logger.warning(
-                "Momentum strategy listener registration failed", exc_info=True
-            )
+            _startup_logger.warning("Momentum strategy listener registration failed", exc_info=True)
 except Exception:
     _startup_logger.exception("Strategy initialization failed")
 
@@ -1781,18 +1706,14 @@ async def on_shutdown() -> None:
             _market_data_logger.stop()
             _startup_logger.info("Market data logger stopped")
         except Exception:
-            _startup_logger.debug(
-                "Market data logger shutdown encountered issues", exc_info=True
-            )
+            _startup_logger.debug("Market data logger shutdown encountered issues", exc_info=True)
         _market_data_logger = None
     try:
         if _MOMENTUM_BREAKOUT is not None:
             await _MOMENTUM_BREAKOUT.stop()
             _MOMENTUM_BREAKOUT = None
     except Exception:
-        _startup_logger.warning(
-            "Momentum breakout shutdown encountered errors", exc_info=True
-        )
+        _startup_logger.warning("Momentum breakout shutdown encountered errors", exc_info=True)
     try:
         if _LISTING_SNIPER is not None:
             await _LISTING_SNIPER.shutdown()
@@ -1803,9 +1724,7 @@ async def on_shutdown() -> None:
             from engine.core.event_bus import BUS
 
             try:
-                BUS.unsubscribe(
-                    "events.external_feed", _MEME_SENTIMENT.on_external_event
-                )
+                BUS.unsubscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
             except Exception:
                 pass
             _MEME_SENTIMENT = None
@@ -1816,22 +1735,16 @@ async def on_shutdown() -> None:
             from engine.core.event_bus import BUS
 
             try:
-                BUS.unsubscribe(
-                    "events.external_feed", _AIRDROP_PROMO.on_external_event
-                )
+                BUS.unsubscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
             except Exception:
                 pass
             try:
                 await _AIRDROP_PROMO.shutdown()
             except Exception:
-                _startup_logger.warning(
-                    "Airdrop promo watcher shutdown failed", exc_info=True
-                )
+                _startup_logger.warning("Airdrop promo watcher shutdown failed", exc_info=True)
             _AIRDROP_PROMO = None
     except Exception:
-        _startup_logger.warning(
-            "Airdrop promo shutdown encountered errors", exc_info=True
-        )
+        _startup_logger.warning("Airdrop promo shutdown encountered errors", exc_info=True)
     try:
         from engine.core.signal_queue import SIGNAL_QUEUE
 
@@ -1859,11 +1772,7 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
     )
     if not ok:
         metrics.orders_rejected.inc()
-        status = (
-            403
-            if err.get("error") in {"TRADING_DISABLED", "SYMBOL_NOT_ALLOWED"}
-            else 400
-        )
+        status = 403 if err.get("error") in {"TRADING_DISABLED", "SYMBOL_NOT_ALLOWED"} else 400
         # Publish risk rejection event
         await publish_risk_event(
             "rejected",
@@ -1911,9 +1820,7 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
                     {
                         "id": order_id,
                         "venue": venue.lower(),
-                        "symbol": (result.get("symbol") or req.symbol).rsplit(".", 1)[
-                            0
-                        ],
+                        "symbol": (result.get("symbol") or req.symbol).rsplit(".", 1)[0],
                         "side": req.side,
                         "qty": req.quantity or req.quote,
                         "price": result.get("price") or result.get("avg_fill_price"),
@@ -1985,9 +1892,7 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
             if isinstance(exc, _httpx.HTTPStatusError) and exc.response is not None:
                 status = exc.response.status_code
                 body = exc.response.text
-                raise HTTPException(
-                    status_code=status, detail=f"Binance error: {body}"
-                ) from exc
+                raise HTTPException(status_code=status, detail=f"Binance error: {body}") from exc
         except Exception:
             pass
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2011,11 +1916,7 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
     )
     if not ok:
         metrics.orders_rejected.inc()
-        status = (
-            403
-            if err.get("error") in {"TRADING_DISABLED", "SYMBOL_NOT_ALLOWED"}
-            else 400
-        )
+        status = 403 if err.get("error") in {"TRADING_DISABLED", "SYMBOL_NOT_ALLOWED"} else 400
         await publish_risk_event(
             "rejected",
             {
@@ -2063,9 +1964,7 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
                     {
                         "id": order_id,
                         "venue": venue.lower(),
-                        "symbol": (result.get("symbol") or req.symbol).rsplit(".", 1)[
-                            0
-                        ],
+                        "symbol": (result.get("symbol") or req.symbol).rsplit(".", 1)[0],
                         "side": req.side,
                         "qty": req.quantity or req.quote,
                         "price": req.price,
@@ -2105,9 +2004,7 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
                     market=market_hint,
                 )
                 st = portfolio.state
-                metrics.update_portfolio_gauges(
-                    st.cash, st.realized, st.unrealized, st.exposure
-                )
+                metrics.update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
                 _store.save(st.snapshot())
         except Exception:
             pass
@@ -2129,9 +2026,7 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
             if isinstance(exc, _httpx.HTTPStatusError) and exc.response is not None:
                 status = exc.response.status_code
                 body = exc.response.text
-                raise HTTPException(
-                    status_code=status, detail=f"Binance error: {body}"
-                ) from exc
+                raise HTTPException(status_code=status, detail=f"Binance error: {body}") from exc
         except Exception:
             pass
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -2162,9 +2057,7 @@ async def symbol_info(symbol: str):
             import httpx
 
             if isinstance(exc, httpx.HTTPStatusError):
-                third_party = (
-                    exc.response.url if hasattr(exc.response, "url") else "no_url"
-                )
+                third_party = exc.response.url if hasattr(exc.response, "url") else "no_url"
         except Exception:
             pass
         base_used = settings.api_base or "no_base"
@@ -2206,15 +2099,9 @@ async def get_portfolio():
         if needs_overlay:
             persisted_snapshot = _store.load()
             if persisted_snapshot:
-                if (
-                    "cash_usd" not in snap
-                    and persisted_snapshot.get("cash_usd") is not None
-                ):
+                if "cash_usd" not in snap and persisted_snapshot.get("cash_usd") is not None:
                     snap["cash_usd"] = float(persisted_snapshot.get("cash_usd"))
-                if (
-                    "equity_usd" not in snap
-                    and persisted_snapshot.get("equity_usd") is not None
-                ):
+                if "equity_usd" not in snap and persisted_snapshot.get("equity_usd") is not None:
                     snap["equity_usd"] = float(persisted_snapshot.get("equity_usd"))
                 if not snap.get("positions"):
                     snap["positions"] = list(persisted_snapshot.get("positions", []))
@@ -2228,11 +2115,7 @@ async def get_portfolio():
         if not snap:
             raise HTTPException(status_code=404, detail="No portfolio available")
         snap.setdefault("equity_usd", snap.get("equity"))
-        if (
-            "equity" not in snap
-            and snap.get("cash_usd") is not None
-            and snap.get("pnl")
-        ):
+        if "equity" not in snap and snap.get("cash_usd") is not None and snap.get("pnl"):
             pnl = snap.get("pnl") or {}
             snap["equity_usd"] = float(snap.get("cash_usd") or 0.0) + float(
                 pnl.get("unrealized", 0.0)
@@ -2249,9 +2132,7 @@ async def get_portfolio():
             last = prices.get(base) or p.get("last_price_quote")
             qty = float(p.get("qty_base", 0.0))
             p["last_price_quote"] = last
-            p["unrealized_usd"] = float(
-                p.get("unrealized_usd", 0.0)
-            )  # keep if already computed
+            p["unrealized_usd"] = float(p.get("unrealized_usd", 0.0))  # keep if already computed
             p["value_usd"] = (qty * float(last)) if (last is not None) else 0.0
             p["is_dust"] = abs(p["value_usd"]) < dust
             # Also update internal portfolio marks so unrealized PnL tracks market
@@ -2304,9 +2185,7 @@ async def get_portfolio():
             if isinstance(snap2, dict):
                 try:
                     cash = float(
-                        snap2.get("totalWalletBalance")
-                        or snap2.get("walletBalance")
-                        or 0.0
+                        snap2.get("totalWalletBalance") or snap2.get("walletBalance") or 0.0
                     )
                 except Exception:
                     cash = float(getattr(state, "cash", 0.0) or 0.0)
@@ -2320,9 +2199,7 @@ async def get_portfolio():
                 pass
 
             # Update gauges using live cash + unrealized (venue truth)
-            metrics.update_portfolio_gauges(
-                cash, state.realized, total_unreal, state.exposure
-            )
+            metrics.update_portfolio_gauges(cash, state.realized, total_unreal, state.exposure)
             try:
                 metrics.set_core_metric("cash_usd", cash)
                 metrics.set_core_metric("equity_usd", cash + total_unreal)
@@ -2332,9 +2209,7 @@ async def get_portfolio():
                         init_m = float(snap2.get("totalInitialMargin", 0.0))
                         maint_m = float(snap2.get("totalMaintMargin", 0.0))
                         avail = float(
-                            snap2.get(
-                                "availableBalance", snap2.get("maxWithdrawAmount", 0.0)
-                            )
+                            snap2.get("availableBalance", snap2.get("maxWithdrawAmount", 0.0))
                         )
                         metrics.set_core_metric("initial_margin_usd", init_m)
                         metrics.set_core_metric("maint_margin_usd", maint_m)
@@ -2346,9 +2221,7 @@ async def get_portfolio():
         else:
             # Spot: signed market value = sum(qty * last)
             try:
-                mv = sum(
-                    pos.quantity * pos.last_price for pos in state.positions.values()
-                )
+                mv = sum(pos.quantity * pos.last_price for pos in state.positions.values())
                 metrics.set_core_metric("market_value_usd", mv)
                 # Per-symbol unrealized for invariants derived from in-process state
                 g = metrics.REGISTRY.get("pnl_unrealized_symbol")
@@ -2398,9 +2271,7 @@ async def account_snapshot(force: bool = False):
     Return account snapshot. If force=1, pull a fresh snapshot from the venue
     and update router cache + snapshot_loaded flag immediately.
     """
-    snap = await (
-        router.fetch_account_snapshot() if force else router.get_account_snapshot()
-    )
+    snap = await (router.fetch_account_snapshot() if force else router.get_account_snapshot())
 
     try:
         router.snapshot_loaded = True
@@ -2419,9 +2290,7 @@ async def account_snapshot(force: bool = False):
             state.cash, state.realized, state.unrealized, state.exposure
         )
         metrics.set_core_metric("equity_usd", float(state.equity))
-        metrics.set_core_metric(
-            "available_usd", float(snap.get("availableBalance", state.cash))
-        )
+        metrics.set_core_metric("available_usd", float(snap.get("availableBalance", state.cash)))
         metrics.set_core_metric("mark_time_epoch", time.time())
     except Exception:
         pass
@@ -2441,45 +2310,32 @@ async def account_snapshot(force: bool = False):
             cash_val = float(getattr(state, "cash", 0.0) or 0.0)
             unreal_val = float(getattr(state, "unrealized", 0.0) or 0.0)
             equity_val = float(
-                getattr(state, "equity", cash_val + unreal_val)
-                or (cash_val + unreal_val)
+                getattr(state, "equity", cash_val + unreal_val) or (cash_val + unreal_val)
             )
             if isinstance(snap, dict):
                 cash_val = float(snap.get("cash_usd", cash_val) or cash_val)
                 pnl_section = snap.get("pnl") or {}
-                unreal_val = float(
-                    pnl_section.get("unrealized", unreal_val) or unreal_val
-                )
+                unreal_val = float(pnl_section.get("unrealized", unreal_val) or unreal_val)
                 equity_candidate = snap.get("equity_usd") or snap.get("equity")
                 if equity_candidate is not None:
                     equity_val = float(equity_candidate)
                 elif not equity_val:
                     equity_val = cash_val + unreal_val
-            store.insert_equity(
-                VENUE.lower(), equity_val, cash_val, unreal_val, snapshot_ts
-            )
+            store.insert_equity(VENUE.lower(), equity_val, cash_val, unreal_val, snapshot_ts)
         except Exception:
             _persist_logger.exception(
                 "Failed to persist account snapshot for venue %s", VENUE.lower()
             )
     else:
-        _persist_logger.debug(
-            "SQLite store unavailable; skipping account snapshot persistence"
-        )
+        _persist_logger.debug("SQLite store unavailable; skipping account snapshot persistence")
 
     current_symbols: set[str] = set()
     for sym, position in state.positions.items():
         key = sym.split(".")[0]
         current_symbols.add(key)
-        metrics.set_core_symbol_metric(
-            "position_amt", symbol=key, value=float(position.quantity)
-        )
-        metrics.set_core_symbol_metric(
-            "entry_price", symbol=key, value=float(position.avg_price)
-        )
-        metrics.set_core_symbol_metric(
-            "unrealized_profit", symbol=key, value=float(position.upl)
-        )
+        metrics.set_core_symbol_metric("position_amt", symbol=key, value=float(position.quantity))
+        metrics.set_core_symbol_metric("entry_price", symbol=key, value=float(position.avg_price))
+        metrics.set_core_symbol_metric("unrealized_profit", symbol=key, value=float(position.upl))
         if position.last_price:
             metrics.set_core_symbol_metric(
                 "mark_price", symbol=key, value=float(position.last_price)
@@ -2521,9 +2377,7 @@ def post_reconcile():
         except Exception:
             symbols = []
     if not symbols:
-        raise HTTPException(
-            status_code=400, detail="No symbols configured for reconciliation"
-        )
+        raise HTTPException(status_code=400, detail="No symbols configured for reconciliation")
 
     try:
         snap = reconcile_since_snapshot(
@@ -2632,9 +2486,7 @@ async def get_prices():
 
 
 @app.get("/price")
-async def get_price(
-    symbol: str = Query(..., description="Symbol e.g. BTCUSDT or BTCUSDT.BINANCE")
-):
+async def get_price(symbol: str = Query(..., description="Symbol e.g. BTCUSDT or BTCUSDT.BINANCE")):
     """Return the latest price for a single symbol."""
     normalized = norm_symbol(symbol)
     prices = await last_prices()
@@ -2666,13 +2518,9 @@ async def promote_strategy(request: Request):
     try:
         data = await request.json()
     except Exception:
-        raise HTTPException(
-            status_code=400, detail='JSON body required: {"model_tag": "<tag>"}'
-        )
+        raise HTTPException(status_code=400, detail='JSON body required: {"model_tag": "<tag>"}')
     if not isinstance(data, dict):
-        raise HTTPException(
-            status_code=400, detail="Invalid JSON payload (expected object)"
-        )
+        raise HTTPException(status_code=400, detail="Invalid JSON payload (expected object)")
     tag = (data or {}).get("model_tag")
     if not tag:
         raise HTTPException(status_code=400, detail="model_tag required")
@@ -2745,13 +2593,9 @@ async def _start_external_feeds():
 
         started = await spawn_external_feeds_from_config()
         if started:
-            _startup_logger.info(
-                "External feed connectors started: %s", ", ".join(started)
-            )
+            _startup_logger.info("External feed connectors started: %s", ", ".join(started))
     except Exception:
-        _startup_logger.warning(
-            "External feed connectors failed to start", exc_info=True
-        )
+        _startup_logger.warning("External feed connectors failed to start", exc_info=True)
 
 
 @app.on_event("startup")
@@ -2828,14 +2672,10 @@ async def _start_stop_validator() -> None:
         "STOP_VALIDATOR_REPAIR": os.getenv("STOP_VALIDATOR_REPAIR", "true").lower()
         in {"1", "true", "yes"},
         "STOP_VALIDATOR_GRACE_SEC": float(os.getenv("STOP_VALIDATOR_GRACE_SEC", "2")),
-        "STOP_VALIDATOR_INTERVAL_SEC": float(
-            os.getenv("STOP_VALIDATOR_INTERVAL_SEC", "5")
-        ),
+        "STOP_VALIDATOR_INTERVAL_SEC": float(os.getenv("STOP_VALIDATOR_INTERVAL_SEC", "5")),
         "STOPVAL_NOTIFY_ENABLED": os.getenv("STOPVAL_NOTIFY_ENABLED", "false").lower()
         in {"1", "true", "yes"},
-        "STOPVAL_NOTIFY_DEBOUNCE_SEC": float(
-            os.getenv("STOPVAL_NOTIFY_DEBOUNCE_SEC", "60")
-        ),
+        "STOPVAL_NOTIFY_DEBOUNCE_SEC": float(os.getenv("STOPVAL_NOTIFY_DEBOUNCE_SEC", "60")),
     }
     try:
         md = _MDAdapter(router)
@@ -2843,9 +2683,7 @@ async def _start_stop_validator() -> None:
             cfg, router, md, log=_startup_logger, metrics=metrics, bus=BUS
         )
         asyncio.create_task(_stop_validator.run())
-        _startup_logger.info(
-            "Stop Validator started (repair=%s)", cfg["STOP_VALIDATOR_REPAIR"]
-        )
+        _startup_logger.info("Stop Validator started (repair=%s)", cfg["STOP_VALIDATOR_REPAIR"])
     except Exception:
         _startup_logger.warning("Stop Validator startup failed", exc_info=True)
 
@@ -2905,9 +2743,7 @@ async def _refresh_binance_futures_snapshot() -> None:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
                 except Exception:
                     pass
-                _maybe_emit_strategy_tick(
-                    sym, px, ts=now_ts, source="rest_snapshot", stream="rest"
-                )
+                _maybe_emit_strategy_tick(sym, px, ts=now_ts, source="rest_snapshot", stream="rest")
             if new_map:
                 _price_map = new_map
     except Exception:
@@ -2932,9 +2768,7 @@ async def _refresh_binance_futures_snapshot() -> None:
         try:
             init_m = float(acc_data.get("totalInitialMargin", 0.0))
             maint_m = float(acc_data.get("totalMaintMargin", 0.0))
-            avail = float(
-                acc_data.get("availableBalance", acc_data.get("maxWithdrawAmount", 0.0))
-            )
+            avail = float(acc_data.get("availableBalance", acc_data.get("maxWithdrawAmount", 0.0)))
             metrics.set_core_metric("initial_margin_usd", init_m)
             metrics.set_core_metric("maint_margin_usd", maint_m)
             metrics.set_core_metric("available_usd", avail)
@@ -3057,9 +2891,7 @@ async def _refresh_binance_spot_snapshot() -> None:
         base = (settings.spot_base or settings.api_base or "").rstrip(
             "/"
         ) or "https://api.binance.com"
-        async with _httpx.AsyncClient(
-            base_url=base, timeout=settings.timeout
-        ) as client:
+        async with _httpx.AsyncClient(base_url=base, timeout=settings.timeout) as client:
             resp = await client.get("/api/v3/ticker/price")
             resp.raise_for_status()
             payload = resp.json()
@@ -3080,9 +2912,7 @@ async def _refresh_binance_spot_snapshot() -> None:
                 continue
             if px > 0:
                 new_map[sym] = px
-                _maybe_emit_strategy_tick(
-                    sym, px, source="rest_snapshot", stream="rest"
-                )
+                _maybe_emit_strategy_tick(sym, px, source="rest_snapshot", stream="rest")
         if new_map:
             _price_map = new_map
             for sym, px in new_map.items():
@@ -3164,13 +2994,9 @@ async def _refresh_binance_spot_snapshot() -> None:
                 except Exception:
                     mark = 0.0
             if mark:
-                metrics.set_core_symbol_metric(
-                    "mark_price", symbol=base_sym, value=mark
-                )
+                metrics.set_core_symbol_metric("mark_price", symbol=base_sym, value=mark)
                 try:
-                    metrics.MARK_PRICE.labels(symbol=base_sym, venue="binance").set(
-                        mark
-                    )
+                    metrics.MARK_PRICE.labels(symbol=base_sym, venue="binance").set(mark)
                 except Exception:
                     pass
         except Exception:
@@ -3248,9 +3074,9 @@ async def _kraken_risk_metrics_loop() -> None:
         metrics.risk_metrics_freshness_sec.set(0.0)
         for product in _KRAKEN_PRODUCTS or ["PI_XBTUSD"]:
             try:
-                metrics.mark_price_freshness_sec.labels(
-                    symbol=product, venue="kraken"
-                ).set(float("inf"))
+                metrics.mark_price_freshness_sec.labels(symbol=product, venue="kraken").set(
+                    float("inf")
+                )
             except Exception:
                 pass
     except Exception:
@@ -3286,9 +3112,7 @@ async def _kraken_risk_metrics_loop() -> None:
             try:
                 RAILS.refresh_snapshot_metrics(snap_dict, venue="kraken")
 
-                equity_val = _safe_float(
-                    snap_dict.get("equity_usd") or snap_dict.get("equity")
-                )
+                equity_val = _safe_float(snap_dict.get("equity_usd") or snap_dict.get("equity"))
                 if equity_val is not None:
                     metrics.kraken_equity_usd.set(equity_val)
                     drawdown_pct = RAILS._compute_drawdown_pct(equity_val)  # type: ignore[attr-defined]
@@ -3319,13 +3143,9 @@ async def _kraken_risk_metrics_loop() -> None:
                 raw_ts_ms = snap_dict.get("ts_ms")
                 if isinstance(raw_ts, (int, float)) and math.isfinite(float(raw_ts)):
                     snap_ts = float(raw_ts)
-                elif isinstance(raw_ts_ms, (int, float)) and math.isfinite(
-                    float(raw_ts_ms)
-                ):
+                elif isinstance(raw_ts_ms, (int, float)) and math.isfinite(float(raw_ts_ms)):
                     snap_ts = float(raw_ts_ms) / 1000.0
-                freshness = (
-                    max(0.0, time.time() - snap_ts) if snap_ts is not None else 0.0
-                )
+                freshness = max(0.0, time.time() - snap_ts) if snap_ts is not None else 0.0
                 metrics.risk_metrics_freshness_sec.set(freshness)
             except Exception:
                 _kraken_risk_logger.exception("Failed to update Kraken risk telemetry")
@@ -3507,13 +3327,11 @@ async def _start_binance_ws_freshness() -> None:
             try:
                 for base in list(_BINANCE_WS_SYMBOLS) or []:
                     last_ts = _binance_mark_ts.get(base)
-                    freshness = (
-                        float("inf") if last_ts is None else max(0.0, now - last_ts)
-                    )
+                    freshness = float("inf") if last_ts is None else max(0.0, now - last_ts)
                     try:
-                        metrics.mark_price_freshness_sec.labels(
-                            symbol=base, venue="binance"
-                        ).set(freshness)
+                        metrics.mark_price_freshness_sec.labels(symbol=base, venue="binance").set(
+                            freshness
+                        )
                     except Exception:
                         pass
             except Exception:
@@ -3598,9 +3416,7 @@ def get_event_stats():
 def get_alert_stats():
     """Get alerting system statistics."""
     return {
-        "alerting": (
-            alert_daemon._alert_daemon.get_stats() if alert_daemon._alert_daemon else {}
-        )
+        "alerting": (alert_daemon._alert_daemon.get_stats() if alert_daemon._alert_daemon else {})
     }
 
 

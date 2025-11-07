@@ -87,9 +87,7 @@ async def oco_watcher(interval: int = 3) -> None:
         await asyncio.sleep(interval)
 
 
-def create_oco_pair(
-    order1_data: Dict[str, Any], order2_data: Dict[str, Any]
-) -> Dict[str, Any]:
+def create_oco_pair(order1_data: Dict[str, Any], order2_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Create an OCO (One Cancels Other) pair of orders.
 
@@ -197,9 +195,7 @@ class TrailingDaemon:
 
             await asyncio.sleep(self.interval)
 
-    async def _process_trailing_stop(
-        self, trail_id: str, trail: Dict[str, Any]
-    ) -> None:
+    async def _process_trailing_stop(self, trail_id: str, trail: Dict[str, Any]) -> None:
         """Process a single trailing stop."""
         symbol = trail["symbol"]
         side = trail["side"]
@@ -215,9 +211,7 @@ class TrailingDaemon:
         # Initialize reference price
         if trail["ref_price"] is None:
             trail["ref_price"] = current_price
-            logging.info(
-                f"[TRAIL] {trail_id} initialized at ref_price ${current_price:.4f}"
-            )
+            logging.info(f"[TRAIL] {trail_id} initialized at ref_price ${current_price:.4f}")
             return
 
         # Calculate trailing adjustment
@@ -226,9 +220,7 @@ class TrailingDaemon:
         if side == "BUY":
             # For long positions, trail below current price
             pct_change = (ref_price - current_price) / ref_price * 100
-            trail_threshold = trail["trail_pct"] or (
-                trail["trail_usd"] / current_price * 100
-            )
+            trail_threshold = trail["trail_pct"] or (trail["trail_usd"] / current_price * 100)
 
             if pct_change >= trail_threshold:
                 # Price moved up significantly, trail upward
@@ -240,9 +232,7 @@ class TrailingDaemon:
         else:  # SELL
             # For short positions, trail above current price
             pct_change = (current_price - ref_price) / ref_price * 100
-            trail_threshold = trail["trail_pct"] or (
-                trail["trail_usd"] / current_price * 100
-            )
+            trail_threshold = trail["trail_pct"] or (trail["trail_usd"] / current_price * 100)
 
             if pct_change >= trail_threshold:
                 # Price moved down significantly, trail downward
@@ -268,17 +258,13 @@ class TrailingDaemon:
                     quantity=trail["quantity"],
                 )
 
-                logging.info(
-                    f"[TRAIL] {trail_id} TRIGGERED stop at ${trigger_price:.4f}"
-                )
+                logging.info(f"[TRAIL] {trail_id} TRIGGERED stop at ${trigger_price:.4f}")
                 logging.info(f"[TRAIL] Stop order placed: {stop_result}")
 
                 # Remove trail (could keep for new stops but keeps simple)
                 del self.active_trails[trail_id]
 
-    def _calculate_stop_price(
-        self, trail: Dict[str, Any], current_price: float
-    ) -> float:
+    def _calculate_stop_price(self, trail: Dict[str, Any], current_price: float) -> float:
         """Calculate where the stop should be placed."""
         if trail["side"] == "BUY":
             # For long positions, stop below current price

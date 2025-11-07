@@ -96,9 +96,7 @@ class KrakenREST:
     async def account_snapshot(self) -> Dict[str, Any]:
         # Fallback for when credentials are invalid/missing (demo mode)
         if not self._api_key or not self._secret_bytes:
-            self._logger.debug(
-                "[KRAKEN] No API credentials - using demo/fallback balances"
-            )
+            self._logger.debug("[KRAKEN] No API credentials - using demo/fallback balances")
             return {
                 "totalWalletBalance": 1000.0,
                 "availableBalance": 1000.0,
@@ -110,9 +108,7 @@ class KrakenREST:
             payload: Dict[str, Any] = {}
             data = await self._private_get("/accounts", payload)
 
-            accounts = (
-                data.get("accounts") or data.get("result", {}).get("accounts") or {}
-            )
+            accounts = data.get("accounts") or data.get("result", {}).get("accounts") or {}
 
             flex = accounts.get("flex") or {}
             cash = accounts.get("cash") or {}
@@ -124,22 +120,16 @@ class KrakenREST:
                 or 0.0
             )
             available = _to_float(
-                flex.get("availableMargin")
-                or cash.get("balances", {}).get("usd")
-                or 0.0
+                flex.get("availableMargin") or cash.get("balances", {}).get("usd") or 0.0
             )
             wallet = _to_float(
-                flex.get("balanceValue")
-                or cash.get("balances", {}).get("usd")
-                or equity
+                flex.get("balanceValue") or cash.get("balances", {}).get("usd") or equity
             )
 
             balances: list[Dict[str, Any]] = []
             for asset, amt in (cash.get("balances") or {}).items():
                 try:
-                    balances.append(
-                        {"asset": asset.upper(), "free": _to_float(amt), "locked": 0.0}
-                    )
+                    balances.append({"asset": asset.upper(), "free": _to_float(amt), "locked": 0.0})
                 except Exception:
                     continue
 
@@ -148,14 +138,11 @@ class KrakenREST:
             return {
                 "totalWalletBalance": wallet,
                 "availableBalance": available,
-                "balances": balances
-                or [{"asset": "USD", "free": available, "locked": 0.0}],
+                "balances": balances or [{"asset": "USD", "free": available, "locked": 0.0}],
                 "positions": positions,
             }
         except KrakenAPIError as e:
-            self._logger.warning(
-                "[KRAKEN] Account API failed: %s - using demo balances", e
-            )
+            self._logger.warning("[KRAKEN] Account API failed: %s - using demo balances", e)
             return {
                 "totalWalletBalance": 1000.0,
                 "availableBalance": 1000.0,
@@ -207,9 +194,7 @@ class KrakenREST:
                         or 0.0
                     )
                     pnl = _to_float(
-                        pos.get("pnl")
-                        or pos.get("unrealizedPnl")
-                        or pos.get("unRealizedProfit")
+                        pos.get("pnl") or pos.get("unrealizedPnl") or pos.get("unRealizedProfit")
                     )
                     formatted.append(
                         {
@@ -224,9 +209,7 @@ class KrakenREST:
                     continue
             return formatted
         except KrakenAPIError:
-            self._logger.debug(
-                "[KRAKEN] Positions API failed - returning empty positions"
-            )
+            self._logger.debug("[KRAKEN] Positions API failed - returning empty positions")
             return []
 
     # ------------------------------------------------------------------ Pricing
@@ -342,10 +325,7 @@ class KrakenREST:
         data = await self._private_post("/sendorder", payload)
 
         order_info = (
-            data.get("order")
-            or data.get("sendStatus")
-            or data.get("result", {}).get("order")
-            or {}
+            data.get("order") or data.get("sendStatus") or data.get("result", {}).get("order") or {}
         )
         status = (
             order_info.get("status")
@@ -476,9 +456,7 @@ class KrakenREST:
     def _sign(self, path: str, body: bytes, nonce: str) -> str:
         # Deprecated - using the new _private_post signing logic above
         digest = hashlib.sha256(nonce.encode("utf-8") + body).digest()
-        mac = hmac.new(
-            self._secret_bytes, path.encode("utf-8") + digest, hashlib.sha512
-        )
+        mac = hmac.new(self._secret_bytes, path.encode("utf-8") + digest, hashlib.sha512)
         return base64.b64encode(mac.digest()).decode("utf-8")
 
     async def open_positions(self) -> list[Dict]:
@@ -487,9 +465,7 @@ class KrakenREST:
         See https://docs.kraken.com/api/docs/futures-api/trading/get-open-positions/
         """
         if not self._api_key or not self._secret_bytes:
-            self._logger.debug(
-                "KrakenREST.open_positions: no API credentials - returning empty"
-            )
+            self._logger.debug("KrakenREST.open_positions: no API credentials - returning empty")
             return []
 
         try:
@@ -531,9 +507,7 @@ class KrakenREST:
                         or 0.0
                     )
                     pnl = _to_float(
-                        pos.get("pnl")
-                        or pos.get("unrealizedPnl")
-                        or pos.get("unRealizedProfit")
+                        pos.get("pnl") or pos.get("unrealizedPnl") or pos.get("unRealizedProfit")
                     )
                     positions.append(
                         {
@@ -653,8 +627,7 @@ class KrakenREST:
                 try:
                     portfolio.state.unrealized = unreal_total
                     portfolio.state.equity = (
-                        float(getattr(portfolio.state, "cash", 0.0) or 0.0)
-                        + unreal_total
+                        float(getattr(portfolio.state, "cash", 0.0) or 0.0) + unreal_total
                     )
                 except Exception:
                     pass
@@ -665,9 +638,7 @@ class KrakenREST:
                     if portfolio:
                         cash = float(getattr(portfolio.state, "cash", 0.0) or 0.0)
                     equity = cash + unreal_total
-                    store_module.insert_equity(
-                        "kraken", equity, cash, unreal_total, ts_ms
-                    )
+                    store_module.insert_equity("kraken", equity, cash, unreal_total, ts_ms)
                 except Exception as exc:
                     self._logger.warning(
                         "KrakenREST.refresh_portfolio: failed to persist equity snapshot: %s",
@@ -684,9 +655,7 @@ class KrakenREST:
                     pass
 
             if not positions:
-                self._logger.info(
-                    "KrakenREST.refresh_portfolio: no open positions returned"
-                )
+                self._logger.info("KrakenREST.refresh_portfolio: no open positions returned")
         except Exception:
             self._logger.exception("KrakenREST.refresh_portfolio failed")
 

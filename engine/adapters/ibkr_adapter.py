@@ -32,16 +32,12 @@ class IbkrVenue:
     ) -> dict[str, Any]:
         """Place market order via IBKR. Only supports quantity (integer shares)."""
         if quote is not None:
-            raise ValueError(
-                "QUOTE_UNSUPPORTED: IBKR router must convert quote to integer shares"
-            )
+            raise ValueError("QUOTE_UNSUPPORTED: IBKR router must convert quote to integer shares")
 
         clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
         quantity_int = int(quantity or 0)
 
-        result = self._c.place_market_order(
-            symbol=clean_symbol, side=side, quantity=quantity_int
-        )
+        result = self._c.place_market_order(symbol=clean_symbol, side=side, quantity=quantity_int)
 
         # Add venue info
         result["venue"] = self.VENUE

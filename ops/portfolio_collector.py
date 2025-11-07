@@ -8,9 +8,7 @@ from datetime import datetime, timezone
 from ops.prometheus import get_or_create_gauge
 from ops.env import engine_endpoints
 
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 
 def _venue_label(base_url: str) -> str:
@@ -145,11 +143,7 @@ async def portfolio_collector_loop(interval_sec: int = 10):
             # Baseline logic: reset on new UTC day or if missing
             now = time.time()
             daykey = _daykey_now(now)
-            if (
-                _BASELINE_DAYKEY != daykey
-                or _BASELINE_EQUITY is None
-                or _BASELINE_EQUITY <= 0
-            ):
+            if _BASELINE_DAYKEY != daykey or _BASELINE_EQUITY is None or _BASELINE_EQUITY <= 0:
                 _BASELINE_EQUITY = total_equity
                 _BASELINE_DAYKEY = daykey
             PORTFOLIO_PREV.set(_BASELINE_EQUITY)

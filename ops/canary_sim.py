@@ -23,9 +23,7 @@ def run_backtest_with_tag(tag: str, config: str) -> dict:
     if not csv_path.exists():
         raise FileNotFoundError(f"Canary backtest CSV not found: {csv_path}")
 
-    symbol = (
-        env.get("CANARY_SYMBOL") or (cfg.get("symbols") or ["BTCUSDT"])[0].split(".")[0]
-    )
+    symbol = env.get("CANARY_SYMBOL") or (cfg.get("symbols") or ["BTCUSDT"])[0].split(".")[0]
     model_path = env.get("CANARY_MODEL", "engine/models/hmm_policy.pkl")
     quote = env.get("CANARY_QUOTE", "100")
 

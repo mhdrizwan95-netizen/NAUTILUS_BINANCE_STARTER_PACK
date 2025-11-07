@@ -17,9 +17,7 @@ CAL_DIR = Path("data/processed/calibration")
 CAL_DIR.mkdir(parents=True, exist_ok=True)
 LOG_PATH = Path("data/processed/feedback_log.csv")
 if not LOG_PATH.exists():
-    raise FileNotFoundError(
-        f"Missing feedback log: {LOG_PATH}. Run backtest/paper to create it."
-    )
+    raise FileNotFoundError(f"Missing feedback log: {LOG_PATH}. Run backtest/paper to create it.")
 
 df = pd.read_csv(LOG_PATH).fillna("")
 df["macro_state"] = df["macro_state"].astype(int)
@@ -51,9 +49,7 @@ R_df = pd.DataFrame(rows)
 
 plt.figure(figsize=(8, 4))
 plt.bar(np.arange(len(R_df)), R_df["reward"])
-plt.xticks(
-    np.arange(len(R_df)), [f"({m},{s})" for m, s in zip(R_df["macro"], R_df["micro"])]
-)
+plt.xticks(np.arange(len(R_df)), [f"({m},{s})" for m, s in zip(R_df["macro"], R_df["micro"])])
 plt.title("EMA Reward per (macro,micro) state")
 plt.ylabel("ΔPnL")
 plt.tight_layout()

@@ -101,9 +101,7 @@ def _histogram_quantiles(
     return results
 
 
-def _gauge_values(
-    families: Dict[str, Tuple], name: str, label_key: str
-) -> Dict[str, float]:
+def _gauge_values(families: Dict[str, Tuple], name: str, label_key: str) -> Dict[str, float]:
     family = families.get(name)
     values: Dict[str, float] = {}
     if not family:
@@ -140,22 +138,16 @@ def _evaluate_metrics(
         worst_p95 = max(worst_p95, p95)
         print(f"[INFO] Latency quantiles for {strategy}: p50={p50:.4f}s p95={p95:.4f}s")
     if worst_p50 > args.max_latency_p50 or worst_p95 > args.max_latency_p95:
-        print(
-            f"[FAIL] Latency thresholds exceeded (p50={worst_p50:.4f}s, p95={worst_p95:.4f}s)"
-        )
+        print(f"[FAIL] Latency thresholds exceeded (p50={worst_p50:.4f}s, p95={worst_p95:.4f}s)")
         failures += 1
     else:
-        print(
-            f"[PASS] Latency within thresholds (p50={worst_p50:.4f}s, p95={worst_p95:.4f}s)"
-        )
+        print(f"[PASS] Latency within thresholds (p50={worst_p50:.4f}s, p95={worst_p95:.4f}s)")
 
     submitted = _sum_counter(families, "orders_submitted_total")
     rejected = _sum_counter(families, "orders_rejected_total")
     failure_rate = (rejected / submitted) if submitted else 0.0
     if failure_rate > args.max_failure_rate:
-        print(
-            f"[FAIL] Order failure rate {failure_rate:.4%} exceeds {args.max_failure_rate:.2%}"
-        )
+        print(f"[FAIL] Order failure rate {failure_rate:.4%} exceeds {args.max_failure_rate:.2%}")
         failures += 1
     else:
         print(f"[PASS] Order failure rate {failure_rate:.4%} within limit")
@@ -172,9 +164,7 @@ def _evaluate_metrics(
             )
             failures += 1
         else:
-            print(
-                f"[PASS] Bucket '{bucket}' usage {usage:.4f} within budget {budget:.4f}"
-            )
+            print(f"[PASS] Bucket '{bucket}' usage {usage:.4f} within budget {budget:.4f}")
 
     return failures
 
@@ -212,9 +202,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-latency-p95", type=float, default=0.400)
     parser.add_argument("--max-failure-rate", type=float, default=0.005)
     parser.add_argument("--bucket-headroom", type=float, default=0.02)
-    parser.add_argument(
-        "--thresholds", default=None, help="YAML file with default thresholds"
-    )
+    parser.add_argument("--thresholds", default=None, help="YAML file with default thresholds")
     return parser.parse_args()
 
 
@@ -259,12 +247,8 @@ def _generate_report(
     bucket_usage = _gauge_values(families, "strategy_bucket_usage_fraction", "bucket")
 
     # Calculate worst latencies
-    worst_p50 = max(
-        (quantiles.get(0.5, 0.0) for quantiles in quantile_data.values()), default=0.0
-    )
-    worst_p95 = max(
-        (quantiles.get(0.95, 0.0) for quantiles in quantile_data.values()), default=0.0
-    )
+    worst_p50 = max((quantiles.get(0.5, 0.0) for quantiles in quantile_data.values()), default=0.0)
+    worst_p95 = max((quantiles.get(0.95, 0.0) for quantiles in quantile_data.values()), default=0.0)
 
     return {
         "timestamp": timestamp,
@@ -282,9 +266,7 @@ def _generate_report(
             "max_failure_rate": args.max_failure_rate,
             "bucket_usage": {k: round(v, 4) for k, v in bucket_usage.items()},
             "bucket_headroom": args.bucket_headroom,
-            "config_budgets": {
-                k: getattr(cfg.buckets, k, None) for k in bucket_usage.keys()
-            },
+            "config_budgets": {k: getattr(cfg.buckets, k, None) for k in bucket_usage.keys()},
         },
         "passed": failures == 0,
         "failure_count": failures,

@@ -63,8 +63,7 @@ def pull_consensus():
             json.dump(data, open(path, "w"), indent=2)
     except Exception as e:
         open(SYNC_LOG, "a").write(
-            json.dumps({"time": datetime.utcnow().isoformat(), "pull_error": str(e)})
-            + "\n"
+            json.dumps({"time": datetime.utcnow().isoformat(), "pull_error": str(e)}) + "\n"
         )
 
 

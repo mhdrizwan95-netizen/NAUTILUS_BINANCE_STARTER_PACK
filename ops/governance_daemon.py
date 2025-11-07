@@ -90,9 +90,7 @@ class GovernanceDaemon:
     """
 
     def __init__(self, policy_path: Optional[str] = None):
-        self.policy_path = policy_path or os.getenv(
-            "GOVERNANCE_POLICY", "ops/policies.yaml"
-        )
+        self.policy_path = policy_path or os.getenv("GOVERNANCE_POLICY", "ops/policies.yaml")
         self.rules: List[GovernanceRule] = []
         self.last_actions: Dict[str, float] = {}  # action -> timestamp
         self.audit_events: List[Dict[str, Any]] = []  # Last 1000 governance events
@@ -102,9 +100,7 @@ class GovernanceDaemon:
         self._load_policies()
         self._setup_event_subscriptions()
 
-        logging.info(
-            f"[GOV] 🎯 Autonomous Governance initialized with {len(self.rules)} rules"
-        )
+        logging.info(f"[GOV] 🎯 Autonomous Governance initialized with {len(self.rules)} rules")
 
     def _load_policies(self) -> None:
         """Load governance policies from YAML configuration."""
@@ -129,13 +125,9 @@ class GovernanceDaemon:
                     params=policy.get("params", {}),
                 )
                 if not rule.name:
-                    desc = (
-                        (rule.description or rule.action).strip().replace(" ", "_")[:40]
-                    )
+                    desc = (rule.description or rule.action).strip().replace(" ", "_")[:40]
                     rule.name = (
-                        f"{rule.trigger}:{desc}"
-                        if desc
-                        else f"{rule.trigger}:{rule.action}"
+                        f"{rule.trigger}:{desc}" if desc else f"{rule.trigger}:{rule.action}"
                     )
                 self.rules.append(rule)
 
@@ -181,9 +173,7 @@ class GovernanceDaemon:
                     continue
 
                 # Execute governance action
-                logging.info(
-                    f"[GOV] 📋 {rule.action.upper()} triggered: {rule.description}"
-                )
+                logging.info(f"[GOV] 📋 {rule.action.upper()} triggered: {rule.description}")
 
                 await self._execute_action(rule.action, data, rule)
 
@@ -214,18 +204,14 @@ class GovernanceDaemon:
                 new_max = max(current_max * 0.7, 10.0)  # Reduce by 30%, minimum $10
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 self.metrics.performance_actions += 1
-                logging.warning(
-                    f"[GOV] 📉 EXPOSURE REDUCED: ${current_max} → ${new_max}"
-                )
+                logging.warning(f"[GOV] 📉 EXPOSURE REDUCED: ${current_max} → ${new_max}")
 
             elif action == "moderate_reductions":
                 current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 new_max = max(current_max * 0.85, 20.0)  # Reduce by 15%, minimum $20
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 self.metrics.performance_actions += 1
-                logging.info(
-                    f"[GOV] 📈 EXPOSURE MODERATED: ${current_max} → ${new_max}"
-                )
+                logging.info(f"[GOV] 📈 EXPOSURE MODERATED: ${current_max} → ${new_max}")
 
             elif action == "emergency_reductions":
                 # Emergency 50% reduction
@@ -233,19 +219,13 @@ class GovernanceDaemon:
                 new_max = max(current_max * 0.5, 5.0)  # Reduce by 50%, minimum $5
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
                 self.metrics.emergency_actions += 1
-                logging.critical(
-                    f"[GOV] 🚨 EMERGENCY REDUCTIONS: ${current_max} → ${new_max}"
-                )
+                logging.critical(f"[GOV] 🚨 EMERGENCY REDUCTIONS: ${current_max} → ${new_max}")
 
             elif action == "increase_exposure":
                 current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
-                new_max = min(
-                    current_max * 1.2, 1000.0
-                )  # Increase by 20%, maximum $1000
+                new_max = min(current_max * 1.2, 1000.0)  # Increase by 20%, maximum $1000
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
-                logging.info(
-                    f"[GOV] 📈 EXPOSURE INCREASED: ${current_max} → ${new_max}"
-                )
+                logging.info(f"[GOV] 📈 EXPOSURE INCREASED: ${current_max} → ${new_max}")
 
             elif action == "set_max_notional":
                 # Explicitly set MAX_NOTIONAL_USDT from rule params
@@ -268,9 +248,7 @@ class GovernanceDaemon:
                 current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 resume_max = min(current_max, 50.0)  # Start with $50 limit
                 os.environ["MAX_NOTIONAL_USDT"] = str(resume_max)
-                logging.info(
-                    f"[GOV] 🔄 GRADUAL RESUME: Trading enabled @ ${resume_max} limit"
-                )
+                logging.info(f"[GOV] 🔄 GRADUAL RESUME: Trading enabled @ ${resume_max} limit")
 
             elif action == "immediate_resume":
                 os.environ["TRADING_ENABLED"] = "true"
@@ -279,13 +257,9 @@ class GovernanceDaemon:
 
             elif action == "promote_model":
                 try:
-                    result = await asyncio.get_event_loop().run_in_executor(
-                        None, promote_best
-                    )
+                    result = await asyncio.get_event_loop().run_in_executor(None, promote_best)
                     if result:
-                        logging.info(
-                            f"[GOV] 🚀 MODEL PROMOTED: New strategy activated - {result}"
-                        )
+                        logging.info(f"[GOV] 🚀 MODEL PROMOTED: New strategy activated - {result}")
                     else:
                         logging.warning("[GOV] 🚫 MODEL PROMOTION failed")
                 except Exception as e:
@@ -294,9 +268,7 @@ class GovernanceDaemon:
             elif action == "conservative_shift":
                 # Adjust risk parameters to be more conservative
                 current_min = float(os.getenv("MIN_NOTIONAL_USDT", "5"))
-                os.environ["MIN_NOTIONAL_USDT"] = str(
-                    current_min * 1.5
-                )  # Higher minimums
+                os.environ["MIN_NOTIONAL_USDT"] = str(current_min * 1.5)  # Higher minimums
                 logging.info("[GOV] 🛡️ CONSERVATIVE SHIFT: Minimum order size increased")
 
             elif action == "reduce_max_order_size":
@@ -304,29 +276,21 @@ class GovernanceDaemon:
                 current_rate = int(os.getenv("MAX_ORDERS_PER_MIN", "30"))
                 new_rate = max(current_rate // 2, 3)  # Halve rate, minimum 3/min
                 os.environ["MAX_ORDERS_PER_MIN"] = str(new_rate)
-                logging.warning(
-                    f"[GOV] 🐌 ORDER RATE REDUCED: {current_rate}/min → {new_rate}/min"
-                )
+                logging.warning(f"[GOV] 🐌 ORDER RATE REDUCED: {current_rate}/min → {new_rate}/min")
 
             elif action == "gradual_risk_increase":
                 current_max = float(os.getenv("MAX_NOTIONAL_USDT", "400"))
                 new_max = min(current_max * 1.15, 500.0)  # 15% increase, max $500
                 os.environ["MAX_NOTIONAL_USDT"] = str(new_max)
-                logging.info(
-                    f"[GOV] 📊 RISK GRADUAL INCREASE: ${current_max} → ${new_max}"
-                )
+                logging.info(f"[GOV] 📊 RISK GRADUAL INCREASE: ${current_max} → ${new_max}")
 
             elif action == "review_alert_config":
                 # This would trigger a manual review - just log for now
-                logging.info(
-                    "[GOV] 📋 ALERT CONFIG REVIEW needed - excessive throttling detected"
-                )
+                logging.info("[GOV] 📋 ALERT CONFIG REVIEW needed - excessive throttling detected")
 
             elif action == "investigate_desync":
                 # Schedule investigation of sync issues
-                logging.warning(
-                    "[GOV] 🔍 SYNC ISSUES detected - may require investigation"
-                )
+                logging.warning("[GOV] 🔍 SYNC ISSUES detected - may require investigation")
 
             elif action == "notify_ops":
                 # This would trigger external notifications beyond standard alerts
@@ -398,9 +362,7 @@ class GovernanceDaemon:
         except Exception as exc:  # pragma: no cover - best-effort persistence
             logging.warning("[GOV] Failed to append audit trail: %s", exc)
         try:
-            _GOVERNANCE_RULE_TRIPPED.labels(
-                name=rule.name or f"{rule.trigger}:{rule.action}"
-            ).inc()
+            _GOVERNANCE_RULE_TRIPPED.labels(name=rule.name or f"{rule.trigger}:{rule.action}").inc()
         except Exception:
             pass
 
@@ -443,9 +405,7 @@ class GovernanceDaemon:
                 self._execute_action(
                     action,
                     mock_data,
-                    GovernanceRule(
-                        "manual", "True", action, "high", 0, f"Manual {action}"
-                    ),
+                    GovernanceRule("manual", "True", action, "high", 0, f"Manual {action}"),
                 )
             )
             logging.info(f"[GOV] 🔧 Manual action executed: {action}")

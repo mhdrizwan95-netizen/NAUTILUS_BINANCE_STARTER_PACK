@@ -56,9 +56,7 @@ EXEC_INTERVAL_SEC = int(os.getenv("EXEC_INTERVAL_SEC", "2"))
 # Basic executor metrics
 EXECUTOR_UP = Gauge("executor_up", "Executor process up (set to 1 on start)")
 LAST_PING_EPOCH = Gauge("executor_last_ping_epoch", "Unix time of last engine ping")
-ENGINE_SNAPSHOT_LOADED = Gauge(
-    "engine_snapshot_loaded", "Engine snapshot_loaded flag (1/0)"
-)
+ENGINE_SNAPSHOT_LOADED = Gauge("engine_snapshot_loaded", "Engine snapshot_loaded flag (1/0)")
 PING_ERRORS = Counter("executor_ping_errors_total", "Total engine ping errors")
 
 # Trade loop metrics (coarse)
@@ -166,9 +164,7 @@ async def trade() -> None:
     timeout = httpx.Timeout(connect=6.0, read=12.0, write=12.0, pool=12.0)
 
     try:
-        async with httpx.AsyncClient(
-            timeout=timeout, limits=limits, trust_env=True
-        ) as client:
+        async with httpx.AsyncClient(timeout=timeout, limits=limits, trust_env=True) as client:
             for r in range(99999):  # Infinite rounds, will be interrupted
                 # Step 1: Fetch ALL prices in one round-trip (O(1) vs O(symbols))
                 price_map = await fetch_all_prices(ENGINE_URL, client)

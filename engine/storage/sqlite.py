@@ -92,9 +92,7 @@ def insert_fill(d: Dict[str, Any]):
     )
 
 
-def upsert_position(
-    venue: str, symbol: str, net_qty: float, avg_price: float | None, ts_ms: int
-):
+def upsert_position(venue: str, symbol: str, net_qty: float, avg_price: float | None, ts_ms: int):
     enqueue(
         """INSERT INTO positions(venue,symbol,net_qty,avg_price,updated_ms)
                VALUES(?,?,?,?,?)

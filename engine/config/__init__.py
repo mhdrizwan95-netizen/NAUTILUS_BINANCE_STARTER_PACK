@@ -41,9 +41,9 @@ class Settings:
             # Kraken Futures configuration
             self.mode = os.getenv("KRAKEN_MODE", "testnet").lower()
             self.is_futures = True
-            self.base_url = os.getenv(
-                "KRAKEN_BASE_URL", "https://demo-futures.kraken.com"
-            ).rstrip("/")
+            self.base_url = os.getenv("KRAKEN_BASE_URL", "https://demo-futures.kraken.com").rstrip(
+                "/"
+            )
             # Kraken API credentials (secret provided base64 encoded per Kraken docs)
             self.api_key = os.getenv("KRAKEN_API_KEY", "")
             self.api_secret = os.getenv("KRAKEN_API_SECRET", "")
@@ -79,9 +79,7 @@ class Settings:
 
             # Prefer explicit demo/testnet credentials if provided
             demo_key = os.getenv("DEMO_API_KEY") or os.getenv("DEMO_API_KEY_SPOT")
-            demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv(
-                "DEMO_API_SECRET_SPOT"
-            )
+            demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv("DEMO_API_SECRET_SPOT")
 
             live_key = os.getenv("BINANCE_API_KEY", "")
             live_secret = os.getenv("BINANCE_API_SECRET", "")
@@ -89,9 +87,7 @@ class Settings:
             if self.is_futures:
                 base_choice = futures_demo_base if is_demo_like else futures_live_base
                 self.api_key = demo_key or live_key if is_demo_like else live_key
-                self.api_secret = (
-                    demo_secret or live_secret if is_demo_like else live_secret
-                )
+                self.api_secret = demo_secret or live_secret if is_demo_like else live_secret
                 self.futures_base = base_choice
                 self.base_url = base_choice
             else:
@@ -103,9 +99,7 @@ class Settings:
                 else:
                     self.api_key = live_key
                     self.api_secret = live_secret
-                    self.base_url = os.getenv(
-                        "BINANCE_SPOT_BASE", "https://api.binance.com"
-                    )
+                    self.base_url = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
 
             self.options_base = os.getenv(
                 "BINANCE_OPTIONS_BASE", "https://vapi.binance.com"
@@ -250,16 +244,10 @@ def load_risk_config() -> RiskConfig:
     return RiskConfig(
         trading_enabled=trading_enabled,
         min_notional_usdt=env_float("MIN_NOTIONAL_USDT", default_min_notional),
-        max_notional_usdt=env_float(
-            "MAX_NOTIONAL_USDT", RISK_DEFAULTS["MAX_NOTIONAL_USDT"]
-        ),
-        max_orders_per_min=env_int(
-            "MAX_ORDERS_PER_MIN", RISK_DEFAULTS["MAX_ORDERS_PER_MIN"]
-        ),
+        max_notional_usdt=env_float("MAX_NOTIONAL_USDT", RISK_DEFAULTS["MAX_NOTIONAL_USDT"]),
+        max_orders_per_min=env_int("MAX_ORDERS_PER_MIN", RISK_DEFAULTS["MAX_ORDERS_PER_MIN"]),
         trade_symbols=trade_symbols,
-        dust_threshold_usd=env_float(
-            "DUST_THRESHOLD_USD", RISK_DEFAULTS["DUST_THRESHOLD_USD"]
-        ),
+        dust_threshold_usd=env_float("DUST_THRESHOLD_USD", RISK_DEFAULTS["DUST_THRESHOLD_USD"]),
         exposure_cap_symbol_usd=env_float(
             "EXPOSURE_CAP_SYMBOL_USD", RISK_DEFAULTS["EXPOSURE_CAP_SYMBOL_USD"]
         ),
@@ -275,28 +263,20 @@ def load_risk_config() -> RiskConfig:
         exposure_cap_venue_usd=env_float(
             "EXPOSURE_CAP_VENUE_USD", RISK_DEFAULTS["EXPOSURE_CAP_VENUE_USD"]
         ),
-        equity_floor_usd=env_float(
-            "EQUITY_FLOOR_USD", RISK_DEFAULTS["EQUITY_FLOOR_USD"]
-        ),
+        equity_floor_usd=env_float("EQUITY_FLOOR_USD", RISK_DEFAULTS["EQUITY_FLOOR_USD"]),
         equity_drawdown_limit_pct=env_float(
             "EQUITY_DRAWDOWN_LIMIT_PCT", RISK_DEFAULTS["EQUITY_DRAWDOWN_LIMIT_PCT"]
         ),
-        equity_cooldown_sec=env_int(
-            "EQUITY_COOLDOWN_SEC", RISK_DEFAULTS["EQUITY_COOLDOWN_SEC"]
-        ),
+        equity_cooldown_sec=env_int("EQUITY_COOLDOWN_SEC", RISK_DEFAULTS["EQUITY_COOLDOWN_SEC"]),
         margin_enabled=env_bool(
             "MARGIN_ENABLED",
             env_bool("BINANCE_MARGIN_ENABLED", RISK_DEFAULTS["MARGIN_ENABLED"]),
         ),
-        margin_min_level=env_float(
-            "MARGIN_MIN_LEVEL", RISK_DEFAULTS["MARGIN_MIN_LEVEL"]
-        ),
+        margin_min_level=env_float("MARGIN_MIN_LEVEL", RISK_DEFAULTS["MARGIN_MIN_LEVEL"]),
         margin_max_liability_usd=env_float(
             "MARGIN_MAX_LIABILITY_USD", RISK_DEFAULTS["MARGIN_MAX_LIABILITY_USD"]
         ),
-        margin_max_leverage=env_float(
-            "MARGIN_MAX_LEVERAGE", RISK_DEFAULTS["MARGIN_MAX_LEVERAGE"]
-        ),
+        margin_max_leverage=env_float("MARGIN_MAX_LEVERAGE", RISK_DEFAULTS["MARGIN_MAX_LEVERAGE"]),
         options_enabled=env_bool(
             "OPTIONS_ENABLED",
             env_bool("BINANCE_OPTIONS_ENABLED", RISK_DEFAULTS["OPTIONS_ENABLED"]),
@@ -443,9 +423,7 @@ def load_strategy_config() -> StrategyConfig:
             k: float(v)
             for k, v in [
                 w.split(":")
-                for w in os.getenv("ENSEMBLE_WEIGHTS", "hmm_v1:0.5,ma_v1:0.5").split(
-                    ","
-                )
+                for w in os.getenv("ENSEMBLE_WEIGHTS", "hmm_v1:0.5,ma_v1:0.5").split(",")
             ]
         },
     )

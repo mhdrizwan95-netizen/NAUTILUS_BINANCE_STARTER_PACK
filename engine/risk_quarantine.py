@@ -18,9 +18,7 @@ from typing import Dict, Tuple
 
 @dataclass
 class QuarantinePolicy:
-    max_stops_in_window: int = (
-        2  # e.g., two stops within the window triggers quarantine
-    )
+    max_stops_in_window: int = 2  # e.g., two stops within the window triggers quarantine
     window_sec: float = 60 * 60  # 60 minutes
     quarantine_sec: float = 4 * 60 * 60  # 4 hours
 
@@ -69,12 +67,8 @@ class _Registry:
                 return
             with open(self._path, "r", encoding="utf-8") as fh:
                 data = json.load(fh) or {}
-            self._stops = {
-                k: list(map(float, v)) for k, v in data.get("stops", {}).items()
-            }
-            self._blocked_until = {
-                k: float(v) for k, v in data.get("blocked", {}).items()
-            }
+            self._stops = {k: list(map(float, v)) for k, v in data.get("stops", {}).items()}
+            self._blocked_until = {k: float(v) for k, v in data.get("blocked", {}).items()}
         except Exception:
             self._stops = {}
             self._blocked_until = {}

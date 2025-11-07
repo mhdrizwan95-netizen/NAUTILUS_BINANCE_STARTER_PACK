@@ -17,9 +17,7 @@ class FundingGuard:
         self.bus = bus
         self.log = log or logging.getLogger("engine.funding_guard")
         self.enabled = _as_bool(os.getenv("FUNDING_GUARD_ENABLED"), False)
-        self.spike_threshold = (
-            float(os.getenv("FUNDING_SPIKE_THRESHOLD", "0.15")) / 100.0
-        )
+        self.spike_threshold = float(os.getenv("FUNDING_SPIKE_THRESHOLD", "0.15")) / 100.0
         self.trim_pct = float(os.getenv("FUNDING_TRIM_PCT", "0.30"))
         self.hedge_ratio = float(os.getenv("FUNDING_HEDGE_RATIO", "0.00"))
 
@@ -36,17 +34,13 @@ class FundingGuard:
             # Expect mapping symbol->dict with lastFundingRate or estimatedRate
             for sym, obj in (data or {}).items():
                 try:
-                    rate = float(
-                        obj.get("lastFundingRate") or obj.get("estimatedRate") or 0.0
-                    )
+                    rate = float(obj.get("lastFundingRate") or obj.get("estimatedRate") or 0.0)
                 except Exception:
                     rate = 0.0
                 if abs(rate) >= self.spike_threshold:
                     try:
                         if self.bus is not None:
-                            self.bus.fire(
-                                "risk.funding_spike", {"symbol": sym, "rate": rate}
-                            )
+                            self.bus.fire("risk.funding_spike", {"symbol": sym, "rate": rate})
                     except Exception:
                         pass
                     await self._mitigate(sym, rate)
@@ -84,9 +78,7 @@ class FundingGuard:
             )
         if self.hedge_ratio > 0:
             try:
-                await self._maybe_await(
-                    self.router.auto_net_hedge_btc(percent=self.hedge_ratio)
-                )
+                await self._maybe_await(self.router.auto_net_hedge_btc(percent=self.hedge_ratio))
             except Exception:
                 pass
 

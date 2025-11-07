@@ -98,9 +98,7 @@ class AlertDaemon:
     """
 
     def __init__(self, config_path: Optional[str] = None):
-        self.config_path = config_path or os.getenv(
-            "ALERT_CONFIG", "engine/config/alerts.yaml"
-        )
+        self.config_path = config_path or os.getenv("ALERT_CONFIG", "engine/config/alerts.yaml")
         self.rules: List[AlertRule] = []
         self.channels: Dict[str, AlertChannel] = {}
         self.throttling = ThrottleConfig()
@@ -198,22 +196,15 @@ class AlertDaemon:
 
                 # Send via configured channels
                 for channel_name in rule.channels:
-                    if (
-                        channel_name in self.channels
-                        and self.channels[channel_name].enabled
-                    ):
-                        await self._send_notification(
-                            channel_name, message, rule.priority
-                        )
+                    if channel_name in self.channels and self.channels[channel_name].enabled:
+                        await self._send_notification(channel_name, message, rule.priority)
 
                 # Record alert
                 self._record_alert(rule.topic, message)
 
         return handle_event
 
-    async def _send_notification(
-        self, channel_name: str, message: str, priority: str
-    ) -> None:
+    async def _send_notification(self, channel_name: str, message: str, priority: str) -> None:
         """Send notification via specified channel."""
         channel = self.channels.get(channel_name)
         if not channel:
@@ -254,13 +245,9 @@ class AlertDaemon:
                 url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
             ) as response:
                 if response.status != 200:
-                    logging.error(
-                        f"[ALERT] Telegram send failed: {await response.text()}"
-                    )
+                    logging.error(f"[ALERT] Telegram send failed: {await response.text()}")
 
-    async def _send_webhook(
-        self, channel: AlertChannel, message: str, priority: str
-    ) -> None:
+    async def _send_webhook(self, channel: AlertChannel, message: str, priority: str) -> None:
         """Send webhook notification."""
         import aiohttp
 
@@ -282,9 +269,7 @@ class AlertDaemon:
                 except Exception as e:
                     logging.warning(f"[ALERT] Webhook failed for {url}: {e}")
 
-    async def _send_email(
-        self, channel: AlertChannel, message: str, priority: str
-    ) -> None:
+    async def _send_email(self, channel: AlertChannel, message: str, priority: str) -> None:
         """Send email notification."""
         import smtplib
         from email.mime.text import MIMEText
@@ -295,9 +280,7 @@ class AlertDaemon:
 
         msg = MIMEText(message, "plain")
         msg["Subject"] = f"Trading Alert - {priority.upper()}"
-        msg["From"] = os.getenv(
-            channel.sender_env or "ALERT_SENDER_EMAIL", "alerts@trading-system"
-        )
+        msg["From"] = os.getenv(channel.sender_env or "ALERT_SENDER_EMAIL", "alerts@trading-system")
         msg["To"] = ", ".join(channel.recipients)
 
         try:
@@ -324,9 +307,7 @@ class AlertDaemon:
         window_start = now - self.throttling.window_seconds
 
         # Count recent alerts
-        recent_count = sum(
-            1 for alert in self._alert_history if alert["timestamp"] > window_start
-        )
+        recent_count = sum(1 for alert in self._alert_history if alert["timestamp"] > window_start)
 
         return recent_count >= self.throttling.max_alerts_per_window
 
@@ -337,10 +318,7 @@ class AlertDaemon:
 
         now = time.time()
         for alert in reversed(self._alert_history):
-            if (
-                alert["rule_topic"] == rule.topic
-                and now - alert["timestamp"] < rule.cooldown
-            ):
+            if alert["rule_topic"] == rule.topic and now - alert["timestamp"] < rule.cooldown:
                 return True
 
         return False
@@ -375,9 +353,7 @@ class AnomalyWatcher:
         self.metric_history: Dict[str, deque] = {}
         self.anomaly_alert = AlertDaemon()
 
-        BUS.subscribe(
-            "metrics.update", lambda d: asyncio.create_task(self.on_metrics_update(d))
-        )
+        BUS.subscribe("metrics.update", lambda d: asyncio.create_task(self.on_metrics_update(d)))
 
     async def on_metrics_update(self, data: Dict[str, Any]) -> None:
         """Process metrics update and check for anomalies."""
@@ -414,9 +390,7 @@ class AnomalyWatcher:
 
         return z_score > self.sigma_threshold
 
-    async def _alert_anomaly(
-        self, metric_name: str, value: float, history: deque
-    ) -> None:
+    async def _alert_anomaly(self, metric_name: str, value: float, history: deque) -> None:
         """Send anomaly alert."""
         mean = statistics.mean(history)
         stdev = statistics.pstdev(history)

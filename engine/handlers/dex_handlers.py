@@ -18,9 +18,7 @@ def on_dex_candidate(sniper: DexSniper):
         try:
             handled = await sniper.handle_candidate(payload or {})
             if handled:
-                logger.info(
-                    "[DEX] candidate promoted to trade: %s", payload.get("symbol")
-                )
+                logger.info("[DEX] candidate promoted to trade: %s", payload.get("symbol"))
         except Exception as exc:  # noqa: BLE001
             logger.warning("[DEX] handler failed: %s", exc, exc_info=True)
 

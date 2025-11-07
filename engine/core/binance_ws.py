@@ -112,19 +112,13 @@ class BinanceWS:
                         stype = self._resolve_stream_type()
                         if stype == "mark":
                             try:
-                                price = float(
-                                    data.get("p") or data.get("markPrice") or 0.0
-                                )
+                                price = float(data.get("p") or data.get("markPrice") or 0.0)
                             except Exception:
                                 price = None
                         elif stype == "bookticker":
                             try:
-                                ask = float(
-                                    data.get("a") or data.get("bestAskPrice") or 0.0
-                                )
-                                bid = float(
-                                    data.get("b") or data.get("bestBidPrice") or 0.0
-                                )
+                                ask = float(data.get("a") or data.get("bestAskPrice") or 0.0)
+                                bid = float(data.get("b") or data.get("bestBidPrice") or 0.0)
                                 if ask > 0 and bid > 0:
                                     price = (ask + bid) / 2.0
                                 else:
@@ -139,24 +133,20 @@ class BinanceWS:
                         else:
                             # Spot mini-ticker fallback: last price in 'c'
                             try:
-                                price = float(
-                                    data.get("c") or data.get("lastPrice") or 0.0
-                                )
+                                price = float(data.get("c") or data.get("lastPrice") or 0.0)
                             except Exception:
                                 price = None
                         if not price or price <= 0:
                             continue
                         try:
                             # Update both multi-tenant and per-symbol gauges
-                            MARK_PRICE.labels(symbol=sym, venue="binance").set(
-                                float(price)
-                            )
+                            MARK_PRICE.labels(symbol=sym, venue="binance").set(float(price))
                             mark_price_by_symbol.labels(symbol=sym).set(float(price))
                             # Set freshness to 0 on arrival; periodic task will age it
                             try:
-                                mark_price_freshness_sec.labels(
-                                    symbol=sym, venue="binance"
-                                ).set(0.0)
+                                mark_price_freshness_sec.labels(symbol=sym, venue="binance").set(
+                                    0.0
+                                )
                             except Exception:
                                 pass
                         except Exception:
@@ -168,9 +158,7 @@ class BinanceWS:
                         )
                         if self._price_hook:
                             try:
-                                self._price_hook(
-                                    f"{sym}.BINANCE", sym, float(price), ts or 0.0
-                                )
+                                self._price_hook(f"{sym}.BINANCE", sym, float(price), ts or 0.0)
                             except Exception:
                                 pass
                         cb = self._on_price_cb
@@ -275,15 +263,11 @@ class BinanceWS:
                 bid_qty = raw.get("B") or raw.get("bidQty")
                 ask_qty = raw.get("A") or raw.get("askQty")
             try:
-                payload["bid_price"] = (
-                    float(bid_price) if bid_price is not None else 0.0
-                )
+                payload["bid_price"] = float(bid_price) if bid_price is not None else 0.0
             except (TypeError, ValueError):
                 payload["bid_price"] = 0.0
             try:
-                payload["ask_price"] = (
-                    float(ask_price) if ask_price is not None else 0.0
-                )
+                payload["ask_price"] = float(ask_price) if ask_price is not None else 0.0
             except (TypeError, ValueError):
                 payload["ask_price"] = 0.0
             try:

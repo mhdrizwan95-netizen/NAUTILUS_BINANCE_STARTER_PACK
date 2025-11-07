@@ -34,9 +34,7 @@ class Telegram:
             connector = None
         try:
             async with aiohttp.ClientSession(connector=connector) as s:
-                async with s.post(
-                    url, json=payload, timeout=aiohttp.ClientTimeout(total=10)
-                ) as r:
+                async with s.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as r:
                     if r.status != 200:
                         try:
                             body = await r.text()

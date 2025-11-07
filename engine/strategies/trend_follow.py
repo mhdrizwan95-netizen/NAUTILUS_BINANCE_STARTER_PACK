@@ -70,27 +70,19 @@ class TrendStrategyConfig:
 def load_trend_config(scanner: "SymbolScanner" | None = None) -> TrendStrategyConfig:
     universe = StrategyUniverse(scanner).get("trend") or []
     primary = TrendTF(
-        interval=env_str(
-            "TREND_PRIMARY_INTERVAL", TREND_DEFAULTS["TREND_PRIMARY_INTERVAL"]
-        ),
+        interval=env_str("TREND_PRIMARY_INTERVAL", TREND_DEFAULTS["TREND_PRIMARY_INTERVAL"]),
         fast=env_int("TREND_PRIMARY_FAST", TREND_DEFAULTS["TREND_PRIMARY_FAST"]),
         slow=env_int("TREND_PRIMARY_SLOW", TREND_DEFAULTS["TREND_PRIMARY_SLOW"]),
         rsi_length=env_int("TREND_PRIMARY_RSI", TREND_DEFAULTS["TREND_PRIMARY_RSI"]),
     )
     secondary = TrendTF(
-        interval=env_str(
-            "TREND_SECONDARY_INTERVAL", TREND_DEFAULTS["TREND_SECONDARY_INTERVAL"]
-        ),
+        interval=env_str("TREND_SECONDARY_INTERVAL", TREND_DEFAULTS["TREND_SECONDARY_INTERVAL"]),
         fast=env_int("TREND_SECONDARY_FAST", TREND_DEFAULTS["TREND_SECONDARY_FAST"]),
         slow=env_int("TREND_SECONDARY_SLOW", TREND_DEFAULTS["TREND_SECONDARY_SLOW"]),
-        rsi_length=env_int(
-            "TREND_SECONDARY_RSI", TREND_DEFAULTS["TREND_SECONDARY_RSI"]
-        ),
+        rsi_length=env_int("TREND_SECONDARY_RSI", TREND_DEFAULTS["TREND_SECONDARY_RSI"]),
     )
     regime = TrendTF(
-        interval=env_str(
-            "TREND_REGIME_INTERVAL", TREND_DEFAULTS["TREND_REGIME_INTERVAL"]
-        ),
+        interval=env_str("TREND_REGIME_INTERVAL", TREND_DEFAULTS["TREND_REGIME_INTERVAL"]),
         fast=env_int("TREND_REGIME_FAST", TREND_DEFAULTS["TREND_REGIME_FAST"]),
         slow=env_int("TREND_REGIME_SLOW", TREND_DEFAULTS["TREND_REGIME_SLOW"]),
         rsi_length=env_int("TREND_REGIME_RSI", TREND_DEFAULTS["TREND_REGIME_RSI"]),
@@ -102,35 +94,19 @@ def load_trend_config(scanner: "SymbolScanner" | None = None) -> TrendStrategyCo
         fetch_limit=env_int("TREND_FETCH_LIMIT", TREND_DEFAULTS["TREND_FETCH_LIMIT"]),
         refresh_sec=env_int("TREND_REFRESH_SEC", TREND_DEFAULTS["TREND_REFRESH_SEC"]),
         atr_length=env_int("TREND_ATR_LENGTH", TREND_DEFAULTS["TREND_ATR_LENGTH"]),
-        atr_stop_mult=env_float(
-            "TREND_ATR_STOP_MULT", TREND_DEFAULTS["TREND_ATR_STOP_MULT"]
-        ),
-        atr_target_mult=env_float(
-            "TREND_ATR_TARGET_MULT", TREND_DEFAULTS["TREND_ATR_TARGET_MULT"]
-        ),
-        swing_lookback=env_int(
-            "TREND_SWING_LOOKBACK", TREND_DEFAULTS["TREND_SWING_LOOKBACK"]
-        ),
-        rsi_long_min=env_float(
-            "TREND_RSI_LONG_MIN", TREND_DEFAULTS["TREND_RSI_LONG_MIN"]
-        ),
-        rsi_long_max=env_float(
-            "TREND_RSI_LONG_MAX", TREND_DEFAULTS["TREND_RSI_LONG_MAX"]
-        ),
+        atr_stop_mult=env_float("TREND_ATR_STOP_MULT", TREND_DEFAULTS["TREND_ATR_STOP_MULT"]),
+        atr_target_mult=env_float("TREND_ATR_TARGET_MULT", TREND_DEFAULTS["TREND_ATR_TARGET_MULT"]),
+        swing_lookback=env_int("TREND_SWING_LOOKBACK", TREND_DEFAULTS["TREND_SWING_LOOKBACK"]),
+        rsi_long_min=env_float("TREND_RSI_LONG_MIN", TREND_DEFAULTS["TREND_RSI_LONG_MIN"]),
+        rsi_long_max=env_float("TREND_RSI_LONG_MAX", TREND_DEFAULTS["TREND_RSI_LONG_MAX"]),
         rsi_exit=env_float("TREND_RSI_EXIT", TREND_DEFAULTS["TREND_RSI_EXIT"]),
         risk_pct=env_float("TREND_RISK_PCT", TREND_DEFAULTS["TREND_RISK_PCT"]),
-        min_quote_usd=env_float(
-            "TREND_MIN_QUOTE_USD", TREND_DEFAULTS["TREND_MIN_QUOTE_USD"]
-        ),
+        min_quote_usd=env_float("TREND_MIN_QUOTE_USD", TREND_DEFAULTS["TREND_MIN_QUOTE_USD"]),
         fallback_equity_usd=env_float(
             "TREND_FALLBACK_EQUITY", TREND_DEFAULTS["TREND_FALLBACK_EQUITY"]
         ),
-        cooldown_bars=env_int(
-            "TREND_COOLDOWN_BARS", TREND_DEFAULTS["TREND_COOLDOWN_BARS"]
-        ),
-        allow_shorts=env_bool(
-            "TREND_ALLOW_SHORTS", TREND_DEFAULTS["TREND_ALLOW_SHORTS"]
-        ),
+        cooldown_bars=env_int("TREND_COOLDOWN_BARS", TREND_DEFAULTS["TREND_COOLDOWN_BARS"]),
+        allow_shorts=env_bool("TREND_ALLOW_SHORTS", TREND_DEFAULTS["TREND_ALLOW_SHORTS"]),
         auto_tune_enabled=env_bool(
             "TREND_AUTO_TUNE_ENABLED", TREND_DEFAULTS["TREND_AUTO_TUNE_ENABLED"]
         ),
@@ -259,9 +235,7 @@ class TrendStrategyModule:
             self._metrics = None
 
     # --- public API ---
-    def handle_tick(
-        self, symbol: str, price: float, ts: float
-    ) -> Optional[Dict[str, float | str]]:
+    def handle_tick(self, symbol: str, price: float, ts: float) -> Optional[Dict[str, float | str]]:
         if not self.enabled:
             return None
         base = symbol.split(".")[0].upper()
@@ -270,9 +244,7 @@ class TrendStrategyModule:
             return None
 
         now = float(ts)
-        if self._state[base] == "COOLDOWN" and now >= self._cooldown_until.get(
-            base, 0.0
-        ):
+        if self._state[base] == "COOLDOWN" and now >= self._cooldown_until.get(base, 0.0):
             self._state[base] = "FLAT"
         if self._state[base] == "FLAT" and now < self._cooldown_until.get(base, 0.0):
             return None
@@ -306,15 +278,11 @@ class TrendStrategyModule:
                 self._entry_price[base] = price
                 self._stop_levels[base] = float(stop)
                 self._targets[base] = float(target)
-                meta.update(
-                    {"stop": float(stop), "target": float(target), "atr": float(atr)}
-                )
+                meta.update({"stop": float(stop), "target": float(target), "atr": float(atr)})
                 stop_bps = self._stop_distance_bps(price, float(stop))
                 self._observe_stop_distance(base, stop_bps)
                 self._record_signal(base, "BUY", "entry")
-                market_choice = resolve_market_choice(
-                    self._qualify(base), self._default_market
-                )
+                market_choice = resolve_market_choice(self._qualify(base), self._default_market)
                 action = {
                     "symbol": self._qualify(base),
                     "side": "BUY",
@@ -327,14 +295,10 @@ class TrendStrategyModule:
             stop = snap.get("stop")
             target = snap.get("target")
             if stop is not None:
-                self._stop_levels[base] = max(
-                    self._stop_levels.get(base, float(stop)), float(stop)
-                )
+                self._stop_levels[base] = max(self._stop_levels.get(base, float(stop)), float(stop))
             if target is not None:
                 self._targets[base] = float(target)
-            meta.update(
-                {"stop": self._stop_levels.get(base), "target": self._targets.get(base)}
-            )
+            meta.update({"stop": self._stop_levels.get(base), "target": self._targets.get(base)})
             if self._long_exit_ready(price, snap):
                 quote = max(self._entry_quote.get(base, 0.0), self.cfg.min_quote_usd)
                 self._state[base] = "COOLDOWN"
@@ -351,9 +315,7 @@ class TrendStrategyModule:
                 self._entry_quote.pop(base, None)
                 self._stop_levels.pop(base, None)
                 self._targets.pop(base, None)
-                market_choice = resolve_market_choice(
-                    self._qualify(base), self._default_market
-                )
+                market_choice = resolve_market_choice(self._qualify(base), self._default_market)
                 action = {
                     "symbol": self._qualify(base),
                     "side": "SELL",
@@ -365,9 +327,7 @@ class TrendStrategyModule:
 
         if action and "meta" in action:
             try:
-                self._log.info(
-                    "[TREND] %s %s meta=%s", base, action["side"], action["meta"]
-                )
+                self._log.info("[TREND] %s %s meta=%s", base, action["side"], action["meta"])
             except Exception:
                 pass
         return action
@@ -377,9 +337,7 @@ class TrendStrategyModule:
         return f"{base}.{self._venue}"
 
     def _cooldown_horizon(self) -> float:
-        base_tf = _TIMEFRAME_SECONDS.get(
-            self.cfg.primary.interval, self.cfg.refresh_sec
-        )
+        base_tf = _TIMEFRAME_SECONDS.get(self.cfg.primary.interval, self.cfg.refresh_sec)
         return float(max(1, int(self._params.cooldown_bars)) * base_tf)
 
     def _quote_size(self, price: float) -> float:
@@ -507,15 +465,9 @@ class TrendStrategyModule:
         return max(0.0, (price - stop) / price * 10_000.0)
 
     def _build_snapshot(self, base: str) -> Optional[Dict[str, float]]:
-        primary = self._klines(
-            base, self.cfg.primary.interval, self._params.primary_slow + 5
-        )
-        secondary = self._klines(
-            base, self.cfg.secondary.interval, self._params.secondary_slow + 5
-        )
-        regime = self._klines(
-            base, self.cfg.regime.interval, self._params.regime_slow + 5
-        )
+        primary = self._klines(base, self.cfg.primary.interval, self._params.primary_slow + 5)
+        secondary = self._klines(base, self.cfg.secondary.interval, self._params.secondary_slow + 5)
+        regime = self._klines(base, self.cfg.regime.interval, self._params.regime_slow + 5)
         if not primary or not secondary or not regime:
             return None
         primary_closes = [float(row[4]) for row in primary]
@@ -539,14 +491,10 @@ class TrendStrategyModule:
             snapshot["target"] = None
         else:
             snapshot["stop"] = swing - (atr_val * self._params.atr_stop_mult)
-            snapshot["target"] = primary_closes[-1] + (
-                atr_val * self._params.atr_target_mult
-            )
+            snapshot["target"] = primary_closes[-1] + (atr_val * self._params.atr_target_mult)
         return snapshot
 
-    def _klines(
-        self, base: str, interval: str, minimum: int
-    ) -> Optional[List[List[float]]]:
+    def _klines(self, base: str, interval: str, minimum: int) -> Optional[List[List[float]]]:
         key = (base, interval)
         now = self._clock.time()
         cached = self._cache.get(base, {}).get(interval)
@@ -558,9 +506,7 @@ class TrendStrategyModule:
                 base, interval=interval, limit=max(self.cfg.fetch_limit, minimum)
             )
         except Exception as exc:
-            self._log.warning(
-                "[TREND] kline fetch failed for %s %s: %s", base, interval, exc
-            )
+            self._log.warning("[TREND] kline fetch failed for %s %s: %s", base, interval, exc)
             data = None
         if isinstance(data, list) and len(data) >= minimum:
             self._cache[base][interval] = data
@@ -572,10 +518,7 @@ class TrendStrategyModule:
 class _SyncKlinesClient:
     def __init__(self):
         settings = get_settings()
-        base = (
-            getattr(settings, "base_url", "https://api.binance.com")
-            or "https://api.binance.com"
-        )
+        base = getattr(settings, "base_url", "https://api.binance.com") or "https://api.binance.com"
         self._base = base.rstrip("/")
         self._timeout = getattr(settings, "timeout", 10.0)
         self._headers = {}

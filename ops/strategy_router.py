@@ -20,6 +20,7 @@ import logging
 import os
 import random
 import time
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -128,9 +129,7 @@ def choose_model(signal_id: Optional[str] = None) -> str:
     current = config.get("current", "")
     for model, weight in list(weights.items()):
         if model != current and weight > max_canary:
-            logging.warning(
-                f"[ROUTER] Reducing {model} weight from {weight} to {max_canary}"
-            )
+            logging.warning(f"[ROUTER] Reducing {model} weight from {weight} to {max_canary}")
             weights[model] = max_canary
             # Redistribute to current model
             excess = weight - max_canary
@@ -148,9 +147,7 @@ def choose_model(signal_id: Optional[str] = None) -> str:
 
             # Is this a canary model?
             if model != current and weight > 0:
-                logging.info(
-                    f"[ROUTER] 🐤 Canary deployment: Using {model} ({weight*100:.1f}%)"
-                )
+                logging.info(f"[ROUTER] 🐤 Canary deployment: Using {model} ({weight*100:.1f}%)")
 
             return model
 
@@ -312,8 +309,7 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
                 result["original_quantity"] = original_quantity
                 result["allocation_adjusted"] = (
                     signal_data.get("quote", original_quote) != original_quote
-                    or signal_data.get("quantity", original_quantity)
-                    != original_quantity
+                    or signal_data.get("quantity", original_quantity) != original_quantity
                 )
                 result["routing_time"] = time.time() - start_time
 
@@ -389,9 +385,7 @@ def _load_ops_token() -> str:
         try:
             secret = Path(token_file).read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise RuntimeError(
-                f"Failed to read OPS_API_TOKEN_FILE ({token_file})"
-            ) from exc
+            raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE ({token_file})") from exc
         if secret:
             token = secret
     if not token or token == "dev-token":
@@ -401,26 +395,33 @@ def _load_ops_token() -> str:
     return token
 
 
-OPS_TOKEN = _load_ops_token()
+@lru_cache(maxsize=1)
+def get_ops_token() -> str:
+    """Load and memoize the ops token lazily."""
+    return _load_ops_token()
+
+
+def reset_ops_token_cache() -> None:
+    """Allow tests to clear the cached token."""
+    get_ops_token.cache_clear()
 
 
 def _require_ops_token(request: Request) -> None:
     header = request.headers.get("X-Ops-Token") or request.headers.get("X-OPS-TOKEN")
-    if not header or not hmac.compare_digest(header, OPS_TOKEN):
+    expected = get_ops_token()
+    if not header or not hmac.compare_digest(header, expected):
         raise HTTPException(status_code=401, detail="Invalid or missing X-Ops-Token")
 
 
 def _engine_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    headers: Dict[str, str] = {"X-Ops-Token": OPS_TOKEN}
+    headers: Dict[str, str] = {"X-Ops-Token": get_ops_token()}
     if extra:
         headers.update(extra)
     return headers
 
 
 @router.post("/strategy/signal")
-async def strategy_signal_endpoint(
-    signal_data: Dict[str, Any], request: Request
-) -> Dict[str, Any]:
+async def strategy_signal_endpoint(signal_data: Dict[str, Any], request: Request) -> Dict[str, Any]:
     """Primary endpoint for routing trading signals to models."""
     try:
         _require_ops_token(request)
@@ -431,15 +432,11 @@ async def strategy_signal_endpoint(
         required = ["symbol", "side"]
         for f in required:
             if not signal_data.get(f):
-                raise HTTPException(
-                    status_code=400, detail="symbol and side are required"
-                )
+                raise HTTPException(status_code=400, detail="symbol and side are required")
         q = signal_data.get("quote")
         qty = signal_data.get("quantity")
         if (q is None) == (qty is None):  # exactly one must be provided
-            raise HTTPException(
-                status_code=400, detail="Provide exactly one of quote or quantity"
-            )
+            raise HTTPException(status_code=400, detail="Provide exactly one of quote or quantity")
 
         # Route and execute signal with capital allocation
         result = await route_signal_with_allocation(signal_data)
@@ -480,9 +477,7 @@ async def set_weights_endpoint(body: Dict[str, Any], request: Request):
         total = sum(new_weights.values())
 
         if abs(total - 1.0) > 0.001:
-            raise HTTPException(
-                status_code=400, detail=f"Weights must sum to 1.0, got {total}"
-            )
+            raise HTTPException(status_code=400, detail=f"Weights must sum to 1.0, got {total}")
 
         # Validate no canary exceeds max
         max_canary = config.get("max_canary_weight", 0.15)

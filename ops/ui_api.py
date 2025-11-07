@@ -10,6 +10,7 @@ import secrets
 import time
 import base64
 from collections import OrderedDict, deque
+from functools import lru_cache
 from pathlib import Path
 from threading import RLock
 from typing import Any, Deque, Dict, List, Optional
@@ -51,11 +52,23 @@ def _load_ops_token() -> str:
         except OSError as exc:
             raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE ({token_file})") from exc
     if not token or token == "dev-token":
-        raise RuntimeError("Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Command Center API")
+        raise RuntimeError(
+            "Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Command Center API"
+        )
     return token
 
 
-OPS_TOKEN = _load_ops_token()
+@lru_cache(maxsize=1)
+def get_ops_token() -> str:
+    """Load and cache the ops token to avoid import-time failures."""
+    return _load_ops_token()
+
+
+def reset_ops_token_cache() -> None:
+    """Tests can clear the memoized token after mutating env vars."""
+    get_ops_token.cache_clear()
+
+
 DEFAULT_PAGE_LIMIT = 50
 MAX_PAGE_LIMIT = 500
 
@@ -83,6 +96,7 @@ def _require_idempotency(request: Request) -> tuple[str, Optional[Dict[str, Any]
         )
     cached = _idempotency_lookup(key)
     return key, cached
+
 
 router = APIRouter(prefix="/api", tags=["command-center"])
 
@@ -130,7 +144,7 @@ class FlattenRequest(BaseModel):
 
 
 def require_ops_token(x_ops_token: Optional[str] = Header(None)) -> None:
-    if x_ops_token != OPS_TOKEN:
+    if x_ops_token != get_ops_token():
         http_error(
             status.HTTP_401_UNAUTHORIZED,
             "auth.invalid_token",
@@ -164,9 +178,7 @@ def _load_params() -> Dict[str, Any]:
 
 
 def _save_params(payload: Dict[str, Any]) -> None:
-    PARAMS_PATH.write_text(
-        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
-    )
+    PARAMS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def _idempotency_lookup(key: str) -> Optional[Dict[str, Any]]:
@@ -281,40 +293,18 @@ def _paginate_items(
 def _normalize_positions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     sanitized: List[Dict[str, Any]] = []
     for idx, p in enumerate(rows):
-        symbol = (
-            p.get("symbol")
-            or p.get("product")
-            or p.get("instrument")
-            or "UNKNOWN"
-        )
+        symbol = p.get("symbol") or p.get("product") or p.get("instrument") or "UNKNOWN"
         sanitized.append(
             {
-                "id": p.get("id")
-                or f"position-{symbol.lower()}-{idx}",
+                "id": p.get("id") or f"position-{symbol.lower()}-{idx}",
                 "symbol": symbol,
-                "qty": float(
-                    p.get("qty")
-                    or p.get("quantity")
-                    or p.get("size")
-                    or 0
-                ),
+                "qty": float(p.get("qty") or p.get("quantity") or p.get("size") or 0),
                 "entry": float(
-                    p.get("entry")
-                    or p.get("entry_price")
-                    or p.get("avgEntryPrice")
-                    or 0
+                    p.get("entry") or p.get("entry_price") or p.get("avgEntryPrice") or 0
                 ),
-                "mark": float(
-                    p.get("mark")
-                    or p.get("mark_price")
-                    or p.get("markPrice")
-                    or 0
-                ),
+                "mark": float(p.get("mark") or p.get("mark_price") or p.get("markPrice") or 0),
                 "pnl": float(
-                    p.get("pnl")
-                    or p.get("unrealizedPnl")
-                    or p.get("unrealized_pnl")
-                    or 0
+                    p.get("pnl") or p.get("unrealizedPnl") or p.get("unrealized_pnl") or 0
                 ),
             }
         )
@@ -563,9 +553,7 @@ async def strategies_patch(
 
 
 @router.get("/universe/{strategy_id}")
-async def universe_get(
-    strategy_id: str, state: Dict[str, Any] = Depends(get_state)
-) -> Any:
+async def universe_get(strategy_id: str, state: Dict[str, Any] = Depends(get_state)) -> Any:
     return await state["scanner"].universe(strategy_id)
 
 
@@ -617,10 +605,7 @@ async def orders_open(
                 "side": (order.get("side") or "buy").lower(),
                 "type": (order.get("type") or "limit").lower(),
                 "qty": float(
-                    order.get("qty")
-                    or order.get("quantity")
-                    or order.get("origQty")
-                    or 0
+                    order.get("qty") or order.get("quantity") or order.get("origQty") or 0
                 ),
                 "filled": float(
                     order.get("filled")
@@ -730,13 +715,9 @@ async def governance_reload(
     try:
         ok = governance_reload_policies()
     except Exception as exc:  # pragma: no cover - defensive
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, f"Reload failed: {exc}"
-        ) from exc
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Reload failed: {exc}") from exc
     if not ok:
-        raise HTTPException(
-            status.HTTP_500_INTERNAL_SERVER_ERROR, "Reload returned false"
-        )
+        raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Reload returned false")
     audit_key = guard.idempotency_key or secrets.token_urlsafe(16)
     _record_control_action(
         "governance.reload",
@@ -747,6 +728,7 @@ async def governance_reload(
         {"ok": True},
     )
     return {"ok": True}
+
 
 @router.get("/feeds/status")
 async def feeds_status(state: Dict[str, Any] = Depends(get_state)) -> Any:
@@ -787,9 +769,7 @@ async def account_transfer(
             body.asset, body.amount, body.source, body.target
         )
     except RuntimeError as exc:  # pragma: no cover - defensive
-        raise HTTPException(
-            status.HTTP_502_BAD_GATEWAY, f"Transfer failed: {exc}"
-        ) from exc
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Transfer failed: {exc}") from exc
 
     _record_control_action(
         "account.transfer",
@@ -813,9 +793,7 @@ async def post_trade_event(
     try:
         RECENT_TRADES.append(
             {
-                "time": item.get("time")
-                or item.get("timestamp")
-                or int(time.time() * 1000),
+                "time": item.get("time") or item.get("timestamp") or int(time.time() * 1000),
                 "symbol": item.get("symbol"),
                 "side": item.get("side"),
                 "qty": float(item.get("qty") or item.get("quantity") or 0),
@@ -899,9 +877,7 @@ async def cc_strategies_list(
 
 
 @router.get("/strategies/{strategy_id}")
-async def cc_strategy_get(
-    strategy_id: str, state: Dict[str, Any] = Depends(get_state)
-) -> Any:
+async def cc_strategy_get(strategy_id: str, state: Dict[str, Any] = Depends(get_state)) -> Any:
     params_store = _load_params()
     schema = _load_strategy_schema(strategy_id)
     try:
@@ -1237,22 +1213,16 @@ async def cc_metrics_summary(
     pnl_by_symbol: Dict[str, float] = {}
     for p in positions:
         sym = p.get("symbol") or p.get("product") or "UNKNOWN"
-        pnl_val = float(
-            p.get("pnl") or p.get("unrealizedPnl") or p.get("unrealized_pnl") or 0.0
-        )
+        pnl_val = float(p.get("pnl") or p.get("unrealizedPnl") or p.get("unrealized_pnl") or 0.0)
         pnl_by_symbol[sym] = pnl_by_symbol.get(sym, 0.0) + pnl_val
 
     # Aggregate portfolio KPIs from enhanced model data
     total_realized = sum(float(d.get("pnl_realized_total", 0.0)) for d in enhanced_data)
-    total_unrealized = sum(
-        float(d.get("pnl_unrealized_total", 0.0)) for d in enhanced_data
-    )
+    total_unrealized = sum(float(d.get("pnl_unrealized_total", 0.0)) for d in enhanced_data)
     total_pnl = total_realized + total_unrealized
     win_rate = pnl.calculate_overall_win_rate(enhanced_data) if enhanced_data else 0.0
     sharpe = pnl.calculate_portfolio_sharpe(enhanced_data) if enhanced_data else 0.0
-    max_dd = max(
-        (float(d.get("max_drawdown", 0.0)) for d in enhanced_data), default=0.0
-    )
+    max_dd = max((float(d.get("max_drawdown", 0.0)) for d in enhanced_data), default=0.0)
 
     # Dev-friendly seeding: if nothing available, provide a small synthetic snapshot
     if not enhanced_data and not positions:
@@ -1443,9 +1413,7 @@ async def cc_alerts(
 
 
 @router.post("/alerts")
-async def cc_alerts_post(
-    item: Dict[str, Any], _auth: None = Depends(require_ops_token)
-) -> Any:
+async def cc_alerts_post(item: Dict[str, Any], _auth: None = Depends(require_ops_token)) -> Any:
     row = {
         "time": item.get("time") or int(time.time() * 1000),
         "level": item.get("level") or item.get("type") or "info",
@@ -1469,8 +1437,7 @@ async def cc_health(state: Dict[str, Any] = Depends(get_state)) -> Any:
             out = [
                 {
                     "name": v.get("name") or v.get("venue") or "engine",
-                    "status": v.get("status")
-                    or ("ok" if v.get("ok", True) else "down"),
+                    "status": v.get("status") or ("ok" if v.get("ok", True) else "down"),
                     "latencyMs": float(v.get("latencyMs") or v.get("latency_ms") or 0),
                     "queue": int(v.get("queue") or 0),
                 }
@@ -1480,17 +1447,13 @@ async def cc_health(state: Dict[str, Any] = Depends(get_state)) -> Any:
             out = [
                 {
                     "name": "trading-engine",
-                    "status": (
-                        "ok" if eng.get("engine") == "ok" or eng.get("ok") else "warn"
-                    ),
+                    "status": ("ok" if eng.get("engine") == "ok" or eng.get("ok") else "warn"),
                     "latencyMs": float(eng.get("latency_ms") or 0.0),
                     "queue": int(eng.get("queue") or 0),
                 }
             ]
     except Exception:
-        out = [
-            {"name": "trading-engine", "status": "down", "latencyMs": 0.0, "queue": 0}
-        ]
+        out = [{"name": "trading-engine", "status": "down", "latencyMs": 0.0, "queue": 0}]
     return {"venues": out}
 
 

@@ -13,9 +13,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-COPY constraints.txt /constraints.txt
 RUN python -m pip install --upgrade pip \
- && pip install --prefix=/install -c /constraints.txt -r requirements.txt
+ && pip install --prefix=/install --require-hashes -r requirements.txt
 
 # Build the React/TypeScript Command Center bundle
 FROM node:20-bookworm-slim AS frontend_builder

@@ -36,9 +36,7 @@ DEFAULT_POLICY: Dict[str, Any] = {
 log = logging.getLogger(__name__)
 
 
-def load_capital_policy(
-    path: Path | None = None, *, create: bool = True
-) -> Dict[str, Any]:
+def load_capital_policy(path: Path | None = None, *, create: bool = True) -> Dict[str, Any]:
     """
     Load the capital policy from disk.
 
@@ -103,9 +101,7 @@ def is_model_enabled(model_name: str, policy: Dict[str, Any] | None = None) -> b
     return model_name in enabled_models(policy)
 
 
-def update_enabled_models(
-    models: Iterable[str], *, merge: bool = True
-) -> Dict[str, Any]:
+def update_enabled_models(models: Iterable[str], *, merge: bool = True) -> Dict[str, Any]:
     """
     Update the enabled models list. When merge is True we union with existing models,
     otherwise we replace the list entirely.

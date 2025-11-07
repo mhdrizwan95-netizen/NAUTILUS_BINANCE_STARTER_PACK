@@ -272,9 +272,7 @@ Examples:
         help="Registration type",
     )
     parser.add_argument("--description", help="Human-readable description")
-    parser.add_argument(
-        "--extra-metrics", type=json.loads, help="Extra metrics as JSON string"
-    )
+    parser.add_argument("--extra-metrics", type=json.loads, help="Extra metrics as JSON string")
 
     args = parser.parse_args()
 

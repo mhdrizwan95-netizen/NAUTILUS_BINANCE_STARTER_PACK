@@ -61,9 +61,7 @@ def combine(
     if has_hmm:
         hmm_val = 1 if hmm_decision[0] == "BUY" else -1
         hmm_conf = (
-            max(hmm_decision[2].get("probs", [0]))
-            if isinstance(hmm_decision[2], dict)
-            else 0.5
+            max(hmm_decision[2].get("probs", [0])) if isinstance(hmm_decision[2], dict) else 0.5
         )
 
     score = (w_ma * ma_val * ma_conf) + (w_hmm * hmm_val * hmm_conf)
@@ -85,9 +83,7 @@ def combine(
         "components": {
             "ma_side": ma_side,
             "ma_conf": ma_conf,
-            "hmm_side": (
-                "BUY" if has_hmm and hmm_val > 0 else ("SELL" if has_hmm else "NONE")
-            ),
+            "hmm_side": ("BUY" if has_hmm and hmm_val > 0 else ("SELL" if has_hmm else "NONE")),
             "hmm_conf": hmm_conf,
         },
     }

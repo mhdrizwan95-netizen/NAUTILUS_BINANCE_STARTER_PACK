@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 import pandas as pd
 from loguru import logger
-from common import manifest
+from services.common import manifest
 from .config import settings
 
 
@@ -16,14 +16,10 @@ class HistoricalDriver:
         self.symbol = symbol
         self.timeframe = timeframe
         self.src_files = sorted(
-            (Path(settings.RESEARCH_DIR) / symbol.replace("/", "_") / timeframe).glob(
-                "*.csv"
-            )
+            (Path(settings.RESEARCH_DIR) / symbol.replace("/", "_") / timeframe).glob("*.csv")
         )
         if not self.src_files:
-            logger.warning(
-                f"No research files at {settings.RESEARCH_DIR}/{symbol}/{timeframe}"
-            )
+            logger.warning(f"No research files at {settings.RESEARCH_DIR}/{symbol}/{timeframe}")
         self.src_idx = 0
         self.offset = 0  # row index within current file
 
@@ -61,15 +57,10 @@ class HistoricalDriver:
 
             t_start = int(part["timestamp"].min())
             t_end = int(part["timestamp"].max())
-            dst_dir = (
-                Path(settings.DATA_INCOMING)
-                / self.symbol.replace("/", "_")
-                / self.timeframe
-            )
+            dst_dir = Path(settings.DATA_INCOMING) / self.symbol.replace("/", "_") / self.timeframe
             dst_dir.mkdir(parents=True, exist_ok=True)
             dst = (
-                dst_dir
-                / f"{self.symbol.replace('/','_')}__{self.timeframe}__{t_start}_{t_end}.csv"
+                dst_dir / f"{self.symbol.replace('/','_')}__{self.timeframe}__{t_start}_{t_end}.csv"
             )
             part.to_csv(dst, index=False)
 

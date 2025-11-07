@@ -12,9 +12,7 @@ import uuid
 
 # Type definitions for better type safety
 OrderType = Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]
-OrderStatus = Literal[
-    "NEW", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED"
-]
+OrderStatus = Literal["NEW", "SUBMITTED", "PARTIALLY_FILLED", "FILLED", "CANCELED", "REJECTED"]
 OrderSide = Literal["BUY", "SELL"]
 TimeInForce = Literal["GTC", "DAY", "IOC", "FOK"]
 
@@ -64,9 +62,7 @@ class OrderRecord:
         """Calculate remaining unfilled quantity."""
         return self.quantity - self.filled_qty
 
-    def update_fill(
-        self, filled_qty: float, avg_price: float, fee: float = 0.0
-    ) -> None:
+    def update_fill(self, filled_qty: float, avg_price: float, fee: float = 0.0) -> None:
         """Update order with a fill event."""
         self.filled_qty = filled_qty
         self.avg_fill_price = avg_price

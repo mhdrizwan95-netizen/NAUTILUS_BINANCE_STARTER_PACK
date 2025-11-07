@@ -30,9 +30,7 @@ def aggregate():
         return {"status": "no_data"}
     # Compute consensus stats
     metrics = ["avg_reward", "winrate", "entropy", "drift_score"]
-    agg = {
-        m: statistics.mean([r.get(m, 0) for r in records if m in r]) for m in metrics
-    }
+    agg = {m: statistics.mean([r.get(m, 0) for r in records if m in r]) for m in metrics}
     agg["n_nodes"] = len(records)
     agg["updated"] = datetime.utcnow().isoformat()
     json.dump(agg, open(AGGREGATE, "w"), indent=2)
@@ -42,7 +40,5 @@ def aggregate():
 @APP.get("/status")
 def status():
     return JSONResponse(
-        json.load(open(AGGREGATE))
-        if os.path.exists(AGGREGATE)
-        else {"status": "no_aggregate"}
+        json.load(open(AGGREGATE)) if os.path.exists(AGGREGATE) else {"status": "no_aggregate"}
     )

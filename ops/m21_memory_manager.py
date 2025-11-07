@@ -35,6 +35,7 @@ MEMORY_ROOT = os.path.join("data", "memory_vault")
 INDEX_PATH = os.path.join(MEMORY_ROOT, "lineage_index.json")
 os.makedirs(MEMORY_ROOT, exist_ok=True)
 
+
 def generate_fingerprint(file_path: str) -> Optional[str]:
     """
     Generate SHA-256 fingerprint for file integrity verification.
@@ -59,6 +60,7 @@ def generate_fingerprint(file_path: str) -> Optional[str]:
         print(f"⚠️  Failed to fingerprint {file_path}: {e}")
         return None
 
+
 def load_lineage_index() -> Dict[str, Any]:
     """
     Load the global lineage index from JSON file.
@@ -80,8 +82,9 @@ def load_lineage_index() -> Dict[str, Any]:
         "created_at": datetime.utcnow().isoformat(),
         "memory_manager_version": "M21",
         "total_archived": 0,
-        "models": []
+        "models": [],
     }
+
 
 def save_lineage_index(index: Dict[str, Any]) -> None:
     """
@@ -98,6 +101,7 @@ def save_lineage_index(index: Dict[str, Any]) -> None:
             json.dump(index, f, indent=2, default=str)
     except Exception as e:
         print(f"⚠️  Failed to save lineage index: {e}")
+
 
 def find_recent_models(model_store_dir: str = None, limit: int = 5) -> List[str]:
     """
@@ -132,6 +136,7 @@ def find_recent_models(model_store_dir: str = None, limit: int = 5) -> List[str]
 
     return [path for path, _ in all_models[:limit]]
 
+
 def extract_model_tag(model_path: str) -> str:
     """
     Extract or generate a model tag from file path.
@@ -151,6 +156,7 @@ def extract_model_tag(model_path: str) -> str:
 
     # Generate new tag if not recoverable
     return datetime.utcnow().strftime("v-%Y%m%dT%H%M%S")
+
 
 def archive_model(source_path: str, metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """
@@ -190,13 +196,14 @@ def archive_model(source_path: str, metadata: Dict[str, Any]) -> Optional[Dict[s
             "fingerprint_sha256_16": fingerprint,
             "original_path": source_path,
             "archived_path": dest_path,
-            "metadata_path": meta_path
+            "metadata_path": meta_path,
         }
 
         with open(meta_path, "w") as f:
             json.dump(meta_info, f, indent=2, default=str)
 
-        print("✅ Model fossilized:"        print(f"   Tag: {tag}")
+        print("✅ Model fossilized:")
+        print(f"   Tag: {tag}")
         print(f"   Location: {archive_dir}")
         print(f"   Fingerprint: {fingerprint}")
 
@@ -205,6 +212,7 @@ def archive_model(source_path: str, metadata: Dict[str, Any]) -> Optional[Dict[s
     except Exception as e:
         print(f"❌ Failed to archive model {source_path}: {e}")
         return None
+
 
 def update_lineage(metadata: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -234,6 +242,7 @@ def update_lineage(metadata: Dict[str, Any]) -> Dict[str, Any]:
 
     return index
 
+
 def collect_model_context() -> Dict[str, Any]:
     """
     Gather context information about the current model training environment.
@@ -255,8 +264,11 @@ def collect_model_context() -> Dict[str, Any]:
     context["training_environment"] = {
         "python_version": os.sys.version.split()[0],
         "working_directory": os.getcwd(),
-        "environment_variables": {k: v for k, v in os.environ.items()
-                                if k.startswith(("M1", "TRAIN", "POLICY", "CALIBRATE"))},
+        "environment_variables": {
+            k: v
+            for k, v in os.environ.items()
+            if k.startswith(("M1", "TRAIN", "POLICY", "CALIBRATE"))
+        },
     }
 
     # Performance snapshot from environment or logs
@@ -276,6 +288,7 @@ def collect_model_context() -> Dict[str, Any]:
     }
 
     return context
+
 
 def archive_new_generation(notes: str = None) -> Optional[Dict[str, Any]]:
     """
@@ -323,6 +336,7 @@ def archive_new_generation(notes: str = None) -> Optional[Dict[str, Any]]:
 
     return archived
 
+
 def find_ancestor(tag_or_fingerprint: str) -> Optional[Dict[str, Any]]:
     """
     Locate a specific ancestral fossil by tag or fingerprint.
@@ -336,11 +350,14 @@ def find_ancestor(tag_or_fingerprint: str) -> Optional[Dict[str, Any]]:
     index = load_lineage_index()
 
     for model in index["models"]:
-        if (model.get("tag") == tag_or_fingerprint or
-            model.get("fingerprint_sha256_16") == tag_or_fingerprint):
+        if (
+            model.get("tag") == tag_or_fingerprint
+            or model.get("fingerprint_sha256_16") == tag_or_fingerprint
+        ):
             return model
 
     return None
+
 
 def unlock_model_ancestor(tag_or_fingerprint: str, restore_dir: str = None) -> Optional[str]:
     """
@@ -379,6 +396,7 @@ def unlock_model_ancestor(tag_or_fingerprint: str, restore_dir: str = None) -> O
     print(f"🗝  Ancestor unlocked: {tag_or_fingerprint} → {unlocked_path}")
     return unlocked_path
 
+
 def analyze_lineage() -> Dict[str, Any]:
     """
     Generate analytical insights about the evolutionary lineage.
@@ -402,17 +420,20 @@ def analyze_lineage() -> Dict[str, Any]:
 
     # Calculate time span
     if len(index["models"]) > 1:
-        timestamps = [datetime.fromisoformat(m.get("timestamp", m.get("archived_at", "")))
-                     for m in index["models"] if m.get("timestamp", m.get("archived_at"))]
+        timestamps = [
+            datetime.fromisoformat(m.get("timestamp", m.get("archived_at", "")))
+            for m in index["models"]
+            if m.get("timestamp", m.get("archived_at"))
+        ]
         if timestamps:
             time_span = max(timestamps) - min(timestamps)
             stats["time_span_days"] = time_span.days
 
     # Analyze performance trends
-    pnl_values = [m.get("performance_snapshot", {}).get("pnl_last", 0)
-                 for m in index["models"]]
-    winrate_values = [m.get("performance_snapshot", {}).get("winrate_last", 0)
-                     for m in index["models"]]
+    pnl_values = [m.get("performance_snapshot", {}).get("pnl_last", 0) for m in index["models"]]
+    winrate_values = [
+        m.get("performance_snapshot", {}).get("winrate_last", 0) for m in index["models"]
+    ]
 
     if pnl_values:
         stats["performance_trends"]["pnl_range"] = [min(pnl_values), max(pnl_values)]
@@ -429,6 +450,7 @@ def analyze_lineage() -> Dict[str, Any]:
 
     return stats
 
+
 if __name__ == "__main__":
     # Archive new generation when run directly
     notes = " ".join(os.sys.argv[1:]) if len(os.sys.argv) > 1 else None
@@ -436,7 +458,8 @@ if __name__ == "__main__":
     result = archive_new_generation(notes)
 
     if result:
-        print("\n--"        print(f"✅ Generation archived successfully")
+        print("\n--")
+        print("✅ Generation archived successfully")
         print(f"   Tag: {result['tag']}")
         print(f"   Fingerprint: {result.get('fingerprint_sha256_16', 'none')}")
         print(f"   Unique ID: {result['fingerprint_sha256_16'] or result['tag']}")
@@ -445,7 +468,8 @@ if __name__ == "__main__":
         # Show lineage stats
         lineage_analysis = analyze_lineage()
         if lineage_analysis.get("total_generations"):
-            print("📊 Lineage status:"            print(f"   Total generations: {lineage_analysis['total_generations']}")
+            print("📊 Lineage status:")
+            print(f"   Total generations: {lineage_analysis['total_generations']}")
             if lineage_analysis.get("performance_trends", {}).get("pnl_improvement") is not None:
                 improvement = lineage_analysis["performance_trends"]["pnl_improvement"]
                 print(f"   PnL Evolution: {improvement:+.2f} USD")

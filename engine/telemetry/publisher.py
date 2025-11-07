@@ -89,9 +89,7 @@ def consume_latency(symbol: str) -> Optional[float]:
     return None
 
 
-def record_equity(
-    equity_usd: float, *, now: Optional[float] = None
-) -> Tuple[float, float]:
+def record_equity(equity_usd: float, *, now: Optional[float] = None) -> Tuple[float, float]:
     global _EQUITY_PEAK
     try:
         equity = float(equity_usd)

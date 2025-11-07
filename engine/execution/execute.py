@@ -198,9 +198,7 @@ class StrategyExecutor:
             CACHE.set(key, payload)
             return payload
 
-        result = await self._submit(
-            symbol, side, quote, quantity, market_hint, tag, meta
-        )
+        result = await self._submit(symbol, side, quote, quantity, market_hint, tag, meta)
 
         metrics.orders_submitted.inc()
         payload = {
@@ -280,9 +278,7 @@ class StrategyExecutor:
             loop = None
         if loop and loop.is_running():
             fut = asyncio.run_coroutine_threadsafe(
-                self.execute(
-                    signal, idem_key=idem_key, dry_run_override=dry_run_override
-                ),
+                self.execute(signal, idem_key=idem_key, dry_run_override=dry_run_override),
                 loop,
             )
             return fut.result()
@@ -331,9 +327,7 @@ class StrategyExecutor:
                     None if quote is None else float(quote),
                     None if quantity is None else float(quantity),
                 )
-                fallback_args = (
-                    (*base_args, market_hint) if market_hint is not None else base_args
-                )
+                fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
         if submit_callable is None:
             submit_callable = getattr(self._router, "place_market_order_async", None)
             if submit_callable:
@@ -351,9 +345,7 @@ class StrategyExecutor:
                     None if quote is None else float(quote),
                     None if quantity is None else float(quantity),
                 )
-                fallback_args = (
-                    (*base_args, market_hint) if market_hint is not None else base_args
-                )
+                fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
         if submit_callable is None:
             raise RuntimeError("router does not expose market order submission")
 
@@ -377,9 +369,7 @@ class StrategyExecutor:
         async def _invoke_with_kwargs() -> Any:
             if is_async_callable:
                 return await submit_callable(**call_kwargs)
-            return await loop.run_in_executor(
-                None, partial(submit_callable, **call_kwargs)
-            )
+            return await loop.run_in_executor(None, partial(submit_callable, **call_kwargs))
 
         try:
             try:

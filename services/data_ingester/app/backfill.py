@@ -8,7 +8,7 @@ import pandas as pd
 from loguru import logger
 
 from .config import settings
-from common import manifest
+from services.common import manifest
 
 EARLIEST_BINANCE_TS = 1502942400000  # 2017-08-17 00:00:00 UTC
 
@@ -54,10 +54,7 @@ def _write_chunk(symbol: str, frame: pd.DataFrame) -> Optional[str]:
     t_start = int(frame["timestamp"].min())
     t_end = int(frame["timestamp"].max())
     dest_dir = _landing_dir(symbol)
-    dest = (
-        dest_dir
-        / f"{symbol.replace('/', '_')}__{settings.TIMEFRAME}__{t_start}_{t_end}.csv"
-    )
+    dest = dest_dir / f"{symbol.replace('/', '_')}__{settings.TIMEFRAME}__{t_start}_{t_end}.csv"
     frame.to_csv(dest, index=False)
     file_id, inserted = manifest.register_file(
         str(dest),
@@ -118,9 +115,7 @@ def run_backfill() -> None:
             frame = frame[frame["timestamp"] < target_end]
 
             if frame.empty:
-                logger.info(
-                    "Fetched candles exceed target end for %s; stopping.", symbol
-                )
+                logger.info("Fetched candles exceed target end for %s; stopping.", symbol)
                 break
 
             written = _write_chunk(symbol, frame)

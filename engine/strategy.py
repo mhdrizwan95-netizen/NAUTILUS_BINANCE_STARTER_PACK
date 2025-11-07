@@ -70,17 +70,11 @@ except Exception:
 
 MOMENTUM_RT_CFG = None
 MOMENTUM_RT_MODULE: Optional[MomentumStrategyModule] = None
-if (
-    "MomentumStrategyModule" in globals()
-    and MomentumStrategyModule
-    and load_momentum_rt_config
-):
+if "MomentumStrategyModule" in globals() and MomentumStrategyModule and load_momentum_rt_config:
     try:
         MOMENTUM_RT_CFG = load_momentum_rt_config(SYMBOL_SCANNER)
         if MOMENTUM_RT_CFG.enabled:
-            MOMENTUM_RT_MODULE = MomentumStrategyModule(
-                MOMENTUM_RT_CFG, scanner=SYMBOL_SCANNER
-            )
+            MOMENTUM_RT_MODULE = MomentumStrategyModule(MOMENTUM_RT_CFG, scanner=SYMBOL_SCANNER)
             logging.getLogger(__name__).info(
                 "Momentum RT module enabled (window=%.1fs, move>=%.2f%%, vol>=%.2fx)",
                 MOMENTUM_RT_CFG.window_sec,
@@ -103,9 +97,7 @@ def _wire_scalp_fill_handler() -> None:
         _SCALP_BUS_WIRED = True
         logging.getLogger(__name__).info("Scalping fill handler wired")
     except Exception:
-        logging.getLogger(__name__).warning(
-            "Scalping fill handler wiring failed", exc_info=True
-        )
+        logging.getLogger(__name__).warning("Scalping fill handler wiring failed", exc_info=True)
 
 
 async def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
@@ -129,9 +121,7 @@ async def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
     target_px = float(meta.get("take_profit") or 0.0)
     if stop_px <= 0.0 or target_px <= 0.0:
         return
-    order_id = (
-        str(evt.get("order_id") or "") or f"{symbol}:{evt.get('ts', time.time())}"
-    )
+    order_id = str(evt.get("order_id") or "") or f"{symbol}:{evt.get('ts', time.time())}"
     qualified = symbol if "." in symbol else f"{symbol}.{venue}"
     tag_prefix = tag or "scalp"
     _start_scalp_bracket_watch(
@@ -282,9 +272,7 @@ async def _on_market_book_event(event: Dict[str, Any]) -> None:
     try:
         SCALP_MODULE.handle_book(symbol, bid, ask, bid_qty, ask_qty, ts_val)
     except Exception:
-        logging.getLogger(__name__).debug(
-            "Failed to process book for %s", symbol, exc_info=True
-        )
+        logging.getLogger(__name__).debug("Failed to process book for %s", symbol, exc_info=True)
 
 
 try:
@@ -473,9 +461,7 @@ def on_tick(
             result = _execute_strategy_signal(sig)
             if result.get("status") == "submitted":
                 scalp_base = scalp_symbol.split(".")[0]
-                scalp_venue = (
-                    scalp_symbol.split(".")[1] if "." in scalp_symbol else "BINANCE"
-                )
+                scalp_venue = scalp_symbol.split(".")[1] if "." in scalp_symbol else "BINANCE"
                 try:
                     metrics.strategy_orders_total.labels(
                         symbol=scalp_base,
@@ -490,9 +476,7 @@ def on_tick(
     if MOMENTUM_RT_MODULE and getattr(MOMENTUM_RT_MODULE, "enabled", False):
         momentum_decision = None
         try:
-            momentum_decision = MOMENTUM_RT_MODULE.handle_tick(
-                qualified, price, ts_val, volume
-            )
+            momentum_decision = MOMENTUM_RT_MODULE.handle_tick(qualified, price, ts_val, volume)
         except Exception:
             momentum_decision = None
         if momentum_decision:
@@ -503,8 +487,7 @@ def on_tick(
             momentum_meta = momentum_decision.get("meta")
             default_market = momentum_decision.get("market") or (
                 "futures"
-                if getattr(MOMENTUM_RT_CFG, "prefer_futures", True)
-                or momentum_side == "SELL"
+                if getattr(MOMENTUM_RT_CFG, "prefer_futures", True) or momentum_side == "SELL"
                 else "spot"
             )
             resolved_market = resolve_market_choice(momentum_symbol, default_market)
@@ -524,9 +507,7 @@ def on_tick(
                     metrics.strategy_orders_total.labels(
                         symbol=momentum_symbol.split(".")[0],
                         venue=(
-                            momentum_symbol.split(".")[1]
-                            if "." in momentum_symbol
-                            else "BINANCE"
+                            momentum_symbol.split(".")[1] if "." in momentum_symbol else "BINANCE"
                         ),
                         side=momentum_side,
                         source=momentum_tag,
@@ -547,14 +528,10 @@ def on_tick(
             trend_quote = float(trend_decision.get("quote") or S_CFG.quote_usdt)
             trend_tag = str(trend_decision.get("tag") or "trend_follow")
             default_market = (
-                trend_decision.get("market")
-                if isinstance(trend_decision, dict)
-                else None
+                trend_decision.get("market") if isinstance(trend_decision, dict) else None
             )
             if not default_market:
-                default_market = (
-                    "futures" if getattr(TREND_CFG, "allow_shorts", False) else "spot"
-                )
+                default_market = "futures" if getattr(TREND_CFG, "allow_shorts", False) else "spot"
             resolved_market = resolve_market_choice(trend_symbol, default_market)
             sig = StrategySignal(
                 symbol=trend_symbol,
@@ -705,9 +682,9 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
     if not _SYMBOL_COOLDOWNS.allow(symbol, now=now):
         try:
             remaining = _SYMBOL_COOLDOWNS.remaining(symbol, now=now)
-            metrics.strategy_cooldown_window_seconds.labels(
-                symbol=base_symbol, venue=venue
-            ).set(remaining)
+            metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(
+                remaining
+            )
         except Exception:
             pass
         return False
@@ -715,9 +692,9 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
     _SYMBOL_COOLDOWNS.hit(symbol, ttl=dynamic_window, now=now)
     _last_trade_price[symbol] = price
     try:
-        metrics.strategy_cooldown_window_seconds.labels(
-            symbol=base_symbol, venue=venue
-        ).set(dynamic_window)
+        metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(
+            dynamic_window
+        )
     except Exception:
         pass
     return True
@@ -737,9 +714,7 @@ def _latest_price(symbol: str) -> Optional[float]:
         s = get_settings()
         base = s.base_url.rstrip("/")
         path = (
-            "/fapi/v1/ticker/price"
-            if getattr(s, "is_futures", False)
-            else "/api/v3/ticker/price"
+            "/fapi/v1/ticker/price" if getattr(s, "is_futures", False) else "/api/v3/ticker/price"
         )
         r = httpx.get(f"{base}{path}", params={"symbol": clean}, timeout=5.0)
         r.raise_for_status()
@@ -904,8 +879,6 @@ async def _submit_scalp_exit(payload: Dict[str, Any]) -> None:
 
     base = symbol.split(".")[0]
     try:
-        metrics.scalp_bracket_exits_total.labels(
-            symbol=base, venue=venue, mode=tag
-        ).inc()
+        metrics.scalp_bracket_exits_total.labels(symbol=base, venue=venue, mode=tag).inc()
     except Exception:
         pass

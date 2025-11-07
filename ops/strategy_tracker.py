@@ -9,9 +9,7 @@ from ops.env import engine_endpoints
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 # Prometheus metrics for strategy performance monitoring
 from prometheus_client import Gauge
@@ -55,9 +53,7 @@ def save_registry(d: dict):
     tmp.replace(REGISTRY_PATH)
 
 
-async def fetch_strategy_metrics(
-    base_url: str, current_model: str | None = None
-) -> dict:
+async def fetch_strategy_metrics(base_url: str, current_model: str | None = None) -> dict:
     """
     Scrape strategy-tagged PnL metrics from engine /metrics endpoint.
     Expects Prometheus format like: pnl_realized_total{venue="BINANCE",model="hmm_v1"} 120.0

@@ -15,12 +15,8 @@ class Predicate(BaseModel):
 class Situation(BaseModel):
     name: str
     version: int = 1
-    window: Dict[str, Any] = Field(
-        default_factory=lambda: {"bars": 20, "interval": "1m"}
-    )
-    universe: Dict[str, Any] = Field(
-        default_factory=lambda: {"venue": "BINANCE", "quote": "USDT"}
-    )
+    window: Dict[str, Any] = Field(default_factory=lambda: {"bars": 20, "interval": "1m"})
+    universe: Dict[str, Any] = Field(default_factory=lambda: {"venue": "BINANCE", "quote": "USDT"})
     predicates: List[Predicate] = Field(default_factory=list)
     labels: List[str] = Field(default_factory=list)
     risk_template: str = "candidate"

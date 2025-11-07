@@ -23,6 +23,7 @@ ml_service/model_store/
 # Logs and runtime snapshots
 snapshots/
 *.log
+ops/logs/*.jsonl
 data/runtime/
 data/ops_snapshots/
 

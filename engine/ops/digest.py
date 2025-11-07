@@ -35,10 +35,7 @@ class DigestJob:
         eff = (trades / live_plans) if live_plans else 0.0
         skips = {k: v for k, v in c.items() if k.startswith("skip_")}
         skip_lines = (
-            " ".join(
-                [f"{k.replace('skip_','')}: *{v}*" for k, v in sorted(skips.items())]
-            )
-            or "—"
+            " ".join([f"{k.replace('skip_','')}: *{v}*" for k, v in sorted(skips.items())]) or "—"
         )
         lines = [
             "*Event Breakout – Daily Digest*",
@@ -68,9 +65,7 @@ class DigestJob:
                     live_b = int(cnt.get("plans_live", 0))
                     eff_b = (trades_b / live_b) if live_b else 0.0
                     half_b = int(cnt.get("half_applied", 0))
-                    skips_b = sum(
-                        int(v) for k, v in cnt.items() if str(k).startswith("skip_")
-                    )
+                    skips_b = sum(int(v) for k, v in cnt.items() if str(k).startswith("skip_"))
                     label = f"B{i}"
                     lines.append(
                         f"{label}: trades *{trades_b}*, live *{live_b}*, eff *{eff_b:.2f}*, half *{half_b}*, skips *{skips_b}*"

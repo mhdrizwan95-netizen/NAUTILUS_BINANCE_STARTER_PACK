@@ -23,6 +23,7 @@ jobs:
     env:
       PIP_DISABLE_PIP_VERSION_CHECK: "1"
       DRY_RUN: "1"
+      OPS_API_TOKEN: test-ops-token-1234567890
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,6 +51,8 @@ jobs:
       - name: Unit tests
         run: make test
       - name: Security audit
+        env:
+          SKIP_DOCKER: "1"
         run: make audit
       - name: Upload test reports
         if: always()

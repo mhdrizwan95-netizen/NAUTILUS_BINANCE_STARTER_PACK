@@ -4,9 +4,7 @@ import asyncio, time, logging, httpx
 from ops.prometheus import get_or_create_gauge
 from ops.env import engine_endpoints
 
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 
 def _venue_label(base_url: str) -> str:

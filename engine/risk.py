@@ -128,9 +128,7 @@ class RiskRails:
             }
 
         # Exactly one of quote or quantity
-        if (quote is None and quantity is None) or (
-            quote is not None and quantity is not None
-        ):
+        if (quote is None and quantity is None) or (quote is not None and quantity is not None):
             return False, {
                 "error": "ORDER_SHAPE_INVALID",
                 "message": "Specify exactly one of {'quote','quantity'}.",
@@ -171,9 +169,7 @@ class RiskRails:
             exch_fn = getattr(router_mod, "exchange_client", None)
             if callable(exch_fn):
                 client = exch_fn()
-            get_price = (
-                getattr(client, "get_last_price", None) if client is not None else None
-            )
+            get_price = getattr(client, "get_last_price", None) if client is not None else None
 
             if callable(get_price):
 
@@ -225,9 +221,7 @@ class RiskRails:
             except Exception:
                 return 0.0
 
-        base_symbol = (
-            symbol_base if symbol_base.endswith("USD") else f"{symbol_base}USD"
-        )
+        base_symbol = symbol_base if symbol_base.endswith("USD") else f"{symbol_base}USD"
         primary_lookup = symbol if "." in symbol else f"{symbol_base}.BINANCE"
         last_price = _resolve_price(primary_lookup)
         if last_price == 0.0:
@@ -242,14 +236,10 @@ class RiskRails:
                 "message": f"Unable to price {symbol} for risk checks; retry when market data is available.",
             }
         side_mult = 1.0 if side.upper() == "BUY" else -1.0
-        delta_signed = side_mult * (
-            quote_amt if quote_amt else qty * float(last_price or 0.0)
-        )
+        delta_signed = side_mult * (quote_amt if quote_amt else qty * float(last_price or 0.0))
 
         raw_positions = snap.get("positions") if isinstance(snap, dict) else None
-        positions = (
-            list(raw_positions) if isinstance(raw_positions, (list, tuple)) else []
-        )
+        positions = list(raw_positions) if isinstance(raw_positions, (list, tuple)) else []
         sym_expo = 0.0
         total_expo = 0.0
         venue_exposures: Dict[str, float] = defaultdict(float)
@@ -263,9 +253,7 @@ class RiskRails:
                 if not pos_symbol:
                     continue
                 pos_base = pos_symbol.split(".")[0]
-                pos_venue = (
-                    pos_symbol.split(".")[1].upper() if "." in pos_symbol else "BINANCE"
-                )
+                pos_venue = pos_symbol.split(".")[1].upper() if "." in pos_symbol else "BINANCE"
                 qty_base = float(pos.get("qty_base", 0.0) or 0.0)
                 mark_px = pos.get("last_price_quote")
                 if not mark_px:
@@ -307,9 +295,7 @@ class RiskRails:
             }
 
         if resolved_market == "margin" and self.cfg.margin_enabled:
-            margin_level_val = self._sanitize_float(
-                getattr(portfolio_state, "margin_level", None)
-            )
+            margin_level_val = self._sanitize_float(getattr(portfolio_state, "margin_level", None))
             if (
                 margin_level_val is not None
                 and margin_level_val > 0
@@ -331,9 +317,7 @@ class RiskRails:
                     "error": "MARGIN_LIABILITY_LIMIT",
                     "message": f"Cross-margin liability {margin_liability_val:.2f} exceeds limit {self.cfg.margin_max_liability_usd:.2f}",
                 }
-            equity_val = (
-                self._sanitize_float(getattr(portfolio_state, "equity", None)) or 0.0
-            )
+            equity_val = self._sanitize_float(getattr(portfolio_state, "equity", None)) or 0.0
             max_leverage = max(self.cfg.margin_max_leverage, 0.0)
             if max_leverage > 0 and equity_val > 0:
                 current_abs_expo = abs(sym_expo)
@@ -538,9 +522,7 @@ class RiskRails:
                 continue
             parts = symbol_raw.split(".")
             parts[0]
-            pos_venue = (
-                parts[1] if len(parts) > 1 else venue_default or "binance"
-            ).lower()
+            pos_venue = (parts[1] if len(parts) > 1 else venue_default or "binance").lower()
             qty = self._sanitize_float(pos.get("qty_base")) or 0.0
             last_px = self._sanitize_float(pos.get("last_price_quote"))
             if last_px is None:

@@ -114,18 +114,13 @@ def prepare_model_row(model_data, portfolio_summary, export_timestamp):
         "trading_days": model_data.get("trading_days", 0),
         # Portfolio context
         "portfolio_total_realized": portfolio_summary.get("total_realized_pnl", 0.0),
-        "portfolio_total_unrealized": portfolio_summary.get(
-            "total_unrealized_pnl", 0.0
-        ),
+        "portfolio_total_unrealized": portfolio_summary.get("total_unrealized_pnl", 0.0),
         "portfolio_total_trades": portfolio_summary.get("total_trades", 0),
         "portfolio_sharpe": portfolio_summary.get("sharpe_portfolio", 0.0),
         "portfolio_max_drawdown": portfolio_summary.get("max_drawdown_portfolio", 0.0),
         # Attribution (% of portfolio this model represents)
         "pnl_attribution_pct": (
-            (
-                model_data.get("total_pnl", 0.0)
-                / max(portfolio_summary.get("total_pnl", 1), 0.01)
-            )
+            (model_data.get("total_pnl", 0.0) / max(portfolio_summary.get("total_pnl", 1), 0.01))
             * 100
             if portfolio_summary.get("total_pnl", 0) != 0
             else 0.0
@@ -241,9 +236,7 @@ def export_to_csv(models_data, portfolio_summary, timestamp=None):
             summary_file.write(
                 f"- Total Unrealized P&L: {format_currency(portfolio_summary.get('total_unrealized_pnl', 0))}\n"
             )
-            summary_file.write(
-                f"- Total Trades: {portfolio_summary.get('total_trades', 0)}\n"
-            )
+            summary_file.write(f"- Total Trades: {portfolio_summary.get('total_trades', 0)}\n")
             summary_file.write(
                 f"- Portfolio Sharpe: {portfolio_summary.get('sharpe_portfolio', 0):.2f}\n\n"
             )

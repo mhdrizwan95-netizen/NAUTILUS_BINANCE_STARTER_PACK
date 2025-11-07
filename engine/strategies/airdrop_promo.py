@@ -227,9 +227,7 @@ class AirdropPromoWatcher:
             self._record_event(symbol, "spread_high")
             return
 
-        quote_requirement, qty_requirement = self._extract_requirements(
-            text_blob, symbol
-        )
+        quote_requirement, qty_requirement = self._extract_requirements(text_blob, symbol)
         expected_reward = self._extract_expected_reward(text_blob)
         if expected_reward is not None and expected_reward < float(
             self.cfg.min_expected_reward_usd
@@ -279,9 +277,7 @@ class AirdropPromoWatcher:
         self._record_event(symbol, "accepted")
         if expected_reward and airdrop_expected_value_usd:
             try:
-                airdrop_expected_value_usd.labels(symbol=symbol).set(
-                    float(expected_reward)
-                )
+                airdrop_expected_value_usd.labels(symbol=symbol).set(float(expected_reward))
             except Exception:  # pragma: no cover - metrics optional
                 pass
 
@@ -364,9 +360,7 @@ class AirdropPromoWatcher:
         ]
         return " ".join(part for part in parts if part).strip()
 
-    def _promo_identifier(
-        self, evt: Dict[str, Any], payload: Dict[str, Any], text: str
-    ) -> str:
+    def _promo_identifier(self, evt: Dict[str, Any], payload: Dict[str, Any], text: str) -> str:
         fields = [
             payload.get("id"),
             payload.get("article_id"),
@@ -380,9 +374,7 @@ class AirdropPromoWatcher:
                 return str(field)
         return hex(abs(hash(text)))  # deterministic-ish fallback
 
-    def _select_symbol(
-        self, evt: Dict[str, Any], payload: Dict[str, Any]
-    ) -> Optional[str]:
+    def _select_symbol(self, evt: Dict[str, Any], payload: Dict[str, Any]) -> Optional[str]:
         candidates = []
         hints = evt.get("asset_hints") or []
         if isinstance(hints, list):
@@ -433,9 +425,7 @@ class AirdropPromoWatcher:
             if token in {"USD", "USDT", "BUSD", "FDUSD", "TUSD"}:
                 continue
             try:
-                qty_requirement = float(
-                    match.group(1).replace(",", "").replace("_", "")
-                )
+                qty_requirement = float(match.group(1).replace(",", "").replace("_", ""))
             except (TypeError, ValueError):
                 continue
             base = symbol.split(".")[0]
@@ -556,9 +546,7 @@ class AirdropPromoWatcher:
 
             BUS.fire(topic, data)
         except Exception:
-            _LOG.debug(
-                "Failed to publish participation event for %s", promo_id, exc_info=True
-            )
+            _LOG.debug("Failed to publish participation event for %s", promo_id, exc_info=True)
 
     def _record_event(self, symbol: str, decision: str) -> None:
         if not self.cfg.metrics_enabled or not airdrop_events_total:

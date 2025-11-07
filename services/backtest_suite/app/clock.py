@@ -1,5 +1,3 @@
-
-
 class SimClock:
     def __init__(self):
         self._t = 0

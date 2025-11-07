@@ -60,20 +60,12 @@ class MemeCoinConfig:
 
 
 def load_meme_coin_config() -> MemeCoinConfig:
-    if os.environ.get("SOCIAL_SENTIMENT_ENABLED") and not os.environ.get(
-        "MEME_SENTIMENT_ENABLED"
-    ):
+    if os.environ.get("SOCIAL_SENTIMENT_ENABLED") and not os.environ.get("MEME_SENTIMENT_ENABLED"):
         os.environ["MEME_SENTIMENT_ENABLED"] = os.environ["SOCIAL_SENTIMENT_ENABLED"]
-        _LOG.warning(
-            "SOCIAL_SENTIMENT_ENABLED is deprecated; use MEME_SENTIMENT_ENABLED instead"
-        )
-    if os.environ.get("SOCIAL_SENTIMENT_SOURCES") and not os.environ.get(
-        "MEME_SENTIMENT_SOURCES"
-    ):
+        _LOG.warning("SOCIAL_SENTIMENT_ENABLED is deprecated; use MEME_SENTIMENT_ENABLED instead")
+    if os.environ.get("SOCIAL_SENTIMENT_SOURCES") and not os.environ.get("MEME_SENTIMENT_SOURCES"):
         os.environ["MEME_SENTIMENT_SOURCES"] = os.environ["SOCIAL_SENTIMENT_SOURCES"]
-        _LOG.warning(
-            "SOCIAL_SENTIMENT_SOURCES is deprecated; use MEME_SENTIMENT_SOURCES instead"
-        )
+        _LOG.warning("SOCIAL_SENTIMENT_SOURCES is deprecated; use MEME_SENTIMENT_SOURCES instead")
 
     default_market_raw = (
         env_str(
@@ -352,9 +344,7 @@ class MemeCoinSentiment:
         order_payload = execution.get("order", {})
         router_result = order_payload.get("result", {})
         avg_px = self._as_float(router_result.get("avg_fill_price")) or price
-        qty = self._as_float(router_result.get("filled_qty_base")) or (
-            notional / max(avg_px, 1e-9)
-        )
+        qty = self._as_float(router_result.get("filled_qty_base")) or (notional / max(avg_px, 1e-9))
         _LOG.info(
             "[MEME] executed BUY %s notional=%.2f qty=%.6f avg=%.6f score=%.2f market=%s",
             symbol,
@@ -411,21 +401,13 @@ class MemeCoinSentiment:
         mentions = self._as_float(payload.get("mentions"))
         mentions = max(mentions, self._as_float(payload.get("mention_count")))
         mentions = max(mentions, self._as_float(metrics.get("mention_count")))
-        likes = self._as_float(
-            metrics.get("like_count") or metrics.get("favorite_count")
-        )
+        likes = self._as_float(metrics.get("like_count") or metrics.get("favorite_count"))
         retweets = self._as_float(metrics.get("retweet_count"))
         quotes = self._as_float(metrics.get("quote_count"))
-        replies = self._as_float(
-            metrics.get("reply_count") or payload.get("comment_count")
-        )
+        replies = self._as_float(metrics.get("reply_count") or payload.get("comment_count"))
 
         interactions = (
-            mentions
-            + (retweets * 1.8)
-            + (likes * 0.35)
-            + (quotes * 0.5)
-            + (replies * 0.8)
+            mentions + (retweets * 1.8) + (likes * 0.35) + (quotes * 0.5) + (replies * 0.8)
         )
         interactions = max(interactions, 0.0)
 
@@ -450,9 +432,7 @@ class MemeCoinSentiment:
 
         price_change_pct = payload.get("price_change_pct")
         price_change_pct = self._as_float(
-            price_change_pct
-            if price_change_pct is not None
-            else payload.get("price_change_5m_pct")
+            price_change_pct if price_change_pct is not None else payload.get("price_change_5m_pct")
         )
         price_change_pct = self._normalize_pct(price_change_pct)
 
@@ -494,9 +474,7 @@ class MemeCoinSentiment:
             equity = float(self.cfg.fallback_equity_usd)
         risk_budget = equity * float(self.cfg.per_trade_risk_pct)
         notional = risk_budget / max(self.cfg.stop_loss_pct, 1e-6)
-        notional = max(
-            self.cfg.notional_min_usd, min(self.cfg.notional_max_usd, notional)
-        )
+        notional = max(self.cfg.notional_min_usd, min(self.cfg.notional_max_usd, notional))
         return float(notional)
 
     def _router_equity(self) -> float:
@@ -598,11 +576,7 @@ class MemeCoinSentiment:
 
     def _set_cooldown(self, symbol: str, now: Optional[float] = None) -> None:
         until = self._cooldowns.set(symbol, now=now or self.clock.time())
-        if (
-            self.cfg.metrics_enabled
-            and meme_sentiment_cooldown_epoch is not None
-            and until
-        ):
+        if self.cfg.metrics_enabled and meme_sentiment_cooldown_epoch is not None and until:
             try:
                 meme_sentiment_cooldown_epoch.labels(symbol=symbol).set(until)
             except Exception:
@@ -614,9 +588,7 @@ class MemeCoinSentiment:
     def _arm_global_lock(self, now: float) -> None:
         if self.cfg.trade_lock_sec <= 0:
             return
-        self._global_lock_until = max(
-            self._global_lock_until, now + float(self.cfg.trade_lock_sec)
-        )
+        self._global_lock_until = max(self._global_lock_until, now + float(self.cfg.trade_lock_sec))
 
     def _record_event(self, symbol: str, decision: str) -> None:
         if not self.cfg.metrics_enabled or meme_sentiment_events_total is None:

@@ -9,9 +9,7 @@ log = logging.getLogger(__name__)
 _TASKS: Set[asyncio.Task[Any]] = set()
 
 
-def spawn(
-    coro: Coroutine[Any, Any, Any], *, name: Optional[str] = None
-) -> asyncio.Task[Any]:
+def spawn(coro: Coroutine[Any, Any, Any], *, name: Optional[str] = None) -> asyncio.Task[Any]:
     """Create and track an asyncio task, logging exceptions centrally."""
     try:
         loop = asyncio.get_running_loop()

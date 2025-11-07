@@ -106,13 +106,9 @@ class UniverseFilterConfig:
     def from_dict(name: str, payload: dict) -> "UniverseFilterConfig":
         venues = tuple(
             str(v).lower()
-            for v in (
-                payload.get("venues") or payload.get("exchange_type") or ["futures"]
-            )
+            for v in (payload.get("venues") or payload.get("exchange_type") or ["futures"])
         )
-        sort_by_raw = (
-            payload.get("sort_by") or payload.get("rank_by") or ["24h_volume_usdt"]
-        )
+        sort_by_raw = payload.get("sort_by") or payload.get("rank_by") or ["24h_volume_usdt"]
         if isinstance(sort_by_raw, (list, tuple)):
             sort_by = tuple(str(item).lower() for item in sort_by_raw)
         else:
@@ -120,9 +116,7 @@ class UniverseFilterConfig:
         return UniverseFilterConfig(
             name=str(name),
             venues=venues,
-            min_24h_volume_usdt=_as_float(
-                payload.get("min_24h_volume_usdt"), 5_000_000.0
-            ),
+            min_24h_volume_usdt=_as_float(payload.get("min_24h_volume_usdt"), 5_000_000.0),
             min_price_usdt=_as_float(
                 payload.get("min_price_usdt"), _as_float(payload.get("min_price"), 0.01)
             ),
@@ -142,32 +136,18 @@ class UniverseFilterConfig:
                     else None
                 )
             ),
-            exclude_prefixes=tuple(
-                str(x).upper() for x in (payload.get("exclude_prefixes") or [])
-            ),
-            exclude_suffixes=tuple(
-                str(x).upper() for x in (payload.get("exclude_suffixes") or [])
-            ),
-            exclude_contains=tuple(
-                str(x).upper() for x in (payload.get("exclude_contains") or [])
-            ),
-            include_symbols=tuple(
-                str(x).upper() for x in (payload.get("include_symbols") or [])
-            ),
+            exclude_prefixes=tuple(str(x).upper() for x in (payload.get("exclude_prefixes") or [])),
+            exclude_suffixes=tuple(str(x).upper() for x in (payload.get("exclude_suffixes") or [])),
+            exclude_contains=tuple(str(x).upper() for x in (payload.get("exclude_contains") or [])),
+            include_symbols=tuple(str(x).upper() for x in (payload.get("include_symbols") or [])),
             min_30d_trend_pct=_as_float(payload.get("min_30d_trend_pct"), None),
-            max_bid_ask_spread_pct=_as_float(
-                payload.get("max_bid_ask_spread_pct"), None
-            ),
+            max_bid_ask_spread_pct=_as_float(payload.get("max_bid_ask_spread_pct"), None),
             min_5m_atr_pct=_as_float(payload.get("min_5m_atr_pct"), None),
             min_price_change_pct_last_1h=_as_float(
                 payload.get("min_price_change_pct_last_1h"), None
             ),
-            min_liquidity_bid_size=_as_float(
-                payload.get("min_liquidity_bid_size"), None
-            ),
-            min_orderbook_depth_usdt=_as_float(
-                payload.get("min_orderbook_depth_usdt"), None
-            ),
+            min_liquidity_bid_size=_as_float(payload.get("min_liquidity_bid_size"), None),
+            min_orderbook_depth_usdt=_as_float(payload.get("min_orderbook_depth_usdt"), None),
             min_tick_size_pct=_as_float(payload.get("min_tick_size_pct"), None),
             new_listing_within_days=(
                 int(payload.get("new_listing_within_days"))
@@ -182,9 +162,7 @@ class UniverseFilterConfig:
             ),
             sort_by=sort_by,
             max_symbols=(
-                int(payload.get("max_symbols"))
-                if payload.get("max_symbols") is not None
-                else None
+                int(payload.get("max_symbols")) if payload.get("max_symbols") is not None else None
             ),
         )
 
@@ -278,13 +256,10 @@ def load_runtime_config(path: str | os.PathLike[str] | None = None) -> RuntimeCo
     futures_section = data.get("futures", {}) or {}
     futures = FuturesSettings(
         leverage={
-            str(k).upper(): int(v)
-            for k, v in (futures_section.get("leverage") or {}).items()
+            str(k).upper(): int(v) for k, v in (futures_section.get("leverage") or {}).items()
         }
         or {"BTCUSDT": 5, "ETHUSDT": 5, "default": 3},
-        desired_leverage=_parse_leverage_overrides(
-            futures_section.get("futures_leverage")
-        ),
+        desired_leverage=_parse_leverage_overrides(futures_section.get("futures_leverage")),
         hedge_mode=bool(futures_section.get("hedge_mode", True)),
     )
 
@@ -304,9 +279,7 @@ def load_runtime_config(path: str | os.PathLike[str] | None = None) -> RuntimeCo
     scanner_section = data.get("scanner", {}) or {}
     scanner = ScannerSettings(
         top_n=int(scanner_section.get("top_n", 30)),
-        min_24h_vol_usdt=_as_float(
-            scanner_section.get("min_24h_vol_usdt"), 5_000_000.0
-        ),
+        min_24h_vol_usdt=_as_float(scanner_section.get("min_24h_vol_usdt"), 5_000_000.0),
         refresh_seconds=int(scanner_section.get("refresh_seconds", 300)),
     )
 

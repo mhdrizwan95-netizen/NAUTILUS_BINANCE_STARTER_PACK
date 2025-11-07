@@ -22,9 +22,7 @@ def load_ops_token() -> Optional[str]:
             candidate = Path(token_file).read_text(encoding="utf-8").strip()
         except OSError as exc:
             if not _TOKEN_FILE_WARNING_EMITTED:
-                _log.warning(
-                    "Failed to read OPS_API_TOKEN_FILE (%s): %s", token_file, exc
-                )
+                _log.warning("Failed to read OPS_API_TOKEN_FILE (%s): %s", token_file, exc)
                 _TOKEN_FILE_WARNING_EMITTED = True
         else:
             if candidate:
@@ -37,11 +35,8 @@ def require_ops_token(request: Request) -> str:
     """Validate the inbound Ops control token, raising an HTTP error if missing."""
     expected = load_ops_token()
     if not expected:
-        raise HTTPException(
-            status_code=503, detail="OPS_API_TOKEN not configured on engine"
-        )
+        raise HTTPException(status_code=503, detail="OPS_API_TOKEN not configured on engine")
     provided = request.headers.get("X-Ops-Token") or request.headers.get("X-OPS-TOKEN")
     if not provided or not hmac.compare_digest(provided, expected):
         raise HTTPException(status_code=401, detail="Invalid or missing X-Ops-Token")
     return expected
-

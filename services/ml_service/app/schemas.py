@@ -23,9 +23,7 @@ class ModelInfo(BaseModel):
 
 
 class PredictRequest(BaseModel):
-    logret: List[float] = Field(
-        default_factory=list, description="Series of log returns"
-    )
+    logret: List[float] = Field(default_factory=list, description="Series of log returns")
 
 
 class PredictResponse(BaseModel):

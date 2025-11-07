@@ -78,9 +78,7 @@ class RiskGuardian:
         self.cfg = cfg or load_guardian_config()
         self._running = False
         self._task: Optional[asyncio.Task] = None
-        self._day_anchor: Optional[Tuple[int, float]] = (
-            None  # (YYYYMMDD, realized_at_anchor)
-        )
+        self._day_anchor: Optional[Tuple[int, float]] = None  # (YYYYMMDD, realized_at_anchor)
         self._paused_until_utc_reset = False
         self._tz = None
         self._max_loss_env_override = os.getenv("MAX_DAILY_LOSS_USD")
@@ -149,17 +147,13 @@ class RiskGuardian:
             except (TypeError, ValueError):
                 pass
         elif self._daily_loss_pct is not None and equity > 0:
-            loss_limit_usd = max(
-                loss_limit_usd, abs(equity) * abs(self._daily_loss_pct)
-            )
+            loss_limit_usd = max(loss_limit_usd, abs(equity) * abs(self._daily_loss_pct))
             self.cfg.max_daily_loss_usd = loss_limit_usd
 
         # Anchor at first run of day based on configured timezone/hour
         now_dt = datetime.now(self._tz)
         # daily boundary hour
-        boundary = now_dt.replace(
-            hour=self.cfg.daily_reset_hour, minute=0, second=0, microsecond=0
-        )
+        boundary = now_dt.replace(hour=self.cfg.daily_reset_hour, minute=0, second=0, microsecond=0)
         if now_dt < boundary:
             # before today's boundary, use yesterday's
             boundary = boundary - timedelta(days=1)
@@ -182,10 +176,7 @@ class RiskGuardian:
             MET.get("pnl_realized_total").set(realized)
         except Exception:
             pass
-        if (
-            pnl_day <= -abs(loss_limit_usd)
-            and not self._paused_until_utc_reset
-        ):
+        if pnl_day <= -abs(loss_limit_usd) and not self._paused_until_utc_reset:
             # Pause trading via RiskRails config gate
             # Write a single-source-of-truth flag file; RiskRails will consult it on each order
             _write_trading_flag(False)
@@ -290,9 +281,7 @@ class RiskGuardian:
         else:
             target = max(
                 positions,
-                key=lambda p: abs(
-                    getattr(p, "quantity", 0.0) * getattr(p, "last_price", 0.0)
-                ),
+                key=lambda p: abs(getattr(p, "quantity", 0.0) * getattr(p, "last_price", 0.0)),
             )
         if target is None:
             return

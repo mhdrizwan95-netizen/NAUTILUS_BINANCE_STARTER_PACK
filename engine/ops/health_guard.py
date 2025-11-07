@@ -33,14 +33,10 @@ class SoftBreachGuard:
 
     def __init__(self, router: Any, portfolio: Any | None = None) -> None:
         self.router = router
-        self.portfolio = (
-            portfolio or getattr(router, "portfolio_service", lambda: None)()
-        )
+        self.portfolio = portfolio or getattr(router, "portfolio_service", lambda: None)()
         self.cfg = SoftBreachConfig(
             enabled=env_bool("SOFT_BREACH_ENABLED", True),
-            tighten_mult=max(
-                0.0, min(1.0, env_float("SOFT_BREACH_TIGHTEN_SL_PCT", 0.6))
-            ),
+            tighten_mult=max(0.0, min(1.0, env_float("SOFT_BREACH_TIGHTEN_SL_PCT", 0.6))),
             breakeven_ok=env_bool("SOFT_BREACH_BREAKEVEN_OK", True),
             cancel_entries=env_bool("SOFT_BREACH_CANCEL_ENTRIES", True),
             log_orders=env_bool("SOFT_BREACH_LOG_ORDERS", True),
@@ -140,9 +136,7 @@ class SoftBreachGuard:
             _LOG.info("SOFT-BREACH: %s has no active stop order", symbol)
             return
 
-        current_stop = float(
-            protective.get("stopPrice") or protective.get("price") or 0.0
-        )
+        current_stop = float(protective.get("stopPrice") or protective.get("price") or 0.0)
         if current_stop <= 0:
             return
 
@@ -248,9 +242,7 @@ class SoftBreachGuard:
         return True
 
     @staticmethod
-    def _matching_stop(
-        symbol: str, orders: Iterable[Dict[str, Any]]
-    ) -> Optional[Dict[str, Any]]:
+    def _matching_stop(symbol: str, orders: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         base = symbol.split(".")[0].upper()
         for order in orders:
             sym = str(order.get("symbol") or "").upper()

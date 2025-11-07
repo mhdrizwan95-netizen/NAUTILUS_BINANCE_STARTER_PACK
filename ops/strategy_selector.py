@@ -16,9 +16,7 @@ WEIGHTS_PATH = Path("ops/strategy_weights.json")
 POLICY_PATH = Path("ops/m25_policy.yaml")
 RISK_SNAPSHOT_PATH = Path("data/processed/m19/metrics_snapshot.json")
 PROMOTION_AUDIT_PATH = Path("ops/logs/promotion_audit.jsonl")
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 
 def utc_now():
@@ -76,11 +74,7 @@ def rank_strategies(registry: dict) -> list:
     Rank strategies by composite score: Sharpe ratio primary, drawdown penalty
     Returns list of (model_name, score, stats) tuples, desc sorted.
     """
-    models = [
-        (k, v)
-        for k, v in registry.items()
-        if k != "current_model" and isinstance(v, dict)
-    ]
+    models = [(k, v) for k, v in registry.items() if k != "current_model" and isinstance(v, dict)]
 
     if not models:
         return []
@@ -144,9 +138,7 @@ def _compliance_allows_promotion() -> tuple[bool, list[str]]:
     metrics = _load_risk_snapshot()
     alerts = m25_governor.check_risk_limits(metrics, policy)
     if alerts:
-        logging.warning(
-            "[Governance] Promotion blocked by risk alerts: %s", ",".join(alerts)
-        )
+        logging.warning("[Governance] Promotion blocked by risk alerts: %s", ",".join(alerts))
         return False, alerts
     return True, []
 
@@ -183,8 +175,8 @@ def promote_best():
 
     if should_promote:
         policy = _load_promotion_policy()
-        require_approval = (
-            policy.get("human_review", {}).get("require_approval_for_promotion", False)
+        require_approval = policy.get("human_review", {}).get(
+            "require_approval_for_promotion", False
         )
 
         compliant, alerts = _compliance_allows_promotion()

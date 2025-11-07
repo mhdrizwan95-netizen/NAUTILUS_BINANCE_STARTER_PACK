@@ -53,9 +53,7 @@ def _tier_for(item: Dict[str, Any]) -> Optional[DexCandidate]:
         or item.get("baseTokenAddress")
         or ""
     )
-    pair_addr = str(
-        item.get("pairAddress") or item.get("address") or item.get("id") or ""
-    )
+    pair_addr = str(item.get("pairAddress") or item.get("address") or item.get("id") or "")
     base = item.get("baseToken") or {}
     symbol = str(base.get("symbol") or item.get("symbol") or "?")
     name = str(base.get("name") or item.get("name") or symbol)
@@ -165,9 +163,7 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
                         "meta": {
                             "source": "dexscreener",
                             "tier_raw": c.tier,
-                            "volume_ratio": (
-                                c.vol_1h / max((c.vol_24h / 24) or 1.0, 1e-9)
-                            ),
+                            "volume_ratio": (c.vol_1h / max((c.vol_24h / 24) or 1.0, 1e-9)),
                         },
                     },
                 )

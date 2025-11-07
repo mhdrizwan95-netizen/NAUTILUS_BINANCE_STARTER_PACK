@@ -33,9 +33,7 @@ venue_errors = Counter(
 venue_error_rate_pct = Gauge(
     "venue_error_rate_pct", "Venue error pct (rolling window)", multiprocess_mode="max"
 )
-breaker_state = Gauge(
-    "breaker_state", "1 if breaker open, else 0", multiprocess_mode="max"
-)
+breaker_state = Gauge("breaker_state", "1 if breaker open, else 0", multiprocess_mode="max")
 orders_rounded = Counter("orders_rounded_total", "Orders that required qty rounding")
 fees_paid_total = Gauge("fees_paid_total", "Total fees paid in USD")
 
@@ -56,9 +54,7 @@ fill_latency = Histogram(
     "Order fill latency (ms)",
     buckets=(10, 50, 100, 250, 500, 1000, 2500),
 )
-pnl_realized = Gauge(
-    "pnl_realized_total", "Realized profit/loss in USDT", multiprocess_mode="max"
-)
+pnl_realized = Gauge("pnl_realized_total", "Realized profit/loss in USDT", multiprocess_mode="max")
 pnl_unrealized = Gauge(
     "pnl_unrealized_total", "Unrealized profit/loss in USDT", multiprocess_mode="max"
 )
@@ -104,9 +100,7 @@ mark_time_epoch = Gauge(
     "Unix time when positions were last marked to market",
     multiprocess_mode="max",
 )
-health_state = Gauge(
-    "health_state", "0=OK,1=DEGRADED,2=HALTED", multiprocess_mode="max"
-)
+health_state = Gauge("health_state", "0=OK,1=DEGRADED,2=HALTED", multiprocess_mode="max")
 try:
     from prometheus_client import Counter as _Counter
 
@@ -125,9 +119,7 @@ mark_price_freshness_sec = Gauge(
 
 # Position and entry price tracking
 POSITION_SIZE = Gauge("position_size", "Contracts held", ["symbol", "venue", "role"])
-ENTRY_PRICE_USD = Gauge(
-    "entry_price_usd", "Avg entry price", ["symbol", "venue", "role"]
-)
+ENTRY_PRICE_USD = Gauge("entry_price_usd", "Avg entry price", ["symbol", "venue", "role"])
 UPNL_USD = Gauge("upnl_usd", "Unrealized PnL (USD)", ["symbol", "venue", "role"])
 
 # Per-symbol unrealized PnL (for invariants)
@@ -151,9 +143,7 @@ entry_price_by_symbol = Gauge(
 unrealized_profit_by_symbol = Gauge(
     "unrealized_profit", "Unrealized profit (USD)", ["symbol"], multiprocess_mode="max"
 )
-mark_price_by_symbol = Gauge(
-    "mark_price", "Mark price (USD)", ["symbol"], multiprocess_mode="max"
-)
+mark_price_by_symbol = Gauge("mark_price", "Mark price (USD)", ["symbol"], multiprocess_mode="max")
 
 # NOTE: Metrics declared here are shared across workers; ensure PROMETHEUS_MULTIPROC_DIR is set when running multiprocess exports.
 
@@ -583,9 +573,7 @@ metrics_heartbeat = Gauge(
 )
 
 # Production polish metrics
-reconcile_lag_seconds = Gauge(
-    "reconcile_lag_seconds", "Seconds since last portfolio reconcile"
-)
+reconcile_lag_seconds = Gauge("reconcile_lag_seconds", "Seconds since last portfolio reconcile")
 ws_disconnects_total = Counter("ws_disconnects_total", "Websocket disconnects observed")
 last_specs_refresh_epoch = Gauge(
     "last_specs_refresh_epoch", "Unix time of last venue specs refresh"
@@ -729,9 +717,7 @@ except Exception:
 
 # Guards telemetry
 try:
-    risk_depeg_triggers_total = Counter(
-        "risk_depeg_triggers_total", "Depeg guard triggers"
-    )
+    risk_depeg_triggers_total = Counter("risk_depeg_triggers_total", "Depeg guard triggers")
     risk_depeg_active = Gauge("risk_depeg_active", "1 if depeg safe-mode active else 0")
     funding_spike_events_total = Counter("funding_spike_events_total", "Funding spike events", ["symbol"])  # type: ignore
     REGISTRY.update(
@@ -879,9 +865,7 @@ def observe_http_request(
     status = str(status_code)
     try:
         http_requests_total.labels(service, method, path, status).inc()
-        http_request_latency_seconds.labels(service, method, path).observe(
-            duration_seconds
-        )
+        http_request_latency_seconds.labels(service, method, path).observe(duration_seconds)
     except Exception:
         pass
 

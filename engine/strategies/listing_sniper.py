@@ -193,9 +193,7 @@ class ListingSniper:
         article_id = str(payload.get("id") or payload.get("articleId") or "").strip()
         title = str(payload.get("title") or payload.get("titleText") or "").strip()
         url = payload.get("url") or payload.get("linkUrl")
-        announced_at = self._parse_timestamp(
-            payload.get("published") or payload.get("publishTime")
-        )
+        announced_at = self._parse_timestamp(payload.get("published") or payload.get("publishTime"))
         go_live_at = self._extract_go_live_at(payload, title)
         tickers = self._extract_symbols(evt)
         if not tickers:
@@ -205,11 +203,7 @@ class ListingSniper:
             symbol = raw_symbol.upper()
             if not symbol.endswith("USDT"):
                 symbol = f"{symbol}USDT"
-            key = (
-                f"{article_id}:{symbol}"
-                if article_id
-                else f"{symbol}:{int(announced_at)}"
-            )
+            key = f"{article_id}:{symbol}" if article_id else f"{symbol}:{int(announced_at)}"
             if key in self._seen_ids:
                 continue
 
@@ -227,10 +221,7 @@ class ListingSniper:
             if self.cfg.forward_legacy_event:
                 await self._forward_legacy(symbol, announced_at)
 
-            if (
-                self.cfg.max_parallel_tasks > 0
-                and len(self._tasks) >= self.cfg.max_parallel_tasks
-            ):
+            if self.cfg.max_parallel_tasks > 0 and len(self._tasks) >= self.cfg.max_parallel_tasks:
                 self._record_skip(symbol, "too_many_active")
                 continue
 
@@ -249,16 +240,10 @@ class ListingSniper:
         self, symbol: str, announced_at: float, go_live_at: Optional[float]
     ) -> None:
         if self.cfg.metrics_enabled:
-            listing_sniper_announcements_total.labels(
-                symbol=symbol, action="received"
-            ).inc()
-            listing_sniper_last_announce_epoch.labels(symbol=symbol).set(
-                float(announced_at)
-            )
+            listing_sniper_announcements_total.labels(symbol=symbol, action="received").inc()
+            listing_sniper_last_announce_epoch.labels(symbol=symbol).set(float(announced_at))
             if go_live_at:
-                listing_sniper_go_live_epoch.labels(symbol=symbol).set(
-                    float(go_live_at)
-                )
+                listing_sniper_go_live_epoch.labels(symbol=symbol).set(float(go_live_at))
 
     def _record_skip(self, symbol: str, reason: str) -> None:
         if self.cfg.metrics_enabled:
@@ -266,11 +251,7 @@ class ListingSniper:
 
     def _set_cooldown(self, symbol: str) -> None:
         until = self._cooldowns.set(symbol)
-        if (
-            self.cfg.metrics_enabled
-            and until
-            and listing_sniper_cooldown_epoch is not None
-        ):
+        if self.cfg.metrics_enabled and until and listing_sniper_cooldown_epoch is not None:
             listing_sniper_cooldown_epoch.labels(symbol=symbol).set(until)
 
     def _cooldown_active(self, symbol: str) -> bool:
@@ -298,15 +279,9 @@ class ListingSniper:
                 last_spread = spread
                 if baseline is None:
                     baseline = price
-                move = (
-                    0.0
-                    if baseline is None
-                    else (price - baseline) / max(baseline, 1e-9)
-                )
+                move = 0.0 if baseline is None else (price - baseline) / max(baseline, 1e-9)
                 if move > self.cfg.max_chase_pct:
-                    logger.info(
-                        "[LISTING] %s skipped due to chase %.2f%%", symbol, move * 100
-                    )
+                    logger.info("[LISTING] %s skipped due to chase %.2f%%", symbol, move * 100)
                     self._record_skip(symbol, "chase")
                     self._set_cooldown(symbol)
                     return
@@ -364,9 +339,7 @@ class ListingSniper:
             reason = str(execution.get("error") or execution.get("reason") or "risk")
             self._record_skip(symbol, reason)
             if self.cfg.metrics_enabled:
-                listing_sniper_orders_total.labels(
-                    symbol=symbol, status="rejected"
-                ).inc()
+                listing_sniper_orders_total.labels(symbol=symbol, status="rejected").inc()
             self._set_cooldown(symbol)
             return
 
@@ -390,9 +363,7 @@ class ListingSniper:
         try:
             avg_fill = float(router_result.get("avg_fill_price") or last_price)
             qty_filled = float(
-                router_result.get("filled_qty_base")
-                or router_result.get("executedQty")
-                or 0.0
+                router_result.get("filled_qty_base") or router_result.get("executedQty") or 0.0
             )
         except Exception:
             avg_fill = last_price
@@ -406,9 +377,7 @@ class ListingSniper:
             qty_filled,
             market_choice,
         )
-        await self._deploy_exit_plan(
-            full_symbol, router_result, last_price, market_choice
-        )
+        await self._deploy_exit_plan(full_symbol, router_result, last_price, market_choice)
         self._set_cooldown(symbol)
 
     def _sizing_notional(self) -> float:
@@ -442,9 +411,7 @@ class ListingSniper:
             remaining = wait_until - time.time()
             if remaining <= 0:
                 break
-            logger.info(
-                "[LISTING] %s waiting %.2fs for go-live window", op.symbol, remaining
-            )
+            logger.info("[LISTING] %s waiting %.2fs for go-live window", op.symbol, remaining)
             await asyncio.sleep(min(remaining, 0.05))
 
     async def _deploy_exit_plan(
@@ -454,14 +421,9 @@ class ListingSniper:
         fallback_price: float,
         _market_choice: Optional[str],
     ) -> None:
-        qty = float(
-            execution.get("filled_qty_base") or execution.get("executedQty") or 0.0
-        )
+        qty = float(execution.get("filled_qty_base") or execution.get("executedQty") or 0.0)
         avg_px = float(
-            execution.get("avg_fill_price")
-            or execution.get("avgPrice")
-            or fallback_price
-            or 0.0
+            execution.get("avg_fill_price") or execution.get("avgPrice") or fallback_price or 0.0
         )
         if qty <= 0 or avg_px <= 0:
             return
@@ -475,9 +437,7 @@ class ListingSniper:
         if stop_price is not None:
             stop_price = max(avg_px * 0.0001, stop_price)
             try:
-                await self.router.amend_stop_reduce_only(
-                    symbol, "SELL", stop_price, abs(qty)
-                )
+                await self.router.amend_stop_reduce_only(symbol, "SELL", stop_price, abs(qty))
             except Exception as exc:  # noqa: BLE001
                 logger.debug("[LISTING] stop placement failed for %s: %s", symbol, exc)
 
@@ -500,13 +460,9 @@ class ListingSniper:
             if clip_qty <= 0:
                 continue
             try:
-                await self.router.place_reduce_only_limit(
-                    symbol, "SELL", clip_qty, price
-                )
+                await self.router.place_reduce_only_limit(symbol, "SELL", clip_qty, price)
             except Exception as exc:  # noqa: BLE001
-                logger.debug(
-                    "[LISTING] tp placement failed for %s @%.4f: %s", symbol, price, exc
-                )
+                logger.debug("[LISTING] tp placement failed for %s @%.4f: %s", symbol, price, exc)
 
     async def _forward_legacy(self, symbol: str, announced_at: float) -> None:
         key = f"{symbol}:{int(announced_at)}"
@@ -639,12 +595,8 @@ class ListingSniper:
                 res = book_fn(symbol)
                 if inspect.isawaitable(res):
                     res = await res
-                bid = self._as_float(
-                    res.get("bidPrice") if isinstance(res, dict) else None
-                )
-                ask = self._as_float(
-                    res.get("askPrice") if isinstance(res, dict) else None
-                )
+                bid = self._as_float(res.get("bidPrice") if isinstance(res, dict) else None)
+                ask = self._as_float(res.get("askPrice") if isinstance(res, dict) else None)
                 if bid > 0 and ask > 0:
                     price = (bid + ask) / 2.0
                     spread = abs(ask - bid) / max(price, 1e-9)
@@ -676,9 +628,7 @@ class ListingSniper:
             symbols.add(sym)
         return symbols
 
-    def _extract_go_live_at(
-        self, payload: Dict[str, Any], title: str
-    ) -> Optional[float]:
+    def _extract_go_live_at(self, payload: Dict[str, Any], title: str) -> Optional[float]:
         for key in (
             "goLiveTime",
             "go_live_time",

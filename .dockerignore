@@ -2,6 +2,8 @@
 .git
 .gitignore
 .vscode
+.env
+.env.*
 __pycache__/
 *.pyc
 *.pyo
@@ -16,6 +18,7 @@ venv/
 # Node, misc
 # Keep frontend sources so the Docker build can produce the static Command Center bundle
 node_modules/
+frontend/node_modules/
 
 # Large datasets & archives
 backtests/
@@ -37,6 +40,7 @@ ml_service/model_store/
 **/.ruff_cache/
 .DS_Store
 *.log
+ops/logs/
 .ipynb_checkpoints/
 
 # Data generated at runtime stays on a volume

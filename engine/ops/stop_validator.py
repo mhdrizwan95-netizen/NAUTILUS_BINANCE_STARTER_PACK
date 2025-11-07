@@ -26,9 +26,7 @@ class _ProtView:
 
 
 class StopValidator:
-    def __init__(
-        self, cfg: dict, router, md, log, metrics, bus=None, clock=None
-    ) -> None:
+    def __init__(self, cfg: dict, router, md, log, metrics, bus=None, clock=None) -> None:
         self.cfg = cfg
         self.router = router
         self.md = md
@@ -103,9 +101,7 @@ class StopValidator:
             want_sl = (last - atr) if side == "LONG" else (last + atr)
             if not prot.has_stop_for(side):
                 try:
-                    self.metrics.stop_validator_missing_total.labels(
-                        symbol=symbol, kind="SL"
-                    ).inc()
+                    self.metrics.stop_validator_missing_total.labels(symbol=symbol, kind="SL").inc()
                 except Exception:
                     pass
                 if bool(self.cfg.get("STOP_VALIDATOR_REPAIR", False)):
@@ -120,15 +116,10 @@ class StopValidator:
                         pass
                     self.log.warning("[STOPVAL] Repaired SL %s", symbol)
                     # Optional notify bridge (debounced)
-                    if (
-                        bool(self.cfg.get("STOPVAL_NOTIFY_ENABLED", False))
-                        and self.bus is not None
-                    ):
+                    if bool(self.cfg.get("STOPVAL_NOTIFY_ENABLED", False)) and self.bus is not None:
                         now = float(self.clock.time())
                         last = self._last_alert.get(symbol, 0.0)
-                        if now - last >= int(
-                            self.cfg.get("STOPVAL_NOTIFY_DEBOUNCE_SEC", 60)
-                        ):
+                        if now - last >= int(self.cfg.get("STOPVAL_NOTIFY_DEBOUNCE_SEC", 60)):
                             try:
                                 self.bus.fire(
                                     "notify.telegram",

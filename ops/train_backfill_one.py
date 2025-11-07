@@ -77,9 +77,7 @@ def main() -> None:
     run(f'python adapters/binance_hist.py --symbols "{syms_arg}" --day "{day_str}"')
 
     # Step 2: Build features (uses --range day..day)
-    run(
-        f'python pipeline/build_features.py --symbols "{syms_arg}" --range "{day_str}..{day_str}"'
-    )
+    run(f'python pipeline/build_features.py --symbols "{syms_arg}" --range "{day_str}..{day_str}"')
 
     # Step 3: Replay situations
     run(

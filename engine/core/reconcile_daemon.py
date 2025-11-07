@@ -15,9 +15,7 @@ from .oms_models import OrderRecord, new_order_id
 from ..metrics import REGISTRY
 
 _oms = OMSStore()
-_reconcile_runs = REGISTRY.metric(
-    "reconcile_runs_total", "Total reconciliation runs", "counter"
-)
+_reconcile_runs = REGISTRY.metric("reconcile_runs_total", "Total reconciliation runs", "counter")
 _reconcile_imported = REGISTRY.metric(
     "reconcile_imported_total", "Orders imported during reconciliation", "counter"
 )
@@ -66,9 +64,7 @@ async def _perform_reconciliation() -> None:
                 remote_orders = ven_client.list_open_orders()
 
                 # Create lookup maps
-                remote_by_id = {
-                    str(order["order_id"]): order for order in remote_orders
-                }
+                remote_by_id = {str(order["order_id"]): order for order in remote_orders}
 
                 # Process local orders for this venue
                 for order_rec in local_open:
@@ -94,9 +90,7 @@ async def _perform_reconciliation() -> None:
                         # Local order missing remotely - likely filled or canceled
                         _oms.close(order_rec.id, "FILLED")  # Assume filled for safety
                         _reconcile_closed.inc()
-                        logging.info(
-                            "[SYNC] Closed %s (missing remotely)", order_rec.symbol
-                        )
+                        logging.info("[SYNC] Closed %s (missing remotely)", order_rec.symbol)
 
                 # Check for remote orders not in local OMS (import them)
                 local_venue_orders = {
@@ -112,9 +106,7 @@ async def _perform_reconciliation() -> None:
                         await _import_remote_order(remote_order, venue)
 
             except Exception as ven_e:
-                logging.warning(
-                    "[SYNC] Venue %s reconciliation failed: %s", venue, ven_e
-                )
+                logging.warning("[SYNC] Venue %s reconciliation failed: %s", venue, ven_e)
 
         # Persist updated OMS state
         _oms._persist()

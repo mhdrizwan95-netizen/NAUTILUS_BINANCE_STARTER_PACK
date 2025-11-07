@@ -39,9 +39,7 @@ OUT_DIR = "data/processed/m17"
 MODEL_DIR = "ml_service/model_store"
 
 
-def load_feedback_with_macro_regimes(
-    feedback_path: str, macro_model_path: str
-) -> pd.DataFrame:
+def load_feedback_with_macro_regimes(feedback_path: str, macro_model_path: str) -> pd.DataFrame:
     """
     Load feedback log and augment with macro regime classifications.
 
@@ -74,9 +72,7 @@ def load_feedback_with_macro_regimes(
         # Map existing macro_state to regime names
         regime_map = {0: "Calm", 1: "Trend", 2: "Chaos"}
         df["regime"] = df["macro_state"].map(regime_map).fillna("Calm")
-        print(
-            f"Using macro_state for regime labels: {df['regime'].value_counts().to_dict()}"
-        )
+        print(f"Using macro_state for regime labels: {df['regime'].value_counts().to_dict()}")
     else:
         print("Warning: No macro_state column, defaulting all to 'Calm' regime")
         df["regime"] = "Calm"
@@ -94,11 +90,7 @@ def prepare_features_for_regime(df: pd.DataFrame) -> np.ndarray:
     features = []
 
     # Try to use available state features
-    if (
-        "macro_state" in df.columns
-        and "micro_state" in df.columns
-        and "confidence" in df.columns
-    ):
+    if "macro_state" in df.columns and "micro_state" in df.columns and "confidence" in df.columns:
         # Create one-hot encodings + confidence
         macro_oh = pd.get_dummies(df["macro_state"].astype(int), prefix="macro").values
         micro_oh = pd.get_dummies(df["micro_state"].astype(int), prefix="micro").values
@@ -132,9 +124,7 @@ def create_action_labels(df: pd.DataFrame) -> np.ndarray:
     # Ensure we have the expected action range (-1, 0, 1)
     actions = np.clip(actions, -1, 1)
 
-    print(
-        f"Action distribution: {np.bincount(actions + 1, minlength=3)} (SELL/HOLD/BUY)"
-    )
+    print(f"Action distribution: {np.bincount(actions + 1, minlength=3)} (SELL/HOLD/BUY)")
     return actions
 
 
@@ -365,16 +355,10 @@ def create_training_report(training_results: Dict[str, Dict[str, Any]]) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Train M17 Micro Policy Models per Regime"
-    )
+    parser = argparse.ArgumentParser(description="Train M17 Micro Policy Models per Regime")
     parser.add_argument("--feedback", required=True, help="Path to feedback_log.csv")
-    parser.add_argument(
-        "--macro-model", help="Path to trained macro regime model (optional)"
-    )
-    parser.add_argument(
-        "--test-size", type=float, default=0.2, help="Test data fraction"
-    )
+    parser.add_argument("--macro-model", help="Path to trained macro regime model (optional)")
+    parser.add_argument("--test-size", type=float, default=0.2, help="Test data fraction")
 
     args = parser.parse_args()
 

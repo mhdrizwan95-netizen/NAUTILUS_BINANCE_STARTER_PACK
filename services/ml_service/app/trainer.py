@@ -7,7 +7,7 @@ from sklearn.preprocessing import StandardScaler
 from loguru import logger
 from .config import settings
 from . import model_store
-from common import manifest
+from services.common import manifest
 
 
 def _load_new_data() -> Tuple[pd.DataFrame, List[str]]:
@@ -92,9 +92,7 @@ def _train_hmm(
     scaler = StandardScaler()
     Xtr = scaler.fit_transform(Xtr_raw)
     Xval = scaler.transform(Xval_raw)
-    hmm = GaussianHMM(
-        n_components=n_states, covariance_type="full", n_iter=200, random_state=seed
-    )
+    hmm = GaussianHMM(n_components=n_states, covariance_type="full", n_iter=200, random_state=seed)
     hmm.fit(Xtr)
     val_ll = float(hmm.score(Xval) / max(len(Xval), 1))
     meta = {
@@ -111,9 +109,7 @@ def _mark_claimed_as_processed(file_ids: List[str], delete_after: bool = True):
         return
     for fid in file_ids:
         try:
-            manifest.mark_processed(
-                fid, delete_file=delete_after, db_path=settings.LEDGER_DB
-            )
+            manifest.mark_processed(fid, delete_file=delete_after, db_path=settings.LEDGER_DB)
         except Exception as exc:
             logger.warning(f"failed to mark {fid} processed: {exc}")
 
@@ -127,9 +123,7 @@ def _requeue_claims(file_ids: List[str]):
         logger.warning(f"failed to requeue {len(file_ids)} files: {exc}")
 
 
-def train_once(
-    n_states: int = None, tag: str = None, promote: bool = True
-) -> Dict[str, Any]:
+def train_once(n_states: int = None, tag: str = None, promote: bool = True) -> Dict[str, Any]:
     n_states = n_states or settings.HMM_STATES
     np.random.seed(settings.TRAIN_SEED)
     df_new, claimed_ids = _load_new_data()
@@ -188,20 +182,14 @@ def train_once(
         promoted = False
         if promote and settings.AUTO_PROMOTE:
             cur_model, cur_scaler, cur_meta = model_store.load_current()
-            cur_val = (
-                cur_meta.get("metric_value", float("-inf"))
-                if cur_meta
-                else float("-inf")
-            )
+            cur_val = cur_meta.get("metric_value", float("-inf")) if cur_meta else float("-inf")
             if (meta["metric_value"] - cur_val) >= settings.PROMOTION_MIN_DELTA:
                 model_store.promote(version_dir)
                 promoted = True
                 model_store.prune_keep_last(settings.KEEP_N_MODELS)
 
         claimed_count = len(claimed_ids)
-        _mark_claimed_as_processed(
-            claimed_ids, delete_after=settings.DELETE_AFTER_PROCESS
-        )
+        _mark_claimed_as_processed(claimed_ids, delete_after=settings.DELETE_AFTER_PROCESS)
         claimed_ids = []
     except Exception:
         _requeue_claims(claimed_ids)

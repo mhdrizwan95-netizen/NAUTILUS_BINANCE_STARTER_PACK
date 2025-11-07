@@ -21,10 +21,7 @@ def main():
     symbol = (sys.argv[1] if len(sys.argv) > 1 else "BTCUSDT").upper()
     mode = (os.environ.get("BINANCE_MODE") or "").lower()
     if mode.startswith("futures"):
-        base = (
-            os.environ.get("BINANCE_FUTURES_BASE")
-            or "https://testnet.binancefuture.com"
-        )
+        base = os.environ.get("BINANCE_FUTURES_BASE") or "https://testnet.binancefuture.com"
         endpoint = "/fapi/v1/userTrades"
     else:
         base = (

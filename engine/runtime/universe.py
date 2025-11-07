@@ -47,9 +47,7 @@ class UniverseManager:
         self._universes: Dict[str, Tuple[int, Tuple[str, ...]]] = {}
         self._events: Dict[str, asyncio.Event] = {}
         self._metadata: Dict[str, Dict[str, Any]] = {}
-        self._snapshot_dir = (
-            Path(config.snapshot_dir).expanduser() if config.snapshot_dir else None
-        )
+        self._snapshot_dir = Path(config.snapshot_dir).expanduser() if config.snapshot_dir else None
         if self._snapshot_dir:
             self._snapshot_dir.mkdir(parents=True, exist_ok=True)
         self._spot_exchange_info: Dict[str, dict] = {}
@@ -61,9 +59,7 @@ class UniverseManager:
         key = strategy.lower()
         async with self._lock:
             current_version, _ = self._universes.get(key, (0, ()))
-            new_version = (
-                (current_version + 1) if version_hint is None else version_hint
-            )
+            new_version = (current_version + 1) if version_hint is None else version_hint
             clean = tuple(dict.fromkeys(sym.upper() for sym in symbols))
             self._universes[key] = (new_version, clean)
             self._events.setdefault(key, asyncio.Event()).set()
@@ -87,9 +83,7 @@ class UniverseManager:
         key = strategy.lower()
         async with self._lock:
             if key not in self._universes:
-                default_symbols = tuple(
-                    sym.upper() for sym in self._config.symbols.core
-                )
+                default_symbols = tuple(sym.upper() for sym in self._config.symbols.core)
                 self._universes[key] = (0, default_symbols)
             event = self._events.get(key)
             if event is None or event.is_set():
@@ -228,9 +222,7 @@ class UniverseScreener:
         metadata = self.manager.metadata_snapshot()
         universes = self.config.universes or {}
         for strategy, filter_cfg in universes.items():
-            symbols = self._apply_filter(
-                filter_cfg, futures_metrics, spot_metrics, metadata
-            )
+            symbols = self._apply_filter(filter_cfg, futures_metrics, spot_metrics, metadata)
             await self.manager.update(strategy, symbols)
             log.info("[universe] strategy=%s symbols=%d", strategy, len(symbols))
 
@@ -249,9 +241,7 @@ class UniverseScreener:
                         symbol = str(sym.get("symbol") or "").upper()
                         if not symbol:
                             continue
-                        filters = {
-                            f.get("filterType"): f for f in sym.get("filters", []) or []
-                        }
+                        filters = {f.get("filterType"): f for f in sym.get("filters", []) or []}
                         price_filter = filters.get("PRICE_FILTER", {})
                         tick_size = float(price_filter.get("tickSize", 0.0) or 0.0)
                         info[symbol] = {
@@ -282,9 +272,7 @@ class UniverseScreener:
                         symbol = str(sym.get("symbol") or "").upper()
                         if not symbol:
                             continue
-                        filters = {
-                            f.get("filterType"): f for f in sym.get("filters", []) or []
-                        }
+                        filters = {f.get("filterType"): f for f in sym.get("filters", []) or []}
                         price_filter = filters.get("PRICE_FILTER", {})
                         tick_size = float(price_filter.get("tickSize", 0.0) or 0.0)
                         info[symbol] = {
@@ -317,9 +305,7 @@ class UniverseScreener:
                 max_leverage=1,
             )
         # Fetch open interest for most liquid symbols only
-        top_symbols = sorted(
-            metrics.values(), key=lambda m: m.volume_usdt, reverse=True
-        )[:200]
+        top_symbols = sorted(metrics.values(), key=lambda m: m.volume_usdt, reverse=True)[:200]
         semaphore = asyncio.Semaphore(10)
 
         async def fetch(symbol: str) -> None:
@@ -369,9 +355,7 @@ class UniverseScreener:
     async def _fetch_orderbook(
         self, symbol: str, venue: str, limit: int = 20
     ) -> Optional[Tuple[float, float, float]]:
-        base_url = (
-            self.client._futures_base if venue == "futures" else self.client._spot_base
-        )
+        base_url = self.client._futures_base if venue == "futures" else self.client._spot_base
         path = "/fapi/v1/depth" if venue == "futures" else "/api/v3/depth"
         headers = (
             {"X-MBX-APIKEY": self.client._settings.api_key}
@@ -416,9 +400,7 @@ class UniverseScreener:
     async def _fetch_klines(
         self, symbol: str, venue: str, interval: str, limit: int
     ) -> Optional[List[List[str]]]:
-        base_url = (
-            self.client._futures_base if venue == "futures" else self.client._spot_base
-        )
+        base_url = self.client._futures_base if venue == "futures" else self.client._spot_base
         path = "/fapi/v1/klines" if venue == "futures" else "/api/v3/klines"
         headers = (
             {"X-MBX-APIKEY": self.client._settings.api_key}
@@ -438,16 +420,10 @@ class UniverseScreener:
         except Exception:
             return None
 
-    async def _enrich_metrics(
-        self, metrics: Dict[str, SymbolMetrics], venue: str
-    ) -> None:
+    async def _enrich_metrics(self, metrics: Dict[str, SymbolMetrics], venue: str) -> None:
         if not metrics:
             return
-        info_map = (
-            self._futures_exchange_info
-            if venue == "futures"
-            else self._spot_exchange_info
-        )
+        info_map = self._futures_exchange_info if venue == "futures" else self._spot_exchange_info
         ordered = sorted(metrics.values(), key=lambda m: m.volume_usdt, reverse=True)
         limit = min(len(ordered), 80)
         semaphore = asyncio.Semaphore(6)
@@ -466,9 +442,7 @@ class UniverseScreener:
                 klines_5m = await self._fetch_klines(metric.symbol, venue, "5m", 60)
                 if klines_5m:
                     atr_pct = self._compute_atr_pct(klines_5m)
-                    price_change_pct = self._compute_price_change_pct(
-                        klines_5m, steps=12
-                    )
+                    price_change_pct = self._compute_price_change_pct(klines_5m, steps=12)
 
                 trend_pct = 0.0
                 klines_1d = await self._fetch_klines(metric.symbol, venue, "1d", 31)
@@ -569,21 +543,12 @@ class UniverseScreener:
                 return False
             if metric.price < filter_cfg.min_price_usdt:
                 return False
-            if (
-                filter_cfg.max_price_usdt is not None
-                and metric.price > filter_cfg.max_price_usdt
-            ):
+            if filter_cfg.max_price_usdt is not None and metric.price > filter_cfg.max_price_usdt:
                 return False
-            if (
-                metric.venue == "futures"
-                and filter_cfg.min_futures_open_interest_usdt is not None
-            ):
+            if metric.venue == "futures" and filter_cfg.min_futures_open_interest_usdt is not None:
                 if metric.open_interest_usd < filter_cfg.min_futures_open_interest_usdt:
                     return False
-            if (
-                metric.venue == "futures"
-                and filter_cfg.min_leverage_supported is not None
-            ):
+            if metric.venue == "futures" and filter_cfg.min_leverage_supported is not None:
                 if metric.max_leverage < filter_cfg.min_leverage_supported:
                     return False
             if (
@@ -682,9 +647,7 @@ class UniverseScreener:
 
         if filter_cfg.sort_by:
             candidates.sort(
-                key=lambda m: tuple(
-                    metric_value(m, sort_key) for sort_key in filter_cfg.sort_by
-                ),
+                key=lambda m: tuple(metric_value(m, sort_key) for sort_key in filter_cfg.sort_by),
                 reverse=True,
             )
 

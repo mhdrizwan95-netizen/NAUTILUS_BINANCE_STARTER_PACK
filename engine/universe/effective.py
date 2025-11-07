@@ -62,9 +62,12 @@ class StrategyUniverse:
             return symbols if symbols else None
 
         raw = _get("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"])
+        explicit_allow_all = bool(raw and raw.strip() == "*")
         parsed = split_symbols(raw)
         if parsed:
             return parsed
+        if explicit_allow_all:
+            return None
         runtime_core = _load_runtime_core()
         return runtime_core or None
 

@@ -105,17 +105,14 @@ def dynamic_position_notional_usd(
     risk_pct = per_trade_risk_pct(mode, strat)
     free_risk = max(
         0.0,
-        (0.10 if mode == "green" else 0.06 if mode == "yellow" else 0.03)
-        - acct.open_risk_sum_pct,
+        (0.10 if mode == "green" else 0.06 if mode == "yellow" else 0.03) - acct.open_risk_sum_pct,
     )
     risk_use = min(risk_pct, free_risk if free_risk > 0 else risk_pct * 0.5)
     risk_usd = acct.equity_usd * risk_use
     size_by_risk = risk_usd / max(1e-6, stop_pct)
     impact_cap = 0.02 if mode == "green" else (0.015 if mode == "yellow" else 0.01)
     size_by_liquidity = impact_cap * mkt.vol1m_usd
-    quality = max(0.05, min(1.0, 1.0 - (mkt.spread_bps / 50.0))) * (
-        0.5 + 0.5 * mkt.liq_score
-    )
+    quality = max(0.05, min(1.0, 1.0 - (mkt.spread_bps / 50.0))) * (0.5 + 0.5 * mkt.liq_score)
     size_quality_adj = size_by_risk * quality
     size_usd = min(size_quality_adj, size_by_liquidity)
     return (max(0.0, size_usd), stop_pct)
@@ -128,9 +125,7 @@ def dynamic_concurrent_limits(mode: Mode, acct: AccountState) -> Tuple[int, floa
 
     scale = 1.0 + min(0.5, _m.log10(max(1.0, acct.equity_usd / 2000.0)) * 0.25)
     positions = int(max(1, base_positions * scale))
-    residual_cap = max(
-        0.01, base_risk_cap - 0.004 * max(0, acct.open_positions - positions)
-    )
+    residual_cap = max(0.01, base_risk_cap - 0.004 * max(0, acct.open_positions - positions))
     return (positions, residual_cap)
 
 

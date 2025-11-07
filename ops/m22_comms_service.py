@@ -36,7 +36,7 @@ app = FastAPI(
     description="M22 Communication layer for the autonomous trading organism",
     version="1.0.0",
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
 )
 
 # Add CORS middleware for web dashboard integration
@@ -61,6 +61,7 @@ M20_INCIDENT_LOG = os.path.join("data", "processed", "m20", "incident_log.jsonl"
 M20_RECOVERY_LOG = os.path.join("data", "processed", "m20", "recovery_actions.jsonl")
 M21_LINEAGE_INDEX = os.path.join("data", "memory_vault", "lineage_index.json")
 
+
 def safe_json_load(filepath: str, default: Any = None) -> Any:
     """
     Safely load JSON file with error handling.
@@ -75,11 +76,12 @@ def safe_json_load(filepath: str, default: Any = None) -> Any:
     default = default or {}
     try:
         if os.path.exists(filepath):
-            with open(filepath, 'r') as f:
+            with open(filepath, "r") as f:
                 return json.load(f)
     except Exception as e:
         logger.warning(f"Failed to load {filepath}: {e}")
     return default
+
 
 def read_recent_incidents(limit: int = 10) -> List[Dict[str, Any]]:
     """
@@ -96,7 +98,7 @@ def read_recent_incidents(limit: int = 10) -> List[Dict[str, Any]]:
         return incidents
 
     try:
-        with open(M20_INCIDENT_LOG, 'r') as f:
+        with open(M20_INCIDENT_LOG, "r") as f:
             for line in f:
                 if line.strip():
                     try:
@@ -113,6 +115,7 @@ def read_recent_incidents(limit: int = 10) -> List[Dict[str, Any]]:
         logger.error(f"Error reading incident log: {e}")
         return []
 
+
 def read_recovery_actions(limit: int = 10) -> List[Dict[str, Any]]:
     """Read recent recovery action records."""
     actions = []
@@ -120,7 +123,7 @@ def read_recovery_actions(limit: int = 10) -> List[Dict[str, Any]]:
         return actions
 
     try:
-        with open(M20_RECOVERY_LOG, 'r') as f:
+        with open(M20_RECOVERY_LOG, "r") as f:
             lines = f.readlines()[-limit:]  # Get last N lines
 
         for line in lines:
@@ -136,6 +139,7 @@ def read_recovery_actions(limit: int = 10) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error reading recovery action log: {e}")
         return []
+
 
 def get_evolutionary_summary() -> Dict[str, Any]:
     """Get summary of organism evolutionary state from M21 lineage."""
@@ -155,6 +159,7 @@ def get_evolutionary_summary() -> Dict[str, Any]:
         "current_generation_type": latest.get("generation_type", "unknown"),
     }
 
+
 def get_system_health() -> Dict[str, Any]:
     """Aggregate health status from all system components."""
     # Load latest metrics and state
@@ -163,13 +168,13 @@ def get_system_health() -> Dict[str, Any]:
 
     # Recent incidents indicate system stress
     recent_incidents = read_recent_incidents(5)
-    recent_incident_count = len([inc for inc in recent_incidents
-                                if inc.get("status") == "critical"])
+    recent_incident_count = len(
+        [inc for inc in recent_incidents if inc.get("status") == "critical"]
+    )
 
     # Recent recovery actions show responsiveness
     recent_recoveries = read_recovery_actions(5)
-    recent_success_recoveries = len([rec for rec in recent_recoveries
-                                    if rec.get("success", False)])
+    recent_success_recoveries = len([rec for rec in recent_recoveries if rec.get("success", False)])
 
     # Determine overall health
     health_status = "healthy"
@@ -183,7 +188,9 @@ def get_system_health() -> Dict[str, Any]:
     # Check if scheduler is running (has recent decisions)
     last_decision_time = state.get("last_run", {}).get("decision_time")
     if last_decision_time:
-        hours_since_decision = (datetime.utcnow() - datetime.fromisoformat(last_decision_time)).total_seconds() / 3600
+        hours_since_decision = (
+            datetime.utcnow() - datetime.fromisoformat(last_decision_time)
+        ).total_seconds() / 3600
         if hours_since_decision > 2:  # No decisions in 2+ hours
             health_status = "warning"
         if hours_since_decision > 6:  # No decisions in 6+ hours
@@ -194,8 +201,9 @@ def get_system_health() -> Dict[str, Any]:
         "scheduler_active": bool(last_decision_time),
         "recent_critical_incidents": recent_incident_count,
         "recent_successful_recoveries": recent_success_recoveries,
-        "last_scheduler_activity": last_decision_time
+        "last_scheduler_activity": last_decision_time,
     }
+
 
 async def send_telegram_message(message: str) -> bool:
     """Send message to Telegram chat if configured."""
@@ -210,7 +218,7 @@ async def send_telegram_message(message: str) -> bool:
                 "chat_id": TELEGRAM_CHAT_ID,
                 "text": message,
                 "parse_mode": "Markdown",
-                "disable_web_page_preview": True
+                "disable_web_page_preview": True,
             }
 
             response = await client.post(url, json=payload)
@@ -222,6 +230,7 @@ async def send_telegram_message(message: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to send Telegram message: {e}")
         return False
+
 
 async def send_discord_message(message: str) -> bool:
     """Send message to Discord webhook if configured."""
@@ -242,6 +251,7 @@ async def send_discord_message(message: str) -> bool:
         logger.error(f"Failed to send Discord message: {e}")
         return False
 
+
 async def send_slack_message(message: str) -> bool:
     """Send message to Slack webhook if configured."""
     if not SLACK_WEBHOOK:
@@ -260,6 +270,7 @@ async def send_slack_message(message: str) -> bool:
     except Exception as e:
         logger.error(f"Failed to send Slack message: {e}")
         return False
+
 
 async def broadcast_alert(message: str, platforms: List[str] = None) -> Dict[str, bool]:
     """
@@ -299,20 +310,25 @@ async def broadcast_alert(message: str, platforms: List[str] = None) -> Dict[str
 
     return results
 
+
 # ============================================================================
 # API ENDPOINTS
 # ============================================================================
 
+
 @app.get("/")
 def root():
     """Root endpoint with basic organism info."""
-    return JSONResponse({
-        "service": "Trading Organism Communication Gateway",
-        "version": "M22",
-        "documentation": "/docs",
-        "status": "/status",
-        "health": "/health"
-    })
+    return JSONResponse(
+        {
+            "service": "Trading Organism Communication Gateway",
+            "version": "M22",
+            "documentation": "/docs",
+            "status": "/status",
+            "health": "/health",
+        }
+    )
+
 
 @app.get("/status")
 def get_status():
@@ -339,20 +355,25 @@ def get_status():
         "timestamp": datetime.utcnow().isoformat(),
         "organismic_id": "HMM-Trading-Organism-M15-M22",
         "cognitive_layers": [
-            "M15-Calibration", "M16-Reinforcement", "M17-Hierarchical",
-            "M18-Covariance", "M19-Meta-Intelligence", "M20-Resilience", "M21-Memory", "M22-Communication"
+            "M15-Calibration",
+            "M16-Reinforcement",
+            "M17-Hierarchical",
+            "M18-Covariance",
+            "M19-Meta-Intelligence",
+            "M20-Resilience",
+            "M21-Memory",
+            "M22-Communication",
         ],
-
         "health": health,
         "current_state": scheduler_state.get("last_result", {}),
         "live_metrics": current_metrics,
         "evolution": evolution,
-
         "recent_incidents": incidents,
-        "recent_recoveries": recoveries
+        "recent_recoveries": recoveries,
     }
 
     return JSONResponse(status)
+
 
 @app.get("/decisions")
 def get_decisions():
@@ -367,10 +388,11 @@ def get_decisions():
         "last_decision": state.get("last_result", {}),
         "decision_history": state.get("decision_log", []),
         "scheduler_health": state.get("health", "unknown"),
-        "cooldowns": state.get("last_run", {})
+        "cooldowns": state.get("last_run", {}),
     }
 
     return JSONResponse(decisions)
+
 
 @app.get("/incidents")
 def get_incidents(limit: int = 10):
@@ -381,11 +403,14 @@ def get_incidents(limit: int = 10):
     """
     incidents = read_recent_incidents(limit)
 
-    return JSONResponse({
-        "incidents": incidents,
-        "total_available": len(read_recent_incidents(1000)),  # Approximate total
-        "shown_limit": limit
-    })
+    return JSONResponse(
+        {
+            "incidents": incidents,
+            "total_available": len(read_recent_incidents(1000)),  # Approximate total
+            "shown_limit": limit,
+        }
+    )
+
 
 @app.get("/evolution")
 def get_evolution():
@@ -397,6 +422,7 @@ def get_evolution():
     evolution["lineage"] = lineage
 
     return JSONResponse(evolution)
+
 
 @app.post("/alert")
 async def post_alert(alert_payload: Dict[str, Any], background_tasks: BackgroundTasks):
@@ -430,17 +456,21 @@ async def post_alert(alert_payload: Dict[str, Any], background_tasks: Background
     # Broadcast in background to avoid blocking
     background_tasks.add_task(broadcast_alert, formatted_message)
 
-    return JSONResponse({
-        "status": "alert_queued",
-        "message": message,
-        "severity": severity,
-        "platforms_configured": [
-            p for p in ["telegram", "discord", "slack"]
-            if (p == "telegram" and TELEGRAM_TOKEN and TELEGRAM_CHAT_ID) or
-               (p == "discord" and DISCORD_WEBHOOK) or
-               (p == "slack" and SLACK_WEBHOOK)
-        ]
-    })
+    return JSONResponse(
+        {
+            "status": "alert_queued",
+            "message": message,
+            "severity": severity,
+            "platforms_configured": [
+                p
+                for p in ["telegram", "discord", "slack"]
+                if (p == "telegram" and TELEGRAM_TOKEN and TELEGRAM_CHAT_ID)
+                or (p == "discord" and DISCORD_WEBHOOK)
+                or (p == "slack" and SLACK_WEBHOOK)
+            ],
+        }
+    )
+
 
 @app.get("/health")
 def health_check():
@@ -460,9 +490,10 @@ def health_check():
             "service": "Trading Organism Comms Gateway",
             "status": health["overall_status"],
             "timestamp": datetime.utcnow().isoformat(),
-            "version": "M22"
-        }
+            "version": "M22",
+        },
     )
+
 
 @app.get("/metrics")
 def prometheus_metrics():
@@ -471,10 +502,13 @@ def prometheus_metrics():
     evolution = get_evolutionary_summary()
 
     # Create Prometheus-format metrics
+    status_map = {"healthy": 0, "warning": 1, "critical": 2}
+    status_value = status_map.get(health["overall_status"], -1)
+
     metrics = f"""# Trading Organism M15-M22 Metrics
 # HELP organism_health_status Current health status (0=healthy, 1=warning, 2=critical)
 # TYPE organism_health_status gauge
-organism_health_status{{service="comms_gateway"}} {{"healthy": 0, "warning": 1, "critical": 2}.get(health["overall_status"], -1)}
+organism_health_status{{service="comms_gateway"}} {status_value}
 
 # HELP organism_total_generations Total evolutionary generations
 # TYPE organism_total_generations gauge
@@ -491,7 +525,9 @@ organism_recent_recoveries {health.get("recent_successful_recoveries", 0)}
 
     return PlainTextResponse(metrics, media_type="text/plain; charset=utf-8")
 
+
 if __name__ == "__main__":
     # Run with uvicorn for testing
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8080)

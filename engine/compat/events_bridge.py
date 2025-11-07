@@ -30,9 +30,7 @@ def init_external_feed_bridge(bus) -> None:
             ).with_default_id()
             await publish_external_event(
                 envelope,
-                asset_hints=(
-                    [payload.get("symbol")] if isinstance(payload, dict) else None
-                ),
+                asset_hints=([payload.get("symbol")] if isinstance(payload, dict) else None),
             )
         except Exception:  # noqa: BLE001
             _LOG.exception("Failed to bridge events.binance_listing payload")

@@ -37,9 +37,7 @@ def init(db_path: str):
     conn.close()
 
 
-def upsert_preset(
-    db_path: str, strategy: str, instrument: str, preset_id: str, params: dict
-):
+def upsert_preset(db_path: str, strategy: str, instrument: str, preset_id: str, params: dict):
     conn = connect(db_path)
     cur = conn.cursor()
     cur.execute(
@@ -52,9 +50,7 @@ def upsert_preset(
     conn.close()
 
 
-def list_presets(
-    db_path: str, strategy: str, instrument: str
-) -> List[Tuple[str, dict]]:
+def list_presets(db_path: str, strategy: str, instrument: str) -> List[Tuple[str, dict]]:
     conn = connect(db_path)
     cur = conn.cursor()
     cur.execute(
@@ -91,18 +87,13 @@ def log_outcome(
     conn.close()
 
 
-def fetch_outcomes(
-    db_path: str, strategy: str, instrument: str
-) -> List[Tuple[str, float, dict]]:
+def fetch_outcomes(db_path: str, strategy: str, instrument: str) -> List[Tuple[str, float, dict]]:
     conn = connect(db_path)
     cur = conn.cursor()
     cur.execute(
         "SELECT preset_id, reward, features_json FROM outcomes WHERE strategy=? AND instrument=?",
-    (strategy, instrument),
+        (strategy, instrument),
     )
-    rows = [
-        (row[0], float(row[1]), json.loads(row[2]) if row[2] else {})
-        for row in cur.fetchall()
-    ]
+    rows = [(row[0], float(row[1]), json.loads(row[2]) if row[2] else {}) for row in cur.fetchall()]
     conn.close()
     return rows

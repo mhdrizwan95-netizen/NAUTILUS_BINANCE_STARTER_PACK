@@ -6,9 +6,7 @@ import time
 from pathlib import Path
 from typing import Dict, Any
 
-CALIBRATION_PATH = Path(
-    os.getenv("HMM_CALIBRATION_PATH", "engine/models/hmm_calibration.json")
-)
+CALIBRATION_PATH = Path(os.getenv("HMM_CALIBRATION_PATH", "engine/models/hmm_calibration.json"))
 _DEFAULT_PROFILE: Dict[str, Any] = {
     "confidence_gain": 1.0,
     "quote_multiplier": 1.0,

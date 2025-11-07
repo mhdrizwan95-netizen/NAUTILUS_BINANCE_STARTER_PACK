@@ -51,9 +51,7 @@ class DexSniper:
     def _validate_candidate(self, payload: Dict[str, Any]) -> bool:
         liq = self._sanitize_float(payload.get("liq") or payload.get("liquidity"))
         if liq and liq < self.cfg.min_liq_usd:
-            logger.debug(
-                "[DEX] liquidity %.0f below floor %.0f", liq, self.cfg.min_liq_usd
-            )
+            logger.debug("[DEX] liquidity %.0f below floor %.0f", liq, self.cfg.min_liq_usd)
             return False
         meta = payload.get("meta") or {}
         tax = self._sanitize_float(meta.get("tax_pct") or payload.get("tax_pct"))
@@ -66,9 +64,7 @@ class DexSniper:
             return False
         chain = str(payload.get("chain") or "").upper()
         if self.cfg.chain_whitelist and chain not in self.cfg.chain_whitelist:
-            logger.debug(
-                "[DEX] chain %s not in whitelist %s", chain, self.cfg.chain_whitelist
-            )
+            logger.debug("[DEX] chain %s not in whitelist %s", chain, self.cfg.chain_whitelist)
             return False
         return True
 
@@ -82,10 +78,7 @@ class DexSniper:
         symbol = str(payload.get("symbol") or "").upper()
         chain = str(payload.get("chain") or "").upper()
         token_addr = str(
-            payload.get("addr")
-            or payload.get("token_address")
-            or payload.get("address")
-            or ""
+            payload.get("addr") or payload.get("token_address") or payload.get("address") or ""
         )
         tier = str(payload.get("tier") or "B").upper()
         payload.get("price") or (payload.get("meta") or {}).get("price")
@@ -155,9 +148,7 @@ class DexSniper:
         """Synthetic close of all open positions (stub)."""
         for pos in list(self.state.open_positions()):
             try:
-                await self.executor.sell(
-                    symbol=pos.symbol, token_address=pos.address, qty=pos.qty
-                )
+                await self.executor.sell(symbol=pos.symbol, token_address=pos.address, qty=pos.qty)
             except Exception:
                 pass
             self.state.close_position(pos.pos_id, reason="flatten_all")

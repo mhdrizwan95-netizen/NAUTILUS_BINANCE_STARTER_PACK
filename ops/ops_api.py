@@ -10,6 +10,7 @@ import shlex
 import subprocess
 import time
 import uuid
+from functools import lru_cache
 from http import HTTPStatus
 from pathlib import Path
 from pathlib import Path as Path2
@@ -119,11 +120,10 @@ def _metrics():
     payload, content_type = render_latest()
     return Response(payload, media_type=content_type)
 
+
 if FastAPIInstrumentor:
     FastAPIInstrumentor.instrument_app(APP)
-_REQ_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar(
-    "REQ_ID", default=None
-)
+_REQ_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar("REQ_ID", default=None)
 _API_VERSION: contextvars.ContextVar[str] = contextvars.ContextVar(
     "API_VERSION", default=DEFAULT_API_VERSION
 )
@@ -262,9 +262,7 @@ async def _handle_http_exception(request: Request, exc: HTTPException) -> JSONRe
 
 
 @APP.exception_handler(RequestValidationError)
-async def _handle_validation_error(
-    request: Request, exc: RequestValidationError
-) -> JSONResponse:
+async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     return _structured_error_response(
         status.HTTP_422_UNPROCESSABLE_ENTITY,
         "request.validation_failed",
@@ -274,9 +272,7 @@ async def _handle_validation_error(
 
 
 @APP.exception_handler(Exception)
-async def _handle_unhandled_exception(
-    request: Request, exc: Exception
-) -> JSONResponse:
+async def _handle_unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
     logger.exception("Unhandled exception during request processing", exc_info=exc)
     return _structured_error_response(
         status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -314,13 +310,22 @@ def _load_ops_token() -> str:
     return token
 
 
-EXPECTED_TOKEN = _load_ops_token()
+@lru_cache(maxsize=1)
+def get_expected_token() -> str:
+    """Return the memoized control token for Ops API actions."""
+    return _load_ops_token()
+
+
+def reset_expected_token_cache() -> None:
+    """Allow tests to clear the cached token when env vars change."""
+    get_expected_token.cache_clear()
 
 
 def _check_auth(request):
     """Check X-OPS-TOKEN header for control actions."""
     auth_header = request.headers.get("X-OPS-TOKEN")
-    if not auth_header or auth_header != EXPECTED_TOKEN:
+    expected = get_expected_token()
+    if not auth_header or auth_header != expected:
         raise HTTPException(401, "Invalid or missing X-OPS-TOKEN")
 
 
@@ -364,9 +369,7 @@ ML_URL = os.getenv("HMM_URL", "http://127.0.0.1:8010")
 
 
 # --- network helpers (timeouts/retries) --------------------------------------
-def _http_retry_get(
-    url: str, *, timeout: float = 1.0, attempts: int = 3, backoff: float = 0.2
-):
+def _http_retry_get(url: str, *, timeout: float = 1.0, attempts: int = 3, backoff: float = 0.2):
     for i in range(max(1, attempts)):
         try:
             headers = {}
@@ -594,9 +597,7 @@ PORTFOLIO_SERVICE = PortfolioService()
 ORDERS_SERVICE = OrdersService()
 STRATEGY_SERVICE = StrategyGovernanceService(Path("ops/strategy_weights.json"))
 SCANNER_SERVICE = ScannerService(Path("ops/universe_state.json"))
-CONFIG_SERVICE = ConfigService(
-    Path("config/runtime.yaml"), Path("ops/runtime_overrides.json")
-)
+CONFIG_SERVICE = ConfigService(Path("config/runtime.yaml"), Path("ops/runtime_overrides.json"))
 RISK_SERVICE = RiskGuardService()
 FEEDS_SERVICE = FeedsGovernanceService()
 OPS_SERVICE = OpsGovernanceService(STATE_FILE, engine_health, PORTFOLIO_SERVICE)
@@ -644,9 +645,7 @@ def _publish_account_snapshot(state: dict) -> None:
     ACCOUNT_CACHE["equity"] = float(state.get("equity", 0.0))
     ACCOUNT_CACHE["cash"] = float(state.get("cash", 0.0))
     ACCOUNT_CACHE["exposure"] = float(state.get("exposure", 0.0))
-    ACCOUNT_CACHE["pnl"] = state.get(
-        "pnl", {"realized": 0.0, "unrealized": 0.0, "fees": 0.0}
-    )
+    ACCOUNT_CACHE["pnl"] = state.get("pnl", {"realized": 0.0, "unrealized": 0.0, "fees": 0.0})
     ACCOUNT_CACHE["balances"] = {
         "equity": ACCOUNT_CACHE["equity"],
         "cash": ACCOUNT_CACHE["cash"],
@@ -757,9 +756,7 @@ async def _risk_monitor_iteration() -> None:
                 if ALERT_WEBHOOK_URL:
                     webhook_payload = {"text": alert_msg, "timestamp": time.time()}
                     try:
-                        await client.post(
-                            ALERT_WEBHOOK_URL, json=webhook_payload, timeout=3
-                        )
+                        await client.post(ALERT_WEBHOOK_URL, json=webhook_payload, timeout=3)
                     except Exception as webhook_exc:
                         print(f"[RISK] Webhook failed: {webhook_exc}")
 
@@ -1154,9 +1151,7 @@ async def _start_situations_consumer():
     async def _run():
         import httpx
 
-        url = os.getenv(
-            "SITUATIONS_SSE_URL", "http://hmm_situations:8011/events/stream"
-        )
+        url = os.getenv("SITUATIONS_SSE_URL", "http://hmm_situations:8011/events/stream")
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 async with client.stream("GET", url) as r:
@@ -1196,8 +1191,9 @@ async def ws_multiplex(websocket: WebSocket):
 
     # Lightweight auth: allow missing token when using default dev token
     token = websocket.query_params.get("token")
-    dev_mode = EXPECTED_TOKEN == "dev-token"
-    if token is not None and token != EXPECTED_TOKEN:
+    expected = get_expected_token()
+    dev_mode = expected == "dev-token"
+    if token is not None and token != expected:
         await websocket.close(code=4401)
         return
     if token is None and not dev_mode:
@@ -1285,9 +1281,7 @@ async def ws_multiplex(websocket: WebSocket):
                     req = set(incoming.get("channels") or [])
                     # Only allow known channels
                     channels.clear()
-                    channels.update(
-                        {c for c in req if c in {"metrics", "venues", "performances"}}
-                    )
+                    channels.update({c for c in req if c in {"metrics", "venues", "performances"}})
                     # Ack optional
                 elif t == "heartbeat":
                     await websocket.send_json(

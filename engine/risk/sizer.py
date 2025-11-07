@@ -9,9 +9,7 @@ def atr_pct(md: Any, symbol: str, tf: str = "5m", n: int = 14) -> float:
     return (atr / px) if (atr > 0 and px > 0) else 0.0
 
 
-def risk_parity_qty(
-    per_trade_risk_usd: float, md: Any, symbol: str, tf: str, n: int
-) -> float:
+def risk_parity_qty(per_trade_risk_usd: float, md: Any, symbol: str, tf: str, n: int) -> float:
     px = md.last(symbol) or 0.0
     atr = md.atr(symbol, tf=tf, n=n) or 0.0
     if atr <= 0 or px <= 0:

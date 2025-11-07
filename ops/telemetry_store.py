@@ -56,9 +56,7 @@ def load() -> Snapshot:
                         j = json.loads(last)
                     except JSONDecodeError:
                         j = {}
-        _STORE = Snapshot(
-            metrics=Metrics(**j.get("metrics", {})), ts=j.get("ts", time.time())
-        )
+        _STORE = Snapshot(metrics=Metrics(**j.get("metrics", {})), ts=j.get("ts", time.time()))
         return _STORE
     _STORE = Snapshot(metrics=Metrics(), ts=time.time())
     return _STORE

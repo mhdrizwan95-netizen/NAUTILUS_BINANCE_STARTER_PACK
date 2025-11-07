@@ -13,9 +13,7 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Dict
 
-logging.basicConfig(
-    level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 SPECS_PATH = Path(__file__).parent / "venue_specs.json"
 BINANCE_INFO_URL = "https://api.binance.com/api/v3/exchangeInfo"

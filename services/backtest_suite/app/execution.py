@@ -45,9 +45,7 @@ class ExecutionModel:
             # simple flip/close
             if self.pos.side != side:
                 pnl = (
-                    (px - self.pos.entry)
-                    * (1.0 if self.pos.side == "buy" else -1.0)
-                    * self.pos.qty
+                    (px - self.pos.entry) * (1.0 if self.pos.side == "buy" else -1.0) * self.pos.qty
                 )
                 self.trades.append(
                     {

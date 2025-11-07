@@ -50,9 +50,7 @@ class DexPosition:
     @classmethod
     def from_dict(cls, payload: dict) -> "DexPosition":
         targets = [
-            DexTarget(**item)
-            for item in payload.get("tp_targets", [])
-            if isinstance(item, dict)
+            DexTarget(**item) for item in payload.get("tp_targets", []) if isinstance(item, dict)
         ]
         return cls(
             pos_id=str(payload.get("pos_id") or payload.get("id") or uuid.uuid4().hex),
@@ -106,11 +104,7 @@ class DexState:
     def _save(self) -> None:
         try:
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            payload = {
-                "positions": {
-                    pid: pos.to_dict() for pid, pos in self._positions.items()
-                }
-            }
+            payload = {"positions": {pid: pos.to_dict() for pid, pos in self._positions.items()}}
             tmp_path = f"{self.path}.tmp"
             with open(tmp_path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, separators=(",", ":"), sort_keys=True)
@@ -155,8 +149,7 @@ class DexState:
     ) -> DexPosition:
         pos_id = uuid.uuid4().hex
         tp_targets = [
-            DexTarget(pct=float(pct), portion=float(portion))
-            for pct, portion in (targets or [])
+            DexTarget(pct=float(pct), portion=float(portion)) for pct, portion in (targets or [])
         ]
         position = DexPosition(
             pos_id=pos_id,
@@ -178,9 +171,7 @@ class DexState:
         self._save()
         return position
 
-    def close_position(
-        self, pos_id: str, *, reason: str | None = None
-    ) -> Optional[DexPosition]:
+    def close_position(self, pos_id: str, *, reason: str | None = None) -> Optional[DexPosition]:
         position = self._positions.get(pos_id)
         if position is None:
             return None

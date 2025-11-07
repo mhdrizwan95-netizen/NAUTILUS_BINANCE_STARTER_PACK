@@ -29,19 +29,13 @@ class Momentum15mConfig:
 
 def load_momentum_15m_config() -> Momentum15mConfig:
     symbol_raw = (
-        env_str("MOMENTUM_15M_SYMBOL", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_SYMBOL"])
-        .strip()
-        .upper()
+        env_str("MOMENTUM_15M_SYMBOL", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_SYMBOL"]).strip().upper()
     )
     if not symbol_raw:
         symbol_raw = MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_SYMBOL"]
     return Momentum15mConfig(
-        enabled=env_bool(
-            "MOMENTUM_15M_ENABLED", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_ENABLED"]
-        ),
-        dry_run=env_bool(
-            "MOMENTUM_15M_DRY_RUN", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_DRY_RUN"]
-        ),
+        enabled=env_bool("MOMENTUM_15M_ENABLED", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_ENABLED"]),
+        dry_run=env_bool("MOMENTUM_15M_DRY_RUN", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_DRY_RUN"]),
         symbol=symbol_raw,
         lookback_ticks=max(
             5,
@@ -52,9 +46,7 @@ def load_momentum_15m_config() -> Momentum15mConfig:
         ),
         quantity=max(
             0.0,
-            env_float(
-                "MOMENTUM_15M_QUANTITY", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_QUANTITY"]
-            ),
+            env_float("MOMENTUM_15M_QUANTITY", MOMENTUM_15M_DEFAULTS["MOMENTUM_15M_QUANTITY"]),
         ),
         allow_shorts=env_bool(
             "MOMENTUM_15M_ALLOW_SHORTS",

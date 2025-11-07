@@ -49,9 +49,7 @@ async def patch_situation(name: str, patch: Dict[str, Any]):
 async def update_priorities(body: Dict[str, Any]):
     ok = True
     for u in body.get("updates", []):
-        ok = (
-            await _store.update_priority(u.get("name"), float(u.get("priority", 0)))
-        ) and ok
+        ok = (await _store.update_priority(u.get("name"), float(u.get("priority", 0)))) and ok
     return {"ok": ok}
 
 

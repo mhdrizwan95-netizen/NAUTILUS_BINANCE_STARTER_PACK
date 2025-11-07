@@ -52,15 +52,11 @@ def _margin_isolated_default() -> bool:
 class BinanceREST:
     """Minimal async REST client for Binance spot/futures/margin endpoints."""
 
-    def __init__(
-        self, *, market: Literal["spot", "futures", "margin"] | None = None
-    ) -> None:
+    def __init__(self, *, market: Literal["spot", "futures", "margin"] | None = None) -> None:
         settings = get_settings()
         self._settings = settings
         # Capture base URLs for each market upfront (fall back to primary base_url)
-        spot_base = getattr(settings, "spot_base", "") or getattr(
-            settings, "base_url", ""
-        )
+        spot_base = getattr(settings, "spot_base", "") or getattr(settings, "base_url", "")
         if not spot_base:
             spot_base = "https://api.binance.com"
         futures_base = getattr(settings, "futures_base", "") or spot_base
@@ -90,9 +86,7 @@ class BinanceREST:
         if default_market == "options" and self._options_base:
             self._base = self._options_base
         else:
-            self._base = (
-                self._futures_base if default_market == "futures" else self._spot_base
-            )
+            self._base = self._futures_base if default_market == "futures" else self._spot_base
         self._is_futures = default_market == "futures"
 
         self._symbol_filters: dict[tuple[str, str], SymbolFilter] = {}
@@ -174,9 +168,7 @@ class BinanceREST:
         """
         secret = getattr(self._settings, "api_secret", "") or ""
         if not secret:
-            self._logger.debug(
-                "Signing request without API secret (dry-run/test configuration)"
-            )
+            self._logger.debug("Signing request without API secret (dry-run/test configuration)")
             return ""
         query = urlencode(params, doseq=True)
         return hmac.new(secret.encode(), query.encode(), sha256).hexdigest()
@@ -206,9 +198,7 @@ class BinanceREST:
                     price = 0.0
                     for item in raw:
                         if str(item.get("symbol", "")).upper() == clean:
-                            price = float(
-                                item.get("markPrice") or item.get("price") or 0.0
-                            )
+                            price = float(item.get("markPrice") or item.get("price") or 0.0)
                             break
                 elif isinstance(raw, dict):
                     price = float(raw.get("markPrice") or raw.get("price") or 0.0)
@@ -295,9 +285,7 @@ class BinanceREST:
                     "markPrice": float(item.get("markPrice", 0.0) or 0.0),
                     "indexPrice": float(item.get("indexPrice", 0.0) or 0.0),
                     "lastFundingRate": item.get("lastFundingRate"),
-                    "estimatedSettlePrice": float(
-                        item.get("estimatedSettlePrice", 0.0) or 0.0
-                    ),
+                    "estimatedSettlePrice": float(item.get("estimatedSettlePrice", 0.0) or 0.0),
                     "estimatedRate": item.get("estimatedRate"),
                     "nextFundingTime": item.get("nextFundingTime"),
                     "time": item.get("time"),
@@ -307,9 +295,7 @@ class BinanceREST:
         except Exception:
             return {}
 
-    async def position_risk(
-        self, *, market: Optional[str] = None
-    ) -> list[dict[str, Any]]:
+    async def position_risk(self, *, market: Optional[str] = None) -> list[dict[str, Any]]:
         """Fetch venue positionRisk data (basis, PnL, amt)."""
         market_key, base_url, is_futures = self._resolve_market(market)
         if not is_futures:
@@ -371,9 +357,7 @@ class BinanceREST:
                 timeout=self._settings.timeout,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
             ) as client:
-                self._log_request(
-                    "GET", "/fapi/v1/positionSide/dual", params=base_params
-                )
+                self._log_request("GET", "/fapi/v1/positionSide/dual", params=base_params)
                 r = await client.get("/fapi/v1/positionSide/dual", params=base_params)
             r.raise_for_status()
             data = r.json()
@@ -407,9 +391,7 @@ class BinanceREST:
             return r.json()
         return {}
 
-    async def futures_change_leverage(
-        self, symbol: str, leverage: int
-    ) -> dict[str, Any]:
+    async def futures_change_leverage(self, symbol: str, leverage: int) -> dict[str, Any]:
         """Set leverage for a futures symbol."""
         market_key, base_url, is_futures = self._resolve_market("futures")
         if not is_futures:
@@ -522,9 +504,7 @@ class BinanceREST:
                 ) from e
         return {}
 
-    async def exchange_filter(
-        self, symbol: str, *, market: Optional[str] = None
-    ) -> SymbolFilter:
+    async def exchange_filter(self, symbol: str, *, market: Optional[str] = None) -> SymbolFilter:
         async with self._lock:
             clean = self._clean_symbol(symbol)
             market_key, base_url, is_futures = self._resolve_market(market)
@@ -557,9 +537,7 @@ class BinanceREST:
             info = r.json()
             symbols = info.get("symbols", [])
             if not symbols:
-                raise RuntimeError(
-                    f"Symbol {symbol} not found in exchangeInfo response."
-                )
+                raise RuntimeError(f"Symbol {symbol} not found in exchangeInfo response.")
             filters = symbols[0].get("filters", [])
             step_size = 0.000001
             min_qty = 0.0
@@ -684,9 +662,7 @@ class BinanceREST:
         isolated: Optional[bool] = None,
     ) -> dict[str, Any]:
         """Borrow asset on cross or isolated margin."""
-        mode_isolated = (
-            _margin_isolated_default() if isolated is None else bool(isolated)
-        )
+        mode_isolated = _margin_isolated_default() if isolated is None else bool(isolated)
         clean_asset = asset.upper()
         params: dict[str, Any] = {
             "asset": clean_asset,
@@ -721,9 +697,7 @@ class BinanceREST:
         isolated: Optional[bool] = None,
     ) -> dict[str, Any]:
         """Repay borrowed asset on cross or isolated margin."""
-        mode_isolated = (
-            _margin_isolated_default() if isolated is None else bool(isolated)
-        )
+        mode_isolated = _margin_isolated_default() if isolated is None else bool(isolated)
         clean_asset = asset.upper()
         params: dict[str, Any] = {
             "asset": clean_asset,
@@ -765,17 +739,11 @@ class BinanceREST:
         except Exception:
             return []
 
-    async def book_ticker(
-        self, symbol: str, *, market: Optional[str] = None
-    ) -> dict[str, Any]:
+    async def book_ticker(self, symbol: str, *, market: Optional[str] = None) -> dict[str, Any]:
         try:
             clean = self._clean_symbol(symbol)
             market_key, base_url, is_futures = self._resolve_market(market)
-            path = (
-                "/fapi/v1/ticker/bookTicker"
-                if is_futures
-                else "/api/v3/ticker/bookTicker"
-            )
+            path = "/fapi/v1/ticker/bookTicker" if is_futures else "/api/v3/ticker/bookTicker"
             params = {"symbol": clean}
             async with httpx.AsyncClient(
                 base_url=base_url,
@@ -925,13 +893,9 @@ class BinanceREST:
         if market_key == "options":
             px = await self.ticker_price(clean, market=market_key)
             if px <= 0:
-                raise RuntimeError(
-                    f"quote too small for options: quote={quote:.8f} {clean}"
-                )
+                raise RuntimeError(f"quote too small for options: quote={quote:.8f} {clean}")
             qty = max(math.floor((float(quote) / float(px)) + 1e-8), 1)
-            return await self.submit_market_order(
-                clean, side, float(qty), market=market_key
-            )
+            return await self.submit_market_order(clean, side, float(qty), market=market_key)
         if is_futures:
             px = await self.ticker_price(clean, market=market_key)
             try:
@@ -1155,9 +1119,7 @@ class BinanceREST:
         market_key, _, is_futures = self._resolve_market(market)
         clean_symbol = self._clean_symbol(symbol)
         if not is_futures:
-            return await self.submit_market_order(
-                clean_symbol, side, quantity, market=market_key
-            )
+            return await self.submit_market_order(clean_symbol, side, quantity, market=market_key)
         return await self.submit_market_order(
             clean_symbol, side, quantity, reduce_only=True, market=market_key
         )
@@ -1288,17 +1250,12 @@ class BinanceREST:
         """Fetch free balance for an asset held in the Funding wallet."""
         payload = {"asset": asset.upper()}
         try:
-            data = await self._post_signed(
-                "/sapi/v1/asset/get-funding-asset", payload, base="spot"
-            )
+            data = await self._post_signed("/sapi/v1/asset/get-funding-asset", payload, base="spot")
         except httpx.HTTPStatusError:
             return 0.0
         if isinstance(data, list):
             for row in data:
-                if (
-                    isinstance(row, dict)
-                    and str(row.get("asset", "")).upper() == asset.upper()
-                ):
+                if isinstance(row, dict) and str(row.get("asset", "")).upper() == asset.upper():
                     try:
                         return float(row.get("free") or 0.0)
                     except (TypeError, ValueError):
@@ -1326,9 +1283,7 @@ class BinanceREST:
 
         funding_free = await self.funding_balance(asset)
         if funding_free <= 0.0:
-            result.update(
-                {"ok": False, "skipped": True, "reason": "no_funding_balance"}
-            )
+            result.update({"ok": False, "skipped": True, "reason": "no_funding_balance"})
             return result
 
         transfer_amount = min(float(topup_chunk_usdt), float(funding_free))

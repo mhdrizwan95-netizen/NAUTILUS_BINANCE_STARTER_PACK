@@ -21,8 +21,6 @@ def send_email(subject, body):
 
 
 if __name__ == "__main__":
-    payload = json.dumps(
-        {"approval_required": True, "reason": "model_promotion"}, indent=2
-    )
+    payload = json.dumps({"approval_required": True, "reason": "model_promotion"}, indent=2)
     send_email("Organism Approval Required", payload)
     print("[M25] Approval email sent.")

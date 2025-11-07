@@ -26,9 +26,7 @@ def _is_async_callable(obj: Callable[[Dict[str, Any]], Any]) -> bool:
     return bool(call and inspect.iscoroutinefunction(call))
 
 
-def _call_sync(
-    handler: Callable[[Dict[str, Any]], Any], payload: Dict[str, Any]
-) -> Any:
+def _call_sync(handler: Callable[[Dict[str, Any]], Any], payload: Dict[str, Any]) -> Any:
     """Execute the synchronous handler. Runs inside the thread pool."""
     return handler(payload)
 
@@ -101,9 +99,7 @@ class EventBus:
             self._stats["topics"].add(topic)
 
         self._subscribers[topic].append(handler)
-        logging.debug(
-            f"[BUS] Subscribed to '{topic}' - {len(self._subscribers[topic])} handlers"
-        )
+        logging.debug(f"[BUS] Subscribed to '{topic}' - {len(self._subscribers[topic])} handlers")
 
     def unsubscribe(self, topic: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
         """Unsubscribe from a topic."""
@@ -116,9 +112,7 @@ class EventBus:
             except ValueError:
                 pass  # Handler not found
 
-    async def publish(
-        self, topic: str, data: Dict[str, Any], urgent: bool = False
-    ) -> None:
+    async def publish(self, topic: str, data: Dict[str, Any], urgent: bool = False) -> None:
         """
         Publish an event to all subscribers.
 
@@ -193,9 +187,7 @@ class EventBus:
         data = event["data"]
 
         if topic not in self._subscribers:
-            logging.getLogger(__name__).debug(
-                "EventBus: no subscribers for topic %s", topic
-            )
+            logging.getLogger(__name__).debug("EventBus: no subscribers for topic %s", topic)
             return  # No subscribers for this topic
 
         delivered = 0
@@ -220,9 +212,7 @@ class EventBus:
                     if not consumer and hasattr(handler, "__self__"):
                         consumer = handler.__self__.__class__.__name__
                     consumer = consumer or handler.__class__.__name__
-                    metrics.events_external_feed_consumed_total.labels(
-                        consumer=consumer
-                    ).inc()
+                    metrics.events_external_feed_consumed_total.labels(consumer=consumer).inc()
                 except Exception:  # noqa: BLE001
                     logging.getLogger(__name__).debug(
                         "EventBus metrics update failed", exc_info=True
@@ -240,9 +230,7 @@ class EventBus:
         """Get bus statistics."""
         return {
             **self._stats,
-            "active_subscriptions": sum(
-                len(handlers) for handlers in self._subscribers.values()
-            ),
+            "active_subscriptions": sum(len(handlers) for handlers in self._subscribers.values()),
             "topics_count": len(self._stats["topics"]),
             "queue_size": self._queue.qsize() if self._queue is not None else 0,
             "running": self._running,
@@ -260,9 +248,7 @@ class EventBus:
             try:
                 await self.publish(topic, data)
             except Exception as e:
-                logging.getLogger(__name__).warning(
-                    "[BUS] fire error on %s: %s", topic, e
-                )
+                logging.getLogger(__name__).warning("[BUS] fire error on %s: %s", topic, e)
 
         try:
             loop = asyncio.get_running_loop()

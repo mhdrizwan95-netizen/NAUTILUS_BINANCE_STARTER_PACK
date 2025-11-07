@@ -37,9 +37,7 @@ def _load_ops_token() -> str:
                 _OPS_TOKEN_MTIME = mtime
                 return token
         except OSError as exc:  # pragma: no cover - defensive
-            raise RuntimeError(
-                f"Failed to read OPS_API_TOKEN_FILE: {token_file}"
-            ) from exc
+            raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE: {token_file}") from exc
 
     token = os.getenv("OPS_API_TOKEN")
     if token:

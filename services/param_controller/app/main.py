@@ -68,9 +68,7 @@ def get_param(strategy: str, instrument: str, features: Dict[str, float] = {}):
 
 
 @app.post("/learn/outcome/{strategy}/{instrument}/{preset_id}")
-def report_outcome(
-    strategy: str, instrument: str, preset_id: str, body: Dict[str, Any]
-):
+def report_outcome(strategy: str, instrument: str, preset_id: str, body: Dict[str, Any]):
     reward = float(body.get("reward", 0.0))
     features = body.get("features", {})
     store.log_outcome(settings.PC_DB, strategy, instrument, preset_id, reward, features)

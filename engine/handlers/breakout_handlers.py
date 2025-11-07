@@ -155,9 +155,7 @@ def on_binance_listing(router):
         try:
             from engine import metrics as MET
 
-            MET.event_bo_plans_total.labels(
-                venue="BINANCE", symbol=sym, dry="true"
-            ).inc()
+            MET.event_bo_plans_total.labels(venue="BINANCE", symbol=sym, dry="true").inc()
             if half:
                 MET.event_bo_half_size_applied_total.labels(symbol=sym).inc()
         except Exception:

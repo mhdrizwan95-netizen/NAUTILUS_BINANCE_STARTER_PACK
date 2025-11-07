@@ -9,6 +9,7 @@ PYTHON                ?= python3
 COMPOSE               ?= docker compose
 OBS_COMPOSE           ?= docker compose -f ops/observability/docker-compose.observability.yml
 COMPOSE_BUILD_FLAGS   ?= --progress=plain
+NPM_INSTALL_FLAGS     ?= --ignore-scripts --prefer-offline
 
 # Service names (as in docker-compose.yml)
 ENGINE_EXPORTER_SVC   ?= engine_binance_exporter
@@ -75,6 +76,7 @@ help:
 	@echo "  make test                  # run Python tests (and frontend unit tests if npm present)"
 	@echo "  make image                 # build main Dockerfile image"
 	@echo "  make push REGISTRY=org IMG=nautilus TAG=dev   # push image"
+	@echo "  SKIP_DOCKER=1 SKIP_FRONTEND=1 SKIP_TESTS=1 make audit   # resource-friendly audit pass"
 	@echo ""
 
 # ---------------------------------------------------------------------------
@@ -85,7 +87,7 @@ bootstrap: ## Install pinned Python & frontend dependencies (idempotent)
 	$(PYTHON) -m pip install --upgrade pip pip-tools
 	pip-sync requirements.txt requirements-dev.txt
 	pre-commit install --install-hooks
-	cd frontend && npm ci --ignore-scripts
+	cd frontend && npm ci $(NPM_INSTALL_FLAGS)
 
 .PHONY: lint
 lint: ## Run Python and frontend linters

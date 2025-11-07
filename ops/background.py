@@ -27,9 +27,7 @@ async def price_stream(symbols: Sequence[str], interval: float = 2.0) -> None:
         while True:
             for symbol in upper_symbols:
                 try:
-                    response = await client.get(
-                        BINANCE_PRICE_URL, params={"symbol": symbol}
-                    )
+                    response = await client.get(BINANCE_PRICE_URL, params={"symbol": symbol})
                     response.raise_for_status()
                     payload = response.json()
                     price = float(payload.get("price", 0.0))
@@ -41,15 +39,11 @@ async def price_stream(symbols: Sequence[str], interval: float = 2.0) -> None:
                         }
                     )
                 except Exception as exc:  # noqa: BLE001
-                    logger.debug(
-                        "price_stream: failed to fetch %s price: %s", symbol, exc
-                    )
+                    logger.debug("price_stream: failed to fetch %s price: %s", symbol, exc)
             await asyncio.sleep(interval)
 
 
-async def account_broadcaster(
-    portfolio: PortfolioService, interval: float = 2.0
-) -> None:
+async def account_broadcaster(portfolio: PortfolioService, interval: float = 2.0) -> None:
     while True:
         try:
             snapshot = await portfolio.snapshot()

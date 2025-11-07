@@ -37,10 +37,7 @@ def load_symbol_scanner_config() -> SymbolScannerConfig:
     ).strip()
     if universe_raw in {"", "*"}:
         fallback = (
-            split_symbols(
-                env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]) or None
-            )
-            or []
+            split_symbols(env_str("TRADE_SYMBOLS", GLOBAL_DEFAULTS["TRADE_SYMBOLS"]) or None) or []
         )
         universe = fallback or ["BTCUSDT", "ETHUSDT"]
     elif "," in universe_raw:
@@ -65,9 +62,7 @@ def load_symbol_scanner_config() -> SymbolScannerConfig:
             "SYMBOL_SCANNER_LOOKBACK",
             SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_LOOKBACK"],
         ),
-        top_n=env_int(
-            "SYMBOL_SCANNER_TOP_N", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_TOP_N"]
-        ),
+        top_n=env_int("SYMBOL_SCANNER_TOP_N", SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_TOP_N"]),
         min_volume_usd=env_float(
             "SYMBOL_SCANNER_MIN_VOLUME_USD",
             SYMBOL_SCANNER_DEFAULTS["SYMBOL_SCANNER_MIN_VOLUME_USD"],
@@ -108,9 +103,7 @@ class SymbolScanner:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._base_url = (get_settings().base_url or "https://api.binance.com").rstrip(
-            "/"
-        )
+        self._base_url = (get_settings().base_url or "https://api.binance.com").rstrip("/")
         self._state_path = Path(self.cfg.state_path)
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_state()
@@ -124,9 +117,7 @@ class SymbolScanner:
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return
-        self._thread = threading.Thread(
-            target=self._loop, name="symbol-scanner", daemon=True
-        )
+        self._thread = threading.Thread(target=self._loop, name="symbol-scanner", daemon=True)
         self._thread.start()
 
     def stop(self) -> None:

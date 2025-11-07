@@ -4,9 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
 WORKDIR /app
 COPY services/param_controller/requirements.txt ./requirements.txt
-COPY constraints.txt /constraints.txt
 # hadolint ignore=DL3013
-RUN pip install --upgrade pip && pip install -c /constraints.txt -r requirements.txt
+RUN pip install --upgrade pip && pip install --require-hashes -r requirements.txt
 
 # Needed for container healthcheck
 RUN apt-get update \

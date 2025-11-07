@@ -57,9 +57,7 @@ class DexExecutor:
         if amount_in <= 0:
             raise ValueError("Amount in must be positive")
         path = self._path_buy(token_address)
-        await self.wallet.ensure_allowance(
-            self.stable_token, self.router.router.address, amount_in
-        )
+        await self.wallet.ensure_allowance(self.stable_token, self.router.router.address, amount_in)
         quote = await self.router.quote(amount_in, path)
         min_out = int(quote.amount_out * (1 - self.slippage_bps / 10_000))
         gas_price = min(self.wallet.w3.eth.gas_price, self.wallet.max_gas_price_wei)
@@ -96,9 +94,7 @@ class DexExecutor:
         if amount_in <= 0:
             raise ValueError("Sell quantity must be positive")
         path = self._path_sell(token_address)
-        await self.wallet.ensure_allowance(
-            token_address, self.router.router.address, amount_in
-        )
+        await self.wallet.ensure_allowance(token_address, self.router.router.address, amount_in)
         quote = await self.router.quote(amount_in, path)
         min_out = int(quote.amount_out * (1 - self.slippage_bps / 10_000))
         gas_price = min(self.wallet.w3.eth.gas_price, self.wallet.max_gas_price_wei)

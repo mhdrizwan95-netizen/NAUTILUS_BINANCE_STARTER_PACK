@@ -288,9 +288,7 @@ class CanaryManager:
                 }
             )
         elif rating == "insufficient_data":
-            result.update(
-                {"recommendation": "hold", "reason": "insufficient_data_for_evaluation"}
-            )
+            result.update({"recommendation": "hold", "reason": "insufficient_data_for_evaluation"})
         else:
             result.update({"recommendation": "hold", "reason": "neutral_performance"})
 
@@ -379,9 +377,7 @@ class CanaryManager:
         except Exception as e:
             logging.error(f"[CANARY] Rollback failed for {model_name}: {e}")
 
-    async def _update_registry(
-        self, model_name: str, action: str, evaluation: Dict[str, Any]
-    ):
+    async def _update_registry(self, model_name: str, action: str, evaluation: Dict[str, Any]):
         """Update the strategy registry with canary outcomes."""
         try:
             registry_path = Path("ops/strategy_registry.json")
@@ -441,9 +437,7 @@ class CanaryManager:
                     "cooldown_sec": 900,
                 }
                 capital_policy_path.write_text(json.dumps(default_policy, indent=2))
-                logging.info(
-                    f"[CANARY] Created default capital policy with {model_name} enabled"
-                )
+                logging.info(f"[CANARY] Created default capital policy with {model_name} enabled")
                 return
 
             policy = json.loads(capital_policy_path.read_text())
@@ -455,9 +449,7 @@ class CanaryManager:
                 policy["last_updated"] = time.time()
 
                 capital_policy_path.write_text(json.dumps(policy, indent=2))
-                logging.info(
-                    f"[CANARY] Added {model_name} to capital allocation enabled list"
-                )
+                logging.info(f"[CANARY] Added {model_name} to capital allocation enabled list")
 
         except Exception as e:
             logging.error(f"[CANARY] Failed to update capital policy: {e}")
@@ -511,9 +503,7 @@ async def canary_evaluation_loop(interval_minutes: int = 60):
                 try:
                     from ops import governance_daemon
 
-                    await governance_daemon.BUS.publish(
-                        "canary.evaluation_complete", results
-                    )
+                    await governance_daemon.BUS.publish("canary.evaluation_complete", results)
                 except ImportError:
                     pass
             else:

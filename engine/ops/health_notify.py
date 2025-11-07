@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 
-
 class HealthNotifier:
     def __init__(self, cfg: dict, bus, tg, log, clock, metrics) -> None:
         self.cfg = cfg

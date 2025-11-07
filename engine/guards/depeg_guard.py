@@ -30,9 +30,7 @@ class DepegGuard:
         self.switch_quote = _as_bool(os.getenv("DEPEG_SWITCH_QUOTE"), False)
         self.watch_symbols = [
             s.strip().upper()
-            for s in os.getenv("DEPEG_WATCH_SYMBOLS", "USDTUSDC,BTCUSDT,BTCUSDC").split(
-                ","
-            )
+            for s in os.getenv("DEPEG_WATCH_SYMBOLS", "USDTUSDC,BTCUSDT,BTCUSDC").split(",")
             if s.strip()
         ]
         # State
@@ -95,9 +93,7 @@ class DepegGuard:
             try:
                 if self.bus is not None:
                     self.bus.fire("risk.depeg_trigger", {"deviation_pct": dev})
-                    self.bus.fire(
-                        "health.state", {"state": 2, "reason": "depeg_trigger"}
-                    )
+                    self.bus.fire("health.state", {"state": 2, "reason": "depeg_trigger"})
             except Exception:
                 pass
             await self._apply_actions(dev)
@@ -120,15 +116,9 @@ class DepegGuard:
                 positions = []
             for p in positions or []:
                 try:
-                    sym = (
-                        p.get("symbol")
-                        if isinstance(p, dict)
-                        else getattr(p, "symbol", "")
-                    )
+                    sym = p.get("symbol") if isinstance(p, dict) else getattr(p, "symbol", "")
                     qty = float(
-                        p.get("qty")
-                        if isinstance(p, dict)
-                        else getattr(p, "quantity", 0.0)
+                        p.get("qty") if isinstance(p, dict) else getattr(p, "quantity", 0.0)
                     )
                     if not sym or qty == 0:
                         continue
@@ -137,9 +127,7 @@ class DepegGuard:
                         self.router.place_reduce_only_market(sym, side, abs(qty))
                     )
                 except Exception as e:
-                    self.log.warning(
-                        "[DEPEG] exit fail %s: %s", getattr(p, "symbol", "?"), e
-                    )
+                    self.log.warning("[DEPEG] exit fail %s: %s", getattr(p, "symbol", "?"), e)
         if self.switch_quote:
             try:
                 if hasattr(self.router, "set_preferred_quote"):

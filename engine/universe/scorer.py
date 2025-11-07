@@ -40,16 +40,12 @@ def score_symbols(features: List[SymbolFeatures]) -> Dict[str, float]:
 
     scores = {}
     for f in features:
-        liq = 0.5 * _z(f.quote_volume_1m_usd, mvol, s_vol) + 0.5 * _z(
-            f.book_depth_usd, mdep, s_dep
-        )
+        liq = 0.5 * _z(f.quote_volume_1m_usd, mvol, s_vol) + 0.5 * _z(f.book_depth_usd, mdep, s_dep)
         vol = _z(f.atr_pct, matr, s_atr)
         spr = -_z(f.spread_bps, mspr, s_spr)
         mom = f.velocity * 2.0
         fund = 0.5 if f.funding_rate_8h > 0 else 0.0
         evt = f.event_heat * 2.0
-        score = (
-            0.25 * liq + 0.20 * vol + 0.25 * mom + 0.10 * spr + 0.05 * fund + 0.15 * evt
-        )
+        score = 0.25 * liq + 0.20 * vol + 0.25 * mom + 0.10 * spr + 0.05 * fund + 0.15 * evt
         scores[f.symbol] = float(score)
     return scores

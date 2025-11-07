@@ -85,9 +85,7 @@ def env_b(name: str, default: bool) -> bool:
 class CircuitBreaker:
     """Fast-fail circuit breaker that pauses trading on repeated errors."""
 
-    def __init__(
-        self, err_threshold: int = 4, window_sec: int = 30, cooldown_sec: int = 120
-    ):
+    def __init__(self, err_threshold: int = 4, window_sec: int = 30, cooldown_sec: int = 120):
         self.err_threshold = err_threshold
         self.window_sec = window_sec
         self.cooldown_sec = cooldown_sec
@@ -135,8 +133,7 @@ async def get_universe(engine_base: str) -> List[str]:
     # Try engine universe first, else fall back to OPS if present
     urls = [
         f"{engine_base}/universe",
-        os.getenv("OPS_BASE", "http://localhost:8002").rstrip("/")
-        + "/aggregate/universe",
+        os.getenv("OPS_BASE", "http://localhost:8002").rstrip("/") + "/aggregate/universe",
     ]
     async with httpx.AsyncClient(timeout=6.0) as client:
         for u in urls:
@@ -167,9 +164,7 @@ async def symbol_info(engine_base: str, symbol: str) -> dict:
     """
     try:
         async with httpx.AsyncClient(timeout=6.0) as client:
-            r = await client.get(
-                f"{engine_base}/symbol_info", params={"symbol": symbol}
-            )
+            r = await client.get(f"{engine_base}/symbol_info", params={"symbol": symbol})
             if r.status_code == 200:
                 return r.json()
     except Exception:
@@ -238,9 +233,7 @@ async def submit_market_quote(
     payload = {"symbol": symbol, "side": side, "quote": quote}
 
     # Backoff configuration from environment (already set in .env)
-    base_backoff_ms = env_i(
-        "RETRY_BASE_MS", 600
-    )  # 600ms default (as per user's config)
+    base_backoff_ms = env_i("RETRY_BASE_MS", 600)  # 600ms default (as per user's config)
     backoff_multiplier = env_f("RETRY_BACKOFF", 2.0)  # 2x default
     max_backoff_sec = env_f("RETRY_MAX_SEC", 20.0)  # 20s max default
 
@@ -321,9 +314,7 @@ async def probe_symbol(
 
         try:
             # Use shared client
-            res = await submit_market_quote(
-                client, engine_base, symbol, "BUY", quote, idem
-            )
+            res = await submit_market_quote(client, engine_base, symbol, "BUY", quote, idem)
             order = res.get("order", {})
             status = order.get("status") or res.get("status")
             avg_px = float(order.get("avg_fill_price") or 0.0)
@@ -354,20 +345,14 @@ async def probe_symbol(
 async def main():
     """Main trading loop with shared client and strictly bounded rounds."""
     ap = argparse.ArgumentParser(description="Auto probe many symbols via engine API")
-    ap.add_argument(
-        "--engine", default=os.getenv("ENGINE_URL", "http://localhost:8003")
-    )
+    ap.add_argument("--engine", default=os.getenv("ENGINE_URL", "http://localhost:8003"))
     ap.add_argument("--symbols", default=os.getenv("SYMBOLS"))
     ap.add_argument("--probe-usdt", type=float, default=env_f("PROBE_USDT", 30.0))
     ap.add_argument("--max-slip-bps", type=float, default=env_f("MAX_SLIP_BP", 120.0))
-    ap.add_argument(
-        "--max-orders-per-min", type=int, default=env_i("MAX_ORDERS_PER_MIN", 20)
-    )
+    ap.add_argument("--max-orders-per-min", type=int, default=env_i("MAX_ORDERS_PER_MIN", 20))
     ap.add_argument("--max-parallel", type=int, default=env_i("MAX_PARALLEL_ORDERS", 3))
     ap.add_argument("--cooldown-sec", type=int, default=env_i("PROBE_COOLDOWN_SEC", 90))
-    ap.add_argument(
-        "--rounds", type=int, default=99999, help="Infinite rounds unless specified"
-    )
+    ap.add_argument("--rounds", type=int, default=99999, help="Infinite rounds unless specified")
     ap.add_argument("--dry-run", action="store_true", default=env_b("DRY_RUN", False))
     args = ap.parse_args()
 

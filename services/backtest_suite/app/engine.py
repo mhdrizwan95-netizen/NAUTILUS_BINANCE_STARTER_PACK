@@ -90,9 +90,7 @@ def run():
                 prev_close = equity[-1]["close_mtm"] if equity else bar["close"]
                 features["ret1"] = (bar["close"] - prev_close) / max(prev_close, 1e-9)
 
-            param_resp = _get_params(
-                "momentum_breakout", symbol.replace("/", "_"), features
-            )
+            param_resp = _get_params("momentum_breakout", symbol.replace("/", "_"), features)
             params = param_resp.get("params", {})
             order = strat.on_bar(bar, params)
             execm.on_signal(order, bar)

@@ -56,9 +56,7 @@ def _features(sym: str) -> Optional[List[float]]:
         _vola(rets[-20:]),  # short volatility
         (P[-1] - vwap) / vwap,  # dev vs VWAP
         _zscore(list(P)[-30:]),  # zscore of price
-        (
-            float(V[-1]) / max(1.0, sum(list(V)[-20:]) / 20.0) if V else 1.0
-        ),  # volume spike ratio
+        (float(V[-1]) / max(1.0, sum(list(V)[-20:]) / 20.0) if V else 1.0),  # volume spike ratio
     ]
     return feats
 

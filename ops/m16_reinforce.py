@@ -90,14 +90,10 @@ def features(df: pd.DataFrame) -> np.ndarray:
     return X, states
 
 
-def train_proxy_probe(
-    df: pd.DataFrame, X: np.ndarray
-) -> Tuple[np.ndarray, SGDClassifier]:
+def train_proxy_probe(df: pd.DataFrame, X: np.ndarray) -> Tuple[np.ndarray, SGDClassifier]:
     # 3-class (short/hold/long) with probability outputs (softmax via log_loss)
     y = (df["action"].astype(int) + 1).values  # {-1,0,1} -> {0,1,2}
-    clf = SGDClassifier(
-        loss="log_loss", learning_rate="constant", eta0=LR, max_iter=2000
-    )
+    clf = SGDClassifier(loss="log_loss", learning_rate="constant", eta0=LR, max_iter=2000)
     clf.fit(X, y)
     # probs for IPS fallback
     # For SGDClassifier, decision_function -> softmax manually:
@@ -175,11 +171,7 @@ def guarded_update(df: pd.DataFrame) -> Dict:
             pickle.dump(policy, f)
 
     # Metrics
-    winrate = (
-        float((df[df["action"] != 0]["pnl"] > 0).mean())
-        if (df["action"] != 0).any()
-        else 0.0
-    )
+    winrate = float((df[df["action"] != 0]["pnl"] > 0).mean()) if (df["action"] != 0).any() else 0.0
     avg_reward = float((r * base_w).mean())
     entropy = float((-(p_new * np.log(p_new + 1e-8)).sum(axis=1).mean()))
 

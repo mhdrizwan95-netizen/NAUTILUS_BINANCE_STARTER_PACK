@@ -7,7 +7,7 @@ import ccxt
 import pandas as pd
 
 from .config import settings
-from common import manifest
+from services.common import manifest
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 app = FastAPI(title="data-ingester", version="0.1.0")
@@ -61,9 +61,7 @@ def ingest_once():
         try:
             # fetch in chunks
             int(time.time() * 1000)
-            batch = ex.fetch_ohlcv(
-                sym, timeframe=tf, since=since, limit=settings.BATCH_LIMIT
-            )
+            batch = ex.fetch_ohlcv(sym, timeframe=tf, since=since, limit=settings.BATCH_LIMIT)
             if not batch:
                 continue
             df = pd.DataFrame(

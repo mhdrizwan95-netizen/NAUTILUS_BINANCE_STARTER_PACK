@@ -136,9 +136,7 @@ def format_recovery_message(recovery: Dict[str, Any]) -> str:
     return message
 
 
-def format_custom_message(
-    message: str, severity: str = "info", source: str = "system"
-) -> str:
+def format_custom_message(message: str, severity: str = "info", source: str = "system") -> str:
     """Format a custom message with standard header."""
     severity_emojis = {"critical": "🚨", "warning": "⚠️", "info": "ℹ️", "success": "✅"}
 

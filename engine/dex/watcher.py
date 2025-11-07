@@ -58,9 +58,7 @@ class DexWatcher:
 
     async def _evaluate(self, pos: DexPosition) -> None:
         token_identifier = (
-            pos.address
-            or (pos.metadata.get("candidate") or {}).get("addr")
-            or pos.symbol
+            pos.address or (pos.metadata.get("candidate") or {}).get("addr") or pos.symbol
         )
         price = await self.oracle.price_usd(token_identifier)
         if price is None or price <= 0:
@@ -93,9 +91,7 @@ class DexWatcher:
         if price <= trail_price and high > pos.entry_price:
             await self._flatten(pos, price, reason="trailing_stop")
 
-    async def _take_partial(
-        self, pos: DexPosition, target_index: int, price: float
-    ) -> None:
+    async def _take_partial(self, pos: DexPosition, target_index: int, price: float) -> None:
         target = pos.tp_targets[target_index]
         base_qty = float(pos.metadata.get("initial_qty") or pos.qty)
         qty_to_sell = max(base_qty * target.portion, 0.0)
@@ -120,9 +116,7 @@ class DexWatcher:
                 pos.pos_id, qty_to_sell, target_index=target_index, reason="take_profit"
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[DEX] partial fill failed %s: %s", pos.symbol, exc, exc_info=True
-            )
+            logger.warning("[DEX] partial fill failed %s: %s", pos.symbol, exc, exc_info=True)
 
     async def _flatten(self, pos: DexPosition, price: float, *, reason: str) -> None:
         qty = pos.qty
@@ -130,9 +124,7 @@ class DexWatcher:
             self.state.close_position(pos.pos_id, reason=reason)
             return
         try:
-            result = await self.executor.sell(
-                symbol=pos.symbol, token_address=pos.address, qty=qty
-            )
+            result = await self.executor.sell(symbol=pos.symbol, token_address=pos.address, qty=qty)
             logger.info(
                 "[DEX] %s exit qty=%.6f price=%.4f tx=%s reason=%s",
                 pos.symbol,
@@ -142,8 +134,6 @@ class DexWatcher:
                 reason,
             )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "[DEX] failed to flatten %s: %s", pos.symbol, exc, exc_info=True
-            )
+            logger.warning("[DEX] failed to flatten %s: %s", pos.symbol, exc, exc_info=True)
         finally:
             self.state.close_position(pos.pos_id, reason=reason)

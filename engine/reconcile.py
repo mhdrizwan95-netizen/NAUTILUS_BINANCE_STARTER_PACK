@@ -84,9 +84,7 @@ def reconcile_since_snapshot(
                 t.get("quoteFee", 0.0)
                 or t.get("commission_quote", 0.0)
                 or (
-                    t.get("commission", 0.0)
-                    if t.get("commissionAsset") in {"USDT", "USD"}
-                    else 0.0
+                    t.get("commission", 0.0) if t.get("commissionAsset") in {"USDT", "USD"} else 0.0
                 )
                 or 0.0
             )
@@ -94,14 +92,10 @@ def reconcile_since_snapshot(
             fee = 0.0
         if sym and qty and px:
             venue_hint = str(t.get("venue") or "BINANCE").upper()
-            market_hint = (
-                str(t.get("market") or t.get("isIsolated") or "").strip().lower()
-            )
+            market_hint = str(t.get("market") or t.get("isIsolated") or "").strip().lower()
             if market_hint not in {"margin", "spot", "futures", "options"}:
                 market_hint = None
-            qualified_symbol = (
-                sym if "." in sym else f"{sym}.{venue_hint}" if venue_hint else sym
-            )
+            qualified_symbol = sym if "." in sym else f"{sym}.{venue_hint}" if venue_hint else sym
             # Portfolio.apply_fill expects keyword names: quantity, fee_usd
             portfolio.apply_fill(
                 symbol=qualified_symbol,

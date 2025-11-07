@@ -118,9 +118,7 @@ def load_momentum_config() -> MomentumConfig:
         leverage_major=max(1, _env_int("MOMENTUM_LEVERAGE_MAJOR", 2)),
         leverage_default=max(1, _env_int("MOMENTUM_LEVERAGE_DEFAULT", 2)),
         max_signals_per_cycle=max(1, _env_int("MOMENTUM_MAX_SIGNALS_PER_CYCLE", 3)),
-        min_quote_volume_usd=max(
-            50_000.0, _env_float("MOMENTUM_MIN_QUOTE_VOL_USD", 250_000.0)
-        ),
+        min_quote_volume_usd=max(50_000.0, _env_float("MOMENTUM_MIN_QUOTE_VOL_USD", 250_000.0)),
         default_market=default_market,
     )
 
@@ -232,10 +230,7 @@ class MomentumBreakout:
         if client is None or not hasattr(client, "klines"):
             return None
         limit = max(
-            self.cfg.lookback_bars
-            + self.cfg.volume_baseline_window
-            + self.cfg.volume_window
-            + 5,
+            self.cfg.lookback_bars + self.cfg.volume_baseline_window + self.cfg.volume_window + 5,
             self.cfg.atr_length + 5,
         )
         raw = client.klines(symbol, interval=self.cfg.atr_interval, limit=limit)
@@ -255,36 +250,27 @@ class MomentumBreakout:
         if not math.isfinite(price) or price <= 0:
             return None
         lookback_idx = (
-            -self.cfg.lookback_bars
-            if self.cfg.lookback_bars < len(closes)
-            else -len(closes)
+            -self.cfg.lookback_bars if self.cfg.lookback_bars < len(closes) else -len(closes)
         )
         baseline_price = closes[lookback_idx]
         if baseline_price <= 0:
             return None
         move = (price - baseline_price) / baseline_price
         recent_high = max(highs[lookback_idx:])
-        prior_high = (
-            max(highs[:lookback_idx]) if abs(lookback_idx) < len(highs) else recent_high
-        )
+        prior_high = max(highs[:lookback_idx]) if abs(lookback_idx) < len(highs) else recent_high
         breakout = price >= prior_high and move >= self.cfg.pct_move_threshold
 
         recent_vol = sum(vols[-self.cfg.volume_window :])
         baseline_slice = vols[
-            -(
-                self.cfg.volume_window + self.cfg.volume_baseline_window
-            ) : -self.cfg.volume_window
+            -(self.cfg.volume_window + self.cfg.volume_baseline_window) : -self.cfg.volume_window
         ]
         baseline_vol = statistics.mean(baseline_slice) if baseline_slice else 0.0
         volume_boost = (
-            baseline_vol > 0
-            and (recent_vol / baseline_vol) >= self.cfg.volume_multiplier
+            baseline_vol > 0 and (recent_vol / baseline_vol) >= self.cfg.volume_multiplier
         )
         notional_recent = sum(qvols[-self.cfg.volume_window :])
         if notional_recent < self.cfg.min_quote_volume_usd:
-            momentum_breakout_candidates_total.labels(
-                symbol, "BINANCE", "low_volume"
-            ).inc()
+            momentum_breakout_candidates_total.labels(symbol, "BINANCE", "low_volume").inc()
             return None
 
         if not breakout or not volume_boost:
@@ -296,9 +282,7 @@ class MomentumBreakout:
         low_anchor = min(window_lows) if window_lows else price
         extension = (price - low_anchor) / max(low_anchor, 1e-9)
         if extension >= self.cfg.max_extension_pct:
-            momentum_breakout_candidates_total.labels(
-                symbol, "BINANCE", "extended"
-            ).inc()
+            momentum_breakout_candidates_total.labels(symbol, "BINANCE", "extended").inc()
             return None
 
         atr = self._atr(highs, lows, closes, self.cfg.atr_length)
@@ -366,9 +350,7 @@ class MomentumBreakout:
                 symbol, "BUY", plan.notional_usd, market=plan.market
             )
             avg = float(result.get("avg_fill_price") or plan.price)
-            qty = float(
-                result.get("filled_qty_base") or result.get("executedQty") or 0.0
-            )
+            qty = float(result.get("filled_qty_base") or result.get("executedQty") or 0.0)
             self.log.info(
                 "[MOMO] LIVE %s qty=%.6f avg=%.4f stop=%.4f tp=%.4f trail≈%.4f market=%s",
                 symbol,
@@ -387,13 +369,9 @@ class MomentumBreakout:
             self.log.warning("[MOMO] execution failed for %s: %s", symbol, exc)
             momentum_breakout_orders_total.labels(clean, plan.venue, "failed").inc()
 
-    async def _arm_managed_exits(
-        self, symbol: str, qty: float, plan: MomentumPlan
-    ) -> None:
+    async def _arm_managed_exits(self, symbol: str, qty: float, plan: MomentumPlan) -> None:
         try:
-            await self.router.amend_stop_reduce_only(
-                symbol, "SELL", plan.stop_price, abs(qty)
-            )
+            await self.router.amend_stop_reduce_only(symbol, "SELL", plan.stop_price, abs(qty))
         except Exception:
             pass
         try:

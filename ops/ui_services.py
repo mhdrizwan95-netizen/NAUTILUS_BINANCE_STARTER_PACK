@@ -43,9 +43,7 @@ def _deepcopy(value: Any) -> Any:
     try:
         return deepcopy(value)
     except Exception:  # pragma: no cover - defensive guard
-        return (
-            json.loads(json.dumps(value)) if isinstance(value, (dict, list)) else value
-        )
+        return json.loads(json.dumps(value)) if isinstance(value, (dict, list)) else value
 
 
 class PortfolioService:
@@ -97,9 +95,7 @@ class OrdersService:
         if self._cancel_endpoint:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 try:
-                    resp = await client.post(
-                        self._cancel_endpoint, json={"order_ids": list(ids)}
-                    )
+                    resp = await client.post(self._cancel_endpoint, json={"order_ids": list(ids)})
                     resp.raise_for_status()
                 except Exception as exc:  # noqa: BLE001
                     raise RuntimeError(f"engine cancellation failed: {exc}") from exc
@@ -107,9 +103,7 @@ class OrdersService:
         with self._lock:
             before = len(self._orders)
             self._orders = [
-                o
-                for o in self._orders
-                if str(o.get("id") or o.get("orderId")) not in ids
+                o for o in self._orders if str(o.get("id") or o.get("orderId")) not in ids
             ]
             removed = before - len(self._orders)
         return {"cancelled": list(ids), "removed": removed}
@@ -159,7 +153,9 @@ class ConfigService:
             return {"version": 0, "updated_at": None, "updated_by": None, "approved_by": None}
 
     def _persist_meta(self) -> None:
-        self._meta_path.write_text(json.dumps(self._meta, indent=2, sort_keys=True), encoding="utf-8")
+        self._meta_path.write_text(
+            json.dumps(self._meta, indent=2, sort_keys=True), encoding="utf-8"
+        )
 
     def _append_audit(self, record: Dict[str, Any]) -> None:
         try:
@@ -255,9 +251,7 @@ class StrategyGovernanceService:
             return {"current": "trend_core", "weights": {"trend_core": 1.0}}
 
     def _save(self, payload: Dict[str, Any]) -> None:
-        self._path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        self._path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     async def list(self) -> Dict[str, Any]:
         with self._lock:
@@ -336,9 +330,7 @@ class ScannerService:
             "event": [],
             "scalper": [],
         }
-        self._path.write_text(
-            json.dumps(default, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        self._path.write_text(json.dumps(default, indent=2, sort_keys=True), encoding="utf-8")
 
     def _load(self) -> Dict[str, List[str]]:
         try:
@@ -348,9 +340,7 @@ class ScannerService:
             return {}
 
     def _save(self, payload: Dict[str, List[str]]) -> None:
-        self._path.write_text(
-            json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        self._path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def _resolve_key(self, payload: Dict[str, List[str]], strategy_id: str) -> str:
         if strategy_id in payload:
@@ -452,9 +442,7 @@ class OpsGovernanceService:
             return {"trading_enabled": True}
 
     def _persist(self, state: Dict[str, Any]) -> None:
-        self._state_path.write_text(
-            json.dumps(state, indent=2, sort_keys=True), encoding="utf-8"
-        )
+        self._state_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
 
     async def status(self) -> Dict[str, Any]:
         state = self._load_state()
@@ -516,9 +504,7 @@ class OpsGovernanceService:
                 resp.raise_for_status()
                 payload = resp.json() or {}
                 positions = (
-                    payload.get("positions")
-                    or payload.get("state", {}).get("positions", [])
-                    or []
+                    payload.get("positions") or payload.get("state", {}).get("positions", []) or []
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("Engine portfolio fetch failed: %s", exc)

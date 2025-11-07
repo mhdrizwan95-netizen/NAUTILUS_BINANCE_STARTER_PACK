@@ -155,9 +155,7 @@ def exec_shell(cmd: str) -> bool:
     """
     print(f"→ Executing: {cmd}")
     try:
-        result = subprocess.run(
-            shlex.split(cmd), capture_output=True, text=True, timeout=3600
-        )
+        result = subprocess.run(shlex.split(cmd), capture_output=True, text=True, timeout=3600)
 
         if result.returncode == 0:
             print("✅ Execution successful")
@@ -176,9 +174,7 @@ def exec_shell(cmd: str) -> bool:
         return False
 
 
-def assess_system_health(
-    metrics: Dict[str, Any], cfg: Dict[str, Any]
-) -> Dict[str, Any]:
+def assess_system_health(metrics: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
     """
     Assess overall system health based on KPIs and determine if action is needed.
 
@@ -329,15 +325,11 @@ def decide_and_act(
     # Data freshness conditions (lower priority maintenance)
     if metrics.get("feedback_fresh_minutes", 0) > th["feedback_stale_minutes"]:
         if cool_ok(state, "m15", cd["m15_minutes"]):
-            candidates.append(
-                ("paper_seed", pri["paper_seed_on_stale"], "feedback_stale")
-            )
+            candidates.append(("paper_seed", pri["paper_seed_on_stale"], "feedback_stale"))
 
     if metrics.get("rollups_age_minutes", 0) > th["rollups_stale_minutes"]:
         if cool_ok(state, "m15", cd["m15_minutes"]):
-            candidates.append(
-                ("paper_seed", pri["paper_seed_on_stale"], "rollups_stale")
-            )
+            candidates.append(("paper_seed", pri["paper_seed_on_stale"], "rollups_stale"))
 
     # No action needed
     if not candidates:
@@ -379,9 +371,7 @@ def decide_and_act(
 
         elif action == "m18":
             # Legacy covariance diagnostics retired in favor of dashboards.
-            print(
-                "M18 covariance diagnostics deprecated; define M18_COMMAND for custom tooling."
-            )
+            print("M18 covariance diagnostics deprecated; define M18_COMMAND for custom tooling.")
             cmd = os.getenv("M18_COMMAND")
             success = exec_shell(cmd) if cmd else True
 
@@ -458,9 +448,7 @@ def main():
 
         # Get current metrics
         metrics = read_prom_snapshot()
-        print(
-            f"Metrics snapshot: {len(metrics)} keys at {metrics.get('timestamp', 'unknown')}"
-        )
+        print(f"Metrics snapshot: {len(metrics)} keys at {metrics.get('timestamp', 'unknown')}")
 
         # Assess system health
         health = assess_system_health(metrics, cfg)

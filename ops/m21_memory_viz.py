@@ -76,9 +76,7 @@ def load_lineage_data() -> Optional[pd.DataFrame]:
         )
 
         # Extract generation types for color coding
-        df["generation_type"] = df.apply(
-            lambda row: row.get("generation_type", "unknown"), axis=1
-        )
+        df["generation_type"] = df.apply(lambda row: row.get("generation_type", "unknown"), axis=1)
 
         print(f"📊 Loaded {len(df)} fossil records from lineage")
         return df
@@ -315,9 +313,7 @@ def add_summary_stats(df: pd.DataFrame, ax) -> None:
         fontsize=9,
         verticalalignment="top",
         horizontalalignment="right",
-        bbox=dict(
-            boxstyle="round,pad=0.5", facecolor="white", alpha=0.8, edgecolor="gray"
-        ),
+        bbox=dict(boxstyle="round,pad=0.5", facecolor="white", alpha=0.8, edgecolor="gray"),
         multialignment="left",
     )
 

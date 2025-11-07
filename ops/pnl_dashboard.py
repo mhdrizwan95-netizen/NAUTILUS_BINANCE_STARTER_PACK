@@ -172,9 +172,7 @@ async def pnl_dashboard():
 
         # Calculate summary statistics
         total_realized_pnl = sum(item["pnl_realized_total"] for item in enhanced_data)
-        total_unrealized_pnl = sum(
-            item["pnl_unrealized_total"] for item in enhanced_data
-        )
+        total_unrealized_pnl = sum(item["pnl_unrealized_total"] for item in enhanced_data)
         total_trades = sum(item["orders_filled_total"] for item in enhanced_data)
 
         # Calculate portfolio-level metrics
@@ -224,9 +222,7 @@ async def model_performance(model_name: str):
 
     # Aggregate across venues for this model
     total_realized = sum(floor_data["pnl_realized_total"] for floor_data in model_data)
-    total_unrealized = sum(
-        floor_data["pnl_unrealized_total"] for floor_data in model_data
-    )
+    total_unrealized = sum(floor_data["pnl_unrealized_total"] for floor_data in model_data)
     total_trades = sum(floor_data["orders_filled_total"] for floor_data in model_data)
 
     # Use registry data for strategy-level metrics
@@ -241,14 +237,10 @@ async def model_performance(model_name: str):
             "total_unrealized_pnl": total_unrealized,
             "total_pnl": total_realized + total_unrealized,
             "total_trades": total_trades,
-            "win_rate": sum(
-                d["win_rate"] * d["orders_submitted_total"] for d in model_data
-            )
+            "win_rate": sum(d["win_rate"] * d["orders_submitted_total"] for d in model_data)
             / max(1, sum(d["orders_submitted_total"] for d in model_data)),
             "sharpe": strategy_info.get("sharpe", 0.0),
-            "max_drawdown": max(
-                (d.get("max_drawdown", 0) for d in model_data), default=0.0
-            ),
+            "max_drawdown": max((d.get("max_drawdown", 0) for d in model_data), default=0.0),
         },
         "strategy_info": strategy_info,
         "timestamp": time.time(),
@@ -265,11 +257,7 @@ def calculate_overall_win_rate(model_data: list) -> float:
 
 def calculate_portfolio_sharpe(model_data: list) -> float:
     """Simple portfolio Sharpe calculation (simplified)."""
-    returns = [
-        item.get("return_pct", 0)
-        for item in model_data
-        if item.get("return_pct", 0) != 0
-    ]
+    returns = [item.get("return_pct", 0) for item in model_data if item.get("return_pct", 0) != 0]
 
     if len(returns) < 2:
         return 0.0

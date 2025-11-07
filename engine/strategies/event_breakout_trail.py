@@ -68,9 +68,7 @@ class EventBreakoutTrailer:
             if not last:
                 continue
             atr = await self._atr(sym)
-            trail_dist = float(
-                os.getenv("EVENT_BREAKOUT_TRAIL_ATR_MULT", "1.2")
-            ) * float(atr)
+            trail_dist = float(os.getenv("EVENT_BREAKOUT_TRAIL_ATR_MULT", "1.2")) * float(atr)
             desired = max(self._last_stop.get(sym, 0.0), last - max(trail_dist, 0.0))
             # Round
             try:

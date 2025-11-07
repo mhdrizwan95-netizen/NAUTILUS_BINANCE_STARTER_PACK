@@ -254,7 +254,7 @@ def test_manual_promotion_override():
     save_registry(initial_reg)
 
     client = TestClient(ops_app.app)
-    token = getattr(ops_app, "OPS_TOKEN", os.getenv("OPS_API_TOKEN"))
+    token = ops_app.get_expected_token()
     # Manual promotion request
     response = client.post(
         "/strategy/promote",

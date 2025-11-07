@@ -2,6 +2,7 @@
 from pathlib import Path
 import json
 
+
 def generate_html_table(registry_path: Path) -> str:
     """Generate HTML table rows from strategy registry."""
     try:
@@ -11,8 +12,11 @@ def generate_html_table(registry_path: Path) -> str:
         current_model = registry.get("current_model")
 
         # Get all models (excluding metadata keys)
-        models = [(k, v) for k, v in registry.items()
-                 if k not in ("current_model", "promotion_log") and isinstance(v, dict)]
+        models = [
+            (k, v)
+            for k, v in registry.items()
+            if k not in ("current_model", "promotion_log") and isinstance(v, dict)
+        ]
 
         # Sort models by Sharpe ratio descending (same as governance ranking)
         models.sort(key=lambda kv: kv[1].get("sharpe", 0), reverse=True)
@@ -28,13 +32,13 @@ def generate_html_table(registry_path: Path) -> str:
             last_promotion = stats.get("last_promotion", "") or "—"
 
             # Mark current model
-            css_class = 'current-row' if model_name == current_model else ''
+            css_class = "current-row" if model_name == current_model else ""
 
             # Format last promotion timestamp
             if last_promotion != "—":
                 try:
                     # Truncate to just date/time for display
-                    last_promotion = last_promotion[:16].replace('T', ' ')
+                    last_promotion = last_promotion[:16].replace("T", " ")
                 except:
                     pass
 
@@ -45,6 +49,7 @@ def generate_html_table(registry_path: Path) -> str:
 
     except Exception as e:
         return f"<tr><td colspan='7' style='color: red;'>Error loading registry: {str(e)[:50]}</td></tr>"
+
 
 def get_strategy_ui_html() -> str:
     """Return the complete HTML dashboard page."""
@@ -63,12 +68,13 @@ def get_strategy_ui_html() -> str:
                 pass
 
     except Exception as e:
-        table_rows = f"<tr><td colspan='7' style='color: red;'>Critical error: {str(e)[:100]}</td></tr>"
+        table_rows = (
+            f"<tr><td colspan='7' style='color: red;'>Critical error: {str(e)[:100]}</td></tr>"
+        )
         current_model = "Error"
 
     # Professional dark theme HTML dashboard
-    html = "</code></pre>
-    <html lang="en">
+    html = """<html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">

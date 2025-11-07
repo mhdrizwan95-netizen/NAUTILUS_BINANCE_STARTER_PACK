@@ -77,8 +77,7 @@ def write_allocations(result: Dict[str, Any], path: Path) -> None:
     payload = {
         "capital_quota_usd": result["final_quotas"],
         "updated_at": {
-            model: alloc["last_update"]
-            for model, alloc in result["target_allocations"].items()
+            model: alloc["last_update"] for model, alloc in result["target_allocations"].items()
         },
         "equity_usd": result["equity"],
         "ts": result["simulation_ts"],

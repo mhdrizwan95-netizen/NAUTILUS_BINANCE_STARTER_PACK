@@ -63,9 +63,7 @@ async def place_market_order_async(
     quantity: float | None,
     market: str | None = None,
 ) -> dict[str, Any]:
-    return await _place_market_order_async_core(
-        symbol, side, quote, quantity, None, market=market
-    )
+    return await _place_market_order_async_core(symbol, side, quote, quantity, None, market=market)
 
 
 def _as_float(value: Any) -> float:
@@ -125,9 +123,7 @@ async def _maybe_refresh_order_status(
                 symbol=clean_symbol, order_id=order_id, client_order_id=client_order_id
             )
     except Exception as exc:  # noqa: BLE001
-        logger.warning(
-            "[ORDER_REFRESH] status fetch failed for %s: %s", clean_symbol, exc
-        )
+        logger.warning("[ORDER_REFRESH] status fetch failed for %s: %s", clean_symbol, exc)
         return
     logger.debug(
         "[ORDER_REFRESH_DEBUG] Refresh result: status=%s execQty=%s avgPrice=%s",
@@ -160,9 +156,7 @@ async def _maybe_refresh_order_status(
 class OrderRouter:
     """Handles order validation and routing across multiple venues."""
 
-    def __init__(
-        self, default_client, portfolio: Portfolio, venue: str | None = None
-    ) -> None:
+    def __init__(self, default_client, portfolio: Portfolio, venue: str | None = None) -> None:
         self._portfolio = portfolio
         self._settings = get_settings()
         self._venue = (venue or self._settings.venue).upper()
@@ -175,7 +169,9 @@ class OrderRouter:
 
     def _split_symbol(self, symbol: str) -> tuple[str, str]:
         base = symbol.split(".")[0].upper()
-        venue = symbol.split(".")[1].upper() if "." in symbol and symbol.split(".")[1] else self._venue
+        venue = (
+            symbol.split(".")[1].upper() if "." in symbol and symbol.split(".")[1] else self._venue
+        )
         return base, venue
 
     def _symbol_spec(self, symbol: str) -> tuple[SymbolSpec | None, str, str]:
@@ -241,9 +237,7 @@ class OrderRouter:
             if not balances:
                 try:
                     wallet = float(
-                        account.get("totalWalletBalance")
-                        or account.get("availableBalance")
-                        or 0.0
+                        account.get("totalWalletBalance") or account.get("availableBalance") or 0.0
                     )
                     if wallet:
                         self._portfolio.state.cash = wallet
@@ -257,18 +251,14 @@ class OrderRouter:
                 from engine.metrics import update_portfolio_gauges
 
                 st = self._portfolio.state
-                update_portfolio_gauges(
-                    st.cash, st.realized, st.unrealized, st.exposure
-                )
+                update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
             except Exception:
                 pass
         except Exception as e:
             import logging
 
             logger = logging.getLogger(__name__)
-            logger.warning(
-                "[INIT] initialize_balances failed: %s; starting with empty balances", e
-            )
+            logger.warning("[INIT] initialize_balances failed: %s; starting with empty balances", e)
             # Leave portfolio empty; snapshot_loaded will be false
 
     async def market_quote(
@@ -301,15 +291,11 @@ class OrderRouter:
 
             if float(quote) < float(spec.min_notional):
                 orders_rejected.inc()
-                raise ValueError(
-                    f"MIN_NOTIONAL: Quote {quote:.2f} below {spec.min_notional:.2f}"
-                )
+                raise ValueError(f"MIN_NOTIONAL: Quote {quote:.2f} below {spec.min_notional:.2f}")
 
             submit = getattr(client, "submit_market_quote", None)
             if submit is None:
-                qty = await self._quote_to_quantity(
-                    symbol, side, quote, market=market_hint
-                )
+                qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
                 return await self.market_quantity(symbol, side, qty, market=market_hint)
 
             margin_market = "margin" if venue == "BINANCE_MARGIN" else None
@@ -327,12 +313,8 @@ class OrderRouter:
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code if e.response is not None else 0
                 if code in (400, 415, 422):
-                    qty = await self._quote_to_quantity(
-                        symbol, side, quote, market=submit_market
-                    )
-                    return await self.market_quantity(
-                        symbol, side, qty, market=submit_market
-                    )
+                    qty = await self._quote_to_quantity(symbol, side, quote, market=submit_market)
+                    return await self.market_quantity(symbol, side, qty, market=submit_market)
                 raise
             t1 = time.time()
 
@@ -342,18 +324,12 @@ class OrderRouter:
                 pass
 
             fee_bps = load_fee_config(venue).taker_bps
-            filled_qty = float(
-                res.get("executedQty") or res.get("filled_qty_base") or 0.0
-            )
+            filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or 0.0)
             avg_price = float(
-                res.get("avg_fill_price")
-                or res.get("fills", [{}])[0].get("price", 0.0)
-                or 0.0
+                res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", 0.0) or 0.0
             )
             fill_notional = (
-                abs(filled_qty) * avg_price
-                if (filled_qty and avg_price)
-                else float(quote)
+                abs(filled_qty) * avg_price if (filled_qty and avg_price) else float(quote)
             )
             fee = (fee_bps / 10_000.0) * fill_notional
             res.setdefault("filled_qty_base", filled_qty)
@@ -365,11 +341,7 @@ class OrderRouter:
 
             try:
                 if filled_qty > 0 and (avg_price or fill_notional > 0):
-                    px = (
-                        avg_price
-                        if avg_price
-                        else (fill_notional / max(filled_qty, 1e-12))
-                    )
+                    px = avg_price if avg_price else (fill_notional / max(filled_qty, 1e-12))
                     symbol_key = symbol if "." in symbol else f"{base}.{venue}"
                     self._portfolio.apply_fill(
                         symbol_key,
@@ -381,9 +353,7 @@ class OrderRouter:
                         market=submit_market,
                     )
                     st = self._portfolio.state
-                    update_portfolio_gauges(
-                        st.cash, st.realized, st.unrealized, st.exposure
-                    )
+                    update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
             except Exception:
                 pass
 
@@ -412,9 +382,7 @@ class OrderRouter:
         asyncio.set_event_loop(loop)
         try:
             return loop.run_until_complete(
-                self._place_market_order_async(
-                    symbol, side, quote, quantity, market=market
-                )
+                self._place_market_order_async(symbol, side, quote, quantity, market=market)
             )
         finally:
             loop.close()
@@ -463,9 +431,7 @@ class OrderRouter:
         if not callable(emit):
             return
         try:
-            emit(
-                res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent
-            )
+            emit(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)
         except Exception:
             pass
 
@@ -516,9 +482,7 @@ class OrderRouter:
                 await res  # type: ignore[func-returns-value]
             return True
         except Exception as exc:  # noqa: BLE001
-            logging.getLogger(__name__).debug(
-                "cancel_order failed: %s", exc, exc_info=True
-            )
+            logging.getLogger(__name__).debug("cancel_order failed: %s", exc, exc_info=True)
             return False
 
     async def cancel_open_order(self, order: dict) -> bool:
@@ -594,9 +558,7 @@ class OrderRouter:
         clean_symbol = symbol.split(".")[0]
         try:
             if market is not None and "market" in api_fn.__code__.co_varnames:  # type: ignore[attr-defined]
-                res = api_fn(
-                    symbol=clean_symbol, side=side, quantity=float(qty), market=market
-                )
+                res = api_fn(symbol=clean_symbol, side=side, quantity=float(qty), market=market)
             else:
                 res = api_fn(symbol=clean_symbol, side=side, quantity=float(qty))
             if hasattr(res, "__await__"):
@@ -629,9 +591,7 @@ class OrderRouter:
         spec_key = "BINANCE" if venue == "BINANCE_MARGIN" else venue
         spec: SymbolSpec | None = (SPECS.get(spec_key) or {}).get(base)
         if venue == "IBKR" and spec is None:
-            spec = SymbolSpec(
-                min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd()
-            )
+            spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
         elif venue in {"BINANCE", "BINANCE_MARGIN"} and spec is None:
             spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
         elif venue == "KRAKEN" and spec is None:
@@ -690,6 +650,15 @@ def _normalize_symbol(symbol: str) -> str:
     return symbol.split(".")[0].upper()
 
 
+def _infer_default_venue(base: str, engine_venue: str | None) -> str:
+    crypto_suffixes = ("USDT", "USDC", "BUSD")
+    base_up = base.upper()
+    is_crypto = any(base_up.endswith(suffix) for suffix in crypto_suffixes)
+    if is_crypto:
+        return engine_venue or "BINANCE"
+    return "IBKR"
+
+
 async def _place_market_order_async_core(
     symbol: str,
     side: str,
@@ -704,8 +673,9 @@ async def _place_market_order_async_core(
     base = symbol.split(".")[0].upper()
 
     if venue is None:
-        engine_venue = get_settings().venue.upper() if hasattr(get_settings(), "venue") else "BINANCE"
-        default_venue = engine_venue or "BINANCE"
+        engine_venue = getattr(get_settings(), "venue", None)
+        engine_venue = engine_venue.upper() if isinstance(engine_venue, str) else None
+        default_venue = _infer_default_venue(base, engine_venue)
         symbol = f"{base}.{default_venue}"
         venue = default_venue
 
@@ -713,9 +683,7 @@ async def _place_market_order_async_core(
     if client is None:
         raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
 
-    market_hint: str | None = (
-        market.lower() if isinstance(market, str) and market else None
-    )
+    market_hint: str | None = market.lower() if isinstance(market, str) and market else None
     if venue == "BINANCE_MARGIN" and not market_hint:
         market_hint = "margin"
 
@@ -726,9 +694,7 @@ async def _place_market_order_async_core(
     spec_key = "BINANCE" if venue == "BINANCE_MARGIN" else venue
     spec: SymbolSpec | None = (SPECS.get(spec_key) or {}).get(base)
     if venue == "IBKR" and spec is None:
-        spec = SymbolSpec(
-            min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd()
-        )
+        spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
     elif venue in {"BINANCE", "BINANCE_MARGIN"} and spec is None:
         spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
     elif venue == "KRAKEN" and spec is None:
@@ -773,9 +739,7 @@ async def _place_market_order_async_core(
 
     if quantity is None or abs(quantity) < min_qty:
         orders_rejected.inc()
-        raise ValueError(
-            f"QTY_TOO_SMALL: Rounded qty {quantity} < min_qty {min_qty}"
-        )
+        raise ValueError(f"QTY_TOO_SMALL: Rounded qty {quantity} < min_qty {min_qty}")
 
     quantity_val = float(quantity)
     notional = abs(quantity_val) * float(px)
@@ -784,15 +748,11 @@ async def _place_market_order_async_core(
 
     if notional < min_notional:
         orders_rejected.inc()
-        raise ValueError(
-            f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}"
-        )
+        raise ValueError(f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}")
 
     if venue == "IBKR":
         t0 = time.time()
-        res = client.place_market_order(
-            symbol=symbol, side=side, quantity=int(quantity)
-        )
+        res = client.place_market_order(symbol=symbol, side=side, quantity=int(quantity))
         t1 = time.time()
         try:
             REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
@@ -803,9 +763,7 @@ async def _place_market_order_async_core(
         )
         fee_cfg = load_ibkr_fee_config()
         if fee_cfg.mode == "per_share":
-            fee = max(
-                fee_cfg.min_trade_fee_usd, abs(int(quantity)) * fee_cfg.per_share_usd
-            )
+            fee = max(fee_cfg.min_trade_fee_usd, abs(int(quantity)) * fee_cfg.per_share_usd)
         else:
             fee = (fee_cfg.bps / 10_000.0) * fill_notional
     else:
@@ -867,9 +825,7 @@ async def _place_market_order_async_core(
 
         # Futures API commonly reports NEW+executedQty=0 even when filled; quickly re-query
         try:
-            await _maybe_refresh_order_status(
-                res, client, venue, clean_symbol, market_hint
-            )
+            await _maybe_refresh_order_status(res, client, venue, clean_symbol, market_hint)
         except Exception:
             pass
 
@@ -915,9 +871,7 @@ async def _place_market_order_async_core(
                 filled_qty_bin = float(res.get("filled_qty_base") or quantity or 0.0)
                 avg_px_bin = float(res.get("avg_fill_price") or px)
                 symbol_key = symbol if "." in symbol else f"{base}.{venue}"
-                effective_market = market_hint or (
-                    "margin" if venue == "BINANCE_MARGIN" else None
-                )
+                effective_market = market_hint or ("margin" if venue == "BINANCE_MARGIN" else None)
                 portfolio.apply_fill(
                     symbol_key,
                     side,
@@ -1038,11 +992,7 @@ def _round_tick(value: float, tick: float) -> float:
     if tick and tick > 0:
         precision = int(abs(math.log10(tick))) if tick < 1 else 0
         factor = 1 / tick
-        return (
-            math.floor(value * factor) / factor
-            if factor != 0
-            else round(value, precision)
-        )
+        return math.floor(value * factor) / factor if factor != 0 else round(value, precision)
     return value
 
 
@@ -1115,9 +1065,7 @@ class OrderRouterExt(OrderRouter):
                 for bal in balances:
                     asset = (bal.get("asset") or "").upper()
                     if asset in {base_currency, "USD", "USDT"}:
-                        total = float(bal.get("free", 0.0)) + float(
-                            bal.get("locked", 0.0)
-                        )
+                        total = float(bal.get("free", 0.0)) + float(bal.get("locked", 0.0))
                         break
                 if total > 0:
                     self._portfolio.state.cash = total
@@ -1125,9 +1073,7 @@ class OrderRouterExt(OrderRouter):
                     from engine.metrics import update_portfolio_gauges
 
                     s = self._portfolio.state
-                    update_portfolio_gauges(
-                        s.cash, s.realized, s.unrealized, s.exposure
-                    )
+                    update_portfolio_gauges(s.cash, s.realized, s.unrealized, s.exposure)
             else:
                 wallet = float(
                     account.get("totalWalletBalance")
@@ -1174,9 +1120,7 @@ class OrderRouterExt(OrderRouter):
         market: str | None = None,
     ) -> dict[str, Any]:
         qty = await self._quote_to_quantity(symbol, side, quote, market=market)
-        return await self.limit_quantity(
-            symbol, side, qty, price, time_in_force, market=market
-        )
+        return await self.limit_quantity(symbol, side, qty, price, time_in_force, market=market)
 
     async def limit_quantity(
         self,
@@ -1213,18 +1157,14 @@ class OrderRouterExt(OrderRouter):
         q_rounded = _round_step(float(quantity), spec.step_size)
         if abs(q_rounded) < spec.min_qty:
             orders_rejected.inc()
-            raise ValueError(
-                f"QTY_TOO_SMALL: Rounded qty {q_rounded} < min_qty {spec.min_qty}"
-            )
+            raise ValueError(f"QTY_TOO_SMALL: Rounded qty {q_rounded} < min_qty {spec.min_qty}")
 
         # Try to get tick size from live exchange filter
         tick_size = 0.0
         try:
             spec_key = "BINANCE" if venue == "BINANCE_MARGIN" else venue
             filt = (
-                await _CLIENTS["BINANCE"].exchange_filter(base)
-                if spec_key == "BINANCE"
-                else None
+                await _CLIENTS["BINANCE"].exchange_filter(base) if spec_key == "BINANCE" else None
             )
             tick_size = float(getattr(filt, "tick_size", 0.0) or 0.0)
         except Exception:
@@ -1242,9 +1182,7 @@ class OrderRouterExt(OrderRouter):
                     venue,
                     base,
                     symbol,
-                    market=(
-                        market.lower() if isinstance(market, str) and market else None
-                    ),
+                    market=(market.lower() if isinstance(market, str) and market else None),
                 )
                 or 0
             )
@@ -1255,9 +1193,7 @@ class OrderRouterExt(OrderRouter):
             min_notional = max(min_notional, ibkr_min_notional_usd())
         if notional < min_notional:
             orders_rejected.inc()
-            raise ValueError(
-                f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}"
-            )
+            raise ValueError(f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}")
 
         # Submit
         clean_symbol = _normalize_symbol(symbol) if venue == "BINANCE" else symbol
@@ -1293,8 +1229,7 @@ class OrderRouterExt(OrderRouter):
         fee_bps = load_fee_config(venue).taker_bps
         filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or 0.0)
         avg_price = float(
-            res.get("avg_fill_price")
-            or res.get("fills", [{}])[0].get("price", px_for_notional)
+            res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", px_for_notional)
         )
         fill_notional = abs(filled_qty) * avg_price
         fee = (fee_bps / 10_000.0) * fill_notional
@@ -1318,9 +1253,7 @@ class OrderRouterExt(OrderRouter):
                     market=effective_market,
                 )
                 st = self._portfolio.state
-                update_portfolio_gauges(
-                    st.cash, st.realized, st.unrealized, st.exposure
-                )
+                update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
         except Exception:
             pass
 
@@ -1376,17 +1309,13 @@ class OrderRouterExt(OrderRouter):
                 md = _MDAdapter(self)
                 tf = os.getenv("RISK_PARITY_TF", "5m")
                 n = int(float(os.getenv("RISK_PARITY_N", "14")))
-                per_risk = float(
-                    os.getenv("PER_TRADE_RISK_USD", os.getenv("PER_TRADE_USD", "40"))
-                )
+                per_risk = float(os.getenv("PER_TRADE_RISK_USD", os.getenv("PER_TRADE_USD", "40")))
                 computed = risk_parity_qty(per_risk, md, symbol.split(".")[0], tf, n)
                 if computed > 0 and last_px > 0:
                     min_usd = float(os.getenv("RISK_PARITY_MIN_NOTIONAL_USD", "20"))
                     max_usd = float(os.getenv("RISK_PARITY_MAX_NOTIONAL_USD", "500"))
                     qty = clamp_notional(computed, last_px, min_usd, max_usd)
-                    logging.getLogger(__name__).info(
-                        "[RISK-PARITY] %s qty=%.8f", symbol, qty
-                    )
+                    logging.getLogger(__name__).info("[RISK-PARITY] %s qty=%.8f", symbol, qty)
         except Exception:
             pass
         # Apply auto cutback/mute (feature-gated)
@@ -1464,9 +1393,7 @@ class OrderRouterExt(OrderRouter):
         )
         # Emit trade.fill for synchronous fills
         try:
-            self._emit_fill(
-                res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent
-            )
+            self._emit_fill(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)
         except Exception:
             pass
         return res
@@ -1518,9 +1445,7 @@ class _MDAdapter:
         import asyncio
 
         sym = self._default_symbol(symbol)
-        res = asyncio.get_event_loop().run_until_complete(
-            self.router.get_last_price(sym)
-        )
+        res = asyncio.get_event_loop().run_until_complete(self.router.get_last_price(sym))
         return res
 
     def atr(self, symbol: str, tf: str = "5m", n: int = 14):
@@ -1578,9 +1503,7 @@ class _MDAdapter:
         except Exception:
             return 1e-6
 
-    async def place_reduce_only_limit(
-        self, symbol: str, side: Side, qty: float, price: float
-    ):
+    async def place_reduce_only_limit(self, symbol: str, side: Side, qty: float, price: float):
         client = _CLIENTS.get(self._venue)
         if client is None:
             return None

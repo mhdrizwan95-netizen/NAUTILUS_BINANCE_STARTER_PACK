@@ -3,8 +3,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
 COPY services/backtester/requirements.txt ./requirements.txt
 # hadolint ignore=DL3013
-COPY constraints.txt /constraints.txt
-RUN pip install --upgrade pip && pip install -c /constraints.txt -r requirements.txt
+RUN pip install --upgrade pip && pip install --require-hashes -r requirements.txt
 COPY services/backtester/app ./app
 
 RUN useradd -r -u 1000 appuser \

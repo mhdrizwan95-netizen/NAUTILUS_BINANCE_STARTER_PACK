@@ -141,9 +141,7 @@ async def aggregate_exposure(
         sym = _symbol_key(base if "." in base else f"{base}.IBKR")
         if sym not in by_symbol:
             last = _maybe_fill_price_from_ibkr(sym) or 0.0
-            by_symbol[sym] = Position(
-                symbol=sym, qty_base=0.0, last_price_usd=float(last)
-            )
+            by_symbol[sym] = Position(symbol=sym, qty_base=0.0, last_price_usd=float(last))
 
     # Build output
     out_map: Dict[str, Dict] = {}

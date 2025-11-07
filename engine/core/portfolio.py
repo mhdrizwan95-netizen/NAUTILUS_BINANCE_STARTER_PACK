@@ -98,9 +98,7 @@ class Portfolio:
         side = side.upper()
         qty = quantity if side == "BUY" else -quantity
         venue_norm = (venue or "").upper()
-        market_norm = (
-            market or ("margin" if venue_norm == "BINANCE_MARGIN" else "spot")
-        ).lower()
+        market_norm = (market or ("margin" if venue_norm == "BINANCE_MARGIN" else "spot")).lower()
         if "." in symbol:
             symbol_key = symbol.upper()
             if not venue_norm:
@@ -111,9 +109,7 @@ class Portfolio:
             symbol_key = f"{symbol.upper()}.{venue_norm}"
         else:
             symbol_key = symbol.upper()
-        position = self._state.positions.setdefault(
-            symbol_key, Position(symbol=symbol_key)
-        )
+        position = self._state.positions.setdefault(symbol_key, Position(symbol=symbol_key))
         if venue_norm:
             position.venue = venue_norm
         if market_norm:
@@ -143,9 +139,9 @@ class Portfolio:
         if prev_qty == 0 or (prev_qty > 0 and qty > 0) or (prev_qty < 0 and qty < 0):
             # Adding to an existing position in the same direction (or opening new)
             if new_qty != 0:
-                position.avg_price = (
-                    position.avg_price * abs(prev_qty) + price * abs(qty)
-                ) / abs(new_qty)
+                position.avg_price = (position.avg_price * abs(prev_qty) + price * abs(qty)) / abs(
+                    new_qty
+                )
         else:
             # Crossing through zero or partially closing
             if math.isclose(new_qty, 0.0, abs_tol=1e-10):

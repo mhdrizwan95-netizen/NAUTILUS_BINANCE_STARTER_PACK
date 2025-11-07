@@ -43,9 +43,7 @@ class MarketOrderIn(BaseModel):
 
 
 @router.post("/orders/market")
-async def create_market_order(
-    body: MarketOrderIn, _auth: None = Depends(require_ops_token)
-):
+async def create_market_order(body: MarketOrderIn, _auth: None = Depends(require_ops_token)):
     try:
         result = await market_order(body.payload())
     except Exception as exc:  # noqa: BLE001

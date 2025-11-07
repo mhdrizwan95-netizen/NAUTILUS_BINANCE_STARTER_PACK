@@ -100,11 +100,7 @@ async def publish_external_event(
     normalized = event.with_default_id()
     resolved_priority = _resolve_priority(normalized, priority)
     resolved_expiry = _resolve_expiry(normalized, expires_at)
-    hints = (
-        _normalize_hints(asset_hints or [])
-        if asset_hints
-        else _derive_hints(normalized)
-    )
+    hints = _normalize_hints(asset_hints or []) if asset_hints else _derive_hints(normalized)
 
     data = normalized.model_dump(mode="json")
     data["asset_hints"] = hints
