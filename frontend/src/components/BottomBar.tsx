@@ -1,8 +1,10 @@
-import { Bell, Activity, TrendingUp, Info, AlertTriangle, XCircle } from 'lucide-react';
-import { ScrollArea } from './ui/scroll-area';
-import { Badge } from './ui/badge';
-import type { Alert, Trade } from '../types/trading';
+import { Bell, Activity, Info, AlertTriangle, XCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+import { Badge } from './ui/badge';
+import { ScrollArea } from './ui/scroll-area';
+import type { Alert, Trade } from '../types/trading';
+
 
 interface BottomBarProps {
   alerts: Alert[];

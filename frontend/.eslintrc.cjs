@@ -23,11 +23,21 @@ module.exports = {
   ],
   settings: {
     react: { version: "detect" },
+    "import/resolver": {
+      typescript: {
+        project: "./tsconfig.json",
+      },
+      node: {
+        extensions: [".js", ".jsx", ".ts", ".tsx"],
+      },
+    },
   },
   ignorePatterns: ["dist", "build", "coverage", "node_modules", "vitest.config.ts"],
   rules: {
     "@typescript-eslint/explicit-module-boundary-types": "off",
     "@typescript-eslint/no-floating-promises": "error",
+    "@typescript-eslint/consistent-type-imports": "error",
+    "no-console": ["warn", { allow: ["warn", "error"] }],
     "import/order": [
       "error",
       {
@@ -39,6 +49,7 @@ module.exports = {
         "newlines-between": "always",
         alphabetize: { order: "asc", caseInsensitive: true }
       }
-    ]
+    ],
+    "import/no-default-export": "warn"
   },
 };

@@ -50,9 +50,34 @@ reports/
 *.tar.gz
 *.tgz
 *.tar
+autotrain_stack_bundle*.tar.gz
+ml_service_bundle*.tar.gz
+Nautilus Trading Command Center*.zip
+
+# Audit outputs (regenerated per run)
+audit_state/
+audit/
+audit/reports/
+audit/logs/
+.audit-cache/
 
 # Python virtual environments
 .venv/
 venv/
 # Archived research utilities
 legacy/
+
+# Local env overrides
+.env.dryrun
+.env.ci
+.python-version
+
+# Local sqlite/duckdb artifacts
+*.sqlite
+*.sqlite3
+*.duckdb
+*.db
+
+# Repo-sync outputs
+audit/reports/*.md
+audit/reports/*.txt

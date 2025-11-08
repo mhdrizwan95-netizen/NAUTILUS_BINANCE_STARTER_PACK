@@ -186,7 +186,8 @@ if SCALP_MODULE and getattr(SCALP_MODULE, "enabled", False):
 
 class _MACross:
     def __init__(self, fast: int, slow: int):
-        assert fast < slow, "fast MA must be < slow MA"
+        if fast >= slow:
+            raise ValueError("fast MA must be < slow MA")
         self.fast = fast
         self.slow = slow
         self.windows: Dict[str, Deque[float]] = defaultdict(deque)

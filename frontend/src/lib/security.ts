@@ -1,5 +1,14 @@
 // Security utilities and hardening
 
+type StrategyParamValue = string | number | boolean;
+type StrategyParams = Record<string, StrategyParamValue>;
+type AuditEntry = {
+  timestamp: number;
+  action: string;
+  userId?: string;
+  details: Record<string, unknown>;
+};
+
 const readDryRunFlag = (): boolean =>
   typeof import.meta !== 'undefined' && (import.meta.env?.VITE_DRY_RUN ?? '0') === '1';
 
@@ -91,8 +100,8 @@ export class InputSanitizer {
   }
 
   // Sanitize strategy parameters
-  static sanitizeStrategyParams(params: Record<string, any>): Record<string, any> {
-    const sanitized: Record<string, any> = {};
+  static sanitizeStrategyParams(params: StrategyParams): StrategyParams {
+    const sanitized: StrategyParams = {};
 
     for (const [key, value] of Object.entries(params)) {
       // Only allow alphanumeric keys
@@ -196,12 +205,19 @@ export class RequestSigner {
   }
 
   // Generate HMAC signature for request
-  async signRequest(method: string, endpoint: string, body: any, timestamp: string): Promise<string> {
+  async signRequest(
+    method: string,
+    endpoint: string,
+    body: Record<string, unknown> | string | undefined,
+    timestamp: string
+  ): Promise<string> {
     if (!this.apiSecret) {
       throw new Error('API credentials not set');
     }
 
-    const message = `${method}${endpoint}${timestamp}${body ? JSON.stringify(body) : ''}`;
+    const serializedBody =
+      typeof body === 'string' ? body : body ? JSON.stringify(body) : '';
+    const message = `${method}${endpoint}${timestamp}${serializedBody}`;
 
     if (isCryptoAvailable()) {
       const key = this.keyPromise ?? window.crypto.subtle.importKey(
@@ -222,7 +238,12 @@ export class RequestSigner {
   }
 
   // Add authentication headers to request
-  async addAuthHeaders(headers: Headers, method: string, endpoint: string, body?: any): Promise<void> {
+  async addAuthHeaders(
+    headers: Headers,
+    method: string,
+    endpoint: string,
+    body?: Record<string, unknown> | string
+  ): Promise<void> {
     if (!this.apiKey) {
       return; // No auth if credentials not set
     }
@@ -345,12 +366,7 @@ export class CSRFProtection {
 // Audit logging
 export class AuditLogger {
   private static instance: AuditLogger;
-  private logs: Array<{
-    timestamp: number;
-    action: string;
-    userId?: string;
-    details: Record<string, any>;
-  }> = [];
+  private logs: AuditEntry[] = [];
 
   static getInstance(): AuditLogger {
     if (!AuditLogger.instance) {
@@ -359,8 +375,8 @@ export class AuditLogger {
     return AuditLogger.instance;
   }
 
-  logAction(action: string, details: Record<string, any>, userId?: string): void {
-    const logEntry = {
+  logAction(action: string, details: Record<string, unknown>, userId?: string): void {
+    const logEntry: AuditEntry = {
       timestamp: Date.now(),
       action,
       userId,
@@ -378,7 +394,7 @@ export class AuditLogger {
     console.log('Audit log:', logEntry);
   }
 
-  getRecentLogs(limit = 100): any[] {
+  getRecentLogs(limit = 100): AuditEntry[] {
     return this.logs.slice(-limit);
   }
 
@@ -434,8 +450,7 @@ export class NetworkSecurity {
     }
 
     // Check for dev tools (basic detection)
-    if ((window as any).console && (window as any).console.clear) {
-      // This is a very basic check - not foolproof
+    if (typeof window !== 'undefined' && typeof window.console?.clear === 'function') {
       threats.push('Developer tools may be open');
     }
 

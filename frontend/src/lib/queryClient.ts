@@ -10,9 +10,9 @@ const defaultQueryOptions: DefaultOptions = {
     // Retry failed requests 3 times with exponential backoff
     retry: (failureCount, error) => {
       // Don't retry on 4xx errors (client errors)
-      if (error instanceof Error && 'status' in error) {
-        const status = (error as any).status;
-        if (status >= 400 && status < 500) {
+      if (error instanceof Error) {
+        const maybeStatus = (error as Error & { status?: number }).status;
+        if (typeof maybeStatus === 'number' && maybeStatus >= 400 && maybeStatus < 500) {
           return false;
         }
       }
@@ -43,7 +43,7 @@ export const queryClient = new QueryClient({
 export const queryKeys = {
   // Dashboard queries
   dashboard: {
-    summary: (params: Record<string, any>) => ['dashboard', 'summary', params],
+    summary: (params: Record<string, unknown>) => ['dashboard', 'summary', params],
     positions: () => ['dashboard', 'positions'],
     trades: () => ['dashboard', 'trades'],
     alerts: () => ['dashboard', 'alerts'],

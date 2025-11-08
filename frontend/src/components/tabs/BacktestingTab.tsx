@@ -1,5 +1,3 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { DateRange } from 'react-day-picker';
 import {
   Calendar as CalendarIcon,
   Filter,
@@ -8,17 +6,24 @@ import {
   Download,
   Loader2,
 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DateRange } from 'react-day-picker';
 import { toast } from 'sonner';
-import { Card } from '@/components/ui/card';
+
+import { EquityCurves } from '@/components/charts/EquityCurves';
+import { PnlBySymbol } from '@/components/charts/PnlBySymbol';
+import { ReturnsHistogram } from '@/components/charts/ReturnsHistogram';
+import { DynamicParamForm } from '@/components/forms/DynamicParamForm';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Calendar } from '@/components/ui/calendar';
+import { Card } from '@/components/ui/card';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Calendar } from '@/components/ui/calendar';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import {
   Table,
   TableBody,
@@ -27,21 +32,17 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { DynamicParamForm } from '@/components/forms/DynamicParamForm';
-import { EquityCurves } from '@/components/charts/EquityCurves';
-import { PnlBySymbol } from '@/components/charts/PnlBySymbol';
-import { ReturnsHistogram } from '@/components/charts/ReturnsHistogram';
-import { usePolling } from '@/lib/hooks';
 import {
   getStrategies,
   pollBacktest,
   startBacktest,
 } from '@/lib/api';
-import type { StrategySummary } from '@/types/trading';
-import { useAppStore } from '@/lib/store';
-import { generateIdempotencyKey } from '@/lib/idempotency';
-import { stableHash } from '@/lib/equality';
 import { useRenderCounter } from '@/lib/debug/why';
+import { stableHash } from '@/lib/equality';
+import { usePolling } from '@/lib/hooks';
+import { generateIdempotencyKey } from '@/lib/idempotency';
+import { useAppStore } from '@/lib/store';
+import type { StrategySummary } from '@/types/trading';
 
 type BacktestPoll = Awaited<ReturnType<typeof pollBacktest>>;
 

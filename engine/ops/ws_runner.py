@@ -12,9 +12,18 @@ All behavior is gated by cfg flags passed in at construction time.
 from __future__ import annotations
 
 import asyncio
-import random
+import logging
 import time
+from random import SystemRandom
 from typing import Awaitable, Callable
+
+_RNG = SystemRandom()
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger("engine.ops.ws_runner").debug(
+        "%s suppressed exception: %s", context, exc, exc_info=True
+    )
 
 
 class WSRunner:
@@ -48,8 +57,8 @@ class WSRunner:
                 if self.cfg.get("WS_HEALTH_ENABLED", False):
                     try:
                         self.bus.fire("health.state", {"state": 0, "reason": "ws_connected"})
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log_suppressed("ws_runner.health_online", exc)
                 self.last_evt_ts = float(self.clock.time())
                 async for upd in ws.order_updates():
                     self.last_evt_ts = float(self.clock.time())
@@ -57,19 +66,19 @@ class WSRunner:
             except Exception as e:
                 try:
                     self.log.warning("[WS] error: %s", e)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("ws_runner.log_error", exc)
             finally:
                 if self.cfg.get("WS_HEALTH_ENABLED", False):
                     try:
                         self.bus.fire("health.state", {"state": 1, "reason": "ws_disconnected"})
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log_suppressed("ws_runner.health_offline", exc)
                 await self._watchdog()
 
             # Reconnect with jittered backoff (first step only by default)
             for b in backoffs:
-                await asyncio.sleep((b + random.randint(0, 200)) / 1000.0)
+                await asyncio.sleep((b + _RNG.randint(0, 200)) / 1000.0)
                 break
 
     async def _watchdog(self) -> None:
@@ -79,5 +88,5 @@ class WSRunner:
         if (self.clock.time() - self.last_evt_ts) > timeout:
             try:
                 self.bus.fire("health.state", {"state": 1, "reason": "ws_silent"})
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("ws_runner.health_watchdog", exc)

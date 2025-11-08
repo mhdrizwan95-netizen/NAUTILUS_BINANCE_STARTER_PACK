@@ -26,6 +26,39 @@ All services share the `data`, `models`, and `shared` volumes declared in the co
 | param_controller | `8002` | `/health`, `/param/{strategy}/{instrument}`, `/learn/outcome/...` |
 | ml_service | `8003` | `/health`, `/train`, `/predict`, `/model` |
 
+## Authentication & JWT flow
+
+The ML API now enforces FastAPI's `require_role` guard by default (`REQUIRE_AUTH=true`). You must supply either a symmetric `JWT_SECRET` **or** an asymmetric pair (`JWT_PUBLIC_KEY`/`JWT_ALG`) in `.env`. In CI/dry-run scenarios you can rely on the baked default:
+
+```bash
+cp env.example .env
+sed -i '' 's/OPS_API_TOKEN=.*/OPS_API_TOKEN=test-ops-token-1234567890/' .env
+echo 'JWT_SECRET=dev-secret-change-me' >> .env
+```
+
+Generate tokens with the role claim expected by `services/ml_service/app/auth.py`:
+
+```python
+import jwt, time
+token = jwt.encode(
+    {"role": "admin", "exp": int(time.time()) + 300},
+    "dev-secret-change-me",
+    algorithm="HS256",
+)
+print(token)
+```
+
+Invoke the API with the bearer token:
+
+```bash
+curl -H "Authorization: Bearer $ML_JWT" \
+     -H "Content-Type: application/json" \
+     -d '{"train_window_days": 7}' \
+     http://localhost:8003/train
+```
+
+Set `REQUIRE_AUTH=false` only for local experimentation; production compose overlays should keep it enabled so auditors can map every `/train` or `/predict` call to an operator identity (`role`, `actor`).
+
 ## Component reference
 
 ### `data_ingester`

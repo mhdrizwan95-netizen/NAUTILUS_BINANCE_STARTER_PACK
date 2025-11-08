@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import math
 import time
+import logging
 from dataclasses import dataclass, field
 from typing import Dict, List
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    _LOGGER.debug("%s suppressed exception: %s", context, exc, exc_info=True)
 
 
 @dataclass
@@ -167,8 +174,8 @@ class Portfolio:
             ctr = _MET.get("orders_filled_total")
             if ctr is not None:
                 ctr.inc()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("portfolio.orders_filled_metric", exc)
 
     def _cleanup_positions(self) -> None:
         to_delete: List[str] = []

@@ -1,10 +1,13 @@
 # engine/connectors/ibkr_client.py
 from __future__ import annotations
 
+import logging
 import os
 from typing import Optional
 
 from ib_insync import IB, MarketOrder, Stock
+
+_LOGGER = logging.getLogger(__name__)
 
 
 def _enabled() -> bool:
@@ -25,7 +28,7 @@ class IbkrClient:
             self.ib.connect(host, port, clientId=client_id, readonly=False)
             self._connected = True
         except Exception as e:
-            print(f"IBKR connection failed (OK for startup): {e}")
+            _LOGGER.warning("IBKR connection failed (OK for startup): %s", e, exc_info=True)
             self._connected = False
 
     def _to_contract(self, symbol: str):
@@ -45,11 +48,11 @@ class IbkrClient:
             px = cd.last if cd.last else cd.close
             try:
                 self.ib.cancelMktData(c)
-            except Exception:
-                pass
+            except Exception as cancel_exc:
+                _LOGGER.debug("IBKR cancel market data failed: %s", cancel_exc, exc_info=True)
             return float(px) if px else None
         except Exception as e:
-            print(f"IBKR get_last_price error: {e}")
+            _LOGGER.error("IBKR get_last_price error: %s", e, exc_info=True)
             return None
 
     def place_market_order(self, *, symbol: str, side: str, quote=None, quantity=None):
@@ -84,7 +87,7 @@ class IbkrClient:
                 "status": trade.orderStatus.status,
             }
         except Exception as e:
-            print(f"IBKR place_market_order error: {e}")
+            _LOGGER.error("IBKR place_market_order error: %s", e, exc_info=True)
             raise ValueError("IBKR_ORDER_FAILED", f"Order failed: {e}")
 
     def get_contract_details(self, symbol: str):
@@ -94,5 +97,5 @@ class IbkrClient:
             c = self._to_contract(symbol)
             return self.ib.reqContractDetails(c)
         except Exception as e:
-            print(f"IBKR get_contract_details error: {e}")
+            _LOGGER.error("IBKR get_contract_details error: %s", e, exc_info=True)
             return None

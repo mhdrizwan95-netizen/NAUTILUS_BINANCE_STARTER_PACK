@@ -42,6 +42,10 @@ def _normalize_symbol(symbol: str) -> str:
     return _SYMBOL_ALIASES.get(sym, sym)
 
 
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger("engine.kraken.rest").debug("%s suppressed: %s", context, exc, exc_info=True)
+
+
 class KrakenREST:
     """
     Minimal async client for Kraken Futures REST API.
@@ -69,7 +73,8 @@ class KrakenREST:
     def _split_base_and_prefix(raw_base: str) -> Tuple[str, str]:
         try:
             url = httpx.URL(str(raw_base))
-        except Exception:
+        except Exception as exc:
+            _log_suppressed("kraken base url parse", exc)
             return ("https://demo-futures.kraken.com", "/derivatives/api/v3")
         base = url.copy_with(path="", query=None, fragment=None)
         prefix = _normalize_prefix(url.path)
@@ -89,8 +94,8 @@ class KrakenREST:
     async def close(self) -> None:
         try:
             await self._client.aclose()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("kraken client close", exc)
 
     # ------------------------------------------------------------------ Account
     async def account_snapshot(self) -> Dict[str, Any]:
@@ -129,9 +134,11 @@ class KrakenREST:
             balances: list[Dict[str, Any]] = []
             for asset, amt in (cash.get("balances") or {}).items():
                 try:
-                    balances.append({"asset": asset.upper(), "free": _to_float(amt), "locked": 0.0})
-                except Exception:
-                    continue
+                    free_amt = _to_float(amt)
+                except Exception as exc:
+                    _log_suppressed("kraken balance parse", exc)
+                else:
+                    balances.append({"asset": asset.upper(), "free": free_amt, "locked": 0.0})
 
             positions = await self.positions()
 
@@ -196,17 +203,17 @@ class KrakenREST:
                     pnl = _to_float(
                         pos.get("pnl") or pos.get("unrealizedPnl") or pos.get("unRealizedProfit")
                     )
-                    formatted.append(
-                        {
-                            "symbol": symbol,
-                            "positionAmt": size,
-                            "entryPrice": entry_price,
-                            "markPrice": mark_price,
-                            "pnl": pnl,
-                        }
-                    )
-                except Exception:
-                    continue
+                    payload = {
+                        "symbol": symbol,
+                        "positionAmt": size,
+                        "entryPrice": entry_price,
+                        "markPrice": mark_price,
+                        "pnl": pnl,
+                    }
+                except Exception as exc:
+                    _log_suppressed("kraken position parse", exc)
+                else:
+                    formatted.append(payload)
             return formatted
         except KrakenAPIError:
             self._logger.debug("[KRAKEN] Positions API failed - returning empty positions")
@@ -274,8 +281,8 @@ class KrakenREST:
                         )
                         self._price_cache[canon] = price
                         return price
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed(f"kraken price parse ({k})", exc)
 
         bid, ask = t.get("bid"), t.get("ask")
         if bid and ask:
@@ -284,8 +291,8 @@ class KrakenREST:
                 if price > 0:
                     self._price_cache[canon] = price
                     return price
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("kraken bid/ask midpoint", exc)
 
         idx = t.get("index") or t.get("indexPrice")
         if idx not in (None, "", "0"):
@@ -294,8 +301,8 @@ class KrakenREST:
                 if price > 0:
                     self._price_cache[canon] = price
                     return price
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("kraken index price parse", exc)
 
         self._logger.debug(
             "[KRAKEN] no valid price found for %s in available fields: %s",
@@ -509,20 +516,20 @@ class KrakenREST:
                     pnl = _to_float(
                         pos.get("pnl") or pos.get("unrealizedPnl") or pos.get("unRealizedProfit")
                     )
-                    positions.append(
-                        {
-                            "symbol": symbol,
-                            "positionAmt": size,
-                            "entryPrice": entry_price,
-                            "markPrice": mark_price,
-                            "pnl": pnl,
-                        }
-                    )
-                except Exception:
-                    continue
+                    payload_pos = {
+                        "symbol": symbol,
+                        "positionAmt": size,
+                        "entryPrice": entry_price,
+                        "markPrice": mark_price,
+                        "pnl": pnl,
+                    }
+                except Exception as exc:
+                    _log_suppressed("kraken open_positions parse", exc)
+                else:
+                    positions.append(payload_pos)
             return positions
-        except Exception:
-            self._logger.exception("KrakenREST.open_positions failed")
+        except Exception as exc:
+            _log_suppressed("kraken open_positions", exc)
             return []
 
     async def refresh_portfolio(self):
@@ -548,14 +555,15 @@ class KrakenREST:
             if store_module is None:
                 try:
                     from engine.storage import sqlite as store_module  # type: ignore[assignment]
-                except Exception:
+                except Exception as exc:
+                    _log_suppressed("kraken store module import", exc)
                     store_module = None  # type: ignore[assignment]
 
             if portfolio:
                 try:
                     portfolio.state.positions.clear()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("kraken portfolio clear", exc)
 
             ts_ms = _now_ms()
             unreal_total = 0.0
@@ -618,10 +626,12 @@ class KrakenREST:
                     POSITION_SIZE.labels(**labels).set(qty)
                     ENTRY_PRICE_USD.labels(**labels).set(entry_price)
                     UPNL_USD.labels(**labels).set(pnl)
-                except Exception:
+                except Exception as exc:
                     self._logger.warning(
-                        "KrakenREST.refresh_portfolio: error processing position %s",
+                        "KrakenREST.refresh_portfolio: error processing position %s (%s)",
                         pos,
+                        exc,
+                        exc_info=True,
                     )
 
             if portfolio:
@@ -630,8 +640,8 @@ class KrakenREST:
                     portfolio.state.equity = (
                         float(getattr(portfolio.state, "cash", 0.0) or 0.0) + unreal_total
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("kraken portfolio equity update", exc)
 
             if store_module is not None:
                 try:
@@ -652,8 +662,8 @@ class KrakenREST:
                     update_portfolio_gauges(
                         state.cash, state.realized, state.unrealized, state.exposure
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("kraken portfolio gauge update", exc)
 
             if not positions:
                 self._logger.info("KrakenREST.refresh_portfolio: no open positions returned")

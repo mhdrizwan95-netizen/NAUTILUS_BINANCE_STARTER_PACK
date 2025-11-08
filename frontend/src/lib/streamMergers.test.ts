@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { mergeMetricsSnapshot, mergeVenuesSnapshot } from './streamMergers';
 
 describe('streamMergers', () => {

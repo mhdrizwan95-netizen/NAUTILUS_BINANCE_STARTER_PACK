@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from ops import ui_api, ui_state
-from ops.ops_api import ORDERS_SERVICE, PORTFOLIO_SERVICE
+from ops.ui_services import OrdersService, PortfolioService
 
 OPS_TOKEN = os.getenv("OPS_API_TOKEN", "test-ops-token-1234567890")
 
@@ -265,7 +265,10 @@ def test_ws_session_requires_actor(client: TestClient) -> None:
 
 
 def test_orders_open_returns_paginated_envelope(client: TestClient) -> None:
-    ORDERS_SERVICE.update_orders(
+    temp_orders = OrdersService()
+    original_orders = ui_state.get_services()["orders"]
+    ui_state.configure(orders=temp_orders)
+    temp_orders.update_orders(
         [
             {
                 "id": "order-1",
@@ -297,11 +300,15 @@ def test_orders_open_returns_paginated_envelope(client: TestClient) -> None:
         assert len(payload["data"]) == 1
         assert payload["page"]["nextCursor"]
     finally:
-        ORDERS_SERVICE.update_orders([])
+        temp_orders.update_orders([])
+        ui_state.configure(orders=original_orders)
 
 
 def test_positions_open_returns_paginated_envelope(client: TestClient) -> None:
-    PORTFOLIO_SERVICE.update_snapshot(
+    temp_portfolio = PortfolioService()
+    original_portfolio = ui_state.get_services()["portfolio"]
+    ui_state.configure(portfolio=temp_portfolio)
+    temp_portfolio.update_snapshot(
         {
             "equity": 0.0,
             "cash": 0.0,
@@ -337,7 +344,7 @@ def test_positions_open_returns_paginated_envelope(client: TestClient) -> None:
         assert len(payload["data"]) == 1
         assert payload["page"]["nextCursor"]
     finally:
-        PORTFOLIO_SERVICE.update_snapshot(
+        temp_portfolio.update_snapshot(
             {
                 "equity": 0.0,
                 "cash": 0.0,
@@ -348,6 +355,7 @@ def test_positions_open_returns_paginated_envelope(client: TestClient) -> None:
                 "source": "test",
             }
         )
+        ui_state.configure(portfolio=original_portfolio)
 
 
 def test_strategies_governance_returns_paginated_envelope(client: TestClient) -> None:

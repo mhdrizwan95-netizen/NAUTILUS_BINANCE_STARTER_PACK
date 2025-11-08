@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Iterable, Set
+from typing import Awaitable, Callable, Iterable, Set
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 from starlette.status import HTTP_503_SERVICE_UNAVAILABLE
 
 _MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
@@ -22,7 +23,9 @@ def install_dry_run_guard(app: FastAPI, allow_paths: Iterable[str] | None = None
         whitelisted.update(allow_paths)
 
     class DryRunGuardMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next):
+        async def dispatch(
+            self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+        ) -> Response:
             if (
                 dry_run_enabled()
                 and request.method.upper() in _MUTATING_METHODS
@@ -37,7 +40,8 @@ def install_dry_run_guard(app: FastAPI, allow_paths: Iterable[str] | None = None
                         }
                     },
                 )
-            return await call_next(request)
+            resp = await call_next(request)
+            return resp
 
     app.add_middleware(DryRunGuardMiddleware)
 

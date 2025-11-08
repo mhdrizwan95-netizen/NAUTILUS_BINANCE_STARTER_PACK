@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import time
 from dataclasses import dataclass
 from functools import partial
@@ -10,6 +11,12 @@ from typing import Any, Callable, Dict, List, Optional, Sequence
 from engine import metrics
 from engine.idempotency import CACHE, append_jsonl
 from engine.risk import RiskRails
+
+_LOGGER = logging.getLogger(__name__)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    _LOGGER.debug("%s suppressed exception: %s", context, exc, exc_info=True)
 
 
 def _bool(value: Any) -> Optional[bool]:
@@ -262,8 +269,8 @@ class StrategyExecutor:
         if self._order_recorder:
             try:
                 self._order_recorder(recorded)
-            except Exception:  # noqa: BLE001 - recorder must not break execution
-                pass
+            except Exception as exc:
+                _log_suppressed("strategy_executor", exc)
 
     def execute_sync(
         self,
@@ -404,8 +411,8 @@ class StrategyExecutor:
                 try:
                     if getattr(self._router, "_strategy_pending_meta", None) is context:
                         delattr(self._router, "_strategy_pending_meta")
-                except Exception:  # noqa: BLE001 - defensive cleanup
-                    pass
+                except Exception as exc:
+                    _log_suppressed("strategy_executor", exc)
         return result
 
     def _safe_config_hash(self) -> Optional[str]:

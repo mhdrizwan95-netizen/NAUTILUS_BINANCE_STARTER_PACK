@@ -35,12 +35,12 @@ class MarketDataDispatcher:
         try:
             evt_type = str(enriched.get("type") or "tick").lower()
             metrics.market_data_events_total.labels(source=self.source, type=evt_type).inc()
-        except Exception:
-            pass
+        except Exception as exc:
+            self._log.debug("Failed to record market data metric: %s", exc, exc_info=True)
         try:
             self.bus.fire(topic, enriched)
-        except Exception:
-            self._log.debug("Failed to dispatch market data event", exc_info=True)
+        except Exception as exc:
+            self._log.debug("Failed to dispatch market data event: %s", exc, exc_info=True)
 
     @staticmethod
     def _topic_for_event(event_type: Optional[str]) -> Optional[str]:

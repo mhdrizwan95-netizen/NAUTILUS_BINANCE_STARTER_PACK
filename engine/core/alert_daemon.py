@@ -12,6 +12,7 @@ Design Philosophy:
 - Throttling to prevent alert spam during extreme events
 """
 
+import ast
 import asyncio
 import logging
 import os
@@ -40,8 +41,7 @@ class AlertRule:
     def evaluate(self, data: Dict[str, Any]) -> bool:
         """Evaluate condition against event data."""
         try:
-            # Safe evaluation with globals disabled
-            result = eval(self.condition, {"__builtins__": {}}, {"data": data})
+            result = _safe_eval_condition(self.condition, {"data": data})
             return bool(result)
         except Exception as e:
             logging.warning(f"[ALERT] Rule evaluation error: {e}")
@@ -84,6 +84,52 @@ class AlertChannel:
     smtp_port: Optional[int] = None
     sender_env: Optional[str] = None
     recipients: Optional[List[str]] = None
+
+
+_ALLOWED_AST_NODES = (
+    ast.Expression,
+    ast.BoolOp,
+    ast.BinOp,
+    ast.UnaryOp,
+    ast.Compare,
+    ast.Subscript,
+    ast.Attribute,
+    ast.Name,
+    ast.Load,
+    ast.Constant,
+    ast.Dict,
+    ast.List,
+    ast.Tuple,
+    ast.And,
+    ast.Or,
+    ast.Not,
+    ast.Eq,
+    ast.NotEq,
+    ast.Gt,
+    ast.GtE,
+    ast.Lt,
+    ast.LtE,
+    ast.In,
+    ast.NotIn,
+    ast.Is,
+    ast.IsNot,
+    ast.Slice,
+)
+_ALLOWED_NAMES = {"data", "True", "False", "None"}
+
+
+def _safe_eval_condition(expression: str, context: Dict[str, Any]) -> bool:
+    """Parse and evaluate a rule condition using a constrained AST."""
+    tree = ast.parse(expression, mode="eval")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            raise ValueError("Function calls are not allowed in alert conditions.")
+        if isinstance(node, ast.Name) and node.id not in _ALLOWED_NAMES:
+            raise ValueError(f"Name '{node.id}' is not allowed in alert conditions.")
+        if not isinstance(node, _ALLOWED_AST_NODES):
+            raise ValueError(f"Disallowed syntax: {ast.dump(node, include_attributes=False)}")
+    compiled = compile(tree, "<alert_condition>", "eval")
+    return bool(eval(compiled, {"__builtins__": {}}, context))  # nosec B307 - AST validated
 
 
 class AlertDaemon:

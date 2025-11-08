@@ -1,12 +1,15 @@
-import { create } from 'zustand';
-import { shallow } from 'zustand/shallow';
+import { create, type StoreApi } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
-import type { ModeType, GlobalMetrics, Venue, StrategyPerformance } from '../types/trading';
+import { shallow } from 'zustand/shallow';
+
 import type { PageMetadata } from './api';
 import {
   createDefaultDashboardFilters,
   type DashboardFiltersState,
 } from './dashboardFilters';
+import type { ModeType, GlobalMetrics, Venue, StrategyPerformance } from '../types/trading';
+
+type NautilusWindow = Window & { __NAUTILUS_DISABLE_PERSIST__?: boolean };
 
 // App-wide state interface
 interface AppState {
@@ -118,12 +121,15 @@ const isSamePage = (a: PageMetadata | null, b: PageMetadata | null): boolean => 
 
 type StoreCreator = (
   set: (nextState: AppState | Partial<AppState> | ((state: AppState) => AppState | Partial<AppState>)) => void,
-  get: () => AppState,
-  store: any
+  _get: () => AppState,
+  _store: StoreApi<AppState>
 ) => AppState & AppActions;
 
 // Helper creator shared by persisted and ephemeral stores
-const createAppStore: StoreCreator = (set, get) => ({
+const createAppStore: StoreCreator = (set, _get, _store) => {
+  void _get;
+  void _store;
+  return {
       ...defaultState,
 
       // Mode actions
@@ -135,7 +141,7 @@ const createAppStore: StoreCreator = (set, get) => ({
           preferences: { ...state.preferences, ...preferences },
         })),
       resetPreferences: () =>
-        set((state) => ({
+        set(() => ({
           preferences: defaultState.preferences,
         })),
 
@@ -149,7 +155,7 @@ const createAppStore: StoreCreator = (set, get) => ({
           opsAuth: { ...state.opsAuth, actor },
         })),
       clearOpsAuth: () =>
-        set((state) => ({
+        set(() => ({
           opsAuth: defaultState.opsAuth,
         })),
 
@@ -207,9 +213,9 @@ const createAppStore: StoreCreator = (set, get) => ({
           },
         })),
       clearLoadingStates: () =>
-      set((state) => ({
-        ui: { ...state.ui, loadingStates: {} },
-      })),
+        set((state) => ({
+          ui: { ...state.ui, loadingStates: {} },
+        })),
       setDashboardFilters: (filters) =>
         set((state) => ({
           ui: { ...state.ui, dashboardFilters: filters },
@@ -262,10 +268,12 @@ const createAppStore: StoreCreator = (set, get) => ({
 
       // Utility actions
       reset: () => set(defaultState),
-});
+  };
+};
 
 const shouldPersist = () =>
-  typeof window !== 'undefined' && !(window as any).__NAUTILUS_DISABLE_PERSIST__;
+  typeof window !== 'undefined' &&
+  !(window as NautilusWindow).__NAUTILUS_DISABLE_PERSIST__;
 
 const storeInitializer = shouldPersist()
   ? persist(createAppStore, {

@@ -1,9 +1,11 @@
 import { TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react';
-import { Badge } from './ui/badge';
-import { MiniChart } from './MiniChart';
-import type { StrategyPerformance, Venue, Strategy } from '../types/trading';
-import { getVenueColor, getVenueGradient } from '../lib/mockData';
 import { motion } from 'motion/react';
+
+import { MiniChart } from './MiniChart';
+import { Badge } from './ui/badge';
+import { getVenueColor, getVenueGradient } from '../lib/mockData';
+import type { StrategyPerformance, Venue, Strategy } from '../types/trading';
+
 
 interface StrategyPodProps {
   performance: StrategyPerformance;

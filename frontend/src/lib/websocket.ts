@@ -1,17 +1,21 @@
 import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
-import { useAppStore, useRealTimeActions } from './store';
-import { issueWebsocketSession } from './api';
 
-export interface WebSocketMessage {
+import { issueWebsocketSession } from './api';
+import { useAppStore, useRealTimeActions } from './store';
+import type { GlobalMetrics, StrategyPerformance, Venue } from '../types/trading';
+
+type OutgoingMessage = Record<string, unknown>;
+
+export interface WebSocketMessage<T = unknown> {
   type: string;
-  data: any;
+  data: T;
   timestamp: number;
 }
 
 export interface WebSocketHookResult {
   isConnected: boolean;
   lastMessage: WebSocketMessage | null;
-  sendMessage: (message: any) => void;
+  sendMessage: (message: OutgoingMessage) => void;
   reconnect: () => void;
 }
 
@@ -59,7 +63,15 @@ class WebSocketManager {
 
       this.ws.onmessage = (event) => {
         try {
-          const message: WebSocketMessage = JSON.parse(event.data);
+          const parsed = JSON.parse(event.data) as Partial<WebSocketMessage>;
+          if (!parsed || typeof parsed.type !== 'string') {
+            throw new Error('Malformed message');
+          }
+          const message: WebSocketMessage = {
+            type: parsed.type,
+            data: parsed.data ?? null,
+            timestamp: parsed.timestamp ?? Date.now(),
+          };
           // Clear heartbeat timeout on ack
           if (message.type === 'heartbeat' && this.heartbeatTimeout) {
             clearTimeout(this.heartbeatTimeout);
@@ -97,7 +109,7 @@ class WebSocketManager {
     this.stopHeartbeat();
   }
 
-  sendMessage(message: any): void {
+  sendMessage(message: OutgoingMessage): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
@@ -164,6 +176,15 @@ let wsManager: WebSocketManager | null = null;
 let currentUrl: string | null = null;
 let liveDisabledOverride: boolean | null = null;
 
+const isGlobalMetricsPayload = (data: unknown): data is GlobalMetrics =>
+  typeof data === 'object' && data !== null;
+
+const isStrategyPerformanceArray = (data: unknown): data is StrategyPerformance[] =>
+  Array.isArray(data);
+
+const isVenueArray = (data: unknown): data is Venue[] =>
+  Array.isArray(data);
+
 const buildWebSocketUrl = (base: string, session: string): string => {
   try {
     const url = new URL(base, base.startsWith('ws') ? undefined : window.location.origin);
@@ -183,7 +204,7 @@ const resolveLiveDisabled = (): boolean => {
   if (liveDisabledOverride !== null) {
     return liveDisabledOverride;
   }
-  return import.meta.env.VITE_LIVE_OFF === 'true';
+  return (import.meta.env?.VITE_LIVE_OFF ?? 'false') === 'true';
 };
 
 export function initializeWebSocket(
@@ -194,7 +215,7 @@ export function initializeWebSocket(
   session: string
 ): WebSocketManager {
   // Use environment variable or default to localhost
-  const baseUrl = (import.meta as any).env?.VITE_WS_URL || 'ws://localhost:8002/ws';
+  const baseUrl = import.meta.env?.VITE_WS_URL ?? 'ws://localhost:8002/ws';
   const wsUrl = buildWebSocketUrl(baseUrl, session);
 
   if (!wsManager || currentUrl !== wsUrl) {
@@ -208,11 +229,13 @@ export function initializeWebSocket(
 
 export function useWebSocket(): WebSocketHookResult {
   const liveDisabled = resolveLiveDisabled();
-  const disabledResult = useMemo<WebSocketHookResult>(
+  const disabledResult: WebSocketHookResult = useMemo(
     () => ({
       isConnected: false,
       lastMessage: null,
-      sendMessage: () => {},
+      sendMessage: () => {
+        console.warn('WebSocket disabled; dropping message');
+      },
       reconnect: () => {},
     }),
     []
@@ -241,13 +264,19 @@ export function useWebSocket(): WebSocketHookResult {
     // Handle different message types using the current actions
     switch (message.type) {
       case 'metrics':
-        actionsRef.current.updateGlobalMetrics(message.data);
+        if (isGlobalMetricsPayload(message.data)) {
+          actionsRef.current.updateGlobalMetrics(message.data);
+        }
         break;
       case 'performances':
-        actionsRef.current.updatePerformances(message.data);
+        if (isStrategyPerformanceArray(message.data)) {
+          actionsRef.current.updatePerformances(message.data);
+        }
         break;
       case 'venues':
-        actionsRef.current.updateVenues(message.data);
+        if (isVenueArray(message.data)) {
+          actionsRef.current.updateVenues(message.data);
+        }
         break;
       case 'heartbeat':
         // Heartbeat response - connection is healthy
@@ -332,7 +361,7 @@ export function useWebSocket(): WebSocketHookResult {
       }
     };
 
-    requestSession();
+    void requestSession();
 
     return () => {
       cancelled = true;
@@ -372,7 +401,7 @@ export function useWebSocket(): WebSocketHookResult {
     };
   }, [handleConnect, handleDisconnect, handleError, handleMessage, opsToken, wsSession]);
 
-  const sendMessage = useCallback((message: any) => {
+  const sendMessage = useCallback((message: OutgoingMessage) => {
     managerRef.current?.sendMessage(message);
   }, []);
 

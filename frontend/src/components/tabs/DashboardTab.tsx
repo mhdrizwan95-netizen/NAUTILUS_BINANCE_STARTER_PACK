@@ -1,29 +1,8 @@
+import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { Calendar as CalendarIcon, Filter, RefreshCcw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState, useId } from 'react';
 import { DateRange } from 'react-day-picker';
-import { Calendar as CalendarIcon, Filter, RefreshCcw } from 'lucide-react';
-import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { Calendar } from '../ui/calendar';
-import { Button } from '../ui/button';
-import { Card } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Label } from '../ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import { Checkbox } from '../ui/checkbox';
-import { Separator } from '../ui/separator';
-import { ScrollArea } from '../ui/scroll-area';
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '../ui/table';
-import { Skeleton } from '../ui/skeleton';
-import { EquityCurves } from '../charts/EquityCurves';
-import { PnlBySymbol } from '../charts/PnlBySymbol';
-import { ReturnsHistogram } from '../charts/ReturnsHistogram';
+
 import {
   getAlerts,
   getDashboardSummary,
@@ -33,29 +12,50 @@ import {
   getStrategies,
   type PageMetadata,
 } from '../../lib/api';
-import { queryKeys } from '../../lib/queryClient';
-import { validateApiResponse } from '../../lib/validation';
-import {
-  dashboardSummarySchema,
-  strategyListResponseSchema,
-  positionsListResponseSchema,
-  tradesListResponseSchema,
-  alertsListResponseSchema,
-  healthCheckSchema
-} from '../../lib/validation';
-import type { StrategySummary } from '../../types/trading';
 import {
   buildSummarySearchParams,
   createDefaultDashboardFilters,
   fromDateRange,
   toDateRange,
 } from '../../lib/dashboardFilters';
+import { queryKeys } from '../../lib/queryClient';
 import {
   useDashboardFilterActions,
   useDashboardFilters,
   usePagination,
   usePaginationActions,
 } from '../../lib/store';
+import {
+  validateApiResponse,
+  dashboardSummarySchema,
+  strategyListResponseSchema,
+  positionsListResponseSchema,
+  tradesListResponseSchema,
+  alertsListResponseSchema,
+  healthCheckSchema,
+} from '../../lib/validation';
+import { EquityCurves } from '../charts/EquityCurves';
+import { PnlBySymbol } from '../charts/PnlBySymbol';
+import { ReturnsHistogram } from '../charts/ReturnsHistogram';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
+import { Calendar } from '../ui/calendar';
+import { Card } from '../ui/card';
+import { Checkbox } from '../ui/checkbox';
+import { Label } from '../ui/label';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { ScrollArea } from '../ui/scroll-area';
+import { Separator } from '../ui/separator';
+import { Skeleton } from '../ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCaption,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../ui/table';
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-US', {
@@ -68,6 +68,8 @@ function formatCurrency(value: number) {
 function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
+
+type EquityPoint = { t: string; [strategyId: string]: number };
 
 export function DashboardTab() {
   const dashboardFilters = useDashboardFilters();
@@ -285,13 +287,14 @@ export function DashboardTab() {
   };
 
   const handleRefresh = () => {
-    // Invalidate and refetch all queries
-    strategiesQuery.refetch();
-    summaryQuery.refetch();
-    positionsQuery.refetch();
-    tradesQuery.refetch();
-    alertsQuery.refetch();
-    healthQuery.refetch();
+    void Promise.all([
+      strategiesQuery.refetch(),
+      summaryQuery.refetch(),
+      positionsQuery.refetch(),
+      tradesQuery.refetch(),
+      alertsQuery.refetch(),
+      healthQuery.refetch(),
+    ]);
   };
 
   return (
@@ -458,7 +461,10 @@ export function DashboardTab() {
         <div className="flex items-center justify-between">
           <h3 className="font-medium">Equity Curves</h3>
         </div>
-        <EquityCurves data={summaryQuery.data?.equityByStrategy as any ?? []} series={equitySeriesKeys} />
+        <EquityCurves
+          data={(summaryQuery.data?.equityByStrategy ?? []) as EquityPoint[]}
+          series={equitySeriesKeys}
+        />
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">

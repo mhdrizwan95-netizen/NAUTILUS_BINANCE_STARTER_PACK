@@ -1,12 +1,14 @@
+import { Power, Activity, Wifi, WifiOff, Pause, Play, RefreshCw } from 'lucide-react';
+import { motion } from 'motion/react';
 import { useId } from 'react';
 import type { ReactNode } from 'react';
-import { Power, Activity, Wifi, WifiOff, Pause, Play, RefreshCw } from 'lucide-react';
-import { Switch } from './ui/switch';
-import { Button } from './ui/button';
-import { motion } from 'motion/react';
-import { Badge } from './ui/badge';
+
 import { useRenderCounter } from '@/lib/debug/why';
 import { isDryRunMode } from '@/lib/security';
+
+import { Badge } from './ui/badge';
+import { Button } from './ui/button';
+import { Switch } from './ui/switch';
 
 export interface TopHudMetrics {
   totalPnl: number;

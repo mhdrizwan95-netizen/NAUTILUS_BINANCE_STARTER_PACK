@@ -1,4 +1,32 @@
 import { QueryClient } from '@tanstack/react-query';
+import type { ErrorInfo } from 'react';
+
+type ApiPerformanceReport = {
+  averageResponseTime: number;
+  totalCalls: number;
+  minTime: number;
+  maxTime: number;
+};
+
+type ErrorContext = Record<string, unknown>;
+
+type TrackedError = {
+  message: string;
+  stack?: string;
+  timestamp: number;
+  context: ErrorContext;
+};
+
+type UserInteraction = {
+  type: string;
+  target: string;
+  timestamp: number;
+};
+
+type ReactErrorDetail = {
+  error: Error;
+  errorInfo: ErrorInfo;
+};
 
 // Performance monitoring utilities
 export class PerformanceMonitor {
@@ -53,8 +81,8 @@ export class PerformanceMonitor {
   }
 
   // Get performance report
-  getReport(): Record<string, any> {
-    const report: Record<string, any> = {};
+  getReport(): Record<string, ApiPerformanceReport> {
+    const report: Record<string, ApiPerformanceReport> = {};
 
     for (const [endpoint, calls] of this.metrics.entries()) {
       report[endpoint] = {
@@ -72,12 +100,7 @@ export class PerformanceMonitor {
 // Error tracking and reporting
 export class ErrorTracker {
   private static instance: ErrorTracker;
-  private errors: Array<{
-    message: string;
-    stack?: string;
-    timestamp: number;
-    context: Record<string, any>;
-  }> = [];
+  private errors: TrackedError[] = [];
 
   static getInstance(): ErrorTracker {
     if (!ErrorTracker.instance) {
@@ -87,8 +110,8 @@ export class ErrorTracker {
   }
 
   // Track application errors
-  trackError(error: Error, context: Record<string, any> = {}): void {
-    const errorInfo = {
+  trackError(error: Error, context: ErrorContext = {}): void {
+    const errorInfo: TrackedError = {
       message: error.message,
       stack: error.stack,
       timestamp: Date.now(),
@@ -112,7 +135,7 @@ export class ErrorTracker {
   }
 
   // Track React Error Boundary errors
-  trackReactError(error: Error, errorInfo: React.ErrorInfo): void {
+  trackReactError(error: Error, errorInfo: ErrorInfo): void {
     this.trackError(error, {
       componentStack: errorInfo.componentStack,
       errorBoundary: true,
@@ -129,27 +152,29 @@ export class ErrorTracker {
   }
 
   // Send error to external service
-  private sendToService(errorInfo: any): void {
+  private sendToService(errorInfo: TrackedError): void {
     // TODO: Integrate with Sentry, LogRocket, or similar
     // Example:
     // Sentry.captureException(error, { extra: errorInfo.context });
 
     // For now, just store locally
     try {
-      const existingErrors = JSON.parse(localStorage.getItem('app-errors') || '[]');
+      const existingErrors: TrackedError[] = JSON.parse(
+        localStorage.getItem('app-errors') || '[]'
+      );
       existingErrors.push(errorInfo);
       // Keep only last 20 errors in localStorage
       if (existingErrors.length > 20) {
         existingErrors.splice(0, existingErrors.length - 20);
       }
       localStorage.setItem('app-errors', JSON.stringify(existingErrors));
-    } catch (e) {
-      // Ignore localStorage errors
+    } catch (storageError) {
+      console.warn('Failed to persist error log', storageError);
     }
   }
 
   // Get recent errors
-  getRecentErrors(limit = 10): any[] {
+  getRecentErrors(limit = 10): TrackedError[] {
     return this.errors.slice(-limit);
   }
 
@@ -177,7 +202,10 @@ export function trackWebVitals(): void {
     // Basic FID tracking
     const fidObserver = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
-        console.log('FID:', (entry as any).processingStart - entry.startTime);
+        const firstInput = entry as PerformanceEventTiming;
+        if (typeof firstInput.processingStart === 'number') {
+          console.log('FID:', firstInput.processingStart - firstInput.startTime);
+        }
       }
     });
     fidObserver.observe({ entryTypes: ['first-input'] });
@@ -187,33 +215,39 @@ export function trackWebVitals(): void {
 // Query monitoring integration
 export function setupQueryMonitoring(queryClient: QueryClient): void {
   // Track query performance
-  const originalFetch = window.fetch;
-  window.fetch = async (...args) => {
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = (async (...args: Parameters<typeof fetch>) => {
     const startTime = Date.now();
-    const [url] = args;
+    const [resource] = args;
+    const endpoint =
+      typeof resource === 'string'
+        ? resource
+        : resource instanceof URL
+        ? resource.toString()
+        : resource.url;
 
     try {
       const response = await originalFetch(...args);
       const duration = Date.now() - startTime;
 
       // Track API call performance
-      PerformanceMonitor.getInstance().trackApiCall(url as string, duration);
+      PerformanceMonitor.getInstance().trackApiCall(endpoint, duration);
 
       return response;
     } catch (error) {
       const duration = Date.now() - startTime;
-      PerformanceMonitor.getInstance().trackApiCall(url as string, duration);
+      PerformanceMonitor.getInstance().trackApiCall(endpoint, duration);
 
       throw error;
     }
-  };
+  }) as typeof window.fetch;
 
   // Track query cache hits/misses
   queryClient.getQueryCache().subscribe((event) => {
     if (event.type === 'added') {
-      console.log('Query added to cache:', event.query.queryKey);
+      console.log('Query added to cache:', JSON.stringify(event.query.queryKey));
     } else if (event.type === 'removed') {
-      console.log('Query removed from cache:', event.query.queryKey);
+      console.log('Query removed from cache:', JSON.stringify(event.query.queryKey));
     }
   });
 }
@@ -221,11 +255,7 @@ export function setupQueryMonitoring(queryClient: QueryClient): void {
 // User interaction tracking
 export class UserTracker {
   private static instance: UserTracker;
-  private interactions: Array<{
-    type: string;
-    target: string;
-    timestamp: number;
-  }> = [];
+  private interactions: UserInteraction[] = [];
 
   static getInstance(): UserTracker {
     if (!UserTracker.instance) {
@@ -249,7 +279,7 @@ export class UserTracker {
     }
   }
 
-  getRecentInteractions(limit = 20): any[] {
+  getRecentInteractions(limit = 20): UserInteraction[] {
     return this.interactions.slice(-limit);
   }
 }
@@ -278,9 +308,10 @@ export function setupGlobalErrorHandling(): void {
   });
 
   // Handle React Error Boundaries
-  window.addEventListener('reactError', (event) => {
-    const { error, errorInfo } = (event as any).detail;
-    ErrorTracker.getInstance().trackReactError(error, errorInfo);
+  window.addEventListener('reactError', (event: Event) => {
+    const detail = (event as CustomEvent<ReactErrorDetail>).detail;
+    if (!detail) return;
+    ErrorTracker.getInstance().trackReactError(detail.error, detail.errorInfo);
   });
 }
 
@@ -304,9 +335,10 @@ export function setupPerformanceObserver(): void {
     // Observe layout shifts (CLS)
     const layoutObserver = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
-        if ((entry as any).value > 0.1) {
+        const shift = entry as LayoutShift;
+        if (shift.value > 0.1 && !shift.hadRecentInput) {
           console.warn('Layout shift detected:', {
-            value: (entry as any).value,
+            value: shift.value,
             startTime: entry.startTime,
           });
         }

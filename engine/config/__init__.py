@@ -20,8 +20,8 @@ class Settings:
         # Initialize defaults for attributes that are populated conditionally.
         self.spot_base = ""
         self.futures_base = ""
-        self.api_key = ""
-        self.api_secret = ""
+        self.api_key: str | None = None
+        self.api_secret: str | None = None
         self.base_url = ""
         self.mode = ""
         self.is_futures = False
@@ -32,8 +32,8 @@ class Settings:
             # IBKR-specific configuration
             self.mode = "ibkr"
             self.is_futures = False  # IBKR doesn't use futures concept like Binance
-            self.api_key = os.getenv("IBKR_USERNAME", "")
-            self.api_secret = os.getenv("IBKR_PASSWORD", "")
+            self.api_key = os.getenv("IBKR_USERNAME")
+            self.api_secret = os.getenv("IBKR_PASSWORD")
             host = os.getenv("IBKR_HOST", "127.0.0.1")
             port = os.getenv("IBKR_PORT", "7497")
             self.base_url = f"{host}:{port}"
@@ -45,8 +45,8 @@ class Settings:
                 "/"
             )
             # Kraken API credentials (secret provided base64 encoded per Kraken docs)
-            self.api_key = os.getenv("KRAKEN_API_KEY", "")
-            self.api_secret = os.getenv("KRAKEN_API_SECRET", "")
+            self.api_key = os.getenv("KRAKEN_API_KEY")
+            self.api_secret = os.getenv("KRAKEN_API_SECRET")
             # Optional websocket endpoints
             self.ws_url = os.getenv(
                 "KRAKEN_WS_URL",
@@ -81,8 +81,8 @@ class Settings:
             demo_key = os.getenv("DEMO_API_KEY") or os.getenv("DEMO_API_KEY_SPOT")
             demo_secret = os.getenv("DEMO_API_SECRET") or os.getenv("DEMO_API_SECRET_SPOT")
 
-            live_key = os.getenv("BINANCE_API_KEY", "")
-            live_secret = os.getenv("BINANCE_API_SECRET", "")
+            live_key = os.getenv("BINANCE_API_KEY")
+            live_secret = os.getenv("BINANCE_API_SECRET")
 
             if self.is_futures:
                 base_choice = futures_demo_base if is_demo_like else futures_live_base
@@ -110,8 +110,8 @@ class Settings:
             if not self.api_key or not self.api_secret:
                 # Allow missing credentials in test/demo environments; callers should
                 # ensure TRADING_ENABLED is false when running without real keys.
-                self.api_key = self.api_key or ""
-                self.api_secret = self.api_secret or ""
+                self.api_key = self.api_key or None
+                self.api_secret = self.api_secret or None
 
             # Validate futures base URL if in futures mode
             if self.is_futures and not self.futures_base:

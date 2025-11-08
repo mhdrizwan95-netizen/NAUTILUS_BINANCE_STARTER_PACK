@@ -1,4 +1,8 @@
 # Update with real teams/users before merging.
-* @nautilus-starter/maintainers
-frontend/ @nautilus-starter/frontend
-docs/ @nautilus-starter/docs
+*                                     @nautilus-starter/maintainers
+engine/                               @nautilus-starter/engine
+ops/                                  @nautilus-starter/ops
+services/                             @nautilus-starter/ml
+frontend/                             @nautilus-starter/frontend
+docs/                                 @nautilus-starter/docs
+scripts/                              @nautilus-starter/release

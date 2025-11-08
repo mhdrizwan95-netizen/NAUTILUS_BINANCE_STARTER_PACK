@@ -1,6 +1,7 @@
 import os
 import time
 from pathlib import Path
+from typing import Any, Dict
 
 import ccxt
 import pandas as pd
@@ -12,12 +13,15 @@ from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 from .config import settings
 
+ExchangeClient = Any
+
+
 app = FastAPI(title="data-ingester", version="0.1.0")
 install_dry_run_guard(app, allow_paths={"/health"})
 log_dry_run_banner("services.data_ingester")
 
 
-def _client():
+def _client() -> ExchangeClient:
     ex = getattr(ccxt, settings.EXCHANGE)()
     # Optionally configure apiKey/secret via env for private endpoints if needed
     if os.getenv("API_KEY"):
@@ -34,7 +38,7 @@ def _landing_dir(sym: str, tf: str) -> Path:
 
 
 @app.on_event("startup")
-def on_start():
+def on_start() -> None:
     Path(settings.DATA_LANDING).mkdir(parents=True, exist_ok=True)
     Path(settings.LEDGER_DB).parent.mkdir(parents=True, exist_ok=True)
     manifest.init(settings.LEDGER_DB)
@@ -42,12 +46,12 @@ def on_start():
 
 
 @app.get("/health")
-def health():
+def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/ingest_once")
-def ingest_once():
+def ingest_once() -> Dict[str, int]:
     ex = _client()
     tf = settings.TIMEFRAME
     out = {"downloaded": 0}
@@ -93,14 +97,11 @@ def ingest_once():
                 try:
                     os.remove(path)
                 except FileNotFoundError:
-                    pass
-        except Exception as e:
-            logger.exception(f"ingest error for {sym}: {e}")
-        # Respect extra delay to avoid rate limits
-        try:
-            delay = max(int(settings.SLEEP_MS), 0) / 1000.0
-            if delay > 0:
-                time.sleep(delay)
+                    logger.warning("Duplicate download missing on disk %s", path)
         except Exception:
-            pass
-    return out
+            logger.exception("ingest error for %s", sym)
+        # Respect extra delay to avoid rate limits
+        delay = max(int(settings.SLEEP_MS), 0) / 1000.0
+        if delay > 0:
+            time.sleep(delay)
+    return {"downloaded": int(out["downloaded"])}

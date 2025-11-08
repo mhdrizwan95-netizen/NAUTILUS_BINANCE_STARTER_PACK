@@ -152,9 +152,9 @@ class BinanceREST:
             m_params = self._mask_payload(params)
             m_data = self._mask_payload(data)
             self._logger.debug("[BINANCE] payload params=%s data=%s", m_params, m_data)
-        except Exception:
+        except Exception as exc:
             # Never let logging break request flow
-            pass
+            self._logger.debug("Binance request logging failed: %s", exc, exc_info=True)
 
     def _sign(self, params: dict[str, Any]) -> str:
         """
@@ -494,8 +494,10 @@ class BinanceREST:
                 try:
                     status = e.response.status_code
                     body = e.response.text
-                except Exception:
-                    pass
+                except Exception as body_exc:
+                    self._logger.debug(
+                        "Failed to read Binance error body: %s", body_exc, exc_info=True
+                    )
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
@@ -556,13 +558,13 @@ class BinanceREST:
                     mx = f.get("maxNotional", None)
                     try:
                         min_notional = float(mn) if mn is not None else min_notional
-                    except Exception:
+                    except Exception as exc:
                         # If venue sends something strange, keep previous/default
-                        pass
+                        self._logger.debug("Min notional parse failed for %s: %s", clean, exc)
                     try:
                         max_notional = float(mx) if mx is not None else max_notional
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self._logger.debug("Max notional parse failed for %s: %s", clean, exc)
                 elif ftype == "PRICE_FILTER":
                     tick_size = float(f.get("tickSize", tick_size or 0.0))
             # Sanitize numeric outputs for JSON + downstream math
@@ -872,8 +874,10 @@ class BinanceREST:
                 try:
                     status = e.response.status_code
                     body = e.response.text
-                except Exception:
-                    pass
+                except Exception as body_exc:
+                    self._logger.debug(
+                        "Failed to read Binance error body: %s", body_exc, exc_info=True
+                    )
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
@@ -903,7 +907,8 @@ class BinanceREST:
                 filt = await self.exchange_filter(clean, market=market_key)
                 step = getattr(filt, "step_size", 0.000001) or 0.000001
                 min_qty = getattr(filt, "min_qty", 0.0) or 0.0
-            except Exception:
+            except Exception as exc:
+                self._logger.debug("Futures filter unavailable for %s: %s", clean, exc)
                 step = 0.000001
                 min_qty = 0.0
             qty_raw = max(float(quote) / float(px or 1.0), 0.0)
@@ -956,8 +961,10 @@ class BinanceREST:
                 try:
                     status = e.response.status_code
                     body = e.response.text
-                except Exception:
-                    pass
+                except Exception as body_exc:
+                    self._logger.debug(
+                        "Failed to read Binance error body: %s", body_exc, exc_info=True
+                    )
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
@@ -1035,8 +1042,10 @@ class BinanceREST:
                 try:
                     status = e.response.status_code
                     body = e.response.text
-                except Exception:
-                    pass
+                except Exception as body_exc:
+                    self._logger.debug(
+                        "Failed to read Binance error body: %s", body_exc, exc_info=True
+                    )
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
@@ -1176,8 +1185,10 @@ class BinanceREST:
                 try:
                     status = e.response.status_code
                     body = e.response.text
-                except Exception:
-                    pass
+                except Exception as body_exc:
+                    self._logger.debug(
+                        "Failed to read Binance error body: %s", body_exc, exc_info=True
+                    )
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue

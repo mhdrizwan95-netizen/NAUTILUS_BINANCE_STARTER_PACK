@@ -9,11 +9,14 @@ in SQLite without touching the surrounding strategy.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from typing import Dict, Iterable, List, Optional
+
+_LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -109,9 +112,9 @@ class DexState:
             with open(tmp_path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, separators=(",", ":"), sort_keys=True)
             os.replace(tmp_path, self.path)
-        except Exception:
+        except Exception as exc:
             # Persistence is best-effort; ignore failures.
-            pass
+            _LOGGER.debug("dex state save failed: %s", exc, exc_info=True)
 
     # State helpers ----------------------------------------------------------------
     def positions(self) -> Iterable[DexPosition]:

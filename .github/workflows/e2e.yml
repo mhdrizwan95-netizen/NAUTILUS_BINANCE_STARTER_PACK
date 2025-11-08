@@ -1,0 +1,29 @@
+name: e2e
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 2 * * *"
+
+jobs:
+  playwright:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install deps
+        working-directory: frontend
+        run: |
+          npm ci --ignore-scripts --prefer-offline
+          npx playwright install --with-deps
+      - name: Run e2e
+        working-directory: frontend
+        run: npm run test:e2e
+      - name: Upload traces
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/playwright-report/

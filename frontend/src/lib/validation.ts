@@ -178,7 +178,7 @@ export const strategySummarySchema = z.object({
   kind: z.string(),
   status: z.enum(['stopped', 'running', 'error']),
   symbols: z.array(z.string()),
-  paramsSchema: z.any(), // Will be validated separately
+  paramsSchema: z.unknown(), // Will be validated separately
   params: z.record(z.unknown()).optional(),
   performance: z.object({
     pnl: z.number(),

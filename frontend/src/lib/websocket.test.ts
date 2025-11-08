@@ -1,5 +1,5 @@
-import { describe, beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
+import { describe, beforeEach, afterEach, expect, it, vi } from 'vitest';
 
 describe('websocket utilities', () => {
   beforeEach(() => {

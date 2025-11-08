@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+
 import { stableHash } from './equality';
 
 export function usePolling<T>(
@@ -14,7 +15,7 @@ export function usePolling<T>(
   const lastHash = useRef<string | null>(null);
   const fnRef = useRef(fn);
   const comparatorRef = useRef(isEqual);
-  const liveDisabled = (import.meta as any)?.env?.VITE_LIVE_OFF === 'true';
+  const liveDisabled = (import.meta.env?.VITE_LIVE_OFF ?? 'false') === 'true';
   const pollingEnabled = enabled && !liveDisabled;
 
   useEffect(() => {
@@ -58,7 +59,7 @@ export function usePolling<T>(
       }
     };
 
-    tick();
+    void tick();
 
     return () => {
       cancelled = true;

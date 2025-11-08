@@ -11,6 +11,12 @@ def _as_bool(v: str | None, default: bool) -> bool:
     return v.strip().lower() not in {"0", "false", "no"}
 
 
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger("engine.funding_guard").debug(
+        "%s suppressed exception: %s", context, exc, exc_info=True
+    )
+
+
 class FundingGuard:
     def __init__(self, router, bus=None, log: logging.Logger | None = None) -> None:
         self.router = router
@@ -35,16 +41,18 @@ class FundingGuard:
             for sym, obj in (data or {}).items():
                 try:
                     rate = float(obj.get("lastFundingRate") or obj.get("estimatedRate") or 0.0)
-                except Exception:
+                except Exception as exc:
+                    _log_suppressed("funding_guard.rate_parse", exc)
                     rate = 0.0
                 if abs(rate) >= self.spike_threshold:
                     try:
                         if self.bus is not None:
                             self.bus.fire("risk.funding_spike", {"symbol": sym, "rate": rate})
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log_suppressed("funding_guard.bus_fire", exc)
                     await self._mitigate(sym, rate)
-        except Exception:
+        except Exception as exc:
+            _log_suppressed("funding_guard.bulk_fetch", exc)
             return
 
     async def _mitigate(self, sym: str, rate: float) -> None:
@@ -53,7 +61,8 @@ class FundingGuard:
             # Try to get position from portfolio state
             state = self.router.portfolio_service().state
             pos = state.positions.get(sym) or state.positions.get(sym.split(".")[0])
-        except Exception:
+        except Exception as exc:
+            _log_suppressed("funding_guard.lookup_position", exc)
             pos = None
         if pos is None:
             return
@@ -79,8 +88,8 @@ class FundingGuard:
         if self.hedge_ratio > 0:
             try:
                 await self._maybe_await(self.router.auto_net_hedge_btc(percent=self.hedge_ratio))
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("funding_guard.auto_hedge", exc)
 
     async def _maybe_await(self, res: Any) -> Any:
         if hasattr(res, "__await__"):

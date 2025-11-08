@@ -28,7 +28,7 @@ def _load_runtime_core() -> List[str]:
     if not isinstance(core, list):
         return []
     cleaned = [token.split(".")[0].upper() for token in core if token]
-    return sorted({token for token in cleaned if token and token != "*"})
+    return sorted({token for token in cleaned if token and token != "*"})  # nosec B105
 
 
 def _scanner_enabled() -> bool:

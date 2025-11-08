@@ -20,6 +20,10 @@ from engine.metrics import (
 log = logging.getLogger("binance_ws")
 
 
+def _log_suppressed(context: str, exc: Exception) -> None:
+    log.debug("%s suppressed exception: %s", context, exc, exc_info=True)
+
+
 def _chunks(seq: List[str], n: int) -> Iterable[List[str]]:
     for i in range(0, len(seq), n):
         yield seq[i : i + n]
@@ -100,7 +104,8 @@ class BinanceWS:
                     async for raw in ws:
                         try:
                             msg = json.loads(raw)
-                        except Exception:
+                        except Exception as exc:
+                            _log_suppressed("binance_ws.json_decode", exc)
                             continue
                         data = msg.get("data") if isinstance(msg, dict) else None
                         if not isinstance(data, dict):
@@ -113,7 +118,8 @@ class BinanceWS:
                         if stype == "mark":
                             try:
                                 price = float(data.get("p") or data.get("markPrice") or 0.0)
-                            except Exception:
+                            except Exception as exc:
+                                _log_suppressed("binance_ws.mark_price_parse", exc)
                                 price = None
                         elif stype == "bookticker":
                             try:
@@ -123,18 +129,21 @@ class BinanceWS:
                                     price = (ask + bid) / 2.0
                                 else:
                                     price = float(data.get("c") or 0.0)
-                            except Exception:
+                            except Exception as exc:
+                                _log_suppressed("binance_ws.book_ticker_parse", exc)
                                 price = None
                         elif stype == "aggtrade":
                             try:
                                 price = float(data.get("p") or 0.0)
-                            except Exception:
+                            except Exception as exc:
+                                _log_suppressed("binance_ws.aggtrade_parse", exc)
                                 price = None
                         else:
                             # Spot mini-ticker fallback: last price in 'c'
                             try:
                                 price = float(data.get("c") or data.get("lastPrice") or 0.0)
-                            except Exception:
+                            except Exception as exc:
+                                _log_suppressed("binance_ws.miniticker_parse", exc)
                                 price = None
                         if not price or price <= 0:
                             continue
@@ -147,10 +156,10 @@ class BinanceWS:
                                 mark_price_freshness_sec.labels(symbol=sym, venue="binance").set(
                                     0.0
                                 )
-                            except Exception:
-                                pass
-                        except Exception:
-                            pass
+                            except Exception as exc:
+                                _log_suppressed("binance_ws.mark_freshness", exc)
+                        except Exception as exc:
+                            _log_suppressed("binance_ws.mark_metric", exc)
                         ts = (
                             float(data.get("E") or data.get("T") or 0.0) / 1000.0
                             if (data.get("E") or data.get("T"))
@@ -159,16 +168,16 @@ class BinanceWS:
                         if self._price_hook:
                             try:
                                 self._price_hook(f"{sym}.BINANCE", sym, float(price), ts or 0.0)
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                _log_suppressed("binance_ws.price_hook", exc)
                         cb = self._on_price_cb
                         if cb:
                             try:
                                 res = cb(f"{sym}.BINANCE", float(price), ts or 0.0)
                                 if asyncio.iscoroutine(res):
                                     asyncio.create_task(res)  # type: ignore[arg-type]
-                            except Exception:
-                                pass
+                            except Exception as exc:
+                                _log_suppressed("binance_ws.price_callback", exc)
                         event_payload = self._build_event_payload(
                             stype=stype,
                             symbol=sym,
@@ -184,8 +193,8 @@ class BinanceWS:
                     ctr = REGISTRY.get("ws_disconnects_total")
                     if ctr:
                         ctr.inc()
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("binance_ws.ws_disconnect_metric", exc)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2.0, 30.0)
 

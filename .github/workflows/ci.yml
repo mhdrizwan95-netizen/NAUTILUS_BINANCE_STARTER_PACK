@@ -42,18 +42,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Bootstrap dependencies
         run: make bootstrap
-      - name: Pre-commit
-        run: pre-commit run --all-files --show-diff-on-failure
-      - name: Lint
-        run: make lint
-      - name: Typecheck
-        run: make typecheck
-      - name: Unit tests
-        run: make test
-      - name: Security audit
+      - name: pre-commit (all files)
+        run: pre-commit run --all-files
+      - name: Quality audit
         env:
           SKIP_DOCKER: "1"
-        run: make audit
+        run: bash scripts/audit.sh
+      - name: Repo sync drift reports
+        run: bash ops/repo_sync_audit.sh
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -62,6 +58,8 @@ jobs:
           path: |
             reports
             frontend/coverage
+            audit/logs
+            audit/reports
           if-no-files-found: ignore
 
   dry-run:

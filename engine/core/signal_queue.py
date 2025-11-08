@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import heapq
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
@@ -47,9 +48,10 @@ class SignalPriorityQueue:
                     continue
                 try:
                     await bus.publish(evt.topic, evt.data)
-                except Exception:
-                    # Ignore downstream errors; keep loop alive
-                    continue
+                except Exception as exc:
+                    logging.getLogger(__name__).debug(
+                        "signal queue publish failed (%s): %s", evt.topic, exc, exc_info=True
+                    )
         except asyncio.CancelledError:
             pass
         finally:

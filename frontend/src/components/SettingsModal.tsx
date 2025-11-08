@@ -1,4 +1,6 @@
 import { Settings, Shield, TrendingUp, Zap, TrendingDown, Rocket, DollarSign, Activity } from 'lucide-react';
+
+import { Button } from './ui/button';
 import {
   Dialog,
   DialogContent,
@@ -6,14 +8,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-import { Label } from './ui/label';
 import { Input } from './ui/input';
-import { Switch } from './ui/switch';
-import { Slider } from './ui/slider';
+import { Label } from './ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Button } from './ui/button';
 import { Separator } from './ui/separator';
+import { Slider } from './ui/slider';
+import { Switch } from './ui/switch';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import type {
   GlobalSettings,
   TrendStrategyConfig,

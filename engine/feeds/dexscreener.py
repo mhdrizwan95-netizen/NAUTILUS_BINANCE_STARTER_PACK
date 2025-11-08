@@ -11,6 +11,7 @@ By default, this module is inert unless DEX_FEED_ENABLED=true.
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -18,6 +19,11 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 DEX_API = os.getenv("DEXSCREENER_API", "https://api.dexscreener.com/latest/dex/tokens")
+logger = logging.getLogger("engine.feeds.dexscreener")
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed exception: %s", context, exc, exc_info=True)
 
 
 @dataclass
@@ -40,7 +46,8 @@ class DexCandidate:
 def _as_float(v, default=0.0) -> float:
     try:
         return float(v)
-    except Exception:
+    except Exception as exc:
+        _log_suppressed("dexscreener.as_float", exc)
         return default
 
 
@@ -125,7 +132,8 @@ async def fetch_top_gainers(chains: list[str] | None = None) -> List[DexCandidat
                 if c:
                     out.append(c)
             return out
-        except Exception:
+        except Exception as exc:
+            logger.warning("Dexscreener fetch failed: %s", exc)
             return []
 
 
@@ -137,9 +145,10 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
     # Optional social ROC tiering
     try:
         from engine.feeds.social import roc as social_roc
-    except Exception:
+    except Exception as exc:
 
         def social_roc(_: str) -> float:
+            _log_suppressed("dexscreener.social_roc_import", exc)
             return 0.0
 
     while True:
@@ -169,6 +178,6 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
                         },
                     },
                 )
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("dexscreener.loop", exc)
         await asyncio.sleep(poll_sec)

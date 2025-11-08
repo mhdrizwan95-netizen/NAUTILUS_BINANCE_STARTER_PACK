@@ -9,6 +9,7 @@ import type {
   Order,
   MetricsModel,
 } from '@/types/trading';
+
 import type { ConfigEffective } from './validation';
 
 export interface ControlRequestOptions {

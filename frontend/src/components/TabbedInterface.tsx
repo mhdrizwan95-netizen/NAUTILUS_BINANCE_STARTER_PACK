@@ -1,8 +1,10 @@
-import { Suspense, lazy } from 'react';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { LayoutDashboard, Target, Wallet, Brain, Settings } from 'lucide-react';
-import { Skeleton } from './ui/skeleton';
 import { motion } from 'motion/react';
+import { Suspense, lazy } from 'react';
+
+import { Skeleton } from './ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+
 
 // Lazy load tab components for better performance
 const DashboardTab = lazy(() => import('./tabs/DashboardTab').then(module => ({ default: module.DashboardTab })));

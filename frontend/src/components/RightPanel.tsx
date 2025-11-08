@@ -1,11 +1,13 @@
-import { X, TrendingUp, Activity, Zap, AlertCircle } from 'lucide-react';
+import { X, TrendingUp } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { LineChart, Line, AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
+
+import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
-import { Badge } from './ui/badge';
-import { LineChart, Line, AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { getVenueColor } from '../lib/mockData';
 import type { StrategyPerformance, Strategy, Venue, Trade } from '../types/trading';
-import { getVenueColor, getVenueGradient } from '../lib/mockData';
-import { motion, AnimatePresence } from 'motion/react';
+
 
 interface RightPanelProps {
   performance: StrategyPerformance | null;
@@ -19,8 +21,6 @@ export function RightPanel({ performance, strategy, venue, trades, onClose }: Ri
   if (!performance || !strategy || !venue) return null;
 
   const venueColor = getVenueColor(venue.type);
-  const venueGradient = getVenueGradient(venue.type);
-
   // Generate equity curve data
   const equityCurveData = performance.metrics.sparkline.map((value, index) => ({
     index,

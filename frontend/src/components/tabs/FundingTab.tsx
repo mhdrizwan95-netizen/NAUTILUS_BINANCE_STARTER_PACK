@@ -1,17 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { TrendingUp, DollarSign, BarChart2, Save } from 'lucide-react';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Skeleton } from '../ui/skeleton';
-import { queryKeys } from '../../lib/queryClient';
+import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
+
 import {
   getAggregatePortfolio,
   getAggregateExposure,
@@ -20,6 +11,9 @@ import {
   updateConfig,
   type ControlRequestOptions,
 } from '../../lib/api';
+import { generateIdempotencyKey } from '../../lib/idempotency';
+import { queryKeys } from '../../lib/queryClient';
+import { useAppStore } from '../../lib/store';
 import {
   exposureAggregateSchema,
   pnlSnapshotSchema,
@@ -27,11 +21,18 @@ import {
   validateApiResponse,
   configEffectiveSchema,
 } from '../../lib/validation';
-import { Input } from '../ui/input';
+import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { useAppStore } from '../../lib/store';
-import { toast } from 'sonner';
-import { generateIdempotencyKey } from '../../lib/idempotency';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '../ui/card';
+import { Input } from '../ui/input';
+import { Skeleton } from '../ui/skeleton';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 
 function formatCurrency(value: number, opts: Intl.NumberFormatOptions = {}) {
   return new Intl.NumberFormat('en-US', {

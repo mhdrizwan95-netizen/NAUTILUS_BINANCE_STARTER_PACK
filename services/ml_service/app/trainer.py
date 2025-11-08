@@ -65,8 +65,8 @@ def _load_window_from_disk(days: int) -> pd.DataFrame:
             if "timestamp" not in df.columns:
                 df.rename(columns={df.columns[0]: "timestamp"}, inplace=True)
             dfs.append(df[["timestamp", "close"]])
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to load fallback window file %s: %s", p, exc, exc_info=True)
     if not dfs:
         return pd.DataFrame(columns=["timestamp", "close"])
     df = pd.concat(dfs, ignore_index=True)
@@ -126,7 +126,9 @@ def _requeue_claims(file_ids: List[str]):
         logger.warning(f"failed to requeue {len(file_ids)} files: {exc}")
 
 
-def train_once(n_states: int = None, tag: str = None, promote: bool = True) -> Dict[str, Any]:
+def train_once(
+    n_states: int | None = None, tag: str | None = None, promote: bool = True
+) -> Dict[str, Any]:
     n_states = n_states or settings.HMM_STATES
     np.random.seed(settings.TRAIN_SEED)
     df_new, claimed_ids = _load_new_data()

@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -16,18 +16,18 @@ log_dry_run_banner("services.param_controller")
 
 
 @app.on_event("startup")
-def on_start():
+def on_start() -> None:
     store.init(settings.PC_DB)
     logger.info("param-controller up")
 
 
 @app.get("/health")
-def health():
+def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/preset/register/{strategy}/{instrument}")
-def register_preset(strategy: str, instrument: str, body: Dict[str, Any]):
+def register_preset(strategy: str, instrument: str, body: Dict[str, Any]) -> Dict[str, bool]:
     pid = body.get("preset_id")
     params = body.get("params")
     if not pid or not isinstance(params, dict):
@@ -37,17 +37,20 @@ def register_preset(strategy: str, instrument: str, body: Dict[str, Any]):
 
 
 @app.get("/param/{strategy}/{instrument}")
-def get_param(strategy: str, instrument: str, features: Dict[str, float] = {}):
+def get_param(
+    strategy: str, instrument: str, features: Optional[Dict[str, float]] = None
+) -> Dict[str, Any]:
     presets = store.list_presets(settings.PC_DB, strategy, instrument)
     if not presets:
         raise HTTPException(404, "no presets registered")
     history = store.fetch_outcomes(settings.PC_DB, strategy, instrument)
     history_feature_keys = {k for _, _, feats in history for k in feats.keys()}
-    feat_keys = sorted(set(features.keys()) | history_feature_keys)
+    provided_features = features or {}
+    feat_keys = sorted(set(provided_features.keys()) | history_feature_keys)
     if not feat_keys:
         feat_keys = ["bias"]
-        features = {"bias": 1.0}
-    x = np.array([features.get(k, 0.0) for k in feat_keys], dtype=float)
+        provided_features = {"bias": 1.0}
+    x = np.array([provided_features.get(k, 0.0) for k in feat_keys], dtype=float)
     K = len(presets)
     X = np.vstack([x for _ in range(K)])
     bandit = LinTS(d=x.size, l2=settings.L2)
@@ -71,7 +74,9 @@ def get_param(strategy: str, instrument: str, features: Dict[str, float] = {}):
 
 
 @app.post("/learn/outcome/{strategy}/{instrument}/{preset_id}")
-def report_outcome(strategy: str, instrument: str, preset_id: str, body: Dict[str, Any]):
+def report_outcome(
+    strategy: str, instrument: str, preset_id: str, body: Dict[str, Any]
+) -> Dict[str, bool]:
     reward = float(body.get("reward", 0.0))
     features = body.get("features", {})
     store.log_outcome(settings.PC_DB, strategy, instrument, preset_id, reward, features)

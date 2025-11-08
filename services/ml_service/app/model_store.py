@@ -61,8 +61,8 @@ def promote(version_dir: Path) -> str:
     if cur.is_symlink() or cur.exists():
         try:
             cur.unlink()
-        except Exception:
-            pass
+        except OSError as exc:
+            logger.warning("Failed to remove current symlink %s: %s", cur, exc, exc_info=True)
     target = version_dir.resolve()
     cur.symlink_to(target, target_is_directory=True)
     (target / "version.txt").write_text(str(time.time()))

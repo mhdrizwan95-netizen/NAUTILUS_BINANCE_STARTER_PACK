@@ -5,11 +5,16 @@
 # =============================================================================
 
 # ---- Configurable knobs ------------------------------------------------------
+SHELL                 := /bin/bash
+.DEFAULT_GOAL         := help
+
 PYTHON                ?= python3
 COMPOSE               ?= docker compose
 OBS_COMPOSE           ?= docker compose -f ops/observability/docker-compose.observability.yml
 COMPOSE_BUILD_FLAGS   ?= --progress=plain
 NPM_INSTALL_FLAGS     ?= --ignore-scripts --prefer-offline
+PIP_VERSION           ?= 24.3.1
+PIP_TOOLS_VERSION     ?= 7.4.1
 
 # Service names (as in docker-compose.yml)
 ENGINE_EXPORTER_SVC   ?= engine_binance_exporter
@@ -82,10 +87,10 @@ help:
 # ---------------------------------------------------------------------------
 # Deterministic developer lifecycle
 # ---------------------------------------------------------------------------
-.PHONY: bootstrap
+.PHONY: bootstrap deps
 bootstrap: ## Install pinned Python & frontend dependencies (idempotent)
-	$(PYTHON) -m pip install --upgrade pip pip-tools
-	pip-sync requirements.txt requirements-dev.txt
+	$(PYTHON) -m pip install --upgrade "pip==$(PIP_VERSION)" "pip-tools==$(PIP_TOOLS_VERSION)"
+	pip-sync --pip-args="--require-hashes" requirements.txt requirements-dev.txt
 	pre-commit install --install-hooks
 	cd frontend && npm ci $(NPM_INSTALL_FLAGS)
 
@@ -123,7 +128,7 @@ test-e2e: ## Opt-in E2E browser tests (Playwright)
 	cd frontend && npm run test:e2e -- --reporter=list
 
 .PHONY: audit
-audit: ## Run read-only security and quality checks
+audit: ## Run read-only security and quality checks (see scripts/audit.sh for toggles)
 	bash scripts/audit.sh
 
 .PHONY: dry-run
@@ -131,7 +136,9 @@ dry-run: ## Start dry-run stack with DRY_RUN=1 guardrails
 	bash scripts/dry_run.sh
 
 .PHONY: ci
-ci: lint typecheck test audit ## Aggregate target for CI environments
+ci: ## One-stop target that mirrors CI workflow
+	DRY_RUN=1 SKIP_DOCKER=1 bash scripts/audit.sh
+	bash ops/repo_sync_audit.sh
 
 # -----------------------------------------------------------------------------
 # Build & Core lifecycle
@@ -353,3 +360,6 @@ autopilot-paper:
 	curl -s -X POST http://localhost:8000/governance/flags \
 	  -H 'Content-Type: application/json' \
 	  -d '{"AUTOPILOT_ENABLED": true, "PAPER_TRADING": true, "AUTOPILOT_MIN_CONF": 0.55}' >/dev/null || true
+.PHONY: repo-sync
+repo-sync: ## Generate FE↔BE/API drift reports under audit/reports
+	bash ops/repo_sync_audit.sh

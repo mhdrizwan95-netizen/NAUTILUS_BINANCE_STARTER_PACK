@@ -11,7 +11,7 @@ This creates the closed-loop: research → registry → governance → deploymen
 import hashlib
 import json
 import shutil
-import subprocess
+import subprocess  # nosec B404 - intentional shell out to scp/rsync
 import time
 from datetime import datetime, timezone
 from pathlib import Path

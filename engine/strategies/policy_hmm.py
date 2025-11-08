@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import math
-import pickle
+import pickle  # nosec B403 - loads trusted local models only
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -78,7 +78,7 @@ def _load_model():
         raise FileNotFoundError(f"No HMM model found at {model_path} or {active_path}")
     print(f"[HMM] Loading model from {model_path}")
     with open(model_path, "rb") as f:
-        return pickle.load(f)
+        return pickle.load(f)  # nosec B301 - models are produced by trusted pipeline
 
 
 _model = None

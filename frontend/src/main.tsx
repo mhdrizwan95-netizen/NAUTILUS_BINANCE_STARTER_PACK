@@ -1,5 +1,6 @@
 
 import { createRoot } from "react-dom/client";
+
 import App from "./App.tsx";
 import "./index.css";
 import { AppErrorBoundary } from "./components/ErrorBoundary";
@@ -10,8 +11,8 @@ import {
   setupQueryMonitoring,
   trackWebVitals
 } from "./lib/monitoring";
-import { initializeSecurity } from "./lib/security";
 import { queryClient } from "./lib/queryClient";
+import { initializeSecurity } from "./lib/security";
 
 if (import.meta.env?.VITE_DRY_RUN === "1") {
   console.info("DRY_RUN=1 — Command Center is running in read-only mode.");

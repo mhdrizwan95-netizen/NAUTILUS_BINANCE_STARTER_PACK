@@ -4,10 +4,9 @@ import { LineChart, Line, ResponsiveContainer } from 'recharts';
 interface MiniChartProps {
   data: number[];
   color: string;
-  trend: 'up' | 'down' | 'neutral';
 }
 
-export const MiniChart = memo(({ data, color, trend }: MiniChartProps) => {
+export const MiniChart = memo(({ data, color }: MiniChartProps) => {
   const chartData = data.map((value, index) => ({ value, index }));
   
   return (

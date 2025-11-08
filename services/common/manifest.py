@@ -1,10 +1,12 @@
 import hashlib
+import logging
 import os
 import sqlite3
 import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+logger = logging.getLogger(__name__)
 DEFAULT_DB = os.environ.get("LEDGER_DB", "/shared/manifest.sqlite")
 
 DDL = """
@@ -186,8 +188,10 @@ def _delete_file_by_id(file_id: str, db_path: str = DEFAULT_DB):
             try:
                 if os.path.exists(path):
                     os.remove(path)
-            except Exception:
-                pass
+            except OSError as exc:
+                logger.warning(
+                    "Failed to remove %s for file_id=%s: %s", path, file_id, exc, exc_info=True
+                )
             cur.execute(
                 "UPDATE files SET status='deleted', deleted_at=? WHERE file_id=?",
                 (time.time(), file_id),

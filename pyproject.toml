@@ -11,8 +11,8 @@ dependencies = [
   "fastapi==0.120.4",
   "uvicorn[standard]==0.30.6",
   "httpx==0.27.2",
-  "requests==2.32.3",
-  "jinja2==3.1.4",
+  "requests==2.32.4",
+  "jinja2==3.1.6",
   "prometheus-client==0.20.0",
   "prometheus-fastapi-instrumentator==6.1.0",
   "pandas==2.2.3",
@@ -26,7 +26,7 @@ dependencies = [
   "loguru==0.7.2",
   "pydantic==2.8.2",
   "pydantic-settings==2.11.0",
-  "python-jose[cryptography]==3.3.0",
+  "pyjwt[crypto]==2.9.0",
   "PyYAML==6.0.1",
   "tabulate==0.9.0",
   "matplotlib==3.8.4",
@@ -50,7 +50,10 @@ dev = [
   "ruff==0.6.9",
   "types-python-dateutil==2.9.0.20240906",
   "types-requests==2.32.0.20241016",
-  "web3==6.20.1"
+  "web3==6.20.1",
+  "pandas-stubs==2.2.2.240807",
+  "eth-typing>=4.2.0",
+  "setuptools==80.9.0"
 ]
 
 [tool.pyright]
@@ -85,9 +88,29 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = [
+  "E",
+  "F",
+  "I",
+  "B",
+  "BLE",
+  "C4",
+  "DTZ",
+  "G",
+  "N",
+  "PL",
+  "RUF",
+  "S",
+  "TID",
+  "TRY",
+  "UP",
+]
 ignore = ["E203", "E501"]
-per-file-ignores = {"tests/" = ["E999"], "frontend/" = ["E999"]}
+fixable = ["ALL"]
+per-file-ignores = {
+  "tests/**" = ["S101", "TRY", "B"],
+  "frontend/**" = ["S101", "E501"],
+}
 
 [tool.ruff.lint.isort]
 known-first-party = ["engine", "ops", "services"]
@@ -102,6 +125,8 @@ warn_unused_configs = true
 warn_return_any = true
 disallow_untyped_defs = true
 disallow_any_generics = true
+namespace_packages = true
+explicit_package_bases = true
 exclude = [
   "frontend/",
   "docs/",
@@ -111,11 +136,18 @@ exclude = [
   "services/backtester/",
 ]
 
+[[tool.mypy.overrides]]
+module = ["ccxt"]
+ignore_missing_imports = true
+
 [tool.bandit]
 skips = ["B101"]
+exclude_dirs = ["tests", "frontend", "docs"]
+targets = ["engine", "ops", "services", "shared", "ml_service"]
 
 [tool.pytest.ini_options]
+minversion = "8.0"
 pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-addopts = "-q --maxfail=1 --disable-warnings"
+addopts = "-q --maxfail=1 --disable-warnings -p no:web3.tools.pytest_ethereum"

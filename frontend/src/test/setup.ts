@@ -75,7 +75,7 @@ global.WebSocket = class MockWebSocket {
     this.readyState = 3; // CLOSED
     this.onclose?.(new CloseEvent('close'));
   }
-} as any;
+} as unknown as typeof WebSocket;
 
 // Mock ResizeObserver
 global.ResizeObserver = class ResizeObserver {

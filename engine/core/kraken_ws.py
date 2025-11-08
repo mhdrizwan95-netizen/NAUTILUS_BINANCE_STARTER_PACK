@@ -22,6 +22,10 @@ from engine.metrics import (
 logger = logging.getLogger("kraken_ws")
 
 
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed exception: %s", context, exc, exc_info=True)
+
+
 async def _safe_call(cb, *args):
     if cb is None:
         return
@@ -117,8 +121,8 @@ class KrakenWS:
                                 cache_fn = getattr(self._rest_client, "cache_price", None)
                                 if callable(cache_fn):
                                     cache_fn(sym, price_f)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _log_suppressed("kraken_ws.cache_price", exc)
                         await _safe_call(self._emit_price, sym, price_f, data)
             except Exception as exc:
                 logger.error("[WS] Kraken WS connection error: %s", exc)
@@ -126,8 +130,8 @@ class KrakenWS:
                     ctr = REGISTRY.get("ws_disconnects_total")
                     if ctr:
                         ctr.inc()
-                except Exception:
-                    pass
+                except Exception as counter_exc:
+                    _log_suppressed("kraken_ws.disconnect_metric", counter_exc)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2.0, 30.0)
 
@@ -141,8 +145,8 @@ class KrakenWS:
             if hasattr(portfolio, "update_price"):
                 try:
                     portfolio.update_price(sym, mark)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("kraken_ws.portfolio_update_price", exc)
 
             positions = None
             if hasattr(portfolio, "state"):
@@ -171,8 +175,8 @@ class KrakenWS:
             try:
                 position_amt_by_symbol.labels(symbol=base_symbol).set(qty)
                 unrealized_profit_by_symbol.labels(symbol=base_symbol).set(upnl)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("kraken_ws.unrealized_metrics", exc)
         except Exception as e:
             logger.warning(f"[WS] Error updating UPNL for {sym}: {e}")
 

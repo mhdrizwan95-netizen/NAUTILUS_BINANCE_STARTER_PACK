@@ -3,12 +3,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
-import random
 import time
 from collections import defaultdict, deque
+from random import SystemRandom
 from typing import Deque, Dict, List, Optional
 
 import httpx
+
+_RNG = SystemRandom()
 
 # --- Symbol feed caching infrastructure ---
 _SYMBOL_CACHE: deque[str] = deque(maxlen=500)
@@ -251,7 +253,7 @@ async def submit_market_quote(
             status_code = e.response.status_code
             # Retry on rate limits and server errors
             if status_code in (429, 500, 502, 503, 504):
-                jitter = random.uniform(0, backoff * 0.3)
+                jitter = _RNG.uniform(0, backoff * 0.3)
                 await asyncio.sleep(backoff + jitter)
                 backoff = min(backoff * backoff_multiplier, max_backoff_sec)
                 continue
@@ -259,7 +261,7 @@ async def submit_market_quote(
             raise
         except Exception:
             # For network/other errors, still retry once with minimal backoff
-            jitter = random.uniform(0, backoff * 0.3)
+            jitter = _RNG.uniform(0, backoff * 0.3)
             await asyncio.sleep(backoff + jitter)
             backoff = min(backoff * backoff_multiplier, max_backoff_sec)
             continue
@@ -435,7 +437,7 @@ async def main():
             # Step 5: Pace rounds with jitter (prevents synchronization)
             base_interval = env_i("EXEC_INTERVAL_SEC", 12)
             jitter = env_f("EXEC_JITTER", 0.40)
-            interval = base_interval * (1.0 + random.uniform(-jitter, jitter))
+            interval = base_interval * (1.0 + _RNG.uniform(-jitter, jitter))
             await asyncio.sleep(interval)
 
 

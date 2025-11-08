@@ -224,7 +224,7 @@ export const handlers = [
 
   http.post('/api/strategies/:id/start', async ({ params, request }) => {
     const { id } = params;
-    const body = await request.json();
+    await request.json();
 
     // Simulate starting strategy
     return HttpResponse.json({
@@ -245,7 +245,7 @@ export const handlers = [
 
   http.post('/api/strategies/:id/update', async ({ params, request }) => {
     const { id } = params;
-    const body = await request.json();
+    await request.json();
 
     // Simulate updating strategy
     return HttpResponse.json({
@@ -257,10 +257,7 @@ export const handlers = [
   // Dashboard endpoints
   http.get('/api/metrics/summary', ({ request }) => {
     const url = new URL(request.url);
-    // Parse query parameters if needed
-    const from = url.searchParams.get('from');
-    const to = url.searchParams.get('to');
-
+    url.searchParams.toString(); // Parsed for parity with real handler
     return HttpResponse.json(generateMockDashboardSummary());
   }),
 
@@ -298,7 +295,7 @@ export const handlers = [
 
   // Backtest endpoints
   http.post('/api/backtests', async ({ request }) => {
-    const body = await request.json();
+    await request.json();
 
     // Simulate starting backtest
     return HttpResponse.json({
@@ -307,9 +304,7 @@ export const handlers = [
     });
   }),
 
-  http.get('/api/backtests/:jobId', ({ params }) => {
-    const { jobId } = params;
-
+  http.get('/api/backtests/:jobId', () => {
     // Simulate backtest progress
     return HttpResponse.json({
       status: 'completed',

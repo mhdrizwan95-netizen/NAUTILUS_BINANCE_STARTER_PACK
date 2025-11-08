@@ -1,6 +1,7 @@
-import React from 'react';
-import { ErrorBoundary as ReactErrorBoundary } from 'react-error-boundary';
 import { AlertTriangle, RefreshCw } from 'lucide-react';
+import type { ComponentType, ReactNode, ErrorInfo } from 'react';
+import { ErrorBoundary as ReactErrorBoundary } from 'react-error-boundary';
+
 import { Button } from './ui/button';
 import { Card } from './ui/card';
 
@@ -54,9 +55,9 @@ function ErrorFallback({ error, resetErrorBoundary }: ErrorFallbackProps) {
 }
 
 interface AppErrorBoundaryProps {
-  children: React.ReactNode;
-  fallback?: React.ComponentType<ErrorFallbackProps>;
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
+  children: ReactNode;
+  fallback?: ComponentType<ErrorFallbackProps>;
+  onError?: (error: Error, errorInfo: ErrorInfo) => void;
 }
 
 export function AppErrorBoundary({
@@ -64,7 +65,7 @@ export function AppErrorBoundary({
   fallback: Fallback = ErrorFallback,
   onError
 }: AppErrorBoundaryProps) {
-  const handleError = (error: Error, errorInfo: React.ErrorInfo) => {
+  const handleError = (error: Error, errorInfo: ErrorInfo) => {
     console.error('AppErrorBoundary captured error:', error, errorInfo);
     // Log to console in development
     if (process.env.NODE_ENV === 'development') {
@@ -98,9 +99,9 @@ export function ComponentErrorBoundary({
   fallback: Fallback,
   onError
 }: {
-  children: React.ReactNode;
-  fallback?: React.ComponentType<ErrorFallbackProps>;
-  onError?: (error: Error, errorInfo: React.ErrorInfo) => void;
+  children: ReactNode;
+  fallback?: ComponentType<ErrorFallbackProps>;
+  onError?: (error: Error, errorInfo: ErrorInfo) => void;
 }) {
   return (
     <ReactErrorBoundary

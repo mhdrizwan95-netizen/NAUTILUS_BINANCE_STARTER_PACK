@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Play, Square, Settings2 } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
-import { Card } from '@/components/ui/card';
+
+import { DynamicParamForm } from '@/components/forms/DynamicParamForm';
+import { MiniChart } from '@/components/MiniChart';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Separator } from '@/components/ui/separator';
+import { Card } from '@/components/ui/card';
 import {
   Dialog,
   DialogContent,
@@ -12,19 +14,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { DynamicParamForm } from '@/components/forms/DynamicParamForm';
-import { MiniChart } from '@/components/MiniChart';
+import { Separator } from '@/components/ui/separator';
 import { Switch } from '@/components/ui/switch';
-import {
-  type PageMetadata,
-  getStrategies,
-  startStrategy,
-  stopStrategy,
-  updateStrategy,
-} from '@/lib/api';
-import type { StrategySummary } from '@/types/trading';
-import { useAppStore, usePagination, usePaginationActions } from '@/lib/store';
+import { getStrategies, startStrategy, stopStrategy, updateStrategy } from '@/lib/api';
 import { generateIdempotencyKey } from '@/lib/idempotency';
+import { useAppStore, usePagination, usePaginationActions } from '@/lib/store';
+import type { StrategySummary } from '@/types/trading';
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat('en-US', {

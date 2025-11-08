@@ -22,6 +22,11 @@ Side = Literal["BUY", "SELL"]
 
 # Venue client registry
 _CLIENTS = {}  # {"BINANCE": binance_client, "IBKR": ibkr_client}
+_LOGGER = logging.getLogger(__name__)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    _LOGGER.debug("%s suppressed exception: %s", context, exc, exc_info=True)
 
 
 def set_exchange_client(venue: str, client):
@@ -232,8 +237,8 @@ class OrderRouter:
             if futures_positions:
                 try:
                     self._import_futures_positions(futures_positions)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("order_router", exc)
 
             if not balances:
                 try:
@@ -243,8 +248,8 @@ class OrderRouter:
                     if wallet:
                         self._portfolio.state.cash = wallet
                         self._portfolio.state.equity = wallet
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("order_router", exc)
 
             self._last_snapshot = account
             self.snapshot_loaded = True
@@ -253,8 +258,8 @@ class OrderRouter:
 
                 st = self._portfolio.state
                 update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("order_router", exc)
         except Exception as e:
             import logging
 
@@ -321,8 +326,8 @@ class OrderRouter:
 
             try:
                 REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("order_router", exc)
 
             fee_bps = load_fee_config(venue).taker_bps
             filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or 0.0)
@@ -355,8 +360,8 @@ class OrderRouter:
                     )
                     st = self._portfolio.state
                     update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("order_router", exc)
 
             await self._maybe_emit_fill(res, symbol, side, venue=venue, intent="")
             return res
@@ -433,8 +438,8 @@ class OrderRouter:
             return
         try:
             emit(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
     # ---- Safe router wrappers (capability-checked, no-throw) ----
     async def list_open_entries(self) -> list[dict]:
@@ -520,8 +525,8 @@ class OrderRouter:
             pos = getattr(self._portfolio.state, "positions", {}).get(base)
             if pos is None or abs(float(getattr(pos, "quantity", 0.0)) or 0.0) <= 0.0:
                 return
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         api_fn = getattr(client, "amend_reduce_only_stop", None)
         if api_fn is None:
             return
@@ -535,8 +540,8 @@ class OrderRouter:
         try:
             if "close_position" in api_fn.__code__.co_varnames:  # type: ignore[attr-defined]
                 params["close_position"] = True  # type: ignore[index]
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         try:
             res = api_fn(**params)
             if hasattr(res, "__await__"):
@@ -758,8 +763,8 @@ async def _place_market_order_async_core(
         t1 = time.time()
         try:
             REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         fill_notional = abs(res.get("filled_qty_base", quantity)) * float(
             res.get("avg_fill_price", px)
         )
@@ -828,13 +833,13 @@ async def _place_market_order_async_core(
         # Futures API commonly reports NEW+executedQty=0 even when filled; quickly re-query
         try:
             await _maybe_refresh_order_status(res, client, venue, clean_symbol, market_hint)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
         try:
             REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
         fee_bps = load_fee_config(venue).taker_bps
         filled_qty = _as_float(res.get("executedQty"))
@@ -885,8 +890,8 @@ async def _place_market_order_async_core(
                 )
             st = portfolio.state
             update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
     REGISTRY["fees_paid_total"].inc(fee)
     res["fee_usd"] = float(fee)
@@ -928,25 +933,25 @@ async def _place_market_order_async_core(
                 from engine.core.event_bus import BUS
 
                 BUS.fire("event_bo.skip", {"symbol": base, "reason": "slippage"})
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("order_router", exc)
         # Histogram observation (optional)
         try:
             from engine.metrics import exec_slippage_bps as _slip_hist
 
             intent = os.getenv("SLIPPAGE_INTENT", "GENERIC")
             _slip_hist.labels(symbol=base, venue=venue, intent=intent).observe(slip_bps)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         # Emit slippage sample for overrides
         try:
             from engine.core.event_bus import BUS
 
             BUS.fire("exec.slippage", {"symbol": base, "venue": venue, "bps": slip_bps})
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
+    except Exception as exc:
+        _log_suppressed("order_router", exc)
     return res
 
 
@@ -1010,8 +1015,8 @@ class OrderRouterExt(OrderRouter):
         # Clear existing positions before import
         try:
             self._portfolio.state.positions.clear()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         for p in positions:
             try:
                 amt = float(p.get("positionAmt", 0.0) or 0.0)
@@ -1019,27 +1024,26 @@ class OrderRouterExt(OrderRouter):
                     continue
                 sym = str(p.get("symbol", "")).upper()
                 entry = float(p.get("entryPrice", 0.0) or 0.0)
-                pos = self._portfolio.state.positions.setdefault(
-                    sym, self._portfolio.state.positions.get(sym)
-                )
-                if pos is None:
-                    from engine.core.portfolio import Position as _Position
-
-                    pos = _Position(symbol=sym)
-                    self._portfolio.state.positions[sym] = pos
-                pos.quantity = amt  # signed
-                pos.avg_price = entry
-                # last_price updated via /portfolio marks; upl recomputed there
-            except Exception:
+            except Exception as exc:
+                _log_suppressed("order_router.position_import.parse", exc)
                 continue
+            pos = self._portfolio.state.positions.setdefault(
+                sym, self._portfolio.state.positions.get(sym)
+            )
+            if pos is None:
+                from engine.core.portfolio import Position as _Position
+
+                pos = _Position(symbol=sym)
+                self._portfolio.state.positions[sym] = pos
+            pos.quantity = amt  # signed
+            pos.avg_price = entry
+            # last_price updated via /portfolio marks; upl recomputed there
         # After import, recalc exposure/equity; last prices will be updated on /portfolio
         try:
-            pass
-
             # trigger recalc with current last prices (may be zero)
             self._portfolio._recalculate()  # type: ignore[attr-defined]
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
     async def fetch_account_snapshot(self) -> dict:
         """
@@ -1087,22 +1091,22 @@ class OrderRouterExt(OrderRouter):
                 if wallet > 0:
                     self._portfolio.state.cash = wallet
                     self._portfolio.state.equity = wallet
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
         if positions:
             try:
                 self._import_futures_positions(positions)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("order_router", exc)
 
         try:
             from engine.metrics import update_portfolio_gauges
 
             st = self._portfolio.state
             update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
         return self._last_snapshot or {"balances": [], "positions": []}
 
@@ -1225,8 +1229,8 @@ class OrderRouterExt(OrderRouter):
 
         try:
             REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
         # Treat IOC as taker
         fee_bps = load_fee_config(venue).taker_bps
@@ -1257,8 +1261,8 @@ class OrderRouterExt(OrderRouter):
                 )
                 st = self._portfolio.state
                 update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
         REGISTRY["fees_paid_total"].inc(fee)
         res["fee_usd"] = float(fee)
@@ -1297,8 +1301,8 @@ class OrderRouterExt(OrderRouter):
                 )
                 if market_px and market_px > 0:
                     last_px = market_px
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("order_router", exc)
         if last_px is None or last_px <= 0:
             last_px = 0.0
         # Optional risk-parity sizing override (when qty <= 0 or explicitly enabled)
@@ -1320,8 +1324,8 @@ class OrderRouterExt(OrderRouter):
                     max_usd = float(os.getenv("RISK_PARITY_MAX_NOTIONAL_USD", "500"))
                     qty = clamp_notional(computed, last_px, min_usd, max_usd)
                     logging.getLogger(__name__).info("[RISK-PARITY] %s qty=%.8f", symbol, qty)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         # Apply auto cutback/mute (feature-gated)
         try:
             if os.getenv("AUTO_CUTBACK_ENABLED", "").lower() in {"1", "true", "yes"}:
@@ -1345,8 +1349,8 @@ class OrderRouterExt(OrderRouter):
                         "reason": "SCALP_MUTED",
                         "symbol": symbol,
                     }
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         shadow = os.getenv("SCALP_MAKER_SHADOW", "").lower() in {"1", "true", "yes"}
         if intent.upper() == "SCALP" and shadow:
             ref = float(last_px)
@@ -1390,16 +1394,16 @@ class OrderRouterExt(OrderRouter):
                     "reason": "MIN_NOTIONAL_BLOCK",
                     "symbol": symbol,
                 }
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         res = await self._place_market_order_async(
             symbol=symbol, side=side, quote=None, quantity=qty, market=market_hint
         )
         # Emit trade.fill for synchronous fills
         try:
             self._emit_fill(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
         return res
 
     # Utility methods used by guards/sizers
@@ -1420,8 +1424,8 @@ class OrderRouterExt(OrderRouter):
             from engine.risk_guardian import _write_trading_flag
 
             _write_trading_flag(bool(enabled))
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)
 
     def set_preferred_quote(self, quote: str) -> None:
         try:
@@ -1572,8 +1576,8 @@ class _MDAdapter:
                     except Exception:
                         try:
                             setattr(self, "_strategy_pending_meta", None)
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            _log_suppressed("order_router", exc)
                 bus.fire("trade.fill", payload)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("order_router", exc)

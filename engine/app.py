@@ -8,10 +8,11 @@ import json
 import logging
 import math
 import os
-import random
+import tempfile
 import time
 import uuid
 from pathlib import Path
+from random import SystemRandom
 from threading import Lock
 from typing import Any, Literal, cast
 
@@ -67,6 +68,22 @@ from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 setup_logging()
 
 SERVICE_NAME = os.getenv("OBS_SERVICE_NAME", "engine")
+_app_logger = logging.getLogger("engine.app")
+_JITTER_RNG = SystemRandom()
+
+
+def _safely(context: str, func: Any, *args, **kwargs):
+    """Invoke callable while logging (instead of swallowing) any exception."""
+    try:
+        return func(*args, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        _app_logger.warning("%s failed: %s", context, exc, exc_info=True)
+        return None
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    """Record intentionally suppressed exceptions for observability."""
+    _app_logger.debug("%s suppressed exception: %s", context, exc, exc_info=True)
 
 
 class _RequestIDMiddleware(BaseHTTPMiddleware):
@@ -80,8 +97,8 @@ class _RequestIDMiddleware(BaseHTTPMiddleware):
             reset_request_context(token)
         try:
             response.headers["X-Request-ID"] = req_id
-        except Exception:
-            pass
+        except Exception as exc:  # pragma: no cover - header mutation failure
+            _app_logger.warning("Failed to attach X-Request-ID header: %s", exc, exc_info=True)
         return response
 
 
@@ -366,13 +383,15 @@ def _kraken_record_mark(symbol: str, raw_price: float, ts: float) -> None:
         metrics.mark_price_by_symbol.labels(symbol=base).set(price)
         metrics.MARK_PRICE.labels(symbol=base, venue="kraken").set(price)
         _price_map[base] = price
-    except Exception:
-        pass
+    except Exception as exc:
+        _app_logger.warning(
+            "Failed to update Kraken mark metrics for %s: %s", base, exc, exc_info=True
+        )
     if KRAKEN_REST is not None:
         try:
             KRAKEN_REST.cache_price(base, price)
-        except Exception:
-            pass
+        except Exception as exc:
+            _app_logger.warning("Failed to cache Kraken price for %s: %s", base, exc, exc_info=True)
 
 
 def _kraken_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
@@ -398,8 +417,10 @@ def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
         metrics.mark_price_by_symbol.labels(symbol=base).set(price_f)
         metrics.mark_price_freshness_sec.labels(symbol=base, venue="binance").set(0.0)
         _price_map[base] = price_f
-    except Exception:
-        pass
+    except Exception as exc:
+        _app_logger.warning(
+            "Failed to update Binance mark metrics for %s: %s", base, exc, exc_info=True
+        )
     # Emit strategy tick + increment strategy_ticks_total via helper
     try:
         _maybe_emit_strategy_tick(
@@ -409,8 +430,8 @@ def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
             source="binance_ws",
             stream="ws",
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _app_logger.warning("Strategy tick emission failed for %s: %s", base, exc, exc_info=True)
 
 
 async def _kraken_refresh_mark_prices(now: float) -> None:
@@ -422,8 +443,10 @@ async def _kraken_refresh_mark_prices(now: float) -> None:
         freshness = float("inf") if last_ts is None else max(0.0, now - last_ts)
         try:
             metrics.mark_price_freshness_sec.labels(symbol=base, venue="kraken").set(freshness)
-        except Exception:
-            pass
+        except Exception as exc:
+            _app_logger.warning(
+                "Failed to record Kraken freshness metric for %s: %s", base, exc, exc_info=True
+            )
 
         state = _kraken_mark_alert_state.get(base, 0)
         if freshness >= _KRAKEN_MARK_PAGE_SEC and state < 2:
@@ -469,8 +492,10 @@ async def _kraken_refresh_mark_prices(now: float) -> None:
         try:
             metrics.MARK_PRICE.labels(symbol=base, venue="kraken").set(0.0)
             metrics.mark_price_by_symbol.labels(symbol=base).set(0.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            _app_logger.warning(
+                "Failed to zero out stale Kraken mark for %s: %s", base, exc, exc_info=True
+            )
 
 
 async def auto_topup_worker() -> None:
@@ -595,13 +620,15 @@ async def wallet_balance_worker() -> None:
                 state.margin_level = margin_level
                 state.margin_liability_usd = margin_liability_usd
                 state.wallet_breakdown = snapshot
-            except Exception:
-                pass
+            except Exception as exc:
+                _WALLET_LOG.warning(
+                    "wallet monitor: failed to update portfolio snapshot: %s", exc, exc_info=True
+                )
             try:
                 metrics.margin_level.set(float(margin_level))
                 metrics.margin_liability_usd.set(float(margin_liability_usd))
-            except Exception:
-                pass
+            except Exception as exc:
+                _WALLET_LOG.warning("wallet monitor: metric update failed: %s", exc, exc_info=True)
         except asyncio.CancelledError:
             _WALLET_LOG.warning("wallet monitor: cancelled")
             raise
@@ -616,8 +643,8 @@ order_router = router
 try:
     # Expose BUS on router for event publishing (e.g., trade.fill)
     router.bus = BUS  # type: ignore[attr-defined]
-except Exception:
-    pass
+except Exception as exc:  # pragma: no cover - defensive guard
+    _app_logger.warning("Failed to attach BUS to router: %s", exc, exc_info=True)
 startup_lock = asyncio.Lock()
 _refresh_logger = logging.getLogger("engine.refresh")
 _startup_logger = logging.getLogger("engine.startup")
@@ -642,8 +669,8 @@ app.include_router(metrics.router)
 metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
 try:
     metrics.set_max_notional(RAILS.cfg.max_notional_usdt)
-except Exception:
-    pass
+except Exception as exc:
+    _app_logger.warning("Failed to set max notional metric: %s", exc, exc_info=True)
 metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
 
 _stop_validator: StopValidator | None = None
@@ -684,9 +711,7 @@ def _config_hash() -> str:
     import os
 
     blob = "|".join(f"{k}={os.getenv(k, '')}" for k in keys)
-    import hashlib
-
-    return hashlib.sha1(blob.encode()).hexdigest()[:12]
+    return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
 
 def _maybe_emit_strategy_tick(
@@ -709,8 +734,8 @@ def _maybe_emit_strategy_tick(
         # Always count ticks for observability, even if strategy disabled
         try:
             metrics.strategy_ticks_total.labels(symbol=base, venue=venue.lower()).inc()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("strategy tick metric increment", exc)
         payload: dict[str, Any] = {
             "symbol": qualified,
             "base": base,
@@ -745,8 +770,8 @@ def _maybe_emit_strategy_tick(
     except Exception:
         try:
             _refresh_logger.debug("Strategy tick emit failed for %s", symbol, exc_info=True)
-        except Exception:
-            pass
+        except Exception as logging_exc:
+            _log_suppressed("strategy tick failure logging", logging_exc)
 
 
 @app.get("/readyz")
@@ -990,8 +1015,8 @@ def _record_venue_error(venue: str, exc: Exception) -> None:
         else:
             error_label = exc.__class__.__name__.upper()
         metrics.venue_errors.labels(venue=venue_label, error=error_label[:64]).inc()
-    except Exception:
-        pass
+    except Exception as metric_exc:
+        _log_suppressed("record venue error metrics", metric_exc)
 
 
 @app.on_event("startup")
@@ -1017,8 +1042,8 @@ async def on_startup() -> None:
                 if os.getenv(k) is not None
             }
             _startup_logger.info("Config hash=%s flags=%s", h, flags)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("startup config hash logging", exc)
         # Start event bus early so other tasks can publish
         try:
             await initialize_event_bus()
@@ -1316,8 +1341,8 @@ async def _start_guardian_and_feeds():
                 try:
                     BUS.subscribe("event_bo.skip", bo.on_skip_entropy)
                     _startup_logger.info("Entropy deny wiring enabled")
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("engine guard", exc)
             BUS.subscribe("strategy.event_breakout", bo.on_event)
             _startup_logger.info("Event Breakout consumer wired")
     except Exception:
@@ -1349,8 +1374,8 @@ async def _start_guardian_and_feeds():
         elif _MEME_SENTIMENT is not None:
             try:
                 BUS.unsubscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             _MEME_SENTIMENT = None
             _startup_logger.info("Meme sentiment strategy disabled via configuration")
     except Exception:
@@ -1382,12 +1407,12 @@ async def _start_guardian_and_feeds():
         elif _LISTING_SNIPER is not None:
             try:
                 BUS.unsubscribe("events.external_feed", _LISTING_SNIPER.on_external_event)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             try:
                 await _LISTING_SNIPER.shutdown()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             _LISTING_SNIPER = None
             _startup_logger.info("Listing sniper disabled via configuration")
     except Exception:
@@ -1418,12 +1443,12 @@ async def _start_guardian_and_feeds():
         elif _AIRDROP_PROMO is not None:
             try:
                 BUS.unsubscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             try:
                 await _AIRDROP_PROMO.shutdown()
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             _AIRDROP_PROMO = None
             _startup_logger.info("Airdrop promo watcher disabled via configuration")
     except Exception:
@@ -1454,8 +1479,8 @@ async def _start_guardian_and_feeds():
                     "Telegram notify bridge %s",
                     "enabled" if bridge_enabled else "disabled",
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             # Health notifier (BUS -> Telegram) if enabled
             try:
                 import time as _t
@@ -1488,8 +1513,8 @@ async def _start_guardian_and_feeds():
 
                 BUS.subscribe("trade.fill", _on_fill_tele)
                 _startup_logger.info("Telegram fill pings enabled")
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             roll = EventBORollup()
             # Optional 6h buckets
             buckets = EventBOBuckets(
@@ -1532,10 +1557,10 @@ async def _start_guardian_and_feeds():
                         val = 1 if now < depeg.safe_until else 0
                         try:
                             risk_depeg_active.set(val)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
+                        except Exception as exc:
+                            _log_suppressed("engine guard", exc)
+                    except Exception as exc:
+                        _log_suppressed("engine guard", exc)
                     await asyncio.sleep(60)
 
             asyncio.create_task(_loop_depeg())
@@ -1553,8 +1578,8 @@ async def _start_guardian_and_feeds():
                 while True:
                     try:
                         await funding.tick()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _log_suppressed("engine guard", exc)
                     await asyncio.sleep(300)
 
             asyncio.create_task(_loop_funding())
@@ -1580,8 +1605,8 @@ async def _start_guardian_and_feeds():
             # attach to router for place_entry consult
             try:
                 router._overrides = ov
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             _startup_logger.info("Auto cutback/mute overrides enabled")
     except Exception:
         _startup_logger.warning("Auto cutback wiring failed", exc_info=True)
@@ -1628,13 +1653,14 @@ def _startup_load_snapshot_and_reconcile():
                     pos.upl = float(entry.get("unrealized_usd", 0.0))
                     pos.rpl = float(entry.get("realized_usd", 0.0))
                     state.positions[sym] = pos
-                except Exception:
+                except Exception as exc:
+                    _log_suppressed("snapshot position parse", exc)
                     continue
             try:
                 _last_position_symbols.clear()
                 _last_position_symbols.update(state.positions.keys())
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             metrics.update_portfolio_gauges(
                 state.cash, state.realized, state.unrealized, state.exposure
             )
@@ -1725,8 +1751,8 @@ async def on_shutdown() -> None:
 
             try:
                 BUS.unsubscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             _MEME_SENTIMENT = None
     except Exception:
         _startup_logger.warning("Meme sentiment shutdown failed", exc_info=True)
@@ -1736,8 +1762,8 @@ async def on_shutdown() -> None:
 
             try:
                 BUS.unsubscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             try:
                 await _AIRDROP_PROMO.shutdown()
             except Exception:
@@ -1749,8 +1775,8 @@ async def on_shutdown() -> None:
         from engine.core.signal_queue import SIGNAL_QUEUE
 
         await SIGNAL_QUEUE.stop()
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
     await rest_client.close()
 
 
@@ -1870,9 +1896,9 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
                 )
                 # Persist snapshot
                 _store.save(state.snapshot())
-        except Exception:
+        except Exception as exc:
             # Non-fatal; reconcile daemon or manual /reconcile can catch up
-            pass
+            _log_suppressed("portfolio fill persistence", exc)
 
         resp = {
             "status": "submitted",
@@ -1893,8 +1919,8 @@ async def submit_market_order(req: MarketOrderRequest, request: Request):
                 status = exc.response.status_code
                 body = exc.response.text
                 raise HTTPException(status_code=status, detail=f"Binance error: {body}") from exc
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -2006,8 +2032,8 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
                 st = portfolio.state
                 metrics.update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
                 _store.save(st.snapshot())
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
 
         resp = {
             "status": "submitted",
@@ -2027,8 +2053,8 @@ async def submit_limit_order(req: LimitOrderRequest, request: Request):
                 status = exc.response.status_code
                 body = exc.response.text
                 raise HTTPException(status_code=status, detail=f"Binance error: {body}") from exc
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
@@ -2058,8 +2084,8 @@ async def symbol_info(symbol: str):
 
             if isinstance(exc, httpx.HTTPStatusError):
                 third_party = exc.response.url if hasattr(exc.response, "url") else "no_url"
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
         base_used = settings.api_base or "no_base"
         mode_info = f"mode={settings.mode}, is_futures={settings.is_futures}"
         raise HTTPException(
@@ -2139,12 +2165,12 @@ async def get_portfolio():
             try:
                 if last is not None:
                     portfolio.update_price(base, float(last))
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
         snap["quote_ccy"] = QUOTE_CCY
         snap["positions"] = positions
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
     # Refresh engine metrics from latest snapshot so external scrapers see updated values
     try:
         state = portfolio.state
@@ -2176,7 +2202,8 @@ async def get_portfolio():
                     total_unreal += upnl
                     if g is not None and sym:
                         g.labels(symbol=sym).set(upnl)
-                except Exception:
+                except Exception as exc:
+                    _log_suppressed("futures pnl gauge update", exc)
                     continue
             # market_value_usd := total unrealized (not Σ qty*price) for linear futures
             metrics.set_core_metric("market_value_usd", total_unreal)
@@ -2195,8 +2222,8 @@ async def get_portfolio():
             # Sync in-process portfolio cash so subsequent calls are consistent
             try:
                 portfolio.state.cash = cash
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
 
             # Update gauges using live cash + unrealized (venue truth)
             metrics.update_portfolio_gauges(cash, state.realized, total_unreal, state.exposure)
@@ -2214,10 +2241,10 @@ async def get_portfolio():
                         metrics.set_core_metric("initial_margin_usd", init_m)
                         metrics.set_core_metric("maint_margin_usd", maint_m)
                         metrics.set_core_metric("available_usd", avail)
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as exc:
+                        _log_suppressed("engine guard", exc)
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
         else:
             # Spot: signed market value = sum(qty * last)
             try:
@@ -2228,15 +2255,15 @@ async def get_portfolio():
                 if g is not None:
                     for pos in state.positions.values():
                         g.labels(symbol=pos.symbol).set(pos.upl)
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
         # Record mark time for auditability - always set, even when no positions
         try:
             metrics.set_core_metric("mark_time_epoch", time.time())
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
     try:
         state = portfolio.state
         snap.setdefault("cash_usd", float(getattr(state, "cash", 0.0)))
@@ -2245,8 +2272,8 @@ async def get_portfolio():
         pnl.setdefault("realized", float(getattr(state, "realized", 0.0)))
         pnl.setdefault("unrealized", float(getattr(state, "unrealized", 0.0)))
         snap["pnl"] = pnl
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     if "cash_usd" not in snap or "equity_usd" not in snap:
         fallback = persisted_snapshot or _store.load() or {}
@@ -2275,8 +2302,8 @@ async def account_snapshot(force: bool = False):
 
     try:
         router.snapshot_loaded = True
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     if VENUE == "KRAKEN":
         try:
@@ -2292,8 +2319,8 @@ async def account_snapshot(force: bool = False):
         metrics.set_core_metric("equity_usd", float(state.equity))
         metrics.set_core_metric("available_usd", float(snap.get("availableBalance", state.cash)))
         metrics.set_core_metric("mark_time_epoch", time.time())
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     if store is not None:
         snapshot_ts = int(time.time() * 1000)
@@ -2348,12 +2375,12 @@ async def account_snapshot(force: bool = False):
             metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=0.0)
         _last_position_symbols.clear()
         _last_position_symbols.update(current_symbols)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
     try:
         _store.save(state.snapshot())
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
     return snap
 
 
@@ -2420,8 +2447,8 @@ async def health():
     snap_ok = bool(getattr(router, "snapshot_loaded", False))
     try:
         metrics.REGISTRY["snapshot_loaded"].set(1 if snap_ok else 0)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     # Venue-specific labels for health endpoint
     venue = VENUE.lower()
@@ -2447,8 +2474,8 @@ async def health():
             from engine.universe import configured_universe
 
             symbols = configured_universe()
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
 
     return {
         "engine": "ok",
@@ -2703,15 +2730,15 @@ async def _subscribe_governance_hooks():
         metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
         try:
             metrics.set_max_notional(RAILS.cfg.max_notional_usdt)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     try:
         BUS.subscribe("governance.action", _on_governance_action)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
 
 async def _refresh_binance_futures_snapshot() -> None:
@@ -2720,8 +2747,8 @@ async def _refresh_binance_futures_snapshot() -> None:
 
     try:
         _refresh_logger.debug("refresh tick")
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     try:
         price_data = await rest_client.bulk_premium_index()
@@ -2741,13 +2768,13 @@ async def _refresh_binance_futures_snapshot() -> None:
                 new_map[sym] = px
                 try:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log_suppressed("engine guard", exc)
                 _maybe_emit_strategy_tick(sym, px, ts=now_ts, source="rest_snapshot", stream="rest")
             if new_map:
                 _price_map = new_map
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     try:
         acc_data = await rest_client.account()
@@ -2772,8 +2799,8 @@ async def _refresh_binance_futures_snapshot() -> None:
             metrics.set_core_metric("initial_margin_usd", init_m)
             metrics.set_core_metric("maint_margin_usd", maint_m)
             metrics.set_core_metric("available_usd", avail)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
 
     try:
         pos_data = await rest_client.position_risk()
@@ -2796,8 +2823,8 @@ async def _refresh_binance_futures_snapshot() -> None:
         try:
             upnl_total = sum(float(p.get("unRealizedProfit", 0.0)) for p in legs)
             metrics.set_core_metric("market_value_usd", upnl_total)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
 
     current_symbols: set[str] = set()
     by_symbol: dict[str, dict[str, float]] = {}
@@ -2853,10 +2880,10 @@ async def _refresh_binance_futures_snapshot() -> None:
                 metrics.set_core_symbol_metric("mark_price", symbol=sym, value=mark)
                 try:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(mark)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as exc:
+                    _log_suppressed("engine guard", exc)
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
 
     try:
         stale = _last_position_symbols - current_symbols
@@ -2866,8 +2893,8 @@ async def _refresh_binance_futures_snapshot() -> None:
             metrics.set_core_symbol_metric("entry_price", symbol=sym, value=0.0)
         _last_position_symbols.clear()
         _last_position_symbols.update(current_symbols)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     now_ts = time.time()
     metrics.set_core_metric("mark_time_epoch", now_ts)
@@ -2908,7 +2935,8 @@ async def _refresh_binance_spot_snapshot() -> None:
                 continue
             try:
                 px = float(item.get("price", 0.0))
-            except Exception:
+            except Exception as exc:
+                _log_suppressed("ticker price parse", exc)
                 continue
             if px > 0:
                 new_map[sym] = px
@@ -2918,7 +2946,8 @@ async def _refresh_binance_spot_snapshot() -> None:
             for sym, px in new_map.items():
                 try:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
-                except Exception:
+                except Exception as exc:
+                    _log_suppressed("mark price gauge update", exc)
                     continue
 
     try:
@@ -2943,15 +2972,15 @@ async def _refresh_binance_spot_snapshot() -> None:
     state = portfolio.state
     try:
         state.cash = wallet
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     unreal = float(getattr(state, "unrealized", 0.0) or 0.0)
     equity = wallet + unreal
     try:
         state.equity = equity
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     metrics.set_core_metric("cash_usd", wallet)
     metrics.set_core_metric("available_usd", wallet)
@@ -2997,10 +3026,10 @@ async def _refresh_binance_spot_snapshot() -> None:
                 metrics.set_core_symbol_metric("mark_price", symbol=base_sym, value=mark)
                 try:
                     metrics.MARK_PRICE.labels(symbol=base_sym, venue="binance").set(mark)
-                except Exception:
-                    pass
-        except Exception:
-            pass
+                except Exception as exc:
+                    _log_suppressed("engine guard", exc)
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
 
     try:
         stale = _last_position_symbols - current_symbols
@@ -3010,8 +3039,8 @@ async def _refresh_binance_spot_snapshot() -> None:
             metrics.set_core_symbol_metric("entry_price", symbol=sym, value=0.0)
         _last_position_symbols.clear()
         _last_position_symbols.update(current_symbols)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     metrics.set_core_metric("mark_time_epoch", now_ts)
     metrics.set_core_metric("metrics_heartbeat", now_ts)
@@ -3033,8 +3062,8 @@ async def _refresh_venue_data():
             VENUE,
             settings.is_futures,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     while True:
         try:
@@ -3045,8 +3074,8 @@ async def _refresh_venue_data():
         except Exception:
             try:
                 _refresh_logger.exception("refresh loop error")
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
         await asyncio.sleep(5)
 
 
@@ -3077,10 +3106,10 @@ async def _kraken_risk_metrics_loop() -> None:
                 metrics.mark_price_freshness_sec.labels(symbol=product, venue="kraken").set(
                     float("inf")
                 )
-            except Exception:
-                pass
-    except Exception:
-        pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
     while True:
         tick_start = time.monotonic()
@@ -3135,7 +3164,8 @@ async def _kraken_risk_metrics_loop() -> None:
                                 last_px = await _kraken_safe_price(base)
                             if isinstance(last_px, (int, float)) and last_px > 0.0:
                                 _kraken_record_mark(base, float(last_px), now_ts)
-                        except Exception:
+                        except Exception as exc:
+                            _log_suppressed("kraken mark refresh", exc)
                             continue
 
                 snap_ts = None
@@ -3152,15 +3182,15 @@ async def _kraken_risk_metrics_loop() -> None:
         else:
             try:
                 metrics.risk_metrics_freshness_sec.set(float("inf"))
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
 
         if VENUE == "KRAKEN":
             await _kraken_refresh_mark_prices(time.time())
 
         elapsed = time.monotonic() - tick_start
         sleep_base = max(0.5, interval - elapsed)
-        jitter = random.uniform(1.0 - jitter_pct, 1.0 + jitter_pct)
+        jitter = _JITTER_RNG.uniform(1.0 - jitter_pct, 1.0 + jitter_pct)
         sleep_for = max(0.5, sleep_base) * jitter
 
         if _kraken_risk_stop_event.is_set():
@@ -3332,16 +3362,16 @@ async def _start_binance_ws_freshness() -> None:
                         metrics.mark_price_freshness_sec.labels(symbol=base, venue="binance").set(
                             freshness
                         )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                    except Exception as exc:
+                        _log_suppressed("engine guard", exc)
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
             await asyncio.sleep(5)
 
     try:
         asyncio.create_task(loop())
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
 
 @app.on_event("startup")
@@ -3387,7 +3417,8 @@ def _init_prom_multiproc_dir():
         import os
         import pathlib
 
-        mp = os.getenv("PROMETHEUS_MULTIPROC_DIR", "/tmp/prom_multiproc")
+        default_prom_dir = os.path.join(tempfile.gettempdir(), "prom_multiproc")
+        mp = os.getenv("PROMETHEUS_MULTIPROC_DIR", default_prom_dir)
         path = pathlib.Path(mp)
         path.mkdir(parents=True, exist_ok=True)
 
@@ -3396,14 +3427,14 @@ def _init_prom_multiproc_dir():
                 f.unlink()
             except FileNotFoundError:
                 continue
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("engine guard", exc)
         try:
             _startup_logger.info("Prometheus multiprocess directory: %s", path)
-        except Exception:
-            pass
-    except Exception:
-        pass
+        except Exception as exc:
+            _log_suppressed("engine guard", exc)
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
 
 
 @app.get("/events/stats")
@@ -3458,8 +3489,8 @@ def reload_risk_config():
     metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
     try:
         metrics.set_max_notional(RAILS.cfg.max_notional_usdt)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
     cfg = RAILS.cfg
     return {
         "status": "ok",
@@ -3482,8 +3513,8 @@ async def toggle_trading(body: TradingToggle, request: Request):
     RAILS.cfg.trading_enabled = enabled
     try:
         metrics.set_trading_enabled(enabled)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log_suppressed("engine guard", exc)
     try:
         await router.set_trading_enabled(enabled)
     except Exception:

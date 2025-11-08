@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from typing import AsyncIterator, Dict
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
@@ -19,7 +20,7 @@ from .trainer import train_once
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_watchdog()
     yield
 
@@ -30,12 +31,12 @@ log_dry_run_banner("services.ml_service")
 
 
 @app.get("/health")
-def health():
+def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/model", response_model=ModelInfo)
-def model_info():
+def model_info() -> ModelInfo:
     model, scaler, meta = model_store.load_current()
     active = meta.get("version_id") if meta else None
     return ModelInfo(
@@ -50,7 +51,7 @@ def model_info():
     dependencies=[Depends(require_role("trainer", "admin"))],
     response_model=TrainResponse,
 )
-def train(req: TrainRequest):
+def train(req: TrainRequest) -> TrainResponse:
     res = train_once(n_states=req.n_states, tag=req.tag, promote=req.promote)
     meta = res.get("metadata", {})
     version_id = res.get("version_dir", "").split("/")[-1]
@@ -64,6 +65,6 @@ def train(req: TrainRequest):
 
 
 @app.post("/predict", response_model=PredictResponse)
-def predict(req: PredictRequest):
+def predict(req: PredictRequest) -> JSONResponse:
     post = predict_proba(req.logret)
     return JSONResponse(post)

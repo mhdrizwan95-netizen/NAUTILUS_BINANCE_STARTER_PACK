@@ -1,11 +1,19 @@
-import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ComponentProps } from 'react';
+import type { ButtonHTMLAttributes, ComponentProps } from 'react';
+import { describe, it, expect, vi } from 'vitest';
+
 import { TopHUD, type TopHudMetrics, type TopHudVenue } from './TopHUD';
 
+type SwitchMockProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  checked: boolean;
+  onCheckedChange: (value: boolean) => void;
+};
+
+type ButtonMockProps = ButtonHTMLAttributes<HTMLButtonElement>;
+
 vi.mock('./ui/switch', () => ({
-  Switch: ({ checked, onCheckedChange, ...props }: any) => (
+  Switch: ({ checked, onCheckedChange, ...props }: SwitchMockProps) => (
     <button
       {...props}
       role="switch"
@@ -18,7 +26,7 @@ vi.mock('./ui/switch', () => ({
 }));
 
 vi.mock('./ui/button', () => ({
-  Button: ({ children, onClick, ...props }: any) => (
+  Button: ({ children, onClick, ...props }: ButtonMockProps) => (
     <button {...props} onClick={onClick}>
       {children}
     </button>

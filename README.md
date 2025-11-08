@@ -5,19 +5,24 @@
 | Step | Command | Purpose |
 |------|---------|---------|
 | 0 | `cp env.example .env && $EDITOR .env` | Populate credentials (especially `OPS_API_TOKEN` or `OPS_API_TOKEN_FILE`) before any FastAPI service imports. |
-| 1 | `make bootstrap` | Sync pinned Python/Node dependencies and install pre-commit hooks. |
+| 0.5 | `cp env.example .env.dryrun && sed -i '' 's/OPS_API_TOKEN=.*/OPS_API_TOKEN=dry-run-token/' .env.dryrun` | Optional sanitized `.env` that `scripts/dry_run.sh` can use without leaking real secrets. |
+| 1 | `make bootstrap` | Sync pinned Python/Node dependencies (hash-locked) and install pre-commit hooks. |
 | 2 | `make lint typecheck test` | Run ruff, black, mypy, pytest, and frontend Vitest in one go. |
 | 3 | `make audit` | Execute the read-only security + quality suite (ruff, mypy, pip-audit, npm audit, docker compose config). |
-| 4 | `make dry-run` | Launch a guarded stack (`DRY_RUN=1`) and run health checks without touching venues. |
-| 5 | `make up-core` | Optional: bring the trading stack up after validating the dry run. |
+| 4 | `bash ops/repo_sync_audit.sh` | Generate FE↔BE drift, config, and control-plane reports under `audit/reports/`. |
+| 5 | `make dry-run` | Launch a guarded stack (`DRY_RUN=1`) and run health checks without touching venues. |
+| 6 | `make up-core` | Optional: bring the trading stack up after validating the dry run. |
 
 > 🔐 Always export `OPS_API_TOKEN` (or point `OPS_API_TOKEN_FILE` at a secret) before running `pytest`, `make` targets, or the FastAPI apps—token loading is now deferred until first use to keep imports cheap, but requests still enforce it. For local smoke tests you can reuse the default `test-ops-token-1234567890`.
+
+Refer to `docs/secrets.md` for the full secrets policy and recommended ways to keep `.env` data out of git.
 
 ### Deterministic audits & dry runs
 
 - Audit stages honor throttles: `MAKEFLAGS="-j1" SKIP_DOCKER=1 SKIP_FRONTEND=1 SKIP_TESTS=1 make audit` keeps the run CPU-light and skips docker/Node work when you only need Python lint+type coverage. Re-enable phases incrementally by clearing the corresponding env vars.
 - `scripts/audit.sh` and `make bootstrap` run `npm ci --ignore-scripts --prefer-offline` so installs are reproducible and side-effect free; drop those flags only if a dependency truly requires lifecycle scripts.
 - `scripts/dry_run.sh` is the underlying launcher behind `make dry-run`. It stages compose services with `docker compose up --no-start`, exports `DRY_RUN=1`, and runs `/health` probes before tailing; pass `DRY_RUN_DETACH=1` to exit after health checks.
+- `pre-commit` includes `detect-secrets`—refresh `.secrets.baseline` whenever you rename env vars or move secrets so CI and local hooks stay in sync.
 
 Try `make help` for the legacy targets while the new lifecycle gets folded into the rest of the Makefile.
 

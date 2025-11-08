@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { TopHUD } from './components/TopHUD';
-import { TabbedInterface } from './components/TabbedInterface';
-import { Toaster } from './components/ui/sonner';
-import { toast } from 'sonner';
 import { motion } from 'motion/react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
+
+import { TabbedInterface } from './components/TabbedInterface';
+import { TopHUD } from './components/TopHUD';
+import { Toaster } from './components/ui/sonner';
 import {
   getConfigEffective,
   getDashboardSummary,
@@ -14,22 +15,42 @@ import {
   flattenPositions,
   updateConfig,
 } from './lib/api';
-import { queryClient, queryKeys } from './lib/queryClient';
 import { buildSummarySearchParams } from './lib/dashboardFilters';
-import { useAppStore, useDashboardFilters } from './lib/store';
-import { useWebSocket, type WebSocketMessage } from './lib/websocket';
-import { generateIdempotencyKey } from './lib/idempotency';
-import { mergeMetricsSnapshot, mergeVenuesSnapshot } from './lib/streamMergers';
+import { useRenderCounter } from './lib/debug/why';
 import { stableHash } from './lib/equality';
+import { generateIdempotencyKey } from './lib/idempotency';
+import { queryClient, queryKeys } from './lib/queryClient';
+import { useAppStore, useDashboardFilters } from './lib/store';
+import { mergeMetricsSnapshot, mergeVenuesSnapshot } from './lib/streamMergers';
+import { useWebSocket } from './lib/websocket';
+
+type DashboardSummarySnapshot = Awaited<ReturnType<typeof getDashboardSummary>>;
+type HealthSnapshot = Awaited<ReturnType<typeof getHealth>>;
 
 const scheduleTask = (cb: () => void) => {
   if (typeof queueMicrotask === 'function') {
     queueMicrotask(cb);
   } else {
-    Promise.resolve().then(cb);
+    void Promise.resolve().then(cb);
   }
 };
-import { useRenderCounter } from './lib/debug/why';
+
+const isMetricPayload = (value: unknown): value is Record<string, number> =>
+  typeof value === 'object' &&
+  value !== null &&
+  Object.values(value).every((entry) => typeof entry === 'number');
+
+const sanitizeVenues = (value: unknown): Array<Record<string, unknown>> => {
+  if (Array.isArray(value)) {
+    return value.filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null);
+  }
+  if (typeof value === 'object' && value !== null && Array.isArray((value as { venues?: unknown }).venues)) {
+    return ((value as { venues?: unknown }).venues as unknown[]).filter(
+      (entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null,
+    );
+  }
+  return [];
+};
 
 export default function App() {
   useRenderCounter('App');
@@ -216,18 +237,18 @@ export default function App() {
     lastProcessedMessage.current = nextToken;
 
     if (lastMessage.type === 'metrics') {
-      const payload = lastMessage.data?.kpis ?? lastMessage.data;
-      if (!payload) {
+      const payloadCandidate = lastMessage.data?.kpis ?? lastMessage.data;
+      if (!isMetricPayload(payloadCandidate)) {
         return;
       }
-      const digest = stableHash(payload);
+      const digest = stableHash(payloadCandidate);
       if (metricsDigestRef.current === digest) {
         return;
       }
       metricsDigestRef.current = digest;
       scheduleTask(() => {
-        const current = queryClient.getQueryData(summaryQueryKey) as any;
-        const merged = mergeMetricsSnapshot(current, payload);
+        const current = queryClient.getQueryData<DashboardSummarySnapshot>(summaryQueryKey);
+        const merged = mergeMetricsSnapshot(current, payloadCandidate);
         if (merged !== current) {
           queryClient.setQueryData(summaryQueryKey, merged);
         }
@@ -235,16 +256,14 @@ export default function App() {
     }
 
     if (lastMessage.type === 'venues' || lastMessage.type === 'health') {
-      const venues = Array.isArray(lastMessage.data)
-        ? lastMessage.data
-        : lastMessage.data?.venues ?? [];
+      const venues = sanitizeVenues(lastMessage.data);
       const digest = stableHash(venues);
       if (venuesDigestRef.current === digest) {
         return;
       }
       venuesDigestRef.current = digest;
       scheduleTask(() => {
-        const current = queryClient.getQueryData(healthQueryKey) as any;
+        const current = queryClient.getQueryData<HealthSnapshot>(healthQueryKey);
         const merged = mergeVenuesSnapshot(current, venues);
         if (merged !== current) {
           queryClient.setQueryData(healthQueryKey, merged);

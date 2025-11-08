@@ -1,7 +1,18 @@
-import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
 import { Copy, Download, RefreshCw } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { toast } from 'sonner';
+
+import { getConfigEffective, type ControlRequestOptions, updateConfig } from '../../lib/api';
+import { generateIdempotencyKey } from '../../lib/idempotency';
+import { queryKeys } from '../../lib/queryClient';
+import { useAppStore } from '../../lib/store';
+import {
+  configEffectiveSchema,
+  validateApiResponse,
+} from '../../lib/validation';
+import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
 import {
   Card,
   CardContent,
@@ -9,20 +20,10 @@ import {
   CardHeader,
   CardTitle,
 } from '../ui/card';
-import { Badge } from '../ui/badge';
-import { Skeleton } from '../ui/skeleton';
-import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
+import { Skeleton } from '../ui/skeleton';
 import { Textarea } from '../ui/textarea';
-import { queryKeys } from '../../lib/queryClient';
-import { getConfigEffective, type ControlRequestOptions, updateConfig } from '../../lib/api';
-import {
-  configEffectiveSchema,
-  validateApiResponse,
-} from '../../lib/validation';
-import { useAppStore } from '../../lib/store';
-import { generateIdempotencyKey } from '../../lib/idempotency';
 
 const CONFIG_FLAGS = [
   {

@@ -11,7 +11,7 @@ from typing import Dict, Optional
 
 import httpx
 
-DEXSCREENER_TOKEN_URL = "https://api.dexscreener.com/latest/dex/tokens/{token}"
+DEXSCREENER_TOKEN_URL = "https://api.dexscreener.com/latest/dex/tokens/{token}"  # nosec B105
 
 
 @dataclass(slots=True)

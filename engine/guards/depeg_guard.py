@@ -12,6 +12,12 @@ def _as_bool(v: str | None, default: bool) -> bool:
     return v.strip().lower() not in {"0", "false", "no"}
 
 
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger("engine.depeg_guard").debug(
+        "%s suppressed exception: %s", context, exc, exc_info=True
+    )
+
+
 class DepegGuard:
     def __init__(
         self, router, md=None, bus=None, clock=time, log: logging.Logger | None = None
@@ -42,8 +48,8 @@ class DepegGuard:
             if self.md and hasattr(self.md, "last"):
                 px = self.md.last(symbol)
                 return float(px) if px else 0.0
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("depeg_guard.last.md", exc)
         try:
             # Fallback to router price
             px = self.router.get_last_price(f"{symbol}.BINANCE")
@@ -53,7 +59,8 @@ class DepegGuard:
                 loop = asyncio.get_event_loop()
                 px = loop.run_until_complete(px)  # in case called sync
             return float(px) if px else 0.0
-        except Exception:
+        except Exception as exc:
+            _log_suppressed("depeg_guard.last.router", exc)
             return 0.0
 
     def _peg_deviation(self) -> float:
@@ -64,8 +71,8 @@ class DepegGuard:
                 usdt_usdc = self._last("USDTUSDC")
                 if usdt_usdc:
                     devs.append(abs(usdt_usdc - 1.0) * 100.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("depeg_guard.dev.usdt_usdc", exc)
         try:
             if "BTCUSDT" in self.watch_symbols and "BTCUSDC" in self.watch_symbols:
                 btc_usdt = self._last("BTCUSDT")
@@ -73,8 +80,8 @@ class DepegGuard:
                 if btc_usdt and btc_usdc:
                     implied = btc_usdt / btc_usdc
                     devs.append(abs(implied - 1.0) * 100.0)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("depeg_guard.dev.btc_pairs", exc)
         return max(devs) if devs else 0.0
 
     async def tick(self) -> None:
@@ -94,8 +101,8 @@ class DepegGuard:
                 if self.bus is not None:
                     self.bus.fire("risk.depeg_trigger", {"deviation_pct": dev})
                     self.bus.fire("health.state", {"state": 2, "reason": "depeg_trigger"})
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("depeg_guard.bus_fire", exc)
             await self._apply_actions(dev)
 
     async def _apply_actions(self, dev: float) -> None:
@@ -104,15 +111,16 @@ class DepegGuard:
         try:
             if hasattr(self.router, "set_trading_enabled"):
                 await self._maybe_await(self.router.set_trading_enabled(False))
-        except Exception:
-            pass
+        except Exception as exc:
+            _log_suppressed("depeg_guard.disable_trading", exc)
         if self.exit_risk:
             # Best-effort flatten
             positions = []
             try:
                 if hasattr(self.router, "list_positions"):
                     positions = await self._maybe_await(self.router.list_positions())
-            except Exception:
+            except Exception as exc:
+                _log_suppressed("depeg_guard.list_positions", exc)
                 positions = []
             for p in positions or []:
                 try:
@@ -132,8 +140,8 @@ class DepegGuard:
             try:
                 if hasattr(self.router, "set_preferred_quote"):
                     self.router.set_preferred_quote("USDC")
-            except Exception:
-                pass
+            except Exception as exc:
+                _log_suppressed("depeg_guard.switch_quote", exc)
 
     async def _maybe_await(self, res: Any) -> Any:
         if hasattr(res, "__await__"):
