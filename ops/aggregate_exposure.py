@@ -1,9 +1,13 @@
 # ops/aggregate_exposure.py
 from __future__ import annotations
-import os, math, asyncio
-from typing import Dict, List
-import httpx
+
+import asyncio
+import math
+import os
 from dataclasses import dataclass
+from typing import Dict, List
+
+import httpx
 
 from ops.env import engine_endpoints
 

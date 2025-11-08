@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Persistence for DEX sniper intent and position state.
 
@@ -8,11 +6,13 @@ open trades.  This is intentionally lightweight; a future rev can swap
 in SQLite without touching the surrounding strategy.
 """
 
-from dataclasses import dataclass, asdict, field
+from __future__ import annotations
+
 import json
 import os
 import time
 import uuid
+from dataclasses import asdict, dataclass, field
 from typing import Dict, Iterable, List, Optional
 
 

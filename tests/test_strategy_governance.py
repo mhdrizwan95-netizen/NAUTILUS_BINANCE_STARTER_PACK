@@ -1,10 +1,13 @@
-import json, os, pytest, asyncio
+import asyncio
+import json
+
+import pytest
 import respx
-from httpx import Response
 from fastapi.testclient import TestClient
-from ops.strategy_tracker import strategy_tracker_loop, load_registry, save_registry
-from ops.strategy_selector import promote_best, rank_strategies, get_leaderboard
-from ops.strategy_selector import push_model_update
+from httpx import Response
+
+from ops.strategy_selector import get_leaderboard, promote_best, push_model_update, rank_strategies
+from ops.strategy_tracker import load_registry, save_registry, strategy_tracker_loop
 
 
 @pytest.fixture(autouse=True)
@@ -14,8 +17,8 @@ def _registry_reset(tmp_path):
     TEST_REGISTRY_PATH = tmp_path / "strategy_registry.json"
 
     # Monkey patch the global registry path for testing
-    import ops.strategy_tracker as tracker_mod
     import ops.strategy_selector as selector_mod
+    import ops.strategy_tracker as tracker_mod
 
     original_path = tracker_mod.REGISTRY_PATH
     tracker_mod.REGISTRY_PATH = TEST_REGISTRY_PATH
@@ -200,9 +203,7 @@ def test_strategy_governance_api_endpoints(monkeypatch):
 @pytest.mark.asyncio
 async def test_push_model_update(monkeypatch):
     """Test broadcasting strategy changes to engines."""
-    monkeypatch.setenv(
-        "ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005"
-    )
+    monkeypatch.setenv("ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005")
 
     with respx.mock:
         # Mock successful responses from engines
@@ -242,8 +243,9 @@ def test_strategy_promotion_with_minimum_trades(sample_registry):
 
 def test_manual_promotion_override():
     """Test manual promotion API with auth."""
-    import ops.ops_api as ops_app
     from fastapi.testclient import TestClient
+
+    import ops.ops_api as ops_app
 
     # Mock registry
     initial_reg = {

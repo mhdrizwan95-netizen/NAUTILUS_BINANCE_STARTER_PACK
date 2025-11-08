@@ -14,14 +14,15 @@ Design Principles:
 - Configurable rules: Human-tunable thresholds without code changes
 """
 
-import os
 import json
-import time
-import subprocess
+import os
 import shlex
+import subprocess
+import time
 from datetime import datetime
+from typing import Any, Dict, List, Tuple
+
 import yaml
-from typing import Dict, List, Any, Tuple
 
 from ops.telemetry_metrics import inc_scheduler_action
 
@@ -388,7 +389,9 @@ def decide_and_act(
                 "reason": reason,
             }
             try:
-                import asyncio, aiohttp, os
+                import asyncio
+
+                import aiohttp
 
                 DASH = os.environ.get("DASH_BASE", "http://127.0.0.1:8002")
 

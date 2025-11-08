@@ -5,10 +5,10 @@ import hashlib
 import hmac
 import logging
 import math
+import threading
 import time
 import uuid
 from typing import Any, Dict, Optional, Tuple
-import threading
 from urllib.parse import urlencode
 
 import httpx
@@ -529,14 +529,15 @@ class KrakenREST:
         """
         Called during snapshot / startup to update metrics, persistence, and portfolio state.
         """
+        import os
+        import sys
+
         from engine.metrics import (
-            POSITION_SIZE,
             ENTRY_PRICE_USD,
+            POSITION_SIZE,
             UPNL_USD,
             update_portfolio_gauges,
         )
-        import os
-        import sys
 
         try:
             positions = await self.positions()

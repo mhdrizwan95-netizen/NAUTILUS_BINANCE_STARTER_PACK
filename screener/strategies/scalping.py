@@ -6,8 +6,8 @@ from typing import Any, Mapping, MutableMapping, Optional, Sequence
 
 from .base import (
     StrategyCandidate,
-    StrategySignal,
     StrategyScreener,
+    StrategySignal,
     abs_value,
     confidence_from_score,
     freeze_mapping,

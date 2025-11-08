@@ -8,14 +8,14 @@ Interval can be controlled via VOL_REFRESH_MIN (minutes).
 
 from __future__ import annotations
 
+import argparse
 import os
 import time
 from typing import List, Optional
-import argparse
 
 import pandas as pd
-from ops.net import create_client, request_with_retry_sync
 
+from ops.net import create_client, request_with_retry_sync
 
 BINANCE_API = os.getenv("BINANCE_API", "https://api.binance.com/api/v3/klines")
 OUTPUT_FILE = os.getenv("VOL_TOP_FILE", "data/top_symbols.txt")

@@ -6,14 +6,15 @@ import json
 import logging
 import os
 import time
-from copy import deepcopy
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
 import httpx
 import yaml
+
 from ops.env import primary_engine_endpoint
 
 logger = logging.getLogger(__name__)

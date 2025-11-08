@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Lightweight social mention rate-of-change estimator (stub).
 
@@ -11,10 +9,11 @@ record_mention(symbol) to update counts. Consumers can call roc(symbol)
 to get a surge indicator.
 """
 
-import time
-from collections import deque, defaultdict
-from typing import Dict
+from __future__ import annotations
 
+import time
+from collections import defaultdict, deque
+from typing import Dict
 
 _BUCKET_SEC = 300.0
 _HISTORY = 6

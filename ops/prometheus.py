@@ -11,8 +11,8 @@ import os
 from pathlib import Path
 
 from prometheus_client import (
-    CollectorRegistry,
     CONTENT_TYPE_LATEST,
+    CollectorRegistry,
     Counter,
     Gauge,
     generate_latest,

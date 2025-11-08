@@ -15,11 +15,12 @@ Design Philosophy:
 import asyncio
 import logging
 import os
-import time
 import statistics
-from typing import Dict, List, Any, Optional, Callable
+import time
 from collections import deque
 from dataclasses import dataclass
+from typing import Any, Callable, Dict, List, Optional
+
 import yaml
 
 from .event_bus import BUS
@@ -272,8 +273,8 @@ class AlertDaemon:
     async def _send_email(self, channel: AlertChannel, message: str, priority: str) -> None:
         """Send email notification."""
         import smtplib
-        from email.mime.text import MIMEText
         import ssl
+        from email.mime.text import MIMEText
 
         if not channel.smtp_server or not channel.recipients:
             return

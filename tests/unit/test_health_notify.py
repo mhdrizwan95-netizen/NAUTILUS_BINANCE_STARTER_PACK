@@ -1,4 +1,5 @@
 import types
+
 import pytest
 
 from engine.ops.health_notify import HealthNotifier

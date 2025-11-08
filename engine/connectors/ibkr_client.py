@@ -1,8 +1,10 @@
 # engine/connectors/ibkr_client.py
 from __future__ import annotations
+
 import os
 from typing import Optional
-from ib_insync import IB, Stock, MarketOrder
+
+from ib_insync import IB, MarketOrder, Stock
 
 
 def _enabled() -> bool:

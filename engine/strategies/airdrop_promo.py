@@ -8,17 +8,17 @@ import time
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, Optional, Tuple
 
-from engine.core.order_router import OrderRouter
 from engine.core.market_resolver import resolve_market_choice
-from engine.risk import RiskRails
+from engine.core.order_router import OrderRouter
 from engine.execution.execute import StrategyExecutor
+from engine.risk import RiskRails
 
 try:  # Optional when metrics are disabled in certain test contexts
     from engine.metrics import (
-        airdrop_events_total,
-        airdrop_orders_total,
         airdrop_cooldown_epoch,
+        airdrop_events_total,
         airdrop_expected_value_usd,
+        airdrop_orders_total,
     )
 except Exception:  # pragma: no cover - metrics disabled
     airdrop_events_total = None  # type: ignore[assignment]

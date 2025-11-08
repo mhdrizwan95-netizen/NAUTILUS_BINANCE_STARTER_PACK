@@ -7,8 +7,9 @@ import ccxt  # type: ignore
 import pandas as pd
 from loguru import logger
 
-from .config import settings
 from services.common import manifest
+
+from .config import settings
 
 EARLIEST_BINANCE_TS = 1502942400000  # 2017-08-17 00:00:00 UTC
 

@@ -75,12 +75,23 @@ exclude = '''
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["scripts/**"]
+extend-exclude = [
+  "scripts/**",
+  "build/",
+  "dist/",
+  ".venv/",
+  "data/",
+  "docs/**/generated_*",
+]
 
 [tool.ruff.lint]
-select = ["E", "F"]
+select = ["E", "F", "I"]
 ignore = ["E203", "E501"]
 per-file-ignores = {"tests/" = ["E999"], "frontend/" = ["E999"]}
+
+[tool.ruff.lint.isort]
+known-first-party = ["engine", "ops", "services"]
+force-single-line = false
 
 [tool.ruff.format]
 quote-style = "double"

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Minimal Binance announcement poller that feeds ``events.external_feed``.
 
 The poller keeps legacy behaviour (environment gating, naive dedupe) but now
@@ -10,6 +8,8 @@ payloads.
 The fetcher remains a stub; wire in a real HTTP client where
 ``_fetch_announcements`` currently returns an empty list.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -23,7 +23,6 @@ from engine.metrics import (
     external_feed_errors_total,
     external_feed_latency_seconds,
 )
-
 
 LOGGER = logging.getLogger("engine.feeds.binance_announcements")
 EVENT_SOURCE = "binance_announcements"

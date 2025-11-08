@@ -4,7 +4,7 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import httpx
 
@@ -13,7 +13,8 @@ from engine.config.defaults import TREND_DEFAULTS
 from engine.config.env import env_bool, env_float, env_int, env_str
 from engine.core.market_resolver import resolve_market_choice
 from engine.universe.effective import StrategyUniverse
-from .trend_params import TrendParams, TrendAutoTuner
+
+from .trend_params import TrendAutoTuner, TrendParams
 
 if TYPE_CHECKING:  # pragma: no cover
     from .symbol_scanner import SymbolScanner

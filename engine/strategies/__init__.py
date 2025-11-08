@@ -4,7 +4,7 @@ Expose the active HMM policy modules from the unified strategies package so
 callers never need to reach for legacy ``strategies.hmm_policy`` paths.
 """
 
-from . import policy_hmm, ensemble_policy
+from . import ensemble_policy, policy_hmm
 
 __all__ = [
     "policy_hmm",

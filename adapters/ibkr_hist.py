@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 IBKR historical bars (1-minute) via ib_insync.
 
@@ -9,6 +7,8 @@ Writes Parquet under:
 Requires a running TWS or IB Gateway and ib_insync installed.
 """
 
+from __future__ import annotations
+
 import os
 
 import pandas as pd
@@ -16,9 +16,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 
-def fetch_1m(
-    ticker: str = "AAPL", endDateTime: str = "", durationStr: str = "2 W"
-) -> pd.DataFrame:
+def fetch_1m(ticker: str = "AAPL", endDateTime: str = "", durationStr: str = "2 W") -> pd.DataFrame:
     try:
         from ib_insync import IB, Stock, util
     except Exception as exc:  # pragma: no cover - optional dependency
@@ -68,16 +66,10 @@ if __name__ == "__main__":
     import argparse
     import datetime as dt
 
-    ap = argparse.ArgumentParser(
-        description="Download IBKR 1m bars and save Parquet by day"
-    )
-    ap.add_argument(
-        "--symbols", required=True, help="Comma-separated tickers, e.g. AAPL,NVDA"
-    )
+    ap = argparse.ArgumentParser(description="Download IBKR 1m bars and save Parquet by day")
+    ap.add_argument("--symbols", required=True, help="Comma-separated tickers, e.g. AAPL,NVDA")
     g = ap.add_mutually_exclusive_group(required=True)
-    g.add_argument(
-        "--day", help="Single day YYYY-MM-DD (downloads a window covering that day)"
-    )
+    g.add_argument("--day", help="Single day YYYY-MM-DD (downloads a window covering that day)")
     g.add_argument(
         "--duration",
         help="IBKR durationStr, e.g. '2 W' (mutually exclusive with --day)",

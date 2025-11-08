@@ -4,9 +4,7 @@ from engine.strategies import ensemble_policy
 def test_ensemble_disabled_returns_none():
     """Test that ensemble returns None when disabled."""
     ensemble_policy.S.ensemble_enabled = False
-    result = ensemble_policy.combine(
-        "BTCUSDT", "BUY", 0.8, ("BUY", 10.0, {"probs": [0.9]})
-    )
+    result = ensemble_policy.combine("BTCUSDT", "BUY", 0.8, ("BUY", 10.0, {"probs": [0.9]}))
     assert result is None
 
 
@@ -16,9 +14,7 @@ def test_strong_consensus_both_buy():
     ensemble_policy.S.ensemble_min_conf = 0.6
     ensemble_policy.S.ensemble_weights = {"hmm_v1": 0.5, "ma_v1": 0.5}
 
-    result = ensemble_policy.combine(
-        "BTCUSDT", "BUY", 0.8, ("BUY", 10.0, {"probs": [0.9]})
-    )
+    result = ensemble_policy.combine("BTCUSDT", "BUY", 0.8, ("BUY", 10.0, {"probs": [0.9]}))
     assert result is not None
     side, quote, meta = result
     assert side == "BUY"
@@ -33,9 +29,7 @@ def test_conflicting_signals_weak_consensus():
     ensemble_policy.S.ensemble_min_conf = 0.7  # High threshold
 
     # MA says BUY strongly, HMM says SELL weakly
-    result = ensemble_policy.combine(
-        "BTCUSDT", "BUY", 0.9, ("SELL", 10.0, {"probs": [0.2]})
-    )
+    result = ensemble_policy.combine("BTCUSDT", "BUY", 0.9, ("SELL", 10.0, {"probs": [0.2]}))
     assert result is None  # Should be filtered out by min_conf
 
 
@@ -45,9 +39,7 @@ def test_weak_conf_signals_filtered():
     ensemble_policy.S.ensemble_min_conf = 0.8
 
     # All signals are weak
-    result = ensemble_policy.combine(
-        "BTCUSDT", "BUY", 0.3, ("BUY", 10.0, {"probs": [0.4]})
-    )
+    result = ensemble_policy.combine("BTCUSDT", "BUY", 0.3, ("BUY", 10.0, {"probs": [0.4]}))
     assert result is None
 
 

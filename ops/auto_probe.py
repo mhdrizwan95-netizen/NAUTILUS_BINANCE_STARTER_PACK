@@ -5,11 +5,10 @@ import asyncio
 import os
 import random
 import time
-from collections import deque, defaultdict
+from collections import defaultdict, deque
 from typing import Deque, Dict, List, Optional
 
 import httpx
-
 
 # --- Symbol feed caching infrastructure ---
 _SYMBOL_CACHE: deque[str] = deque(maxlen=500)

@@ -247,8 +247,7 @@ if missing_defaults:
 unknown_keys = sorted(key for key in SECTION_KEYS if key not in ALL_DEFAULTS)
 if unknown_keys:
     raise RuntimeError(
-        "Generator references keys not present in ALL_DEFAULTS: "
-        + ", ".join(unknown_keys)
+        "Generator references keys not present in ALL_DEFAULTS: " + ", ".join(unknown_keys)
     )
 
 COMMENTS = {

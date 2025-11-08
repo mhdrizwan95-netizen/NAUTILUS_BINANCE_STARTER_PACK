@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Price oracle helpers for the DEX sniper.
 """
+
+from __future__ import annotations
 
 import asyncio
 import time
@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 import httpx
-
 
 DEXSCREENER_TOKEN_URL = "https://api.dexscreener.com/latest/dex/tokens/{token}"
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-import os
 import json
-import yaml
+import os
 from datetime import datetime
+
+import yaml
 
 POLICY_PATH = "ops/m25_policy.yaml"
 LOG_PATH = "data/processed/m25/compliance_log.jsonl"
@@ -47,8 +48,9 @@ if __name__ == "__main__":
     # Example: gather runtime metrics from m19 snapshot
     snap_path = "data/processed/m19/metrics_snapshot.json"
     try:
-        metrics = json.load(open(snap_path))
-    except:
+        with open(snap_path, encoding="utf-8") as fh:
+            metrics = json.load(fh)
+    except (OSError, json.JSONDecodeError):
         metrics = {}
     alerts = check_risk_limits(metrics, policy)
     enforce(alerts)

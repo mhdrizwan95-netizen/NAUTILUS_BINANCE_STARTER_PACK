@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
-from fastapi.responses import StreamingResponse
 import asyncio
 import json
+
+from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 
 router = APIRouter()
 _queue: asyncio.Queue = asyncio.Queue(maxsize=10000)

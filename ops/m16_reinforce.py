@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-import os
 import json
+import os
 import pickle
+from typing import Dict, Tuple
+
 import numpy as np
 import pandas as pd
-from typing import Dict, Tuple
-from sklearn.linear_model import SGDClassifier
 from prometheus_client import CollectorRegistry, Gauge, generate_latest
+from sklearn.linear_model import SGDClassifier
 
 OUT_DIR = os.path.join("data", "processed", "m16")
 CAL_DIR = os.path.join("data", "processed", "calibration")

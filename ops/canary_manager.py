@@ -16,11 +16,11 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Any, Dict, Tuple
 
 import httpx
 
-from ops.strategy_router import _load_weights, WEIGHTS_PATH
+from ops.strategy_router import WEIGHTS_PATH, _load_weights
 
 
 class CanaryEvaluator:

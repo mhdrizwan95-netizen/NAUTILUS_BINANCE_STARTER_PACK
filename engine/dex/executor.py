@@ -1,16 +1,16 @@
-from __future__ import annotations
-
 """
 On-chain DEX executor built on UniswapV2/Pancake router.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
 import logging
-from typing import Optional, Sequence, TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Optional, Sequence
 
 if TYPE_CHECKING:
-    from engine.dex.wallet import DexWallet
     from engine.dex.router import DexRouter
+    from engine.dex.wallet import DexWallet
 
 
 logger = logging.getLogger("engine.dex.executor")

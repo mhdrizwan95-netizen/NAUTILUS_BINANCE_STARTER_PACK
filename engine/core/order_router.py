@@ -2,20 +2,21 @@ from __future__ import annotations
 
 import logging
 import math
-from typing import Any, Literal, Optional
+import time
 from time import time as _now
+from typing import Any, Literal, Optional
+
 import httpx
 
 from engine.config import (
     get_settings,
+    ibkr_min_notional_usd,
     load_fee_config,
     load_ibkr_fee_config,
-    ibkr_min_notional_usd,
 )
 from engine.core.portfolio import Portfolio
 from engine.core.venue_specs import SPECS, SymbolSpec
 from engine.metrics import REGISTRY, orders_rejected, update_portfolio_gauges
-import time
 
 Side = Literal["BUY", "SELL"]
 
@@ -410,7 +411,7 @@ class OrderRouter:
     ) -> dict[str, Any]:
         """Backwards compatibility for existing code"""
         # For now, assume Binance if not specified
-        if not "." in symbol:
+        if "." not in symbol:
             symbol = f"{symbol}.BINANCE"
         result = await self._place_market_order_async(
             symbol=symbol, side=side, quote=None, quantity=quantity, market=market
@@ -502,11 +503,12 @@ class OrderRouter:
     async def amend_stop_reduce_only(
         self, symbol: str, side: Side, stop_price: float, qty: float
     ) -> None:
-        import os, logging
+        import logging
+        import os
 
         if os.getenv("ALLOW_STOP_AMEND", "").lower() not in {"1", "true", "yes"}:
             logging.getLogger(__name__).info(
-                f"[STOP-AMEND:DRY] %s %s stop=%s qty=%s", symbol, side, stop_price, qty
+                "[STOP-AMEND:DRY] %s %s stop=%s qty=%s", symbol, side, stop_price, qty
             )
             return
         client = _CLIENTS.get(self._venue)
@@ -894,7 +896,8 @@ async def _place_market_order_async_core(
         res.setdefault("market", market_hint)
     # Feature-gated slippage telemetry and policy (log-only)
     try:
-        import os, logging
+        import logging
+        import os
 
         cap_spot = float(os.getenv("SPOT_TAKER_MAX_SLIP_BPS", "25"))
         cap_fut = float(os.getenv("FUT_TAKER_MAX_SLIP_BPS", "15"))
@@ -1274,7 +1277,8 @@ class OrderRouterExt(OrderRouter):
         intent: str = "",
         market: str | None = None,
     ):
-        import os, logging
+        import logging
+        import os
 
         market_hint = market.lower() if isinstance(market, str) and market else None
         resolved_venue = symbol.split(".")[1] if "." in symbol else venue
@@ -1304,7 +1308,7 @@ class OrderRouterExt(OrderRouter):
                 "true",
                 "yes",
             } and (qty is None or qty <= 0):
-                from engine.risk.sizer import risk_parity_qty, clamp_notional
+                from engine.risk.sizer import clamp_notional, risk_parity_qty
 
                 md = _MDAdapter(self)
                 tf = os.getenv("RISK_PARITY_TF", "5m")

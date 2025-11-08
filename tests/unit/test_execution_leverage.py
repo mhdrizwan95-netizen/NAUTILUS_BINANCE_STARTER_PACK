@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-
 import pytest
 
 from engine.core.portfolio import Portfolio

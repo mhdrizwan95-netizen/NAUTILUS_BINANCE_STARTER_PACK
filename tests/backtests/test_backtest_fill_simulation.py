@@ -10,11 +10,11 @@ import pytest
 from backtests.engine import BacktestEngine, FeedConfig
 from engine.core.event_bus import BUS
 from engine.idempotency import CACHE
-from engine.strategy import get_executor_override
 from engine.strategies.momentum_realtime import (
     MomentumRealtimeConfig,
     MomentumStrategyModule,
 )
+from engine.strategy import get_executor_override
 
 
 def _write_feed(

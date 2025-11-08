@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Dexscreener lightweight client + loop.
 
@@ -10,13 +8,14 @@ as per the playbook. It publishes events on the global BUS when enabled.
 By default, this module is inert unless DEX_FEED_ENABLED=true.
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import httpx
-
 
 DEX_API = os.getenv("DEXSCREENER_API", "https://api.dexscreener.com/latest/dex/tokens")
 
@@ -48,13 +47,13 @@ def _as_float(v, default=0.0) -> float:
 def _tier_for(item: Dict[str, Any]) -> Optional[DexCandidate]:
     # Extract required fields with defaults
     chain = str(item.get("chainId") or item.get("chain") or "?")
+    base = item.get("baseToken") or {}
     token_addr = str(
         (base.get("address") if isinstance(base, dict) else None)
         or item.get("baseTokenAddress")
         or ""
     )
     pair_addr = str(item.get("pairAddress") or item.get("address") or item.get("id") or "")
-    base = item.get("baseToken") or {}
     symbol = str(base.get("symbol") or item.get("symbol") or "?")
     name = str(base.get("name") or item.get("name") or symbol)
     price = _as_float(item.get("priceUsd") or item.get("price"))
@@ -139,7 +138,10 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
     try:
         from engine.feeds.social import roc as social_roc
     except Exception:
-        social_roc = lambda _: 0.0
+
+        def social_roc(_: str) -> float:
+            return 0.0
+
     while True:
         try:
             cands = await fetch_top_gainers()

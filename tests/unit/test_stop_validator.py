@@ -1,4 +1,5 @@
 import types
+
 import pytest
 
 from engine.ops.stop_validator import StopValidator
@@ -31,9 +32,7 @@ class _Router:
                 from engine.core.portfolio import Position
 
                 self.positions = {
-                    "ABCUSDT": Position(
-                        symbol="ABCUSDT", quantity=100.0, avg_price=10.0
-                    )
+                    "ABCUSDT": Position(symbol="ABCUSDT", quantity=100.0, avg_price=10.0)
                 }
 
         self._state = _Pos()

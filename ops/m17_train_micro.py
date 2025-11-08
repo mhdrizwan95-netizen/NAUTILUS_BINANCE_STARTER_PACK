@@ -18,19 +18,20 @@ Outputs:
     - data/processed/m17/micro_learning_curves.png
 """
 
-import os
-import json
 import argparse
-import numpy as np
-import pandas as pd
-import matplotlib.pyplot as plt
-from typing import Dict, Any, Tuple
-from sklearn.linear_model import SGDClassifier
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
+import json
+import os
 
 # Import the hierarchical HMM classes
 import sys
+from typing import Any, Dict, Tuple
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from sklearn.linear_model import SGDClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import train_test_split
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -362,7 +363,7 @@ def main():
 
     args = parser.parse_args()
 
-    print(f"M17 Micro Policy Training")
+    print("M17 Micro Policy Training")
     print(f"Feedback file: {args.feedback}")
     print(f"Macro model: {args.macro_model}")
     print(f"Test size: {args.test_size}")

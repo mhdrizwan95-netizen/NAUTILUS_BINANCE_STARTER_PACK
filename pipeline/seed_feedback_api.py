@@ -38,9 +38,7 @@ def post_outcomes(pattern: str, endpoint: str, timeout: float = 2.0) -> int:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(
-        description="Seed situation feedback API with offline outcomes"
-    )
+    ap = argparse.ArgumentParser(description="Seed situation feedback API with offline outcomes")
     ap.add_argument(
         "--hits",
         required=True,

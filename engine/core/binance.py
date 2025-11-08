@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import hmac
+import logging
 import math
 import os
 import time
@@ -609,7 +609,8 @@ class BinanceREST:
                 self._log_request("GET", path, params=params)
                 r = await client.get(path, params=params)
                 if r.status_code in (418, 429):
-                    import logging, asyncio
+                    import asyncio
+                    import logging
 
                     logging.getLogger(__name__).warning(
                         "[BINANCE] /account returned %s (attempt %d) — backing off. body=%s",

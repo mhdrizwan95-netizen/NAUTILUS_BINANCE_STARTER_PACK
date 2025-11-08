@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 VAR estimation utilities (stop-aware with ATR fallback when available).
 
@@ -11,7 +9,9 @@ fields: symbol, quantity, avg_price, last_price). If a position exposes
 If md is missing or ATR unavailable, we fall back to notional risk.
 """
 
-from typing import Iterable, Any, List
+from __future__ import annotations
+
+from typing import Any, Iterable, List
 
 
 def _get(attr: str, obj: Any, default=None):

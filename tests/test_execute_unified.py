@@ -1,8 +1,8 @@
 import asyncio
-import pytest
-
 import contextlib
 import os
+
+import pytest
 
 from engine.execution.execute import StrategyExecutor
 from engine.idempotency import CACHE, CACHE_PATH
@@ -32,9 +32,7 @@ class DummyRouter:
 def test_executor_dry_run():
     risk = DummyRisk()
     router = DummyRouter()
-    executor = StrategyExecutor(
-        risk=risk, router=router, default_dry_run=True, source="test"
-    )
+    executor = StrategyExecutor(risk=risk, router=router, default_dry_run=True, source="test")
     result = asyncio.run(
         executor.execute(
             {
@@ -55,9 +53,7 @@ def test_executor_dry_run():
 def test_executor_submits_order():
     risk = DummyRisk(ok=True)
     router = DummyRouter()
-    executor = StrategyExecutor(
-        risk=risk, router=router, default_dry_run=False, source="test"
-    )
+    executor = StrategyExecutor(risk=risk, router=router, default_dry_run=False, source="test")
     result = asyncio.run(
         executor.execute(
             {
@@ -80,9 +76,7 @@ def test_executor_submits_order():
 def test_executor_rejects_via_risk():
     risk = DummyRisk(ok=False)
     router = DummyRouter()
-    executor = StrategyExecutor(
-        risk=risk, router=router, default_dry_run=False, source="test"
-    )
+    executor = StrategyExecutor(risk=risk, router=router, default_dry_run=False, source="test")
     result = asyncio.run(
         executor.execute(
             {

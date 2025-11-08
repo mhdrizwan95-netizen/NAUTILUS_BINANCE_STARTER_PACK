@@ -1,9 +1,15 @@
 # ops/exposure_collector.py
 from __future__ import annotations
-import asyncio, time, logging, os
+
+import asyncio
+import logging
+import os
+import time
+
 from prometheus_client import Gauge
+
+from ops.aggregate_exposure import _parse_endpoints, aggregate_exposure
 from ops.prometheus import REGISTRY
-from ops.aggregate_exposure import aggregate_exposure, _parse_endpoints
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 

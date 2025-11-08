@@ -13,15 +13,16 @@ Key Features:
 - Integration with existing ml_service/app.py REST API
 """
 
+import logging
 import os
+from typing import Any, Dict, Tuple
+
 import joblib
 import numpy as np
 import pandas as pd
-from typing import Dict, Tuple, Any
 from hmmlearn import hmm
-from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import SGDClassifier
-import logging
+from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +62,7 @@ class MacroRegimeHMM:
         Returns:
             Trained MacroRegimeHMM instance
         """
-        logger.info(
-            f"Training MacroRegimeHMM with {len(X)} samples and {X.shape[1]} features"
-        )
+        logger.info(f"Training MacroRegimeHMM with {len(X)} samples and {X.shape[1]} features")
 
         # Standardize features
         X_scaled = self.scaler.fit_transform(X)
@@ -212,17 +211,13 @@ class HierarchicalPolicy:
         path = os.path.join(self.model_dir, fname)
 
         if not os.path.exists(path):
-            fallback_fname = f"policy_v1.joblib"
+            fallback_fname = "policy_v1.joblib"
             fallback_path = os.path.join(self.model_dir, fallback_fname)
             if os.path.exists(fallback_path):
-                logger.warning(
-                    f"No policy for regime {regime}, using fallback {fallback_fname}"
-                )
+                logger.warning(f"No policy for regime {regime}, using fallback {fallback_fname}")
                 path = fallback_path
             else:
-                raise FileNotFoundError(
-                    f"No policy found for regime {regime} at {path}"
-                )
+                raise FileNotFoundError(f"No policy found for regime {regime} at {path}")
 
         bundle = joblib.load(path)
         policy = bundle.get("policy", bundle)  # Handle both formats
@@ -281,9 +276,7 @@ class HierarchicalPolicy:
             raise RuntimeError("No active regime set - call switch() first")
 
         if self.active_regime not in self.loaded_policies:
-            raise RuntimeError(
-                f"No policy loaded for active regime {self.active_regime}"
-            )
+            raise RuntimeError(f"No policy loaded for active regime {self.active_regime}")
 
         policy, metadata = self.loaded_policies[self.active_regime]
 

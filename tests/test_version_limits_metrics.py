@@ -1,5 +1,6 @@
 import importlib
 import os
+
 from fastapi.testclient import TestClient
 
 
@@ -20,8 +21,8 @@ def test_version_and_limits(monkeypatch):
     v = c.get("/version").json()
     assert v["git_sha"] == "abc123"
     assert v["model_tag"] == "hmm_v1"
-    l = c.get("/limits").json()
-    assert l["exposure_cap_symbol_usd"] == 123.0
+    limits = c.get("/limits").json()
+    assert limits["exposure_cap_symbol_usd"] == 123.0
 
 
 def test_reconcile_lag_gauge(monkeypatch):

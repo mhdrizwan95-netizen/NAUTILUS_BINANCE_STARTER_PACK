@@ -14,11 +14,12 @@ Produces lineage_graph.png with dual-axis charts showing:
 
 import json
 import os
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 from datetime import datetime
-import pandas as pd
 from typing import Dict, Optional
+
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
+import pandas as pd
 
 # Configure matplotlib for better output
 plt.style.use("default")
@@ -196,7 +197,7 @@ def create_lineage_graph(df: pd.DataFrame, output_path: str) -> None:
     # Add trend lines if we have enough data
     if len(df) >= 3:
         # Linear trend for P&L
-        pnl_trend = ax1.axhline(
+        ax1.axhline(
             y=df["pnl_last"].mean(),
             color="#1f77b4",
             linestyle="--",
@@ -205,7 +206,7 @@ def create_lineage_graph(df: pd.DataFrame, output_path: str) -> None:
         )
 
         # Linear trend for winrate
-        winrate_trend = ax2.axhline(
+        ax2.axhline(
             y=df["winrate_last"].mean(),
             color="#ff7f0e",
             linestyle="--",

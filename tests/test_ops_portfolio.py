@@ -1,15 +1,20 @@
-import os, importlib, asyncio, contextlib
+import asyncio
+import contextlib
+import importlib
+import os
+
 import pytest
 import respx
-from httpx import Response
 from fastapi.testclient import TestClient
+from httpx import Response
+
 from ops.portfolio_collector import (
-    portfolio_collector_loop,
     PORTFOLIO_EQUITY,
     PORTFOLIO_GAIN,
     PORTFOLIO_RET,
+    _venue_label,
+    portfolio_collector_loop,
 )
-from ops.portfolio_collector import _venue_label
 
 
 @pytest.fixture(autouse=True)
@@ -30,9 +35,7 @@ def mk_client(endpoints: str):
 async def test_portfolio_collector_sums_and_returns(monkeypatch):
     """Test portfolio collector sums equity/cash and computes returns with baseline logic"""
     # Mock engine endpoints
-    monkeypatch.setenv(
-        "ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005"
-    )
+    monkeypatch.setenv("ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005")
 
     # Mock account snapshots
     snap1 = {
@@ -63,7 +66,6 @@ async def test_portfolio_collector_sums_and_returns(monkeypatch):
 
     # Check aggregated values
     total_equity = PORTFOLIO_EQUITY._value.get()
-    total_cash = float(800.0 + 500.0)  # cash from both engines
 
     # First iteration sets baseline ≈ total equity → zero/small gain
     assert total_equity == 1500.0  # 1000 + 500
@@ -143,7 +145,6 @@ def test_portfolio_api_endpoint(monkeypatch):
 
 def test_portfolio_collector_venue_extraction():
     """Test venue name extraction from URLs"""
-    from ops.portfolio_collector import _fetch_pnl  # Can reuse similar logic
 
     # Test URL parsing (similar to pnl collector)
     test_urls = [

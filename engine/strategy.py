@@ -1,26 +1,31 @@
 from __future__ import annotations
-import asyncio, inspect, logging, os
+
+import asyncio
+import inspect
+import logging
+import os
 import threading
 import time
-from collections import deque, defaultdict
+from collections import defaultdict, deque
 from typing import Any, Callable, Deque, Dict, List, Optional
+
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
-from .config import load_strategy_config, load_risk_config
-from .risk import RiskRails
 from . import metrics
-from .core.market_resolver import resolve_market_choice
+from .config import load_risk_config, load_strategy_config
 from .core.event_bus import BUS
-from .telemetry.publisher import record_tick_latency
+from .core.market_resolver import resolve_market_choice
 from .execution.execute import StrategyExecutor
-from .strategies import policy_hmm, ensemble_policy
-from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
-from .strategies.trend_follow import TrendStrategyModule, load_trend_config
-from .strategies.scalping import ScalpStrategyModule, load_scalp_config
-from .state.cooldown import Cooldowns
-from .strategies.scalp.brackets import ScalpBracketManager
 from .ops_auth import require_ops_token
+from .risk import RiskRails
+from .state.cooldown import Cooldowns
+from .strategies import ensemble_policy, policy_hmm
+from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
+from .strategies.scalp.brackets import ScalpBracketManager
+from .strategies.scalping import ScalpStrategyModule, load_scalp_config
+from .strategies.trend_follow import TrendStrategyModule, load_trend_config
+from .telemetry.publisher import record_tick_latency
 
 try:
     from .strategies.momentum_realtime import (
@@ -708,6 +713,7 @@ def _latest_price(symbol: str) -> Optional[float]:
     """
     try:
         import httpx
+
         from .config import get_settings
 
         clean = symbol.split(".")[0]

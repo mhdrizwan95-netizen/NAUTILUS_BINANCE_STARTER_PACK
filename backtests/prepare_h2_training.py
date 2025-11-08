@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 # backtests/prepare_h2_training.py — Prepare H2 training data from Parquet
 import argparse
-import pandas as pd
-import numpy as np
-import requests
 import json
+
+import numpy as np
+import pandas as pd
+import requests
 
 
 def load_parquet_ticks(path: str) -> pd.DataFrame:
@@ -39,44 +40,24 @@ def downsample_macro(data: pd.DataFrame, window_sec: int = 300) -> list:
                 # Compute macro features
                 mids_arr = np.asarray(mids[-300:], dtype=np.float64)
                 x = np.arange(len(mids_arr))
-                slope = float(np.polyfit(x, mids_arr, 1)[0]) / max(
-                    np.mean(mids_arr), 1e-9
-                )
+                slope = float(np.polyfit(x, mids_arr, 1)[0]) / max(np.mean(mids_arr), 1e-9)
                 vol = (
-                    float(
-                        np.median(
-                            [
-                                r["vol_bp"]
-                                for r in current_window[-300:]
-                                if "vol_bp" in r
-                            ]
-                        )
-                    )
+                    float(np.median([r["vol_bp"] for r in current_window[-300:] if "vol_bp" in r]))
                     if len([r for r in current_window if "vol_bp" in r]) > 10
                     else 0.0
                 )
-                spr = (
-                    float(np.median(spreads_bp[-300:])) if len(spreads_bp) > 10 else 0.0
-                )
+                spr = float(np.median(spreads_bp[-300:])) if len(spreads_bp) > 10 else 0.0
                 vol_q = (
                     float(
                         np.quantile(
-                            [
-                                r["vol_bp"]
-                                for r in current_window[-300:]
-                                if "vol_bp" in r
-                            ],
+                            [r["vol_bp"] for r in current_window[-300:] if "vol_bp" in r],
                             0.75,
                         )
                     )
                     if len([r for r in current_window if "vol_bp" in r]) > 10
                     else 0.0
                 )
-                spr_q = (
-                    float(np.quantile(spreads_bp[-300:], 0.75))
-                    if len(spreads_bp) > 10
-                    else 0.0
-                )
+                spr_q = float(np.quantile(spreads_bp[-300:], 0.75)) if len(spreads_bp) > 10 else 0.0
                 trend = float(np.sign(slope))
                 macro_windows.append([vol, vol_q, spr, spr_q, slope, trend])
 
@@ -89,9 +70,7 @@ def downsample_macro(data: pd.DataFrame, window_sec: int = 300) -> list:
             current_window.append(
                 {
                     "mid": (
-                        float(row["mid"])
-                        if "mid" in row
-                        else (row["bid_px"] + row["ask_px"]) / 2
+                        float(row["mid"]) if "mid" in row else (row["bid_px"] + row["ask_px"]) / 2
                     ),
                     "spread_bp": float(
                         row.get(
@@ -138,9 +117,7 @@ def main():
                 rets = np.diff(arr) / np.maximum(arr[:-1], 1e-9)
                 if len(rets) >= 2:
                     vol_window.append(float(np.std(rets) * 1e4))
-                    df.at[i, "vol_bp"] = (
-                        np.mean(list(vol_window)) if vol_window else 0.0
-                    )
+                    df.at[i, "vol_bp"] = np.mean(list(vol_window)) if vol_window else 0.0
 
     print(f"Processing {len(df)} rows -> macro features")
     macro_seqs = downsample_macro(df)
@@ -163,13 +140,7 @@ def main():
     window_size = min(1000, len(df) // len(macro_seqs) if len(macro_seqs) > 0 else 1000)
     micro_len = min(
         9,
-        len(
-            [
-                c
-                for c in df.columns
-                if "feature" in c or c in ["mid", "spread_bp", "imbalance"]
-            ]
-        ),
+        len([c for c in df.columns if "feature" in c or c in ["mid", "spread_bp", "imbalance"]]),
     )
 
     for i, label in enumerate(macro_labels):
@@ -183,9 +154,7 @@ def main():
         micro_seq = []
         for _, row in window_df.iterrows():
             # Assuming features are stored or computed; for demo, use basic ones
-            feats = [
-                row.get(f"feature_{j}", float(row["mid"])) for j in range(micro_len)
-            ]
+            feats = [row.get(f"feature_{j}", float(row["mid"])) for j in range(micro_len)]
             micro_seq.append(feats)
 
         if len(micro_seq) >= len(macro_seqs[0]) // 2:  # minimum length check

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Risk Guardian: cross-margin and equity monitors + auto de-risk actions.
 
@@ -11,17 +9,20 @@ Implements the "automate, not negotiate" guardrails from the playbook:
 Defaults are disabled; enable with env vars to avoid impacting tests.
 """
 
+from __future__ import annotations
+
 import asyncio
 import math
 import os
 import time
+import zoneinfo
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import zoneinfo
 from typing import Optional, Tuple
 
-from .metrics import REGISTRY as MET
 from engine.runtime.config import load_runtime_config
+
+from .metrics import REGISTRY as MET
 
 
 def _as_float(v: Optional[str], default: float) -> float:
@@ -109,8 +110,8 @@ class RiskGuardian:
 
     async def _loop(self) -> None:
         from .app import router as order_router
-        from .risk import RiskRails
         from .config import load_risk_config
+        from .risk import RiskRails
 
         rails = RiskRails(load_risk_config())
         while self._running:
@@ -224,13 +225,6 @@ class RiskGuardian:
             worst = max(worst, self.cfg.cross_health_floor / max(cross_level, 1e-9))
         if fut_mmr is not None and fut_mmr > 0:
             worst = max(worst, fut_mmr / max(self.cfg.futures_mmr_floor, 1e-9))
-
-        # Publish soft metrics if gauges exist
-        try:
-            g1 = MET.get("kraken_equity_usd")  # reuse registry handle access
-            # Only set if present; we avoid adding new gauges here
-        except Exception:
-            pass
 
         if worst >= 1.0:
             await self._derisk_soft(order_router, worst)

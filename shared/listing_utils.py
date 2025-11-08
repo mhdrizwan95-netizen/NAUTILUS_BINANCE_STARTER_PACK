@@ -82,7 +82,7 @@ def compute_listing_metrics(
     score *= 1.0 / (1.0 + 0.1 * age)
     confidence = confidence_from_score(score, scale=150.0)
 
-    stop, targets = (None, ())
+    stop = None
     ladders: Tuple[float, ...] = ()
     if last_price and last_price > 0:
         stop_val, tgt = generate_listing_targets(

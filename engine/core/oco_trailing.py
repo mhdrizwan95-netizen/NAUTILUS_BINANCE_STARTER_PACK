@@ -7,12 +7,12 @@ Provides automatic management of linked orders and dynamic stop adjustments.
 import asyncio
 import logging
 import time
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 from uuid import uuid4
 
 from .oms_store import OMSStore
-from .venues import get_venue
 from .order_router import place_order
+from .venues import get_venue
 
 _oms = OMSStore()
 

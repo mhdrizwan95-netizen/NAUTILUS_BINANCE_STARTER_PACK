@@ -3,17 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import random
 import secrets
 import time
-import base64
 from collections import OrderedDict, deque
 from functools import lru_cache
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from threading import RLock
-from typing import Any, Deque, Dict, List, Optional
+from typing import Any, Deque, Dict, List, Optional, Set
 
 import httpx
 import yaml
@@ -33,13 +34,13 @@ from pydantic import BaseModel
 from ops import pnl_dashboard as pnl
 from ops import ui_state
 from ops.env import engine_endpoints
+from ops.governance_daemon import (
+    reload_governance_policies as governance_reload_policies,
+)
 from ops.middleware.control_guard import (
     ControlContext,
     IdempotentGuard,
     TokenOnlyGuard,
-)
-from ops.governance_daemon import (
-    reload_governance_policies as governance_reload_policies,
 )
 
 
@@ -214,7 +215,7 @@ def _decode_cursor(cursor: str) -> int:
         raw = base64.urlsafe_b64decode(cursor + padding)
         data = json.loads(raw.decode("utf-8"))
         offset = int(data.get("o", 0))
-    except Exception as exc:  # pragma: no cover - defensive guard
+    except Exception:  # pragma: no cover - defensive guard
         http_error(
             status.HTTP_400_BAD_REQUEST,
             "pagination.invalid_cursor",
@@ -838,7 +839,8 @@ async def cc_strategies_list(
         # Minimal performance with dev-friendly sparkline when no live data
         perf = {"pnl": 0.0}
         try:
-            import random, time as _time
+            import random
+            import time as _time
 
             rnd = random.Random(hash(sid) & 0xFFFF)
             base = 10000.0
@@ -998,14 +1000,11 @@ async def cc_strategy_update(
 
 
 # Backtests: job tracker backed by filesystem so multiple workers share state
-from pathlib import Path as _Path
-from tempfile import NamedTemporaryFile
-
-BACKTEST_DIR = _Path("data/ops_backtests")
+BACKTEST_DIR = Path("data/ops_backtests")
 BACKTEST_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _job_path(job_id: str) -> _Path:
+def _job_path(job_id: str) -> Path:
     return BACKTEST_DIR / f"{job_id}.json"
 
 
@@ -1018,7 +1017,7 @@ def _save_job(job_id: str, payload: Dict[str, Any]) -> None:
         tmp.write(json.dumps(payload, ensure_ascii=False))
         tmp.flush()
         os.fsync(tmp.fileno())
-        tmp_path = _Path(tmp.name)
+        tmp_path = Path(tmp.name)
     tmp_path.replace(path)
 
 

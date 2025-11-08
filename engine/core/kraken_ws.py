@@ -10,11 +10,11 @@ from typing import Any, Callable
 import websockets
 
 from engine.metrics import (
+    ENTRY_PRICE_USD,
     MARK_PRICE,
     POSITION_SIZE,
-    ENTRY_PRICE_USD,
-    UPNL_USD,
     REGISTRY,
+    UPNL_USD,
     position_amt_by_symbol,
     unrealized_profit_by_symbol,
 )

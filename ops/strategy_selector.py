@@ -1,15 +1,15 @@
 # ops/strategy_selector.py
+import asyncio
 import json
 import logging
-import asyncio
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 
 import yaml
 
+from ops import m25_governor
 from ops.env import engine_endpoints
 from ops.net import create_async_client, request_with_retry
-from ops import m25_governor
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 WEIGHTS_PATH = Path("ops/strategy_weights.json")

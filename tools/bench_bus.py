@@ -4,7 +4,10 @@ Microbench: EventBus publish/deliver throughput.
 
 Usage: python tools/bench_bus.py [n_events]
 """
-import asyncio, time, sys
+import asyncio
+import sys
+import time
+
 from engine.core.event_bus import BUS
 
 

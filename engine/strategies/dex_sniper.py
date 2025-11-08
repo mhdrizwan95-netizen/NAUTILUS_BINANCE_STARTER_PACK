@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 DEX Sniper strategy.
 
@@ -9,12 +7,13 @@ provide end-to-end wiring (candidate -> execution intent -> state persistence)
 so real swap adapters can be dropped in later without touching orchestration.
 """
 
+from __future__ import annotations
+
 import logging
 from typing import Any, Dict, Iterable
 
 from engine.core.event_bus import BUS
 from engine.dex import DexConfig, DexExecutor, DexState
-
 
 logger = logging.getLogger("engine.strategies.dex_sniper")
 

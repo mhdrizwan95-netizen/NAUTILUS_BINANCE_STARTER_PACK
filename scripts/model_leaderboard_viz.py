@@ -38,9 +38,7 @@ def load_equity_csv(json_path: Path) -> pd.DataFrame | None:
     if not csv_path.exists():
         return None
     try:
-        df = pd.read_csv(
-            csv_path, parse_dates=["date"], date_format="%Y-%m-%d %H:%M:%S"
-        )
+        df = pd.read_csv(csv_path, parse_dates=["date"], date_format="%Y-%m-%d %H:%M:%S")
         return df
     except Exception as e:
         print(f"⚠️ Failed to load equity CSV {csv_path}: {e}", file=os.sys.stderr)
@@ -182,9 +180,7 @@ def visualize(metric: str = "sharpe", top: int = 3) -> None:
 
 
 def main():
-    ap = argparse.ArgumentParser(
-        description="Visualize leaderboard with equity curves and PnL"
-    )
+    ap = argparse.ArgumentParser(description="Visualize leaderboard with equity curves and PnL")
     ap.add_argument("--metric", default="sharpe", help="Metric to rank by")
     ap.add_argument("--top", type=int, default=3, help="Number of top models to plot")
     args = ap.parse_args()

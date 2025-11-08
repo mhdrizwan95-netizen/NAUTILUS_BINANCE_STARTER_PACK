@@ -1,8 +1,14 @@
 # ops/pnl_collector.py
 from __future__ import annotations
-import asyncio, time, logging, httpx
-from ops.prometheus import get_or_create_gauge
+
+import asyncio
+import logging
+import time
+
+import httpx
+
 from ops.env import engine_endpoints
+from ops.prometheus import get_or_create_gauge
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 

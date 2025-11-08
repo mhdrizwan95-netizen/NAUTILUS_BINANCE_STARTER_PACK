@@ -42,10 +42,10 @@ def compute_feats(klines, book):
 def _atr(kl):
     trs = []
     for i in range(1, len(kl)):
-        _, _, h, l, c_prev, *_ = kl[i - 1]
-        _, o, h1, l1, c, *_ = kl[i]
-        h = float(h1)
-        l = float(l1)
+        _, _, high_prev, low_prev, c_prev, *_ = kl[i - 1]
+        _, o, high_curr, low_curr, c, *_ = kl[i]
+        h = float(high_curr)
+        low = float(low_curr)
         c_prev = float(c_prev)
-        trs.append(max(h - l, abs(h - c_prev), abs(l - c_prev)))
+        trs.append(max(h - low, abs(h - c_prev), abs(low - c_prev)))
     return sum(trs) / len(trs) if trs else 0.0

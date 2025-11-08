@@ -1,6 +1,6 @@
 # ops/strategy_ui.py
-from pathlib import Path
 import json
+from pathlib import Path
 
 
 def generate_html_table(registry_path: Path) -> str:
@@ -39,7 +39,7 @@ def generate_html_table(registry_path: Path) -> str:
                 try:
                     # Truncate to just date/time for display
                     last_promotion = last_promotion[:16].replace("T", " ")
-                except:
+                except Exception:
                     pass
 
             row = f'<tr class="{css_class}"><td>{model_name}</td><td>{version}</td><td class="sharpe">{sharpe}</td><td>{drawdown}</td><td class="positive">{realized}</td><td>{trades}</td><td>{last_promotion}</td></tr>'
@@ -64,7 +64,7 @@ def get_strategy_ui_html() -> str:
             try:
                 registry = json.loads(registry_path.read_text())
                 current_model = registry.get("current_model", current_model)
-            except:
+            except Exception:
                 pass
 
     except Exception as e:
@@ -261,4 +261,4 @@ def get_strategy_ui_html() -> str:
     </html>
     """
 
-    return html
+    return html.replace("{current_model}", current_model).replace("{table_rows}", table_rows)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 def _get(feats: Dict[str, Any], key: str, default: float | None = None) -> float | None:

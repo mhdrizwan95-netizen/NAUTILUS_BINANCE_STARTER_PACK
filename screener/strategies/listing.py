@@ -4,14 +4,15 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Sequence
 
+from shared.listing_utils import compute_listing_metrics
+
 from .base import (
     StrategyCandidate,
-    StrategySignal,
     StrategyScreener,
+    StrategySignal,
     freeze_mapping,
     listing_age,
 )
-from shared.listing_utils import compute_listing_metrics
 
 
 class ListingSniperScreener(StrategyScreener):

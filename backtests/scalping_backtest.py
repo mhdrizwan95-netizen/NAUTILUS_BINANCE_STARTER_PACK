@@ -10,21 +10,16 @@ from pathlib import Path
 from typing import Dict, List
 
 from backtests.engine import BacktestEngine, FeedConfig
-
 from engine.strategies.scalping import ScalpStrategyModule, load_scalp_config
 
 
 class ScalpingAdapter:
-    def __init__(
-        self, module: ScalpStrategyModule, spread_bps: float, depth_usd: float
-    ) -> None:
+    def __init__(self, module: ScalpStrategyModule, spread_bps: float, depth_usd: float) -> None:
         self.module = module
         self.spread_bps = spread_bps
         self.depth_usd = depth_usd
 
-    def handle_tick(
-        self, symbol: str, price: float, ts: float, volume: float | None = None
-    ):
+    def handle_tick(self, symbol: str, price: float, ts: float, volume: float | None = None):
         spread = price * (self.spread_bps / 10_000.0)
         bid = max(0.0, price - spread / 2.0)
         ask = price + spread / 2.0
@@ -70,9 +65,7 @@ def main() -> None:
     )
 
     module = ScalpStrategyModule(cfg)
-    adapter = ScalpingAdapter(
-        module, spread_bps=args.spread_bps, depth_usd=args.depth_usd
-    )
+    adapter = ScalpingAdapter(module, spread_bps=args.spread_bps, depth_usd=args.depth_usd)
 
     feed = FeedConfig(
         symbol=args.symbol.upper(),

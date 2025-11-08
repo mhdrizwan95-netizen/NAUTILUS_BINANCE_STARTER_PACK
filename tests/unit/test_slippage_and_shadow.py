@@ -1,5 +1,6 @@
-import os
 import logging
+import os
+
 import pytest
 
 from engine.core.order_router import OrderRouterExt, set_exchange_client
@@ -35,9 +36,7 @@ async def test_slippage_warn_logged(caplog, monkeypatch):
     set_exchange_client("BINANCE", client)
     router = OrderRouterExt(client, Portfolio(), venue="BINANCE")
 
-    await router.place_entry(
-        "BTCUSDT.BINANCE", "BUY", 0.01, venue="BINANCE", intent="SCALP"
-    )
+    await router.place_entry("BTCUSDT.BINANCE", "BUY", 0.01, venue="BINANCE", intent="SCALP")
     assert any("SLIPPAGE" in rec.message for rec in caplog.records)
 
 
@@ -49,7 +48,5 @@ async def test_scalp_maker_shadow_logs(caplog):
     set_exchange_client("BINANCE", client)
     router = OrderRouterExt(client, Portfolio(), venue="BINANCE")
 
-    await router.place_entry(
-        "ETHUSDT.BINANCE", "BUY", 0.1, venue="BINANCE", intent="SCALP"
-    )
+    await router.place_entry("ETHUSDT.BINANCE", "BUY", 0.1, venue="BINANCE", intent="SCALP")
     assert any("SCALP:MAKER:SHADOW" in rec.message for rec in caplog.records)

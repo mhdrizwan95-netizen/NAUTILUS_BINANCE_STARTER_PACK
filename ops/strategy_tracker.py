@@ -1,19 +1,19 @@
 # ops/strategy_tracker.py
-import json
 import asyncio
-import httpx
+import json
 import logging
-from statistics import mean, pstdev
 from pathlib import Path
+from statistics import mean, pstdev
+
+import httpx
+from prometheus_client import Gauge
+
 from ops.env import engine_endpoints
+from ops.prometheus import REGISTRY
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
-
-# Prometheus metrics for strategy performance monitoring
-from prometheus_client import Gauge
-from ops.prometheus import REGISTRY
 
 SHARPE_GAUGE = Gauge(
     "strategy_sharpe",

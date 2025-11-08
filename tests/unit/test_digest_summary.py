@@ -45,9 +45,7 @@ def test_digest_summary_basic(monkeypatch):
     job = DigestJob(
         rollups,
         tg,
-        log=types.SimpleNamespace(
-            info=lambda *a, **k: None, warning=lambda *a, **k: None
-        ),
+        log=types.SimpleNamespace(info=lambda *a, **k: None, warning=lambda *a, **k: None),
         clock=FakeClock(),
     )
     summary = job._summary()

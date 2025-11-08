@@ -1,26 +1,26 @@
 from __future__ import annotations
 
-import math
-import time
-import threading
 import collections
-from collections import deque, defaultdict
+import math
+import threading
+import time
+from collections import defaultdict, deque
 from typing import Any, Callable, Deque, Dict, Literal, Optional
 
 from .config import RiskConfig
 from .core.market_resolver import resolve_market_choice
 from .metrics import (
     breaker_rejections,
-    venue_error_rate_pct,
     breaker_state,
-    venue_exposure_usd,
+    exposure_cap_usd,
     risk_equity_buffer_usd,
+    risk_equity_drawdown_limit_pct,
     risk_equity_drawdown_pct,
     risk_equity_floor_breach,
-    exposure_cap_usd,
     risk_equity_floor_usd,
-    risk_equity_drawdown_limit_pct,
     risk_exposure_headroom_usd,
+    venue_error_rate_pct,
+    venue_exposure_usd,
 )
 
 
@@ -154,6 +154,10 @@ class RiskRails:
         snap: Dict[str, Any] = {}
         portfolio_state: Any = None
         prices: Callable[[str], float]
+
+        def _zero_price(_: str) -> float:
+            return 0.0
+
         try:
             router_mod = order_router
             snap_fn = getattr(router_mod, "portfolio_snapshot", None)
@@ -186,10 +190,10 @@ class RiskRails:
 
                 prices = _price_lookup
             else:
-                prices = lambda _: 0.0
+                prices = _zero_price
         except Exception:
             snap = {}
-            prices = lambda _: 0.0
+            prices = _zero_price
 
         symbol_base = symbol.split(".")[0]
         venue = symbol.split(".")[1].upper() if "." in symbol else "BINANCE"
@@ -615,25 +619,6 @@ class RiskRails:
                 risk_equity_floor_breach.set(0)
             except Exception:
                 pass
-
-    def current_error_rate_pct(self) -> float:
-        """Return the rolling venue error rate percentage."""
-        with self._err_lock:
-            window = list(self._err_window)
-        if not window:
-            return 0.0
-        errors = sum(1 for _, ok in window if not ok)
-        return 100.0 * errors / len(window)
-
-    def venue_breaker_open(self) -> bool:
-        """Return True if the venue error breaker is currently tripped."""
-        return bool(self._breaker_tripped)
-
-    def equity_breaker_open(self) -> bool:
-        """Return True if the equity breaker cooldown is active."""
-        if not self._equity_breaker_active:
-            return False
-        return time.time() < self._equity_breaker_until
 
 
 def _trading_disabled_via_flag() -> bool:

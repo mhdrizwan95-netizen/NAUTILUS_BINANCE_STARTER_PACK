@@ -96,26 +96,20 @@ def rank_models(metric: str, top: int = 10, ascending: bool = False) -> None:
         total_models = len(df_sorted)
         print(f"\n📊 Benchmark Summary ({total_models} models)")
         print(f"   Mean {metric}: {df[metric].mean():.4f}")
-        print(
-            f"   Best {metric}: {df[metric].max() if not ascending else df[metric].min():.4f}"
-        )
+        print(f"   Best {metric}: {df[metric].max() if not ascending else df[metric].min():.4f}")
         print(f"   Std {metric}: {df[metric].std():.4f}")
     else:
         print("No models to display")
 
 
 def main():
-    ap = argparse.ArgumentParser(
-        description="Rank model performance across all backtest reports"
-    )
+    ap = argparse.ArgumentParser(description="Rank model performance across all backtest reports")
     ap.add_argument(
         "--metric",
         default="sharpe",
         help="Metric to rank by: sharpe, pnl_usd, winrate, max_drawdown_usd, trades",
     )
-    ap.add_argument(
-        "--top", type=int, default=10, help="Number of top models to display"
-    )
+    ap.add_argument("--top", type=int, default=10, help="Number of top models to display")
     ap.add_argument(
         "--asc",
         action="store_true",

@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent))
 from model_registry import _read_registry, _get_entry_by_tag, REGISTRY_PATH, ACTIVE_LINK
 
+
 def _metric(entry, metric):
     """Extract metric value safely."""
     try:
@@ -35,6 +36,7 @@ def _metric(entry, metric):
     except (KeyError, ValueError, TypeError):
         return 0.0
 
+
 def _summary(entry):
     """Format summary string for display."""
     tm = entry.get("train_metrics", {})
@@ -43,6 +45,7 @@ def _summary(entry):
     drawdown = tm.get("max_drawdown_usd", "N/A")
     pnl = tm.get("pnl_usd", "N/A")
     return "20"
+
 
 def _get_current_active():
     """Find the currently active model from registry."""
@@ -60,6 +63,7 @@ def _get_current_active():
         pass
     return None
 
+
 def _is_better(latest_metrics, current_metrics, metric, min_improve):
     """Determine if latest model is better based on metric."""
     latest_val = _metric({"train_metrics": latest_metrics}, metric)
@@ -76,15 +80,14 @@ def _is_better(latest_metrics, current_metrics, metric, min_improve):
     else:
         return False
 
+
 def _promote_model(tag, reason="Auto-promotion based on metric improvement"):
     """Promote model to active status."""
     from model_registry import cmd_promote
-    args = argparse.Namespace(
-        tag=tag,
-        user="auto_promoter",
-        reason=reason
-    )
+
+    args = argparse.Namespace(tag=tag, user="auto_promoter", reason=reason)
     cmd_promote(args)
+
 
 def main():
     ap = argparse.ArgumentParser(
@@ -94,13 +97,13 @@ def main():
         "--metric",
         default="sharpe",
         choices=["sharpe", "pnl_usd", "max_drawdown_usd", "winrate"],
-        help="Metric to compare for promotion decision"
+        help="Metric to compare for promotion decision",
     )
     ap.add_argument(
         "--min-improve",
         type=float,
         default=0.05,
-        help="Minimum fractional improvement required (e.g., 0.05 = 5%%)"
+        help="Minimum fractional improvement required (e.g., 0.05 = 5%%)",
     )
     args = ap.parse_args()
 
@@ -173,11 +176,11 @@ def main():
     else:
         print("❌ Auto-promotion criteria not met.")
         print(
-            f"   {metric.upper()} did not improve sufficiently "
-            f"(threshold: {args.min_improve})"
+            f"   {metric.upper()} did not improve sufficiently " f"(threshold: {args.min_improve})"
         )
         print("   Model remains in registry for manual review if desired.")
         return 0
+
 
 if __name__ == "__main__":
     exit(main())

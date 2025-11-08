@@ -72,9 +72,7 @@ def test_ibkr_auto_venue_routing(monkeypatch):
     assert res1["rounded_qty"] == 1.0
 
     # BTCUSDT should auto-route to Binance
-    res2 = r.place_market_order(
-        symbol="BTCUSDT", side="BUY", quote=None, quantity=0.001
-    )
+    res2 = r.place_market_order(symbol="BTCUSDT", side="BUY", quote=None, quantity=0.001)
     assert res2["venue"] == "BINANCE"
     assert res2["rounded_qty"] == 0.001
 
@@ -82,6 +80,7 @@ def test_ibkr_auto_venue_routing(monkeypatch):
 def test_ibkr_fee_calculation(monkeypatch):
     """Test IBKR fee calculation with per-share and BPS modes."""
     import os
+
     from engine.config import load_ibkr_fee_config
 
     # Test per-share mode (default)
@@ -117,7 +116,7 @@ def test_ibkr_fee_calculation(monkeypatch):
 
 def test_ibkr_specs_loading(monkeypatch):
     """Test IBKR specs auto-loading from venue_specs.json"""
-    from engine.core.venue_specs import SPECS, DEFAULT_SPECS
+    from engine.core.venue_specs import DEFAULT_SPECS, SPECS
 
     # Check defaults are present
     assert "IBKR" in SPECS

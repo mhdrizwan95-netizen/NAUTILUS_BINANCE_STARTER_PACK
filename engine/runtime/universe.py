@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
+import time
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
-import json
-import time
 
 import httpx
 
 from ..core.binance import BinanceREST
-from .config import RuntimeConfig, UniverseFilterConfig
 from ..metrics import strategy_universe_size
+from .config import RuntimeConfig, UniverseFilterConfig
 
 log = logging.getLogger("engine.runtime.universe")
 

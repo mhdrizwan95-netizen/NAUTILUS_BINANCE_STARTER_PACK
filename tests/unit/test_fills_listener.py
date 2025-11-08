@@ -1,6 +1,7 @@
-import types
-import pytest
 import asyncio
+import types
+
+import pytest
 
 from engine.ops.fills_listener import FillsListener
 

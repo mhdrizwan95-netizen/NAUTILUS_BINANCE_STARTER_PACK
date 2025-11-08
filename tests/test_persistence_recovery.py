@@ -1,4 +1,5 @@
 import importlib
+
 from fastapi.testclient import TestClient
 
 
@@ -9,9 +10,7 @@ def test_atomic_snapshot_and_load(tmp_path, monkeypatch):
     snap_path = sd / "portfolio.json"
     monkeypatch.setattr("engine.state.SNAP_PATH", snap_path)
     sd.mkdir(parents=True, exist_ok=True)
-    store = __import__("engine.state", fromlist=["SnapshotStore"]).SnapshotStore(
-        snap_path
-    )
+    store = __import__("engine.state", fromlist=["SnapshotStore"]).SnapshotStore(snap_path)
     snap = {
         "equity_usd": 100.0,
         "cash_usd": 99.0,
@@ -52,8 +51,8 @@ def test_portfolio_endpoint_falls_back_to_snapshot(tmp_path, monkeypatch):
 
 
 def test_state_basic_imports():
-    from engine.state import SnapshotStore
     from engine.reconcile import reconcile_since_snapshot
+    from engine.state import SnapshotStore
 
     assert SnapshotStore is not None
     assert reconcile_since_snapshot is not None

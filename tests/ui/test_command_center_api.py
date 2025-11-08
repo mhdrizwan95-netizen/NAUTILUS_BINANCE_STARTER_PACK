@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
-from ops import ui_state, ui_api
+from ops import ui_api, ui_state
 from ops.ops_api import ORDERS_SERVICE, PORTFOLIO_SERVICE
 
 OPS_TOKEN = os.getenv("OPS_API_TOKEN", "test-ops-token-1234567890")
@@ -378,7 +378,9 @@ def test_strategies_governance_returns_paginated_envelope(client: TestClient) ->
 def test_metrics_models_returns_paginated_envelope(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    async def _fake_collect(_state: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
+    async def _fake_collect(
+        _state: dict[str, Any]
+    ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
         models = [
             {
                 "id": "trend:binance",

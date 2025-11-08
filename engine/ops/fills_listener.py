@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 FillsListener — emits BUS 'trade.fill' for WS execution reports.
 
 Safe to run alongside router's synchronous emitter; use EXEC_FILLS_LISTENER_ENABLED
 to gate wiring in app. Designed against a generic Binance-like schema.
 """
+
+from __future__ import annotations
 
 
 class FillsListener:

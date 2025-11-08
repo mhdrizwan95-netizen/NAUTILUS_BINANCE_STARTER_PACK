@@ -83,9 +83,7 @@ def cmd_register(args):
             except json.JSONDecodeError as e:
                 print(f"Warning: Could not read metrics file: {e}", file=sys.stderr)
         else:
-            print(
-                f"Warning: Metrics file does not exist: {metrics_path}", file=sys.stderr
-            )
+            print(f"Warning: Metrics file does not exist: {metrics_path}", file=sys.stderr)
 
     # Check for existing tag
     existing = _get_entry_by_tag(args.tag)
@@ -249,21 +247,15 @@ def main():
 
     # Register command
     reg_parser = subparsers.add_parser("register", help="Register a new model")
-    reg_parser.add_argument(
-        "--model", required=True, help="Path to trained HMM model .pkl file"
-    )
-    reg_parser.add_argument(
-        "--symbol", required=True, help="Trading symbol for this model"
-    )
+    reg_parser.add_argument("--model", required=True, help="Path to trained HMM model .pkl file")
+    reg_parser.add_argument("--symbol", required=True, help="Trading symbol for this model")
     reg_parser.add_argument(
         "--train-metrics", help="Path to backtest JSON file with performance metrics"
     )
     reg_parser.add_argument(
         "--tag", required=True, help="Unique tag for this model (e.g., 'hmm_v1')"
     )
-    reg_parser.add_argument(
-        "--notes", default="", help="Optional notes about this model"
-    )
+    reg_parser.add_argument("--notes", default="", help="Optional notes about this model")
 
     # Promote command
     prom_parser = subparsers.add_parser("promote", help="Promote model to production")

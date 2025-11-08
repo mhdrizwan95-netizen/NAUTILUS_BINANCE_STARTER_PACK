@@ -1,6 +1,7 @@
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
 import asyncio
+from unittest.mock import AsyncMock, Mock, patch
+
+import pytest
 
 from engine.core.order_router import (
     OrderRouter,
@@ -52,9 +53,7 @@ class TestOrderRouterKraken:
         self.router = OrderRouter(mock_kraken_client, mock_portfolio, venue="KRAKEN")
 
     @patch("engine.core.order_router._resolve_last_price", return_value=50000.0)
-    async def test_kraken_ioc_order_submission(
-        self, mock_resolve_price, mock_kraken_client
-    ):
+    async def test_kraken_ioc_order_submission(self, mock_resolve_price, mock_kraken_client):
         """Test Kraken orders use IOC time_in_force."""
         mock_kraken_client.submit_limit_order.return_value = {
             "executedQty": 0.1,
@@ -63,7 +62,7 @@ class TestOrderRouterKraken:
             "fee_usd": 0.125,
         }
 
-        result = await _place_market_order_async_core(
+        await _place_market_order_async_core(
             symbol="BTC.KRAKEN", side="BUY", quote=10.0, quantity=None, portfolio=None
         )
 
@@ -73,9 +72,7 @@ class TestOrderRouterKraken:
         assert call_args[1]["time_in_force"] == "IOC"
 
     @patch("engine.core.order_router._resolve_last_price", return_value=50000.0)
-    async def test_kraken_slippage_calculation(
-        self, mock_resolve_price, mock_kraken_client
-    ):
+    async def test_kraken_slippage_calculation(self, mock_resolve_price, mock_kraken_client):
         """Test Kraken limit price includes 0.2% slippage for BUY orders."""
         mock_kraken_client.submit_limit_order.return_value = {
             "executedQty": 0.1,
@@ -93,9 +90,7 @@ class TestOrderRouterKraken:
         assert call_args[1]["price"] == pytest.approx(expected_limit_price)
 
     @patch("engine.core.order_router._resolve_last_price", return_value=50000.0)
-    async def test_kraken_slippage_sell_order(
-        self, mock_resolve_price, mock_kraken_client
-    ):
+    async def test_kraken_slippage_sell_order(self, mock_resolve_price, mock_kraken_client):
         """Test Kraken limit price includes 0.2% slippage for SELL orders."""
         mock_kraken_client.submit_limit_order.return_value = {
             "executedQty": 0.1,
@@ -126,9 +121,7 @@ class TestOrderRouterKraken:
         assert round_up == 0.1  # _round_step_up rounds up to 0.1
 
     @patch("engine.core.order_router._resolve_last_price", return_value=50000.0)
-    async def test_kraken_quantity_rounding_up(
-        self, mock_resolve_price, mock_kraken_client
-    ):
+    async def test_kraken_quantity_rounding_up(self, mock_resolve_price, mock_kraken_client):
         """Test Kraken uses _round_step_up for quantity calculation."""
         mock_kraken_client.submit_limit_order.return_value = {
             "executedQty": 0.1,
@@ -150,9 +143,7 @@ class TestOrderRouterKraken:
         assert call_args[1]["quantity"] == 0.1  # Rounded up from 0.05
 
     @patch("engine.core.order_router._resolve_last_price", return_value=50000.0)
-    async def test_kraken_symbol_normalization(
-        self, mock_resolve_price, mock_kraken_client
-    ):
+    async def test_kraken_symbol_normalization(self, mock_resolve_price, mock_kraken_client):
         """Test Kraken symbols are properly normalized for API calls."""
         mock_kraken_client.submit_limit_order.return_value = {
             "executedQty": 0.1,

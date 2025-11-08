@@ -12,13 +12,13 @@ Usage:
 
 Output: ops/exports/pnl_YYYY-MM-DD.csv
 """
-import os
-import csv
-from pathlib import Path
-from datetime import datetime
 import asyncio
-from ops.net import create_async_client, request_with_retry
+import csv
+import os
+from datetime import datetime
+from pathlib import Path
 
+from ops.net import create_async_client, request_with_retry
 
 EXPORTS_DIR = Path("ops/exports")
 EXPORTS_DIR.mkdir(exist_ok=True)
@@ -224,12 +224,12 @@ def export_to_csv(models_data, portfolio_summary, timestamp=None):
         # Create summary file
         summary_filename = filename.with_suffix(".summary.txt")
         with open(summary_filename, "w", encoding="utf-8") as summary_file:
-            summary_file.write(f"PnL Attribution Export Summary\n")
-            summary_file.write(f"================================\n\n")
+            summary_file.write("PnL Attribution Export Summary\n")
+            summary_file.write("================================\n\n")
             summary_file.write(f"Export Date: {export_timestamp}\n")
             summary_file.write(f"Export File: {filename.name}\n\n")
 
-            summary_file.write(f"Portfolio Summary:\n")
+            summary_file.write("Portfolio Summary:\n")
             summary_file.write(
                 f"- Total Realized P&L: {format_currency(portfolio_summary.get('total_realized_pnl', 0))}\n"
             )

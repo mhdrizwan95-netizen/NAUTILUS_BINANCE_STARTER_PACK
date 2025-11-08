@@ -48,15 +48,9 @@ class BinanceAccountProvider:
         mode = os.getenv("BINANCE_MODE", "live").lower()
 
         if mode == "demo":
-            self.spot_base = os.getenv(
-                "DEMO_SPOT_BASE", "https://testnet.binance.vision"
-            )
-            self.usdm_base = os.getenv(
-                "DEMO_USDM_BASE", "https://testnet.binancefuture.com"
-            )
-            self.coinm_base = os.getenv(
-                "DEMO_COINM_BASE", "https://testnet.binancefuture.com"
-            )
+            self.spot_base = os.getenv("DEMO_SPOT_BASE", "https://testnet.binance.vision")
+            self.usdm_base = os.getenv("DEMO_USDM_BASE", "https://testnet.binancefuture.com")
+            self.coinm_base = os.getenv("DEMO_COINM_BASE", "https://testnet.binancefuture.com")
             key_candidates = [
                 "DEMO_API_KEY_SPOT",
                 "DEMO_API_KEY_USDM",
@@ -72,9 +66,7 @@ class BinanceAccountProvider:
         else:
             self.spot_base = os.getenv("BINANCE_SPOT_BASE", "https://api.binance.com")
             self.usdm_base = os.getenv("BINANCE_USDM_BASE", "https://fapi.binance.com")
-            self.coinm_base = os.getenv(
-                "BINANCE_COINM_BASE", "https://dapi.binance.com"
-            )
+            self.coinm_base = os.getenv("BINANCE_COINM_BASE", "https://dapi.binance.com")
             key_candidates = ["BINANCE_API_KEY"]
             secret_candidates = ["BINANCE_API_SECRET"]
 
@@ -89,9 +81,7 @@ class BinanceAccountProvider:
 
     def _sign(self, params: dict[str, Any]) -> str:
         query = urllib.parse.urlencode(params, doseq=True)
-        return hmac.new(
-            self.api_secret.encode(), query.encode(), hashlib.sha256
-        ).hexdigest()
+        return hmac.new(self.api_secret.encode(), query.encode(), hashlib.sha256).hexdigest()
 
     async def _get(
         self,
@@ -160,9 +150,7 @@ class BinanceAccountProvider:
         # COIN-M: sum wallet balances across assets (approx in their asset terms; left as 0 for simplicity)
         def coinm_equity_est(cm: dict[str, Any]) -> float:
             try:
-                return sum(
-                    float(x.get("walletBalance", 0)) for x in cm.get("assets", [])
-                )
+                return sum(float(x.get("walletBalance", 0)) for x in cm.get("assets", []))
             except Exception:
                 return 0.0
 

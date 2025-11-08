@@ -7,8 +7,8 @@ adapters or wallets can be swapped without rewriting orchestration code.
 """
 
 from .config import DexConfig, load_dex_config
-from .state import DexState, DexPosition
-from .executor import DexExecutor, DexExecutionResult
+from .executor import DexExecutionResult, DexExecutor
+from .state import DexPosition, DexState
 
 __all__ = [
     "DexConfig",

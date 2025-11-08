@@ -4,7 +4,7 @@ import json
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Deque, Dict, Optional
 

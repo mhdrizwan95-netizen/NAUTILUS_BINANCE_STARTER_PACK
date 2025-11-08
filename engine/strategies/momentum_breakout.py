@@ -9,12 +9,12 @@ import time
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence
 
+from engine.core.market_resolver import resolve_market_choice
 from engine.metrics import (
     momentum_breakout_candidates_total,
     momentum_breakout_cooldown_epoch,
     momentum_breakout_orders_total,
 )
-from engine.core.market_resolver import resolve_market_choice
 
 
 def _env_bool(name: str, default: bool) -> bool:

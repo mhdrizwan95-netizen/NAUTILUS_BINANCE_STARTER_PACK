@@ -13,9 +13,7 @@ volumes = 100 + np.random.rand(1000) * 200  # BTC-like volumes
 
 
 # Make the rolling features to test
-def _rolling_features(
-    price: np.ndarray, volume: np.ndarray, window: int
-) -> pd.DataFrame:
+def _rolling_features(price: np.ndarray, volume: np.ndarray, window: int) -> pd.DataFrame:
     pass
 
     # Simple 1-step returns

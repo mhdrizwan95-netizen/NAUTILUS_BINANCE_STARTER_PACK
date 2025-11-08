@@ -5,7 +5,9 @@ Validates dynamic capital allocation and quota enforcement.
 """
 
 import json
+
 import pytest
+
 from ops.capital_allocator import get_model_quota, simulate_allocation_cycle
 
 
@@ -27,9 +29,7 @@ class TestCapitalAllocation:
 
     def test_get_model_quota(self, temp_allocations_file, monkeypatch):
         """Test quota retrieval for a model."""
-        monkeypatch.setattr(
-            "ops.capital_allocator.ALLOCATIONS_PATH", temp_allocations_file
-        )
+        monkeypatch.setattr("ops.capital_allocator.ALLOCATIONS_PATH", temp_allocations_file)
 
         quota = get_model_quota("hmm_v2_canary")
         assert quota == 5000.0

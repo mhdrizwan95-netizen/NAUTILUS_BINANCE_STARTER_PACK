@@ -44,13 +44,9 @@ def test_momentum_rt_breakout_signal_generates_order():
     assert math.isclose(signal["quote"], cfg.quote_usd)
     assert signal["market"] == "futures"
     meta = signal["meta"]
-    assert math.isclose(
-        meta["stop_price"], 103.2 * (1 - cfg.stop_loss_pct), rel_tol=1e-6
-    )
+    assert math.isclose(meta["stop_price"], 103.2 * (1 - cfg.stop_loss_pct), rel_tol=1e-6)
     assert math.isclose(meta["trail_distance"], 103.2 * cfg.trail_pct, rel_tol=1e-6)
-    assert math.isclose(
-        meta["take_profit"], 103.2 * (1 + cfg.take_profit_pct), rel_tol=1e-6
-    )
+    assert math.isclose(meta["take_profit"], 103.2 * (1 + cfg.take_profit_pct), rel_tol=1e-6)
     metrics_blob = generate_latest().decode()
     assert "momentum_rt_breakouts_total" in metrics_blob
     assert "momentum_rt_cooldown_epoch" in metrics_blob
@@ -72,10 +68,6 @@ def test_momentum_rt_short_signal_when_enabled():
     assert signal["side"] == "SELL"
     assert signal["market"] == "futures"
     meta = signal["meta"]
-    assert math.isclose(
-        meta["stop_price"], 104.5 * (1 + cfg.stop_loss_pct), rel_tol=1e-6
-    )
-    assert math.isclose(
-        meta["take_profit"], 104.5 * (1 - cfg.take_profit_pct), rel_tol=1e-6
-    )
+    assert math.isclose(meta["stop_price"], 104.5 * (1 + cfg.stop_loss_pct), rel_tol=1e-6)
+    assert math.isclose(meta["take_profit"], 104.5 * (1 - cfg.take_profit_pct), rel_tol=1e-6)
     assert math.isclose(meta["trail_distance"], 104.5 * cfg.trail_pct, rel_tol=1e-6)

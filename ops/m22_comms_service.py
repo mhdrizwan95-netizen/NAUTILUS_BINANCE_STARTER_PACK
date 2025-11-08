@@ -15,16 +15,16 @@ Communication capabilities enabled:
 - Multi-platform notifications (Telegram, Discord, future: Slack, Teams)
 """
 
-import os
 import json
-import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
-from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import JSONResponse, PlainTextResponse
-from fastapi.middleware.cors import CORSMiddleware
+import os
+from datetime import datetime
+from typing import Any, Dict, List
+
 import httpx
+from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -164,7 +164,6 @@ def get_system_health() -> Dict[str, Any]:
     """Aggregate health status from all system components."""
     # Load latest metrics and state
     state = safe_json_load(M19_STATE_FILE, {})
-    metrics = safe_json_load(M19_METRICS_FILE, {})
 
     # Recent incidents indicate system stress
     recent_incidents = read_recent_incidents(5)
@@ -441,7 +440,7 @@ async def post_alert(alert_payload: Dict[str, Any], background_tasks: Background
         raise HTTPException(status_code=400, detail="Alert message required")
 
     # Format message for chat platforms
-    formatted_message = f"🚨 **Trading Organism Alert**\n\n"
+    formatted_message = "🚨 **Trading Organism Alert**\n\n"
     formatted_message += f"**Source:** {source}\n"
     formatted_message += f"**Severity:** {severity.upper()}\n"
     formatted_message += f"**Message:** {message}\n"

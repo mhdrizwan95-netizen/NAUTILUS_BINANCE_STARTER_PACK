@@ -11,9 +11,7 @@ def exists(rel: str) -> bool:
 def test_backtest_stub_absent():
     assert not exists("run_backtest.py"), "run_backtest.py should be removed"
     assert not exists("ops/run_backtest.py"), "ops/run_backtest.py should be removed"
-    assert not exists(
-        "scripts/run_backtest.py"
-    ), "scripts/run_backtest.py should be removed"
+    assert not exists("scripts/run_backtest.py"), "scripts/run_backtest.py should be removed"
 
 
 def test_engine_imports_ok():

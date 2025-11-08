@@ -1,8 +1,11 @@
-import os, importlib, json
+import importlib
+import json
+import os
+
 import pytest
 import respx
-from httpx import Response
 from fastapi.testclient import TestClient
+from httpx import Response
 
 
 @pytest.fixture(autouse=True)
@@ -24,7 +27,6 @@ def mk_client(endpoints: str):
 @respx.mock
 def test_risk_alerts_on_high_exposure():
     """Test that risk monitoring triggers alerts when exposure exceeds limit."""
-    c = mk_client("http://e1:8003")
 
     # Mock exposure response with high BTCUSDT position
     respx.get("http://localhost:8001/aggregate/exposure").mock(
@@ -76,7 +78,6 @@ def test_risk_alerts_on_high_exposure():
 @respx.mock
 def test_no_alert_on_safe_exposure():
     """Test that alerts are not sent when exposure is within limits."""
-    c = mk_client("http://e1:8003")
 
     # Mock exposure response with safe position
     respx.get("http://localhost:8001/aggregate/exposure").mock(
@@ -123,7 +124,6 @@ def test_no_alert_on_safe_exposure():
 @respx.mock
 def test_risk_monitor_handles_monitor_errors():
     """Test risk monitoring continues despite errors in one iteration."""
-    c = mk_client("http://e1:8003")
 
     # Mock failure response
     respx.get("http://localhost:8001/aggregate/exposure").mock(

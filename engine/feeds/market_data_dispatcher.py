@@ -1,13 +1,13 @@
-from __future__ import annotations
-
 """Market data dispatcher that bridges WebSocket streams into the event bus."""
+
+from __future__ import annotations
 
 import logging
 import time
 from typing import Any, Callable, Dict, Optional
 
-from engine.core.event_bus import EventBus
 from engine import metrics
+from engine.core.event_bus import EventBus
 
 logger = logging.getLogger("engine.market_data.dispatcher")
 

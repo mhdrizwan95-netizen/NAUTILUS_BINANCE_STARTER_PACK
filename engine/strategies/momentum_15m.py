@@ -9,9 +9,9 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Optional
 
-from engine.execution.execute import StrategyExecutor
 from engine.config.defaults import MOMENTUM_15M_DEFAULTS
 from engine.config.env import env_bool, env_float, env_int, env_str
+from engine.execution.execute import StrategyExecutor
 
 logger = logging.getLogger("engine.momentum.15m")
 

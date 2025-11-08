@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
+import json
+import os
+import statistics
+from datetime import datetime
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from datetime import datetime
-import os, json, statistics
 
 DATA_PATH = "data/collective"
 os.makedirs(DATA_PATH, exist_ok=True)
@@ -16,7 +19,7 @@ AGGREGATE = os.path.join(DATA_PATH, "aggregate.json")
 async def submit(req: Request):
     data = await req.json()
     data["time"] = datetime.utcnow().isoformat()
-    with open(SUBMISSIONS, "a") as f:
+    with open(SUBMISSIONS, "a", encoding="utf-8") as f:
         f.write(json.dumps(data) + "\n")
     return {"status": "accepted"}
 
@@ -25,7 +28,8 @@ async def submit(req: Request):
 def aggregate():
     if not os.path.exists(SUBMISSIONS):
         return JSONResponse({"status": "empty"})
-    records = [json.loads(l) for l in open(SUBMISSIONS)]
+    with open(SUBMISSIONS, encoding="utf-8") as fh:
+        records = [json.loads(line) for line in fh]
     if not records:
         return {"status": "no_data"}
     # Compute consensus stats
@@ -33,12 +37,15 @@ def aggregate():
     agg = {m: statistics.mean([r.get(m, 0) for r in records if m in r]) for m in metrics}
     agg["n_nodes"] = len(records)
     agg["updated"] = datetime.utcnow().isoformat()
-    json.dump(agg, open(AGGREGATE, "w"), indent=2)
+    with open(AGGREGATE, "w", encoding="utf-8") as fh:
+        json.dump(agg, fh, indent=2)
     return agg
 
 
 @APP.get("/status")
 def status():
-    return JSONResponse(
-        json.load(open(AGGREGATE)) if os.path.exists(AGGREGATE) else {"status": "no_aggregate"}
-    )
+    if not os.path.exists(AGGREGATE):
+        return JSONResponse({"status": "no_aggregate"})
+    with open(AGGREGATE, encoding="utf-8") as fh:
+        payload = json.load(fh)
+    return JSONResponse(payload)

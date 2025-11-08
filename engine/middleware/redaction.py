@@ -9,7 +9,6 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.requests import Request
 from starlette.responses import Response
 
-
 REDACTION_KEYS = {"api_key", "secret", "token", "signature", "passphrase"}
 SENSITIVE_VALUES = {
     value.strip()

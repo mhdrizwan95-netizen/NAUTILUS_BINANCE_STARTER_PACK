@@ -48,9 +48,7 @@ def _read_csv(path: str) -> pd.DataFrame:
     for k in ["ts", "price", "volume"]:
         if k not in cols:
             raise ValueError(f"CSV missing required column '{k}'")
-    df = df.rename(
-        columns={cols["ts"]: "ts", cols["price"]: "price", cols["volume"]: "volume"}
-    )
+    df = df.rename(columns={cols["ts"]: "ts", cols["price"]: "price", cols["volume"]: "volume"})
     # normalize ts to seconds
     if df["ts"].max() > 1e12:  # probably ms
         df["ts"] = (df["ts"] / 1000.0).astype(float)
@@ -58,9 +56,7 @@ def _read_csv(path: str) -> pd.DataFrame:
     return df
 
 
-def _rolling_features(
-    price: np.ndarray, volume: np.ndarray, window: int
-) -> pd.DataFrame:
+def _rolling_features(price: np.ndarray, volume: np.ndarray, window: int) -> pd.DataFrame:
     # Simple 1-step returns
     rets = np.zeros_like(price)
     rets[1:] = (price[1:] - price[:-1]) / np.where(price[:-1] == 0, 1e-12, price[:-1])
@@ -92,9 +88,7 @@ def _rolling_features(
     return feats
 
 
-def _train_val_split(
-    X: np.ndarray, split_ratio: float = 0.8
-) -> Tuple[np.ndarray, np.ndarray]:
+def _train_val_split(X: np.ndarray, split_ratio: float = 0.8) -> Tuple[np.ndarray, np.ndarray]:
     n = len(X)
     ntr = max(10, int(n * split_ratio))
     return X[:ntr], X[ntr:]
@@ -153,9 +147,7 @@ def main(cfg: TrainConfig):
 
     # Evaluate log likelihood on train/val
     ll_tr = hmm.score(Xtr) if len(Xtr) else float("nan")
-    ll_va = (
-        hmm.score(Xval) if len(Xval) else float("nan") if len(Xval) else float("nan")
-    )
+    ll_va = hmm.score(Xval) if len(Xval) else float("nan") if len(Xval) else float("nan")
 
     # Persist wrapper
     wrapper = HMMPolicyWrapper(hmm, scaler)
@@ -179,22 +171,14 @@ def main(cfg: TrainConfig):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--csv", required=True, help="Path to price CSV with ts,price,volume"
-    )
+    ap.add_argument("--csv", required=True, help="Path to price CSV with ts,price,volume")
     ap.add_argument("--symbol", default="BTCUSDT")
-    ap.add_argument(
-        "--window", type=int, default=120, help="rolling window for vwap/zscore"
-    )
+    ap.add_argument("--window", type=int, default=120, help="rolling window for vwap/zscore")
     ap.add_argument("--states", type=int, default=3, help="number of regimes")
     ap.add_argument("--seed", type=int, default=42)
-    ap.add_argument(
-        "--cov", default="diag", choices=["diag", "full", "spherical", "tied"]
-    )
+    ap.add_argument("--cov", default="diag", choices=["diag", "full", "spherical", "tied"])
     ap.add_argument("--min-rows", type=int, default=2000)
-    ap.add_argument(
-        "--stride", type=int, default=1, help="reserved: future sub-sampling"
-    )
+    ap.add_argument("--stride", type=int, default=1, help="reserved: future sub-sampling")
     ap.add_argument("--out", default="engine/models/hmm_policy.pkl")
     args = ap.parse_args()
     cfg = TrainConfig(

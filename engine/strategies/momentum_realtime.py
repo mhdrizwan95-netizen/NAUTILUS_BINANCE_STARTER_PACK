@@ -1,13 +1,13 @@
-from __future__ import annotations
-
 """Real-time momentum breakout module wired to the streaming tick feed."""
+
+from __future__ import annotations
 
 import logging
 import math
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Deque, Dict, Iterable, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Deque, Dict, Iterable, Optional
 
 from engine import metrics
 from engine.config.defaults import MOMENTUM_RT_DEFAULTS
@@ -141,9 +141,7 @@ class MomentumStrategyModule:
         self._cooldown_until: Dict[str, float] = defaultdict(float)
         self._universe = StrategyUniverse(scanner)
         if self.cfg.symbols:
-            self._explicit_symbols = {
-                sym.split(".")[0].upper() for sym in self.cfg.symbols if sym
-            }
+            self._explicit_symbols = {sym.split(".")[0].upper() for sym in self.cfg.symbols if sym}
         else:
             self._explicit_symbols = None
 
@@ -201,9 +199,7 @@ class MomentumStrategyModule:
         effective_high = max(highs, baseline_high)
 
         pct_move_up = (price - effective_low) / effective_low if price > effective_low else 0.0
-        pct_move_down = (
-            (effective_high - price) / effective_high if price < effective_high else 0.0
-        )
+        pct_move_down = (effective_high - price) / effective_high if price < effective_high else 0.0
 
         recent_volume = sum(v for _, _, v in fast_points)
         baseline_volumes = [v for ts_val, _, v in window if ts_val < fast_cutoff and v > 0.0]

@@ -1,8 +1,8 @@
 import pytest
 
+from engine.core.event_bus import BUS
 from engine.metrics import generate_latest
 from engine.strategies.listing_sniper import ListingSniper, ListingSniperConfig
-from engine.core.event_bus import BUS
 
 
 @pytest.fixture
@@ -68,9 +68,7 @@ async def test_listing_sniper_emits_dex_candidate(monkeypatch):
 
     from engine.strategies import listing_sniper as ls_mod
 
-    monkeypatch.setattr(
-        ls_mod.httpx, "AsyncClient", lambda **_: _DexClient(dex_payload)
-    )
+    monkeypatch.setattr(ls_mod.httpx, "AsyncClient", lambda **_: _DexClient(dex_payload))
     events = []
 
     async def fake_publish(topic, payload):
@@ -113,9 +111,7 @@ class _RouterMetricsStub:
                 price = 1.0
                 out = []
                 for _ in range(limit):
-                    out.append(
-                        [0, price, price * 1.01, price * 0.99, price, 1000, 0, 250000]
-                    )
+                    out.append([0, price, price * 1.01, price * 0.99, price, 1000, 0, 250000])
                     price *= 1.001
                 return out
 

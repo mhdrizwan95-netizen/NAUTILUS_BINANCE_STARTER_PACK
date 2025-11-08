@@ -2,7 +2,8 @@ import asyncio
 from dataclasses import dataclass
 
 import hypothesis.strategies as st
-from hypothesis import given, settings as hyp_settings
+from hypothesis import given
+from hypothesis import settings as hyp_settings
 
 from engine.core.order_router import _place_market_order_async_core, set_exchange_client
 from engine.core.venue_specs import SymbolSpec
@@ -56,9 +57,7 @@ class _StubBinanceClient:
 
 @hyp_settings(deadline=None, max_examples=50)
 @given(
-    quote_usd=st.floats(
-        min_value=0.0, max_value=10_000.0, allow_nan=False, allow_infinity=False
-    ),
+    quote_usd=st.floats(min_value=0.0, max_value=10_000.0, allow_nan=False, allow_infinity=False),
     step=st.sampled_from([1e-6, 1e-5, 1e-4, 1e-3]),
     min_qty=st.sampled_from([0.0, 1e-6, 1e-5, 1e-4, 1e-3]),
     min_notional=st.sampled_from([0.0, 5.0, 10.0, 50.0]),

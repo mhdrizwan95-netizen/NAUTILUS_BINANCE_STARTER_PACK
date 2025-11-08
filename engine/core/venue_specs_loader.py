@@ -6,12 +6,13 @@ Fetches minQty, stepSize, minNotional for all USDT pairs from Binance
 and updates engine/core/venue_specs.json.
 """
 
-import requests
 import json
 import logging
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict
+
+import requests
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -27,7 +28,7 @@ class SymbolSpec:
 
 
 def fetch_binance_specs(quote="USDT") -> Dict[str, SymbolSpec]:
-    logging.info(f"Fetching /exchangeInfo from Binance...")
+    logging.info("Fetching /exchangeInfo from Binance...")
     r = requests.get(BINANCE_INFO_URL, timeout=10)
     r.raise_for_status()
     data = r.json()

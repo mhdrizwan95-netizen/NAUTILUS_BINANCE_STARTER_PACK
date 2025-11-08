@@ -1,13 +1,16 @@
 from pathlib import Path
-from typing import Dict, Any, Tuple, List
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
 import pandas as pd
 from hmmlearn.hmm import GaussianHMM
-from sklearn.preprocessing import StandardScaler
 from loguru import logger
-from .config import settings
-from . import model_store
+from sklearn.preprocessing import StandardScaler
+
 from services.common import manifest
+
+from . import model_store
+from .config import settings
 
 
 def _load_new_data() -> Tuple[pd.DataFrame, List[str]]:

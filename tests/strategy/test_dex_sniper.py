@@ -1,8 +1,8 @@
 import pytest
 
 from engine.dex.config import DexConfig
-from engine.dex.state import DexState
 from engine.dex.executor import DexExecutionResult
+from engine.dex.state import DexState
 from engine.strategies.dex_sniper import DexSniper
 
 

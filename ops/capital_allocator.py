@@ -13,15 +13,16 @@ Architecture:
 """
 
 from __future__ import annotations
-import os
-import json
-import time
-import logging
-import asyncio
-from pathlib import Path
-from typing import Dict, Any
-import httpx
 
+import asyncio
+import json
+import logging
+import os
+import time
+from pathlib import Path
+from typing import Any, Dict
+
+import httpx
 
 # Configuration paths
 POLICY_PATH = Path("ops/capital_policy.json")
@@ -70,7 +71,7 @@ def parse_prometheus_metrics(metrics_text: str) -> Dict[str, Any]:
             continue
 
         # Portfolio equity
-        if "portfolio_equity_usd" in line and not "{" in line:
+        if "portfolio_equity_usd" in line and "{" not in line:
             try:
                 # Simple format: portfolio_equity_usd 50000.0
                 value_part = line.split()[-1]
@@ -454,7 +455,6 @@ async def simulate_allocation_cycle(policy: Dict = None, metrics: Dict = None) -
 # Startup integration
 def integrate_with_ops():
     """Integration point for OPS API startup."""
-    import ops.ops_api  # Will add startup handler
 
     logging.info("[ALLOC] Capital allocator integrated with OPS")
     return True

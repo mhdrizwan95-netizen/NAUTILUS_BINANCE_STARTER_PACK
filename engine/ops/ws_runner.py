@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 WSRunner — resilient wrapper around a WS client order/execution stream.
 
@@ -11,10 +9,12 @@ Features:
 All behavior is gated by cfg flags passed in at construction time.
 """
 
+from __future__ import annotations
+
 import asyncio
 import random
 import time
-from typing import Callable, Awaitable
+from typing import Awaitable, Callable
 
 
 class WSRunner:

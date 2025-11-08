@@ -1,4 +1,5 @@
 import types
+
 import pytest
 
 from engine.guards.funding_guard import FundingGuard
@@ -18,9 +19,7 @@ class _Router:
                 from engine.core.portfolio import Position
 
                 self.positions = {
-                    "BTCUSDT": Position(
-                        symbol="BTCUSDT", quantity=0.1, avg_price=20000.0
-                    )
+                    "BTCUSDT": Position(symbol="BTCUSDT", quantity=0.1, avg_price=20000.0)
                 }
 
         self._state = _S()

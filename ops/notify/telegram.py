@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import aiohttp
 import logging
 import os
 import socket
+
+import aiohttp
 
 
 class Telegram:

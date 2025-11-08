@@ -1,18 +1,21 @@
-from fastapi import FastAPI, Depends
-from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
+
+from fastapi import Depends, FastAPI
+from fastapi.responses import JSONResponse
+
+from shared.dry_run import install_dry_run_guard, log_dry_run_banner
+
+from . import model_store
 from .auth import require_role
+from .inference import predict_proba, start_watchdog
 from .schemas import (
-    TrainRequest,
-    TrainResponse,
     ModelInfo,
     PredictRequest,
     PredictResponse,
+    TrainRequest,
+    TrainResponse,
 )
 from .trainer import train_once
-from .inference import start_watchdog, predict_proba
-from . import model_store
-from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 
 @asynccontextmanager

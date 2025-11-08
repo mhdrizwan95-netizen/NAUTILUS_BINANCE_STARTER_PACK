@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Risk event handlers (minimal, safe defaults).
 
 Soft handler cancels pending entries and tightens stops — stubbed with
 no-ops to avoid impacting tests. Wire real implementations incrementally.
 """
+
+from __future__ import annotations
 
 import logging
 

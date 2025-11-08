@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import subprocess as sp
-import datetime as dt
 from pathlib import Path
 from typing import Dict, List
-
 
 ROOT = Path(__file__).resolve().parents[1]
 CURSOR = ROOT / "ops" / "training_cursor.json"

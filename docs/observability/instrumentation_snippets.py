@@ -4,21 +4,23 @@ Reference instrumentation snippets for Nautilus services.
 
 # --- FastAPI (Ops API / UI API) ---------------------------------------------
 
+import contextvars
+import logging
+import uuid
+
 from fastapi import FastAPI
-from prometheus_fastapi_instrumentator import Instrumentator
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from prometheus_fastapi_instrumentator import Instrumentator
 
 
 def configure_observability(app: FastAPI, service_name: str) -> None:
     # Prometheus HTTP request metrics
-    Instrumentator().instrument(app).expose(
-        app, include_in_schema=False, endpoint="/metrics"
-    )
+    Instrumentator().instrument(app).expose(app, include_in_schema=False, endpoint="/metrics")
 
     # OpenTelemetry tracing (OTLP/HTTP)
     provider = TracerProvider(resource=Resource.create({"service.name": service_name}))
@@ -35,11 +37,9 @@ def configure_observability(app: FastAPI, service_name: str) -> None:
 
 # --- Async Task Logging Context ---------------------------------------------
 
-import contextvars
-import logging
-import uuid
-
-correlation_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar("correlation_id", default="")
+correlation_id_ctx: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "correlation_id", default=""
+)
 
 
 class ContextAdapter(logging.LoggerAdapter):

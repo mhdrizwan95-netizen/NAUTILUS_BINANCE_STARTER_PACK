@@ -1,4 +1,5 @@
 import types
+
 import pytest
 
 from engine.risk_guardian import GuardianConfig, RiskGuardian
@@ -16,9 +17,7 @@ class StubPosition:
 class StubRouter:
     def __init__(self, positions=None, realized=0.0, equity=0.0):
         positions = positions or {}
-        self._state = types.SimpleNamespace(
-            positions=positions, realized=realized, equity=equity
-        )
+        self._state = types.SimpleNamespace(positions=positions, realized=realized, equity=equity)
         self.calls = []
 
     def portfolio_service(self):
@@ -107,9 +106,7 @@ async def test_guardian_daily_stop_uses_equity_pct(monkeypatch, tmp_path):
     monkeypatch.delenv("MAX_DAILY_LOSS_USD", raising=False)
     monkeypatch.setattr(
         "engine.risk_guardian.load_runtime_config",
-        lambda: types.SimpleNamespace(
-            risk=types.SimpleNamespace(daily_stop_pct=0.06)
-        ),
+        lambda: types.SimpleNamespace(risk=types.SimpleNamespace(daily_stop_pct=0.06)),
     )
     cfg = GuardianConfig(
         enabled=True,
@@ -147,9 +144,7 @@ async def test_guardian_daily_stop_respects_env_override(monkeypatch, tmp_path):
     monkeypatch.setenv("MAX_DAILY_LOSS_USD", "500")
     monkeypatch.setattr(
         "engine.risk_guardian.load_runtime_config",
-        lambda: types.SimpleNamespace(
-            risk=types.SimpleNamespace(daily_stop_pct=0.10)
-        ),
+        lambda: types.SimpleNamespace(risk=types.SimpleNamespace(daily_stop_pct=0.10)),
     )
     cfg = GuardianConfig(
         enabled=True,

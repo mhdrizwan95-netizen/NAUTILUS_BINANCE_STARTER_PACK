@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Wallet utilities for on-chain DEX execution.
 
@@ -7,10 +5,12 @@ This module wraps Web3 interactions so the rest of the strategy can remain
 async-friendly while underlying RPC calls run in a thread pool.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
 import asyncio
 import functools
 import logging
+from dataclasses import dataclass
 from typing import Dict
 
 from web3 import Web3

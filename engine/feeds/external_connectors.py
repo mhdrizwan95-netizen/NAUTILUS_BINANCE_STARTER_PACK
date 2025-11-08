@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 External data feed connectors.
 
@@ -11,6 +9,8 @@ Each connector is intentionally stubbed – it wires metrics, config plumbing,
 and event shaping so we can drop in real API integrations later without
 rewriting the orchestration glue.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging

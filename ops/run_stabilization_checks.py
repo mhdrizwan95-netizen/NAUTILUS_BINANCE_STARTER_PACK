@@ -7,19 +7,18 @@ import sys
 from collections import defaultdict
 from contextlib import suppress
 from datetime import datetime
-from typing import Dict, Tuple
-
 from pathlib import Path
+from typing import Dict, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from prometheus_client.parser import text_string_to_metric_families
+from prometheus_client.parser import text_string_to_metric_families  # noqa: E402
 
-from engine.runtime.config import RuntimeConfig, load_runtime_config
-from engine.metrics import generate_latest
-from tools.synthetic_feed import run_synthetic_runtime
+from engine.metrics import generate_latest  # noqa: E402
+from engine.runtime.config import RuntimeConfig, load_runtime_config  # noqa: E402
+from tools.synthetic_feed import run_synthetic_runtime  # noqa: E402
 
 try:
     import yaml

@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from engine.idempotency import CACHE
-
 from engine.strategies.meme_coin_sentiment import MemeCoinConfig, MemeCoinSentiment
 
 
@@ -30,9 +29,7 @@ class _Router:
         self._portfolio = _Portfolio(equity)
         self.calls: list[tuple[str, str, float, str | None]] = []
 
-    async def market_quote(
-        self, symbol: str, side: str, quote: float, market: str | None = None
-    ):
+    async def market_quote(self, symbol: str, side: str, quote: float, market: str | None = None):
         self.calls.append((symbol, side, quote, market))
         price = 0.1
         qty = quote / price

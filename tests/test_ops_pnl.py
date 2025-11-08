@@ -1,10 +1,14 @@
-import os, importlib, asyncio, contextlib
+import asyncio
+import contextlib
+import importlib
+import os
+
 import pytest
 import respx
-from httpx import Response
 from fastapi.testclient import TestClient
-from ops.pnl_collector import pnl_collector_loop, PNL_REALIZED, PNL_UNREALIZED
-from ops.pnl_collector import _venue_label
+from httpx import Response
+
+from ops.pnl_collector import PNL_REALIZED, PNL_UNREALIZED, _venue_label, pnl_collector_loop
 
 
 @pytest.fixture(autouse=True)
@@ -25,9 +29,7 @@ def mk_client(endpoints: str):
 async def test_pnl_collector_gathers(monkeypatch):
     """Test that PnL collector aggregates data from multiple engines"""
     # Mock engine endpoints
-    monkeypatch.setenv(
-        "ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005"
-    )
+    monkeypatch.setenv("ENGINE_ENDPOINTS", "http://engine_binance:8003,http://engine_ibkr:8005")
 
     # Mock responses with PnL data
     binance_pnl = {"pnl": {"realized": 134.2, "unrealized": 5.8}}
@@ -64,9 +66,7 @@ async def test_pnl_collector_handles_engine_failures():
     with respx.mock:
         # Only one engine available
         respx.get("http://engine_binance:8003/account_snapshot").mock(
-            return_value=Response(
-                200, json={"pnl": {"realized": 100.0, "unrealized": 10.0}}
-            )
+            return_value=Response(200, json={"pnl": {"realized": 100.0, "unrealized": 10.0}})
         )
         respx.get("http://engine_down:8004/account_snapshot").mock(
             return_value=Response(500, text="unavailable")
@@ -90,9 +90,7 @@ def test_pnl_api_endpoint(monkeypatch):
 
     # Mock the account snapshot endpoint for API test
     respx.get("http://engine_binance:8003/account_snapshot").mock(
-        return_value=Response(
-            200, json={"pnl": {"realized": 250.5, "unrealized": 15.3}}
-        )
+        return_value=Response(200, json={"pnl": {"realized": 250.5, "unrealized": 15.3}})
     )
 
     # Update the metrics first

@@ -11,7 +11,7 @@ from collections import Counter
 
 import pytest
 
-from ops.strategy_router import choose_model, _load_weights, WEIGHTS_PATH
+from ops.strategy_router import WEIGHTS_PATH, _load_weights, choose_model
 
 
 @pytest.fixture
@@ -48,12 +48,8 @@ def test_weighted_choice_distribution(sample_weights):
     canary_pct = counts.get("canary_model", 0) / total
 
     # Allow some statistical tolerance
-    assert (
-        0.75 <= stable_pct <= 0.85
-    ), f"Stable model got {stable_pct:.3f}, expected ~0.80"
-    assert (
-        0.15 <= canary_pct <= 0.25
-    ), f"Canary model got {canary_pct:.3f}, expected ~0.20"
+    assert 0.75 <= stable_pct <= 0.85, f"Stable model got {stable_pct:.3f}, expected ~0.80"
+    assert 0.15 <= canary_pct <= 0.25, f"Canary model got {canary_pct:.3f}, expected ~0.20"
 
     print(f"Stable model: {stable_pct:.3f} ({counts['stable_model']} samples)")
     print(f"Canary model: {canary_pct:.3f} ({counts['canary_model']} samples)")
@@ -85,9 +81,7 @@ def test_canary_max_weight_enforcement(sample_weights):
         canary_pct <= config["max_canary_weight"] + 0.02
     ), f"Canary weight {canary_pct:.3f} exceeds max {config['max_canary_weight']}"
 
-    print(
-        f"Canary weight properly capped: {canary_pct:.3f} ≤ {config['max_canary_weight']}"
-    )
+    print(f"Canary weight properly capped: {canary_pct:.3f} ≤ {config['max_canary_weight']}")
 
 
 def test_weights_sum_validation(sample_weights):
@@ -120,9 +114,7 @@ def test_weights_file_parsing():
 
     # Verify weights is a dict with positive values
     assert isinstance(config["weights"], dict), "weights must be a dict"
-    assert all(
-        v > 0 for v in config["weights"].values()
-    ), "all weights must be positive"
+    assert all(v > 0 for v in config["weights"].values()), "all weights must be positive"
 
 
 def test_model_selection_determinism():
@@ -150,8 +142,6 @@ if __name__ == "__main__":
     print("Running canary weights tests...")
 
     # Test 1: Basic distribution
-    test_weighted_choice_distribution(
-        None
-    )  # sample_weights fixture not needed for direct run
+    test_weighted_choice_distribution(None)  # sample_weights fixture not needed for direct run
 
     print("✅ All canary weight tests passed!")

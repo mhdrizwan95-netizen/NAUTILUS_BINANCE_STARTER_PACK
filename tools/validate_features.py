@@ -13,8 +13,9 @@ Checks:
 """
 from __future__ import annotations
 
-import sys
 import math
+import sys
+
 import pandas as pd
 
 

@@ -10,19 +10,19 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 from engine.config.defaults import MEME_SENTIMENT_DEFAULTS
-from engine.config.env import env_bool, env_float, env_int, env_str, env_csv
-from engine.core.order_router import OrderRouter
+from engine.config.env import env_bool, env_csv, env_float, env_int, env_str
 from engine.core.market_resolver import resolve_market_choice
-from engine.risk import RiskRails
+from engine.core.order_router import OrderRouter
 from engine.execution.execute import StrategyExecutor
+from engine.risk import RiskRails
 from shared.cooldown import CooldownTracker
 from shared.meme_utils import generate_meme_bracket
 
 try:  # Metrics are optional in some test contexts
     from engine.metrics import (
+        meme_sentiment_cooldown_epoch,
         meme_sentiment_events_total,
         meme_sentiment_orders_total,
-        meme_sentiment_cooldown_epoch,
     )
 except Exception:  # pragma: no cover - metrics disabled
     meme_sentiment_events_total = None  # type: ignore[assignment]

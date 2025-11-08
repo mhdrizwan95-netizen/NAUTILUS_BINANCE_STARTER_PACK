@@ -1,7 +1,6 @@
 import asyncio
 import contextvars
 import glob
-import httpx
 import json
 import logging
 import os
@@ -16,6 +15,7 @@ from pathlib import Path
 from pathlib import Path as Path2
 from typing import Any, Dict, List
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,6 +24,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.websockets import WebSocketDisconnect
+
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 os.environ.setdefault("OBS_SERVICE_NAME", "ops-api")
@@ -33,26 +34,49 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - optional in minimal envs
     FastAPIInstrumentor = None  # type: ignore[assignment]
 
-from ops.prometheus import get_or_create_counter, render_latest
-from ops.pnl_collector import PNL_REALIZED, PNL_UNREALIZED
+from engine.logging_utils import bind_request_id, reset_request_context, setup_logging
+from engine.metrics import observe_http_request
+from engine.middleware.redaction import RedactionMiddleware
+from ops import ui_state
+from ops.background import account_broadcaster, default_symbols, price_stream
 from ops.env import engine_endpoints
+from ops.pnl_collector import PNL_REALIZED, PNL_UNREALIZED
+from ops.pnl_dashboard import router as pnl_router
 from ops.portfolio_collector import (
-    PORTFOLIO_EQUITY,
     PORTFOLIO_CASH,
+    PORTFOLIO_EQUITY,
     PORTFOLIO_GAIN,
-    PORTFOLIO_RET,
-    PORTFOLIO_PREV,
     PORTFOLIO_LAST,
+    PORTFOLIO_PREV,
+    PORTFOLIO_RET,
+)
+from ops.prometheus import get_or_create_counter, render_latest
+from ops.routes.orders import router as orders_router
+from ops.situations.router import router as situations_router
+from ops.strategy_router import router as strategy_router
+from ops.telemetry_store import (
+    Metrics as _Metrics,
+)
+from ops.telemetry_store import (
+    Snapshot as _Snapshot,
+)
+from ops.telemetry_store import (
+    load as _load_snap,
+)
+from ops.telemetry_store import (
+    save as _save_snap,
 )
 from ops.ui_api import (
-    router as ui_router,
+    broadcast_account,
+    cc_health,
     ws_account,
     ws_events,
     ws_orders,
     ws_price,
     ws_trades,
-    broadcast_account,
-    cc_health,
+)
+from ops.ui_api import (
+    router as ui_router,
 )
 from ops.ui_services import (
     ConfigService,
@@ -64,21 +88,6 @@ from ops.ui_services import (
     ScannerService,
     StrategyGovernanceService,
 )
-from ops import ui_state
-from ops.background import account_broadcaster, default_symbols, price_stream
-from ops.telemetry_store import (
-    load as _load_snap,
-    save as _save_snap,
-    Metrics as _Metrics,
-    Snapshot as _Snapshot,
-)
-from ops.routes.orders import router as orders_router
-from ops.strategy_router import router as strategy_router
-from ops.pnl_dashboard import router as pnl_router
-from ops.situations.router import router as situations_router
-from engine.logging_utils import bind_request_id, reset_request_context, setup_logging
-from engine.middleware.redaction import RedactionMiddleware
-from engine.metrics import observe_http_request
 
 # Risk monitoring configuration
 RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
@@ -580,7 +589,8 @@ SNAP_DIR = Path2("data/ops_snapshots")
 SNAP_DIR.mkdir(parents=True, exist_ok=True)
 RET_DAYS = int(os.getenv("SNAP_RETENTION_DAYS", "14"))
 
-from ops.engine_client import get_portfolio, health as engine_health  # noqa: E402
+from ops.engine_client import get_portfolio  # noqa: E402
+from ops.engine_client import health as engine_health  # noqa: E402
 
 # globals for account cache
 ACCOUNT_CACHE: dict = {
@@ -775,12 +785,12 @@ async def _risk_monitoring_loop(run_once: bool = False):
         await asyncio.sleep(EXPOSURE_CHECK_INTERVAL)
 
 
-from ops.portfolio_collector import portfolio_collector_loop  # noqa: E402
-from ops.strategy_tracker import strategy_tracker_loop  # noqa: E402
-from ops.strategy_selector import promote_best  # noqa: E402
-
-import os as _os  # noqa: E402
 import fcntl as _fcntl  # noqa: E402
+import os as _os  # noqa: E402
+
+from ops.portfolio_collector import portfolio_collector_loop  # noqa: E402
+from ops.strategy_selector import promote_best  # noqa: E402
+from ops.strategy_tracker import strategy_tracker_loop  # noqa: E402
 
 _TRACKER_LOCK_FD = None  # keep process-global lock handle alive
 
@@ -1097,6 +1107,7 @@ def manual_promote_strategy(req: dict, request: Request):
 
         # Broadcast to engines
         import asyncio
+
         from ops.strategy_selector import push_model_update
 
         asyncio.run(push_model_update(model_tag))

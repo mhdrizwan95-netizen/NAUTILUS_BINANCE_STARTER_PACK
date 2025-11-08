@@ -6,9 +6,9 @@ import logging
 import time
 from typing import Iterable, List, Sequence
 
+from engine import metrics
 from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
 from engine.events.schemas import ExternalEvent
-from engine import metrics
 
 _LOG = logging.getLogger("engine.events.publisher")
 

@@ -11,13 +11,14 @@ Design Philosophy:
 - Executive-grade visualization and reporting
 """
 
-import os
 import json
-import time
+import os
 import statistics
+import time
 from pathlib import Path
-from fastapi import APIRouter
+
 import httpx
+from fastapi import APIRouter
 
 router = APIRouter()
 

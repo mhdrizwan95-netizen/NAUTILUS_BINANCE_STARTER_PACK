@@ -4,11 +4,10 @@ Order Management System (OMS) data models and types.
 Defines the complete order lifecycle from creation to terminal state.
 """
 
-from dataclasses import dataclass, asdict
-from typing import Optional, Dict, Any, Literal
 import time
 import uuid
-
+from dataclasses import asdict, dataclass
+from typing import Any, Dict, Literal, Optional
 
 # Type definitions for better type safety
 OrderType = Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]

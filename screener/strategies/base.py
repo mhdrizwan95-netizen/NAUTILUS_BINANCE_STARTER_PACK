@@ -15,7 +15,6 @@ from typing import (
 
 from shared.signal_math import confidence_from_score
 
-
 MappingLike = Mapping[str, Any]
 
 

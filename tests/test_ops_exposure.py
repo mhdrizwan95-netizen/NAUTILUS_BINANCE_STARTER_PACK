@@ -1,8 +1,11 @@
-import os, importlib
+import importlib
+import os
+
 import pytest
 import respx
-from httpx import Response
 from fastapi.testclient import TestClient
+from httpx import Response
+
 from ops.aggregate_exposure import aggregate_exposure
 
 
@@ -42,12 +45,8 @@ async def test_exposure_aggregates_binance_and_ibkr(monkeypatch):
     ibkr_port = {"positions": [{"symbol": "AAPL.IBKR", "qty_base": 2.0}]}
 
     with respx.mock:
-        respx.get("http://e_bin:8003/portfolio").mock(
-            return_value=Response(200, json=bin_port)
-        )
-        respx.get("http://e_ibkr:8005/portfolio").mock(
-            return_value=Response(200, json=ibkr_port)
-        )
+        respx.get("http://e_bin:8003/portfolio").mock(return_value=Response(200, json=bin_port))
+        respx.get("http://e_ibkr:8005/portfolio").mock(return_value=Response(200, json=ibkr_port))
 
         # Provide IBKR price via fake module
         class FakeGauge:
@@ -109,9 +108,7 @@ async def test_exposure_aggregates_binance_and_ibkr(monkeypatch):
 async def test_exposure_handles_unavailable_engines():
     """Test aggregator resilience with unavailable engines"""
     missing_portfolio = {
-        "positions": [
-            {"symbol": "ETHUSDT.BINANCE", "qty_base": 1.0, "last_price_quote": 2500.0}
-        ]
+        "positions": [{"symbol": "ETHUSDT.BINANCE", "qty_base": 1.0, "last_price_quote": 2500.0}]
     }
 
     with respx.mock:
@@ -119,13 +116,9 @@ async def test_exposure_handles_unavailable_engines():
         respx.get("http://good:8003/portfolio").mock(
             return_value=Response(200, json=missing_portfolio)
         )
-        respx.get("http://bad:8004/portfolio").mock(
-            return_value=Response(500, text="unavailable")
-        )
+        respx.get("http://bad:8004/portfolio").mock(return_value=Response(500, text="unavailable"))
 
-        agg = await aggregate_exposure(
-            engine_endpoints_env="http://good:8003,http://bad:8004"
-        )
+        agg = await aggregate_exposure(engine_endpoints_env="http://good:8003,http://bad:8004")
 
         assert "ETHUSDT.BINANCE" in agg.by_symbol
         eth_pos = agg.by_symbol["ETHUSDT.BINANCE"]

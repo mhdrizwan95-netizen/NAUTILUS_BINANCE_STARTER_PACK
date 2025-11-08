@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Configuration loader for the DEX sniper stack.
 
@@ -7,8 +5,10 @@ Environment knobs mirror the playbook defaults while staying optional so the
 entire module can be exercised in tests without touching real wallets.
 """
 
-from dataclasses import dataclass
+from __future__ import annotations
+
 import os
+from dataclasses import dataclass
 
 
 def _as_bool(value: str | None, default: bool) -> bool:

@@ -5,13 +5,15 @@ import inspect
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional, Sequence, Set
+from typing import Any, Dict, Optional, Sequence, Set
 
 import httpx
 
-from engine.core.order_router import OrderRouter
 from engine.core.event_bus import BUS
+from engine.core.market_resolver import resolve_market_choice
+from engine.core.order_router import OrderRouter
 from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
+from engine.execution.execute import StrategyExecutor
 from engine.metrics import (
     listing_sniper_announcements_total,
     listing_sniper_cooldown_epoch,
@@ -21,8 +23,6 @@ from engine.metrics import (
     listing_sniper_skips_total,
 )
 from engine.risk import RiskRails
-from engine.core.market_resolver import resolve_market_choice
-from engine.execution.execute import StrategyExecutor
 from shared.cooldown import CooldownTracker
 from shared.listing_utils import generate_listing_targets
 
@@ -638,7 +638,6 @@ class ListingSniper:
             if payload.get(key) is not None:
                 return self._parse_timestamp(payload[key])
 
-        texts: Iterable[str] = []
         extra = []
         for field in ("content", "summary", "body", "articleContent", "richText"):
             value = payload.get(field)

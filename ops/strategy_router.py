@@ -30,7 +30,6 @@ from fastapi import APIRouter, HTTPException, Request
 from ops.capital_allocator import get_model_quota
 from ops.env import engine_endpoints
 
-
 # Configuration
 WEIGHTS_PATH = Path("ops/strategy_weights.json")
 ENGINE_ENDPOINTS = engine_endpoints()

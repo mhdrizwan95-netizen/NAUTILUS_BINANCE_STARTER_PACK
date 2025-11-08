@@ -12,16 +12,16 @@ from ..core import order_router
 from ..core.market_resolver import resolve_market
 from ..core.portfolio import Portfolio
 from ..metrics import (
+    leverage_set_latency_ms,
+    strategy_bucket_usage_fraction,
+    strategy_leverage_applied,
+    strategy_leverage_configured,
+    strategy_leverage_mismatch_total,
     strategy_orders_total,
     strategy_signal_latency_seconds,
     strategy_signal_queue_latency_sec,
     strategy_signal_queue_len,
     strategy_signals_total,
-    strategy_leverage_configured,
-    strategy_leverage_applied,
-    strategy_leverage_mismatch_total,
-    leverage_set_latency_ms,
-    strategy_bucket_usage_fraction,
 )
 from .config import RuntimeConfig
 from .universe import UniverseManager

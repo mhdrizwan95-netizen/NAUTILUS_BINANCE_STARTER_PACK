@@ -44,9 +44,7 @@ def _build_test_data():
         trend_vols[j] += 900
     scalp_prices = [50 + ((-1) ** i) * 0.03 for i in range(60)]
     scalp_vols = [1500] * 60
-    momentum_prices = [30 + 0.05 * i for i in range(40)] + [
-        32 + 0.9 * i for i in range(20)
-    ]
+    momentum_prices = [30 + 0.05 * i for i in range(40)] + [32 + 0.9 * i for i in range(20)]
     momentum_vols = [250] * 40 + [2200] * 20
     meme_prices = [5 + 0.01 * i for i in range(55)] + [5.6, 6.2, 7.0, 7.8, 8.4]
     meme_vols = [80] * 55 + [1800, 2200, 2600, 3000, 3400]
@@ -169,7 +167,5 @@ def test_trend_screener_rejects_neutral_rsi(monkeypatch):
     features["rsi_14"] = 50.0
 
     screener = TrendFollowingScreener()
-    candidate = screener.evaluate(
-        symbol, universe[symbol], klines[symbol], books[symbol], features
-    )
+    candidate = screener.evaluate(symbol, universe[symbol], klines[symbol], books[symbol], features)
     assert candidate is None

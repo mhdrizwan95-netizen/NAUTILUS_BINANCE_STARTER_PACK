@@ -1,10 +1,11 @@
-import pytest
-from unittest.mock import patch
 import time
+from unittest.mock import patch
+
+import pytest
 
 from engine.strategy import (
-    on_tick,
     _MACross,
+    on_tick,
     register_tick_listener,
 )
 
@@ -31,9 +32,7 @@ class TestStrategyOnTick:
 
     @patch("engine.strategy._MACross.push")
     @patch("engine.strategy.metrics")
-    @patch(
-        "engine.strategy._execute_strategy_signal", return_value={"status": "dry_run"}
-    )
+    @patch("engine.strategy._execute_strategy_signal", return_value={"status": "dry_run"})
     def test_ma_cross_buy_signal(self, mock_execute, mock_metrics, mock_ma_push):
         """Test MA crossover generates BUY signal."""
         mock_ma_push.return_value = "BUY"
@@ -53,9 +52,7 @@ class TestStrategyOnTick:
 
     @patch("engine.strategy._MACross.push")
     @patch("engine.strategy.metrics")
-    @patch(
-        "engine.strategy._execute_strategy_signal", return_value={"status": "dry_run"}
-    )
+    @patch("engine.strategy._execute_strategy_signal", return_value={"status": "dry_run"})
     def test_ma_cross_sell_signal(self, mock_execute, mock_metrics, mock_ma_push):
         """Test MA crossover generates SELL signal."""
         mock_ma_push.return_value = "SELL"
@@ -69,12 +66,8 @@ class TestStrategyOnTick:
 
     @patch("engine.strategy._MACross.push")
     @patch("engine.strategy.metrics")
-    @patch(
-        "engine.strategy._execute_strategy_signal", return_value={"status": "dry_run"}
-    )
-    def test_no_signal_when_no_crossover(
-        self, mock_execute, mock_metrics, mock_ma_push
-    ):
+    @patch("engine.strategy._execute_strategy_signal", return_value={"status": "dry_run"})
+    def test_no_signal_when_no_crossover(self, mock_execute, mock_metrics, mock_ma_push):
         """Test no signal when MA doesn't cross."""
         mock_ma_push.return_value = None  # No signal
 
@@ -89,9 +82,7 @@ class TestStrategyOnTick:
 
     @patch("engine.strategy._MACross.push", return_value="BUY")
     @patch("engine.strategy.metrics")
-    @patch(
-        "engine.strategy._execute_strategy_signal", return_value={"status": "submitted"}
-    )
+    @patch("engine.strategy._execute_strategy_signal", return_value={"status": "submitted"})
     def test_ma_confidence_calculation(self, mock_execute, mock_metrics, mock_ma_push):
         """Test MA confidence calculation and window management."""
         # Test that on_tick calls MA push and executes signals
@@ -131,9 +122,7 @@ class TestStrategyOnTick:
         strat._tick_listeners.clear()
 
     @patch("engine.strategy._MACross.push")
-    @patch(
-        "engine.strategy._execute_strategy_signal", return_value={"status": "dry_run"}
-    )
+    @patch("engine.strategy._execute_strategy_signal", return_value={"status": "dry_run"})
     @patch("engine.strategy.metrics")
     def test_btc_base_extraction(self, mock_metrics, mock_execute, mock_ma_push):
         """Test BTC base extraction from various symbol formats."""
@@ -142,9 +131,7 @@ class TestStrategyOnTick:
         on_tick("BTCUSDT.BINANCE", 50000.0, time.time())
 
         # Check that metrics were called with base symbol from qualified symbol
-        mock_metrics.strategy_signal.labels.assert_called_with(
-            symbol="BTCUSDT", venue="BINANCE"
-        )
+        mock_metrics.strategy_signal.labels.assert_called_with(symbol="BTCUSDT", venue="BINANCE")
         mock_metrics.strategy_confidence.labels.assert_called_with(
             symbol="BTCUSDT", venue="BINANCE"
         )
@@ -231,6 +218,6 @@ class TestStrategyOnTick:
         for price in prices:
             mac.push("TEST", price)
 
-        result = mac.push("TEST", 104.0)  # fast = 103.5, slow = let's calculate...
+        mac.push("TEST", 104.0)  # fast = 103.5, slow = let's calculate...
         # If calculation results in equal, no signal
         # Actually, we're not asserting result here since it depends on exact calculation

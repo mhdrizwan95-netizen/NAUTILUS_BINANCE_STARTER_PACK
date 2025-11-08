@@ -1,11 +1,14 @@
-from fastapi import FastAPI, HTTPException
-from typing import Dict, Any
+from typing import Any, Dict
+
 import numpy as np
+from fastapi import FastAPI, HTTPException
 from loguru import logger
-from .config import settings
+
+from shared.dry_run import install_dry_run_guard, log_dry_run_banner
+
 from . import store
 from .bandit import LinTS
-from shared.dry_run import install_dry_run_guard, log_dry_run_banner
+from .config import settings
 
 app = FastAPI(title="param-controller", version="0.1.0")
 install_dry_run_guard(app, allow_paths={"/health"})

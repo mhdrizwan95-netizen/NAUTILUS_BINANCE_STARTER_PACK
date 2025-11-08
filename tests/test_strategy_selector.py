@@ -92,8 +92,8 @@ def test_promotion_applies_staged_weights_after_approval(selector_env):
     updated_weights = json.loads(weights_path.read_text())
 
     assert updated_registry["current_model"] == "canary_model"
-    assert "pending_promotions" not in updated_registry or not updated_registry[
-        "pending_promotions"
-    ]
+    assert (
+        "pending_promotions" not in updated_registry or not updated_registry["pending_promotions"]
+    )
     assert updated_weights["weights"]["canary_model"] == pytest.approx(1.0)
     assert updated_weights["weights"]["stable_model"] == pytest.approx(0.0)

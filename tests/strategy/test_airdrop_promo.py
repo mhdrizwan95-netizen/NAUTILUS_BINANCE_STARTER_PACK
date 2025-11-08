@@ -54,9 +54,7 @@ async def test_skips_when_no_keywords():
         min_priority=0.6,
         min_expected_reward_usd=5.0,
     )
-    watcher = AirdropPromoWatcher(
-        _Router(), _Risk(), _RestClient(), cfg, clock=_Clock()
-    )
+    watcher = AirdropPromoWatcher(_Router(), _Risk(), _RestClient(), cfg, clock=_Clock())
     event = {
         "source": "binance_listings",
         "priority": 0.9,

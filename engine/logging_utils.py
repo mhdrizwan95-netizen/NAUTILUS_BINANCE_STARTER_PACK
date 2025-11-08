@@ -7,7 +7,6 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-
 _REQUEST_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     "request_id", default=None
 )

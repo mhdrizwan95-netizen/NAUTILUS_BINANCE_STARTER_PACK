@@ -3,9 +3,9 @@ Dynamic risk, exposure and sizing policy (no hardcoded min/max).
 Use these helpers in RiskRails instead of env-driven constants.
 """
 
-from dataclasses import dataclass
-from typing import Dict, Optional, Literal, Tuple
 import math
+from dataclasses import dataclass
+from typing import Dict, Literal, Optional, Tuple
 
 Mode = Literal["red", "yellow", "green"]
 

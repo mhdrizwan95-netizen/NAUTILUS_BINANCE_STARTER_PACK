@@ -1,7 +1,8 @@
 import logging
+
 import pytest
 
-from engine.strategies.event_breakout import EventBreakout, BreakoutConfig
+from engine.strategies.event_breakout import BreakoutConfig, EventBreakout
 
 
 @pytest.mark.asyncio
@@ -31,9 +32,7 @@ async def test_event_breakout_denylist_skips(caplog, tmp_path):
             return {"bidPrice": 9.97, "askPrice": 10.03}
 
     bo = EventBreakout(_Router(), md=_MD(), cfg=cfg)
-    await bo.on_event(
-        {"symbol": "PEPEUSDT", "time": int(__import__("time").time() * 1000)}
-    )
+    await bo.on_event({"symbol": "PEPEUSDT", "time": int(__import__("time").time() * 1000)})
     # Denylist skip should be logged; no dry plan line
     messages = [r.message for r in caplog.records]
     assert any("denylist skip" in m for m in messages)

@@ -4,7 +4,7 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 CALIBRATION_PATH = Path(os.getenv("HMM_CALIBRATION_PATH", "engine/models/hmm_calibration.json"))
 _DEFAULT_PROFILE: Dict[str, Any] = {

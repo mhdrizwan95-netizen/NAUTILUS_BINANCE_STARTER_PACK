@@ -1,14 +1,13 @@
-from __future__ import annotations
-
 """
 Event handlers for DEX strategy wiring.
 """
+
+from __future__ import annotations
 
 import logging
 from typing import Any, Dict
 
 from engine.strategies.dex_sniper import DexSniper
-
 
 logger = logging.getLogger(__name__)
 

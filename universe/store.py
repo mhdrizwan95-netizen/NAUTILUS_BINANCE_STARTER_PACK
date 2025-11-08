@@ -7,7 +7,6 @@ from typing import Dict
 
 from .config import CFG
 
-
 DB = Path("/app/data/universe.json")
 
 
@@ -29,9 +28,7 @@ class UniverseStore:
     def merge(self, listed: list[str], ranks: dict) -> None:
         now = int(time.time())
         for s in listed:
-            ent = self.state.get(
-                s, {"bucket": "quarantine", "first_seen": now, "stats": {}}
-            )
+            ent = self.state.get(s, {"bucket": "quarantine", "first_seen": now, "stats": {}})
             if ent.get("bucket") == "retired":
                 ent["bucket"] = "quarantine"
                 ent["first_seen"] = now

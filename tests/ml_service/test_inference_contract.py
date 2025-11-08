@@ -1,6 +1,6 @@
+import numpy as np
 from fastapi.testclient import TestClient
 from sklearn.preprocessing import StandardScaler
-import numpy as np
 
 
 class _DummyModel:

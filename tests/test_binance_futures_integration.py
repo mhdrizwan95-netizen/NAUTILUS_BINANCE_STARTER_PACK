@@ -47,9 +47,7 @@ async def test_ticker_price_hits_premium_index():
     from engine.core.binance import BinanceREST
 
     route = respx.get("https://testnet.binancefuture.com/fapi/v1/premiumIndex").mock(
-        return_value=httpx.Response(
-            200, json={"symbol": "BTCUSDT", "markPrice": "25000.0"}
-        )
+        return_value=httpx.Response(200, json={"symbol": "BTCUSDT", "markPrice": "25000.0"})
     )
 
     client = BinanceREST()

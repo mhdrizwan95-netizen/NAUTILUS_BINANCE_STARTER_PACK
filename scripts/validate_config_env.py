@@ -102,14 +102,10 @@ def main() -> int:
 
     exit_code = 0
     if missing_in_example:
-        print(
-            f"::error::config.example.env missing required variables: {missing_in_example}"
-        )
+        print(f"::error::config.example.env missing required variables: {missing_in_example}")
         exit_code = 1
     if missing_in_schema:
-        print(
-            f"::error::config.schema.json missing required variables: {missing_in_schema}"
-        )
+        print(f"::error::config.schema.json missing required variables: {missing_in_schema}")
         exit_code = 1
     if exit_code == 0:
         print("Config env templates align with docker-compose manifests")

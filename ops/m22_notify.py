@@ -9,13 +9,13 @@ Supports Telegram, Discord, and Slack platforms through webhooks and API tokens.
 Can be called from other scripts (like M20 guardian) to automatically report incidents.
 """
 
-import os
-import json
-import asyncio
 import argparse
+import asyncio
+import json
 import logging
+import os
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from ops.net import create_async_client, request_with_retry
 
@@ -199,7 +199,7 @@ async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, b
                     )
                     response.raise_for_status()
                     results[platform] = True
-                    logger.info(f"Message sent to Telegram")
+                    logger.info("Message sent to Telegram")
 
                 elif platform == "discord":
                     if not DISCORD_WEBHOOK:

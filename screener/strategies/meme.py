@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Mapping, Optional, Sequence
 
+from shared.meme_utils import compute_meme_metrics
+
 from .base import (
     StrategyCandidate,
-    StrategySignal,
     StrategyScreener,
+    StrategySignal,
     freeze_mapping,
 )
-from shared.meme_utils import compute_meme_metrics
 
 
 class MemeCoinScreener(StrategyScreener):

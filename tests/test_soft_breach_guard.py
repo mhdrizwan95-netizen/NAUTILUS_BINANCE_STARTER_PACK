@@ -54,9 +54,7 @@ def test_soft_breach_guard_cancels_and_tightens(monkeypatch):
         "reduceOnly": True,
     }
     router = DummyRouter([entry_order, stop_order])
-    portfolio = DummyPortfolio(
-        {"BTCUSDT.BINANCE": DummyPosition("BTCUSDT.BINANCE", 0.01, 30000.0)}
-    )
+    portfolio = DummyPortfolio({"BTCUSDT.BINANCE": DummyPosition("BTCUSDT.BINANCE", 0.01, 30000.0)})
 
     async def _noop_publish(*args, **kwargs):
         return None

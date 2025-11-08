@@ -1,9 +1,9 @@
+import hashlib
 import os
 import sqlite3
 import time
-import hashlib
-from typing import List, Optional, Tuple
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 DEFAULT_DB = os.environ.get("LEDGER_DB", "/shared/manifest.sqlite")
 

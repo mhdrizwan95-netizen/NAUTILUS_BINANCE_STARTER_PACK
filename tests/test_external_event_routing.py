@@ -26,9 +26,7 @@ def test_external_event_routing_behaviour():
             bus.subscribe("events.external_feed", handler_one)
             bus.subscribe("events.external_feed", handler_two)
 
-            event = ExternalEvent(
-                source="binance_announcements", payload={"symbol": "XYZUSDT"}
-            )
+            event = ExternalEvent(source="binance_announcements", payload={"symbol": "XYZUSDT"})
             await publish_external_event(event)
             await asyncio.sleep(0.05)
 

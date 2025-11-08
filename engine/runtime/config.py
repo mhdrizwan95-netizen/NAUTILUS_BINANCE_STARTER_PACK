@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional, Tuple
 
 import yaml
 
-
 DEFAULT_CONFIG_PATH = Path("config/runtime.yaml")
 _MAX_FUTURES_LEVERAGE = 125
 

@@ -32,9 +32,7 @@ def test_calculate_target_allocation_updates_cooldown(monkeypatch, tmp_path):
         "models": {"modelA": {"sharpe": 1.5, "realized_pnl": 1200.0}},
     }
 
-    allocations = allocator.calculate_target_allocation(
-        policy, 50000.0, metrics["models"]
-    )
+    allocations = allocator.calculate_target_allocation(policy, 50000.0, metrics["models"])
     entry = allocations["modelA"]
 
     assert entry["decision"] == "promote"

@@ -48,9 +48,7 @@ def _cfg(**overrides) -> ScalpConfig:
     return ScalpConfig(**base)
 
 
-def _seed_ticks(
-    module: ScalpStrategyModule, clock: FakeClock, prices: list[float]
-) -> None:
+def _seed_ticks(module: ScalpStrategyModule, clock: FakeClock, prices: list[float]) -> None:
     start = clock.time()
     for idx, price in enumerate(prices):
         clock.set(start + idx * 4.0)
@@ -91,9 +89,7 @@ def test_scalp_generates_long_signal_with_orderbook_pressure() -> None:
     meta = signal["meta"]
     assert meta["order_book_imbalance"] > 0.0
     assert meta["signal_expires_at"] > clock.time()
-    assert math.isclose(
-        meta["stop_price"], 99.97 * (1 - cfg.stop_bps / 10_000.0), rel_tol=1e-6
-    )
+    assert math.isclose(meta["stop_price"], 99.97 * (1 - cfg.stop_bps / 10_000.0), rel_tol=1e-6)
     assert math.isclose(
         meta["take_profit"], 99.97 * (1 + cfg.take_profit_bps / 10_000.0), rel_tol=1e-6
     )

@@ -38,10 +38,7 @@ def _build_day(
     for i in range(60, len(raw)):
         window = raw.iloc[i - 60 : i + 1]
         # construct minimal klines used by live_compute (indexes 4=close,5=volume)
-        kl = [
-            [None, None, None, None, str(x.close), str(x.volume)]
-            for x in window.itertuples()
-        ]
+        kl = [[None, None, None, None, str(x.close), str(x.volume)] for x in window.itertuples()]
         last = float(window.close.iloc[-1])
         # use a simple spread proxy (5 bps) if no depth available
         book = {"bids": [[last * 0.9995, 1.0]], "asks": [[last * 1.0005, 1.0]]}

@@ -1,5 +1,6 @@
 # backtests/fills.py
 from __future__ import annotations
+
 import math
 from dataclasses import dataclass
 
@@ -20,9 +21,7 @@ def realized_vol_bp(mid_history: list[float], window: int = 120) -> float:
     if n < 2:
         return 0.0
     mids = mid_history[-n:]
-    rets = [
-        (mids[i] / mids[i - 1] - 1.0) for i in range(1, len(mids)) if mids[i - 1] > 0
-    ]
+    rets = [(mids[i] / mids[i - 1] - 1.0) for i in range(1, len(mids)) if mids[i - 1] > 0]
     if not rets:
         return 0.0
     # approx bp sigma per tick
@@ -31,9 +30,7 @@ def realized_vol_bp(mid_history: list[float], window: int = 120) -> float:
     return abs(stats.stdev(rets)) * 1e4
 
 
-def slip_bp(
-    side: str, spread_bp: float, vol_bp: float, depth_ratio: float, p: FillParams
-) -> float:
+def slip_bp(side: str, spread_bp: float, vol_bp: float, depth_ratio: float, p: FillParams) -> float:
     # volatility z-score proxy (cap to sane range)
     vol_z = (vol_bp - 5.0) / max(1.0, 5.0)  # assume ~5bp typical per-tick sigma
     slip = p.base_slip_bps + p.vol_sensitivity * max(0.0, vol_z)

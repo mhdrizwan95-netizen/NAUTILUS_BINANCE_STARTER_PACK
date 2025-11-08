@@ -1,12 +1,15 @@
 # ops/portfolio_collector.py
 from __future__ import annotations
+
 import asyncio
-import time
 import logging
-import httpx
+import time
 from datetime import datetime, timezone
-from ops.prometheus import get_or_create_gauge
+
+import httpx
+
 from ops.env import engine_endpoints
+from ops.prometheus import get_or_create_gauge
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 

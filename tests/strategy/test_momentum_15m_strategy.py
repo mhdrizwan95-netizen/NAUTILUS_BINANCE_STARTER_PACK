@@ -22,9 +22,7 @@ class _DummyRouter:
         self.orders = []
         self._portfolio = _DummyPortfolio()
 
-    def place_market_order(
-        self, *, symbol: str, side: str, quote, quantity, market=None
-    ):
+    def place_market_order(self, *, symbol: str, side: str, quote, quantity, market=None):
         base = symbol.split(".")[0].upper()
         quantity = float(quantity or 0.0)
         if quantity <= 0:

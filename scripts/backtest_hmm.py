@@ -144,9 +144,7 @@ def backtest(cfg):
     # Calculate performance metrics
     returns = equity["equity_usd"].diff().fillna(0)
     mean, std = returns.mean(), returns.std()
-    sharpe = (
-        (mean / (std + 1e-9)) * math.sqrt(252 * 24 * 60) if std else 0.0
-    )  # Annualized
+    sharpe = (mean / (std + 1e-9)) * math.sqrt(252 * 24 * 60) if std else 0.0  # Annualized
     drawdown = (equity["equity_usd"].cummax() - equity["equity_usd"]).max()
 
     summary = dict(
@@ -172,31 +170,17 @@ def backtest(cfg):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument(
-        "--csv", required=True, help="Path to price CSV with ts,price,volume"
-    )
-    ap.add_argument(
-        "--model", required=True, help="Path to trained HMM model .pkl file"
-    )
+    ap.add_argument("--csv", required=True, help="Path to price CSV with ts,price,volume")
+    ap.add_argument("--model", required=True, help="Path to trained HMM model .pkl file")
     ap.add_argument("--symbol", required=True, help="Trading symbol")
-    ap.add_argument(
-        "--quote", type=float, default=100, help="Quote amount per trade (USDT)"
-    )
-    ap.add_argument(
-        "--tp-bps", type=float, default=20, help="Take profit in basis points"
-    )
-    ap.add_argument(
-        "--sl-bps", type=float, default=30, help="Stop loss in basis points"
-    )
-    ap.add_argument(
-        "--cooldown", type=int, default=30, help="Cooldown between trades (seconds)"
-    )
+    ap.add_argument("--quote", type=float, default=100, help="Quote amount per trade (USDT)")
+    ap.add_argument("--tp-bps", type=float, default=20, help="Take profit in basis points")
+    ap.add_argument("--sl-bps", type=float, default=30, help="Stop loss in basis points")
+    ap.add_argument("--cooldown", type=int, default=30, help="Cooldown between trades (seconds)")
     ap.add_argument(
         "--slippage-bps", type=float, default=3, help="Trading slippage in basis points"
     )
-    ap.add_argument(
-        "--out", default="reports/backtest.json", help="Output path for summary JSON"
-    )
+    ap.add_argument("--out", default="reports/backtest.json", help="Output path for summary JSON")
     args = ap.parse_args()
     backtest(args)
 

@@ -23,13 +23,12 @@ data/memory_vault/
 └── lineage_index.json (global index)
 """
 
-import os
-import json
-import time
 import hashlib
+import json
+import os
 import shutil
 from datetime import datetime
-from typing import Dict, List, Any, Optional, Union
+from typing import Any, Dict, List, Optional
 
 MEMORY_ROOT = os.path.join("data", "memory_vault")
 INDEX_PATH = os.path.join(MEMORY_ROOT, "lineage_index.json")
@@ -332,7 +331,7 @@ def archive_new_generation(notes: str = None) -> Optional[Dict[str, Any]]:
         return None
 
     # Update global lineage
-    lineage = update_lineage(archived)
+    update_lineage(archived)
 
     return archived
 

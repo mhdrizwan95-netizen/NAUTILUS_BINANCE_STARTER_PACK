@@ -4,16 +4,15 @@ import logging
 
 from fastapi import FastAPI, Response
 from prometheus_client import (
+    CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Gauge,
     generate_latest,
-    CONTENT_TYPE_LATEST,
 )
 
 from .adapters import fetch_exchange_info, fetch_top24h
-from .store import UniverseStore
 from .config import CFG
-
+from .store import UniverseStore
 
 APP = FastAPI(title="universe")
 STORE = UniverseStore()

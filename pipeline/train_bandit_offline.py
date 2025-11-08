@@ -51,9 +51,7 @@ def train(
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(
-        description="Train UCB priorities from offline outcomes"
-    )
+    ap = argparse.ArgumentParser(description="Train UCB priorities from offline outcomes")
     ap.add_argument("--pattern", default="data/outcomes/*.parquet")
     ap.add_argument("--c", type=float, default=1.0)
     args = ap.parse_args()

@@ -6,9 +6,10 @@ Fetches minSize from IBKR contracts and updates venue_specs.json.
 """
 
 import os
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict
+
 from ib_insync import IB, Stock
 
 SPECS_PATH = Path(__file__).parent / "venue_specs.json"

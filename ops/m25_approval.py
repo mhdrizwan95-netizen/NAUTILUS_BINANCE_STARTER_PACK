@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-import smtplib, os, json
+import json
+import os
+import smtplib
 from email.message import EmailMessage
 
 POLICY = "ops/m25_policy.yaml"

@@ -1,5 +1,5 @@
-import os
 import importlib
+import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,9 +29,7 @@ def test_trading_disabled_by_default(monkeypatch: pytest.MonkeyPatch):
 
 def test_disabled_trading_rejects_market_order():
     c = mk_client({"TRADING_ENABLED": "false", "TRADE_SYMBOLS": "BTCUSDT"})
-    resp = c.post(
-        "/orders/market", json={"symbol": "BTCUSDT.BINANCE", "side": "BUY", "quote": 10}
-    )
+    resp = c.post("/orders/market", json={"symbol": "BTCUSDT.BINANCE", "side": "BUY", "quote": 10})
     assert resp.status_code == 403
     j = resp.json()
     assert j["status"] == "rejected"
@@ -46,40 +44,33 @@ def test_min_notional_enforced():
             "TRADE_SYMBOLS": "BTCUSDT",
         }
     )
-    r = c.post(
-        "/orders/market", json={"symbol": "BTCUSDT.BINANCE", "side": "BUY", "quote": 5}
-    )
+    r = c.post("/orders/market", json={"symbol": "BTCUSDT.BINANCE", "side": "BUY", "quote": 5})
     assert r.status_code == 400
     assert r.json()["error"] == "NOTIONAL_TOO_SMALL"
 
 
 def test_symbol_allowlist_blocks_others():
     c = mk_client({"TRADING_ENABLED": "true", "TRADE_SYMBOLS": "BTCUSDT,ETHUSDT"})
-    r = c.post(
-        "/orders/market", json={"symbol": "BNBUSDT.BINANCE", "side": "BUY", "quote": 10}
-    )
+    r = c.post("/orders/market", json={"symbol": "BNBUSDT.BINANCE", "side": "BUY", "quote": 10})
     assert r.status_code == 403
     assert r.json()["error"] == "SYMBOL_NOT_ALLOWED"
 
 
 def test_rate_limit_blocks_when_exceeded():
     # Rate limit is tricky to test without mocking asyncio, so we'll verify it exists
-    from engine.risk import RiskRails
-    from engine.config import load_risk_config
     import os
+
+    from engine.config import load_risk_config
+    from engine.risk import RiskRails
 
     os.environ["MAX_ORDERS_PER_MIN"] = "1"
     cfg = load_risk_config()
     rails = RiskRails(cfg)
     # First order should pass validation
-    ok, _ = rails.check_order(
-        symbol="BTCUSDT.BINANCE", side="BUY", quote=10.0, quantity=None
-    )
+    ok, _ = rails.check_order(symbol="BTCUSDT.BINANCE", side="BUY", quote=10.0, quantity=None)
     assert ok
     # Second should be rate limited (within ~1s)
-    ok2, err = rails.check_order(
-        symbol="BTCUSDT.BINANCE", side="BUY", quote=10.0, quantity=None
-    )
+    ok2, err = rails.check_order(symbol="BTCUSDT.BINANCE", side="BUY", quote=10.0, quantity=None)
     assert not ok2
     assert err["error"] == "ORDER_RATE_EXCEEDED"
 
@@ -90,10 +81,11 @@ def test_quantity_rejected_without_price(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("MIN_NOTIONAL_USDT", "1")
 
     from engine.config import load_risk_config
-    from engine.risk import RiskRails
     from engine.core import order_router
+    from engine.risk import RiskRails
 
     cfg = load_risk_config()
+
     class DummyClient:
         def get_last_price(self, *_args, **_kwargs):
             return 0.0
@@ -105,8 +97,6 @@ def test_quantity_rejected_without_price(monkeypatch: pytest.MonkeyPatch):
     )
     rails = RiskRails(cfg)
 
-    ok, err = rails.check_order(
-        symbol="BTCUSDT.BINANCE", side="BUY", quote=None, quantity=1.0
-    )
+    ok, err = rails.check_order(symbol="BTCUSDT.BINANCE", side="BUY", quote=None, quantity=1.0)
     assert not ok
     assert err["error"] == "PRICE_UNAVAILABLE"

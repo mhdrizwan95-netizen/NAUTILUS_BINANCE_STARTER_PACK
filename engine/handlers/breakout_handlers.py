@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Announcement → Event Breakout guardrails (publish-only).
 
 Validates late-chase, spread, and 1m notional before relaying to
 strategy.event_breakout. If data is unavailable, fails closed.
 """
+
+from __future__ import annotations
 
 import os
 import time

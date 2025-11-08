@@ -46,13 +46,8 @@ def _simulate_day(symbol: str, day: str, model: str = "quarantine") -> str | Non
 
         # ATR proxy
         atr = float(0.001 * entry_px)
-        if (
-            "spread_over_atr" in bars.columns
-            and bars.loc[entry_ts, "spread_over_atr"] > 0
-        ):
-            atr = max(
-                atr, float(bars.loc[entry_ts, "spread_over_atr"]) * 0.001 * entry_px
-            )
+        if "spread_over_atr" in bars.columns and bars.loc[entry_ts, "spread_over_atr"] > 0:
+            atr = max(atr, float(bars.loc[entry_ts, "spread_over_atr"]) * 0.001 * entry_px)
 
         direction = +1 if h.situation != "parabolic_blowoff" else -1
         stop_mult = 1.8 if model == "quarantine" else 2.2

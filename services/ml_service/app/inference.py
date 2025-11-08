@@ -1,9 +1,11 @@
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
+from typing import Any, Dict, Optional
+
 from loguru import logger
+from watchdog.events import FileSystemEventHandler
+from watchdog.observers import Observer
+
 from . import model_store
 from .config import settings
 

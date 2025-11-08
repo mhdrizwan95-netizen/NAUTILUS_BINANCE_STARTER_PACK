@@ -1,8 +1,8 @@
 import asyncio
 import logging
 
-from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
 from engine import metrics
+from engine.feeds.market_data_dispatcher import MarketDataDispatcher, MarketDataLogger
 
 
 class DummyBus:
@@ -71,9 +71,7 @@ def test_market_data_logger_subscribes_and_logs(caplog) -> None:
                 self.handlers[topic].remove(handler)
 
     bus = LoggerBus()
-    mdl = MarketDataLogger(
-        bus, sample_rate_hz=1000.0, logger=logging.getLogger("test-md")
-    )
+    mdl = MarketDataLogger(bus, sample_rate_hz=1000.0, logger=logging.getLogger("test-md"))
     mdl.start()
     assert "market.tick" in bus.handlers
     handler = bus.handlers["market.tick"][0]

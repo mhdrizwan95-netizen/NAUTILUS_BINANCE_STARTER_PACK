@@ -1,10 +1,9 @@
 import json
 import os
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
-
 
 MODEL_PATH = os.getenv("SLIP_MODEL_PATH", "data/slip_model.json")
 PARQUET_PATH = os.getenv("SLIP_TRAIN_PATH", "data/fills.parquet")

@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Trailing and ladder watcher for DEX sniper positions.
 """
+
+from __future__ import annotations
 
 import asyncio
 import logging
@@ -10,8 +10,7 @@ import logging
 from engine.dex.config import DexConfig
 from engine.dex.executor import DexExecutor
 from engine.dex.oracle import DexPriceOracle
-from engine.dex.state import DexState, DexPosition
-
+from engine.dex.state import DexPosition, DexState
 
 logger = logging.getLogger("engine.dex.watcher")
 

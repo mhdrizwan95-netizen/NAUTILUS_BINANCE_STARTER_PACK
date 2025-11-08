@@ -2,15 +2,17 @@ from __future__ import annotations
 
 from fastapi import FastAPI, Response
 from prometheus_client import (
+    CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Counter,
     Gauge,
     generate_latest,
-    CONTENT_TYPE_LATEST,
 )
-from .store import SituationStore
+
+from .events import publish
+from .events import router as events_router
 from .matcher import Matcher
-from .events import router as events_router, publish
+from .store import SituationStore
 
 APP = FastAPI(title="situations")
 S = SituationStore()
@@ -47,12 +49,8 @@ def health():
 # --- Metrics ---------------------------------------------------------------
 
 REG = CollectorRegistry()
-HITS = Counter(
-    "situation_hits_total", "Total situation matches", ["name"], registry=REG
-)
-EV_MEAN = Gauge(
-    "situation_ev_mean", "Online mean EV per situation (USD)", ["name"], registry=REG
-)
+HITS = Counter("situation_hits_total", "Total situation matches", ["name"], registry=REG)
+EV_MEAN = Gauge("situation_ev_mean", "Online mean EV per situation (USD)", ["name"], registry=REG)
 EV_CI_LOW = Gauge("situation_ev_ci_low", "95% CI low for EV", ["name"], registry=REG)
 EV_CI_HIGH = Gauge("situation_ev_ci_high", "95% CI high for EV", ["name"], registry=REG)
 NOVELTY_RATE = Gauge(

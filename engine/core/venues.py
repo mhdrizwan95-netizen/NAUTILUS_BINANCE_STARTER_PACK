@@ -5,8 +5,9 @@ Provides unified interface across different exchanges (Binance crypto, IBKR trad
 """
 
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Protocol, Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional, Protocol
 
 
 class VenueClient(Protocol):

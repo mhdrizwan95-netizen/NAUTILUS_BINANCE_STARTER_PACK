@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Historical data downloader for Binance spot klines.
 
@@ -8,6 +6,8 @@ Writes Parquet partitioned by symbol/year/day under:
 
 CLI is intentionally omitted; use from Makefile or notebooks.
 """
+
+from __future__ import annotations
 
 import os
 import time
@@ -21,9 +21,7 @@ import pyarrow.parquet as pq
 BASE = os.getenv("BINANCE_HIST_BASE", "https://api.binance.com")
 
 
-def fetch_klines(
-    symbol: str, start_ms: int, end_ms: int, interval: str = "1m"
-) -> pd.DataFrame:
+def fetch_klines(symbol: str, start_ms: int, end_ms: int, interval: str = "1m") -> pd.DataFrame:
     """Fetch klines for [start_ms, end_ms) inclusive window.
 
     Returns a DataFrame with columns:
@@ -134,9 +132,7 @@ if __name__ == "__main__":
     import argparse
     import datetime as dt
 
-    ap = argparse.ArgumentParser(
-        description="Download Binance klines and save Parquet by day"
-    )
+    ap = argparse.ArgumentParser(description="Download Binance klines and save Parquet by day")
     ap.add_argument(
         "--symbols", required=True, help="Comma-separated symbols, e.g. BTCUSDT,ETHUSDT"
     )

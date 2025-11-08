@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-import os
 import json
-import httpx
+import os
 import random
 from datetime import datetime
+
+import httpx
 
 HUB_URL = os.getenv("COLLECTIVE_HUB", "http://127.0.0.1:8090")
 LOCAL_METRICS = "data/processed/m19/metrics_snapshot.json"

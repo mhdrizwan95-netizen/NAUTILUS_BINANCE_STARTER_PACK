@@ -1,15 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from pathlib import Path
 from typing import Dict, List, Optional
-import asyncio
 
-from .models import Situation
-from ..prometheus import REGISTRY
 from prometheus_client import Gauge
 
+from ..prometheus import REGISTRY
+from .models import Situation
 
 SITUATION_PRIORITY = Gauge(
     "situation_priority",

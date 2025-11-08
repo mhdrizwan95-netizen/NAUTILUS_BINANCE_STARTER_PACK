@@ -1,5 +1,7 @@
+from typing import Any, Callable, Dict, List
+
 import pandas as pd
-from typing import List, Callable, Dict, Any
+
 from .ml import HMMModel
 
 

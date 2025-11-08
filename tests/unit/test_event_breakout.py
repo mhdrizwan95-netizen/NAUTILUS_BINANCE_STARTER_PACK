@@ -1,7 +1,8 @@
 import logging
+
 import pytest
 
-from engine.strategies.event_breakout import EventBreakout, BreakoutConfig
+from engine.strategies.event_breakout import BreakoutConfig, EventBreakout
 
 
 class _MD:
@@ -45,9 +46,7 @@ class _RouterStub:
 @pytest.mark.asyncio
 async def test_event_breakout_half_size_logs(caplog):
     caplog.set_level(logging.INFO)
-    cfg = BreakoutConfig(
-        enabled=True, dry_run=True, size_usd=120.0, half_size_minutes=5
-    )
+    cfg = BreakoutConfig(enabled=True, dry_run=True, size_usd=120.0, half_size_minutes=5)
     md = _MD(price=10.0, quote_last=600000.0, spread_bps=60.0, ch30=0.0)
     router = _RouterStub()
     bo = EventBreakout(router, md=md, cfg=cfg)
@@ -64,9 +63,7 @@ async def test_event_breakout_half_size_logs(caplog):
 async def test_event_breakout_guardrails_late_chase(caplog):
     caplog.set_level(logging.INFO)
     cfg = BreakoutConfig(enabled=True, dry_run=True)
-    md = _MD(
-        price=10.0, quote_last=600000.0, spread_bps=20.0, ch30=0.25
-    )  # 25% 30m change
+    md = _MD(price=10.0, quote_last=600000.0, spread_bps=20.0, ch30=0.25)  # 25% 30m change
     router = _RouterStub()
     bo = EventBreakout(router, md=md, cfg=cfg)
     await bo.on_event({"symbol": "XYZUSDT", "time": time_ms()})

@@ -7,12 +7,12 @@ Reconciles discrepancies automatically on boot and continuously during runtime.
 
 import asyncio
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
 
-from .oms_store import OMSStore
-from .venues import list_venues, get_venue
-from .oms_models import OrderRecord, new_order_id
 from ..metrics import REGISTRY
+from .oms_models import OrderRecord, new_order_id
+from .oms_store import OMSStore
+from .venues import get_venue, list_venues
 
 _oms = OMSStore()
 _reconcile_runs = REGISTRY.metric("reconcile_runs_total", "Total reconciliation runs", "counter")

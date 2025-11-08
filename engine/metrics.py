@@ -1,14 +1,14 @@
 import os
 
+from fastapi import APIRouter, Response
 from prometheus_client import (
+    CONTENT_TYPE_LATEST,
+    CollectorRegistry,
     Counter,
     Gauge,
     Histogram,
     generate_latest,
-    CONTENT_TYPE_LATEST,
 )
-from prometheus_client import CollectorRegistry
-from fastapi import APIRouter, Response
 
 router = APIRouter()
 
@@ -679,7 +679,8 @@ REGISTRY = {
 
 # ---- Event Breakout metrics (feature-gated via env) ----
 try:
-    from prometheus_client import Counter, Gauge as _Gauge
+    from prometheus_client import Counter
+    from prometheus_client import Gauge as _Gauge
 
     event_bo_plans_total = Counter("event_bo_plans_total", "Event BO plans", ["venue", "symbol", "dry"])  # type: ignore
     event_bo_trades_total = Counter("event_bo_trades_total", "Event BO trades", ["venue", "symbol"])  # type: ignore

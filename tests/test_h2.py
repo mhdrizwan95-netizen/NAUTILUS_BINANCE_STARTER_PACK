@@ -1,6 +1,7 @@
 # tests/test_h2.py — M13: Hierarchical HMM smoke tests
-from ml_service.app import app
 from fastapi.testclient import TestClient
+
+from ml_service.app import app
 
 client = TestClient(app)
 

@@ -15,26 +15,25 @@ import json
 import logging
 import os
 import random
-import time
 import sys
+import time
 from collections import defaultdict
 from typing import Any, Dict, List
 
 import httpx
-from prometheus_client import start_http_server, Gauge, Counter
+from prometheus_client import Counter, Gauge, start_http_server
 
 # Reuse the probing utilities for simple execution
 from ops.auto_probe import (
-    RateLimiter,
-    get_universe,
-    probe_symbol,
     CircuitBreaker,
-    fetch_all_prices,
+    RateLimiter,
     env_b,
     env_f,
     env_i,
+    fetch_all_prices,
+    get_universe,
+    probe_symbol,
 )
-
 
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -133,7 +132,7 @@ async def trade() -> None:
         symbols: List[str] = [s.strip() for s in explicit.split(",") if s.strip()]
     else:
         # Fetch symbols using temp client since we don't have shared one yet
-        async with httpx.AsyncClient(timeout=10.0) as temp_client:
+        async with httpx.AsyncClient(timeout=10.0):
             symbols = await get_universe(ENGINE_URL)
 
     if not symbols:

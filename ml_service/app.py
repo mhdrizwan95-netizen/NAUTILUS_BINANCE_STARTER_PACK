@@ -1,17 +1,17 @@
 # ml_service/app.py  — M11: Auto-retrain & Blue/Green + M13: H2 Hierarchical HMM
+from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
-from datetime import datetime
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
-from joblib import dump, load
 
 # HMM + Policy
 from hmmlearn.hmm import GaussianHMM
-from sklearn.preprocessing import StandardScaler
+from joblib import dump, load
+from pydantic import BaseModel, Field
 from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.preprocessing import StandardScaler
 
 MODEL_DIR = Path(__file__).parent / "model_store"
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
@@ -79,9 +79,7 @@ def _set_active_tag(tag: str):
 
 
 def _active_h2_tag() -> Optional[str]:
-    return (
-        ACTIVE_H2_TAG_PATH.read_text().strip() if ACTIVE_H2_TAG_PATH.exists() else None
-    )
+    return ACTIVE_H2_TAG_PATH.read_text().strip() if ACTIVE_H2_TAG_PATH.exists() else None
 
 
 def _set_active_h2_tag(tag: str):
@@ -145,12 +143,7 @@ def _bic(hmm: GaussianHMM, X: np.ndarray, lengths: np.ndarray) -> float:
     n_states = hmm.n_components
     n_feats = X.shape[1]
     # params: startprob(n-1) + trans(n*(n-1)) + means(n*f) + covars(n*f)
-    p = (
-        (n_states - 1)
-        + n_states * (n_states - 1)
-        + n_states * n_feats
-        + n_states * n_feats
-    )
+    p = (n_states - 1) + n_states * (n_states - 1) + n_states * n_feats + n_states * n_feats
     return -2.0 * logL + p * np.log(len(X))
 
 
@@ -162,9 +155,7 @@ def _standardize_fit(seqs: List[np.ndarray]) -> Tuple[List[np.ndarray], Standard
     return seqs_std, scaler
 
 
-def _standardize_apply(
-    seqs: List[np.ndarray], scaler: StandardScaler
-) -> List[np.ndarray]:
+def _standardize_apply(seqs: List[np.ndarray], scaler: StandardScaler) -> List[np.ndarray]:
     return [scaler.transform(s) for s in seqs]
 
 
@@ -347,9 +338,7 @@ def train(req: TrainRequest):
         y = np.array(req.labels, dtype=int)
         # Flatten sequences to align labels
         if len(y) != len(X):
-            raise HTTPException(
-                400, "labels length must equal total frames across all sequences"
-            )
+            raise HTTPException(400, "labels length must equal total frames across all sequences")
         # Features for policy = [one-hot(state), standardized features]
         states = best.predict(X, lengths)
         n_states = best.n_components
@@ -452,16 +441,16 @@ def infer(req: InferRequest):
 @app.post("/train_h2")
 def train_h2(req: H2TrainRequest):
     import numpy as np
-    from sklearn.preprocessing import StandardScaler
     from hmmlearn.hmm import GaussianHMM
+    from sklearn.preprocessing import StandardScaler
 
     # Macro HMM
     X_macro = np.asarray(req.macro_sequences, dtype=np.float32)
     scaler_macro = StandardScaler().fit(X_macro)
     X_macro_s = scaler_macro.transform(X_macro)
-    macro_hmm = GaussianHMM(
-        n_components=req.n_macro, covariance_type="diag", n_iter=200
-    ).fit(X_macro_s)
+    macro_hmm = GaussianHMM(n_components=req.n_macro, covariance_type="diag", n_iter=200).fit(
+        X_macro_s
+    )
     _stabilize_transitions(macro_hmm)
 
     # Micro HMMs per macro
@@ -476,9 +465,7 @@ def train_h2(req: H2TrainRequest):
     micro_by_macro = {}
     for m_state, seq in req.micro_sequences_by_macro.items():
         X_m = scaler_micro.transform(np.asarray(seq, dtype=np.float32))
-        hmm_m = GaussianHMM(
-            n_components=req.n_micro, covariance_type="diag", n_iter=200
-        ).fit(X_m)
+        hmm_m = GaussianHMM(n_components=req.n_micro, covariance_type="diag", n_iter=200).fit(X_m)
         _stabilize_transitions(hmm_m)
         micro_by_macro[m_state] = hmm_m
 
@@ -488,9 +475,7 @@ def train_h2(req: H2TrainRequest):
         # simple logistic/gbdt placeholder; keep consistent with your existing policy trainer
         from sklearn.linear_model import LogisticRegression
 
-        y = np.zeros(
-            len(X_micro_all), dtype=int
-        )  # replace with your PnL-derived labels
+        y = np.zeros(len(X_micro_all), dtype=int)  # replace with your PnL-derived labels
         policy = LogisticRegression(max_iter=200).fit(X_micro_all, y)
 
     tag = _h2_timestamp_tag()
@@ -562,11 +547,7 @@ def infer_h2(req: H2InferRequest):
     mset = H2_MODELS.get(tag) or _try_load_h2(tag)
     if mset is None:
         # fallback to single-level
-        ir = infer(
-            InferRequest(
-                symbol=req.symbol, features=req.micro_feats, ts=req.ts, tag=tag
-            )
-        )
+        ir = infer(InferRequest(symbol=req.symbol, features=req.micro_feats, ts=req.ts, tag=tag))
         return H2InferResponse(
             macro_state=0,
             micro_state=ir.state,

@@ -6,8 +6,8 @@ from typing import Any, Mapping, MutableMapping, Optional, Sequence
 
 from .base import (
     StrategyCandidate,
-    StrategySignal,
     StrategyScreener,
+    StrategySignal,
     abs_value,
     atr,
     confidence_from_score,
@@ -97,9 +97,7 @@ class TrendFollowingScreener(StrategyScreener):
             if age is not None and age < 3.0:
                 return None
             volume_field = (
-                meta.get("quote_volume_24h")
-                or meta.get("quote_volume")
-                or meta.get("notional_24h")
+                meta.get("quote_volume_24h") or meta.get("quote_volume") or meta.get("notional_24h")
             )
             if volume_field is not None:
                 try:

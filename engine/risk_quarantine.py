@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Symbol quarantine registry.
 
@@ -11,7 +9,11 @@ Defaults are conservative and the module is inert unless explicitly used
 by callers (RiskRails integrates read-only via is_quarantined()).
 """
 
-import time, os, json
+from __future__ import annotations
+
+import json
+import os
+import time
 from dataclasses import dataclass
 from typing import Dict, Tuple
 

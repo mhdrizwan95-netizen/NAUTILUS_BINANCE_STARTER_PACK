@@ -1,5 +1,5 @@
-import os
 import importlib
+import os
 
 
 def test_hmm_loop_respects_cooldown(monkeypatch):

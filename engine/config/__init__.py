@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import List
-import logging
 
 from engine.config.defaults import GLOBAL_DEFAULTS, RISK_DEFAULTS
 from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols

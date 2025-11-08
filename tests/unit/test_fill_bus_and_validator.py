@@ -1,4 +1,5 @@
 import types
+
 import pytest
 
 from engine.core.order_router import OrderRouterExt
@@ -64,9 +65,7 @@ async def test_validator_fast_check_on_fill(monkeypatch):
                     from engine.core.portfolio import Position
 
                     self.positions = {
-                        "BBBUSDT": Position(
-                            symbol="BBBUSDT", quantity=100.0, avg_price=10.0
-                        )
+                        "BBBUSDT": Position(symbol="BBBUSDT", quantity=100.0, avg_price=10.0)
                     }
 
             self._state = _Pos()

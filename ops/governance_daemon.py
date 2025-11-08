@@ -17,15 +17,15 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 import yaml
-from dataclasses import dataclass
+from prometheus_client import Counter, Gauge
 
 from engine.core.event_bus import BUS
 from ops.strategy_selector import promote_best
-from prometheus_client import Gauge, Counter
 
 # Prometheus metrics for governance visibility
 _GOVERNANCE_RULES_ACTIVE = Gauge(

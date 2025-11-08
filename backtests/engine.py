@@ -13,31 +13,28 @@ code expects.
 
 from __future__ import annotations
 
-import os
 import asyncio
+import math
+import os
+import threading
+from bisect import bisect_right
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-import threading
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence
-
-import math
-from bisect import bisect_right
 
 import pandas as pd
 
+from engine.core.event_bus import BUS
 from engine.execution.execute import RecordedOrder, StrategyExecutor
+from engine.runtime import tasks as runtime_tasks
 from engine.strategy import (
     get_executor_override,
     reset_executor_cache,
     set_executor_override,
 )
-from engine.core.event_bus import BUS
-from engine.runtime import tasks as runtime_tasks
-
-from collections import defaultdict
-
 
 # ---------------------------------------------------------------------------
 # Utility shims used by several backtests
@@ -203,9 +200,7 @@ class _AsyncBusRunner:
         except Exception:
             pass
         try:
-            asyncio.run_coroutine_threadsafe(runtime_tasks.shutdown(), loop).result(
-                timeout=2
-            )
+            asyncio.run_coroutine_threadsafe(runtime_tasks.shutdown(), loop).result(timeout=2)
         except Exception:
             pass
         loop.call_soon_threadsafe(loop.stop)
@@ -236,9 +231,7 @@ class _SyntheticFillSimulator:
         self._clock = clock
         self._bus_runner = _AsyncBusRunner(BUS)
         self._last_prices: Dict[tuple[str, str], float] = {}
-        self._open_positions: Dict[tuple[str, str, str], List[_OpenPosition]] = (
-            defaultdict(list)
-        )
+        self._open_positions: Dict[tuple[str, str, str], List[_OpenPosition]] = defaultdict(list)
         self._pending_exits: List[_PendingExit] = []
 
     @contextmanager
@@ -285,9 +278,7 @@ class _SyntheticFillSimulator:
             )
             self._close_position(base, venue, pending.order.side, pending.quantity)
 
-    def record_order(
-        self, order: RecordedOrder, event: Optional[BacktestEvent]
-    ) -> None:
+    def record_order(self, order: RecordedOrder, event: Optional[BacktestEvent]) -> None:
         if order is None:
             return
         if order.status not in {"backtest", "dry_run", "simulated"}:
@@ -309,9 +300,7 @@ class _SyntheticFillSimulator:
         if trigger:
             stop_price = self._safe_float(meta.get("stop_price")) if meta else None
             take_profit = self._safe_float(meta.get("take_profit")) if meta else None
-            if self._exit_triggered(
-                order.side, trigger, price, stop_price, take_profit
-            ):
+            if self._exit_triggered(order.side, trigger, price, stop_price, take_profit):
                 self._emit_fill(
                     order,
                     base,
@@ -371,9 +360,7 @@ class _SyntheticFillSimulator:
             self._open_positions[key].append(position)
 
     @staticmethod
-    def _infer_trigger(
-        tag: Optional[str], meta: Optional[Dict[str, Any]]
-    ) -> Optional[str]:
+    def _infer_trigger(tag: Optional[str], meta: Optional[Dict[str, Any]]) -> Optional[str]:
         if isinstance(meta, dict) and isinstance(meta.get("trigger"), str):
             return str(meta["trigger"]).lower()
         if not tag:
@@ -470,9 +457,7 @@ class _SyntheticFillSimulator:
             except Exception:
                 pass
 
-    def _close_position(
-        self, base: str, venue: str, exit_side: str, quantity: float
-    ) -> None:
+    def _close_position(self, base: str, venue: str, exit_side: str, quantity: float) -> None:
         entry_side = "BUY" if exit_side.upper() == "SELL" else "SELL"
         key = (base, venue, entry_side)
         positions = self._open_positions.get(key)
@@ -553,9 +538,7 @@ class BacktestEngine:
         if not feeds:
             raise ValueError("At least one feed configuration is required")
         self._feeds = list(feeds)
-        self._symbol_formatter = symbol_formatter or (
-            lambda sym, tf, venue: f"{sym}.{venue}"
-        )
+        self._symbol_formatter = symbol_formatter or (lambda sym, tf, venue: f"{sym}.{venue}")
         self._strategy_factory = strategy_factory
         self._patch_executor = self._resolve_patch_flag(patch_executor)
         self._executor_factory = executor_factory
@@ -594,13 +577,9 @@ class BacktestEngine:
                     self._fill_simulator.on_price_event(event)
                     self._advance_to(event.timestamp_ms)
                     self._clock.set(event.timestamp_seconds)
-                    symbol = self._symbol_formatter(
-                        event.symbol, event.timeframe, event.venue
-                    )
+                    symbol = self._symbol_formatter(event.symbol, event.timeframe, event.venue)
                     self._active_event = event
-                    response = dispatch(
-                        symbol, event.price, event.timestamp_seconds, event.volume
-                    )
+                    response = dispatch(symbol, event.price, event.timestamp_seconds, event.volume)
                     self._active_event = None
                     yield BacktestStep(event=event, response=response)
 
@@ -678,9 +657,7 @@ class BacktestEngine:
         for cfg in self._feeds:
             rows = _load_klines(cfg)
             if not rows:
-                raise ValueError(
-                    f"No rows loaded for {cfg.symbol} {cfg.timeframe} from {cfg.path}"
-                )
+                raise ValueError(f"No rows loaded for {cfg.symbol} {cfg.timeframe} from {cfg.path}")
             key = (cfg.symbol, cfg.timeframe)
             self._data[key] = rows
             state = _FeedState(cfg=cfg, rows=rows)

@@ -1,4 +1,5 @@
 import importlib
+
 from fastapi.testclient import TestClient
 
 
@@ -12,9 +13,7 @@ def test_submit_ack_histogram(monkeypatch):
         "filled_qty_base": 0.001,
     }
     c = TestClient(appmod.app)
-    r = c.post(
-        "/orders/market", json={"symbol": "BTCUSDT.BINANCE", "side": "BUY", "quote": 10}
-    )
+    r = c.post("/orders/market", json={"symbol": "BTCUSDT.BINANCE", "side": "BUY", "quote": 10})
     assert r.status_code in (200, 400, 403)  # depending on rails config
     # Metrics present
     m = c.get("/metrics").text

@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 UniswapV2/PancakeSwap router helper.
 """
+
+from __future__ import annotations
 
 import asyncio
 import time

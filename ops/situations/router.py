@@ -7,10 +7,9 @@ from typing import Any, Dict
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from .matcher import Matcher
 from .models import Situation
 from .store import SituationStore
-from .matcher import Matcher
-
 
 router = APIRouter()
 _store = SituationStore()

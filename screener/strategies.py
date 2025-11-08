@@ -159,9 +159,7 @@ def trend_follow_candidate(
         if age is not None and age < 3.0:
             return None
         volume_check = (
-            meta.get("quote_volume_24h")
-            or meta.get("quote_volume")
-            or meta.get("notional_24h")
+            meta.get("quote_volume_24h") or meta.get("quote_volume") or meta.get("notional_24h")
         )
     if volume_check is not None:
         try:
@@ -175,14 +173,10 @@ def trend_follow_candidate(
     vwap_dev = float(features.get("vwap_dev", 0.0))
     if _abs(vwap_dev) > 0.15:
         return None
-    score = (
-        slope * 120.0 + max(0.0, momentum * 110.0) + max(0.0, (rsi_val - 50.0) / 4.0)
-    )
+    score = slope * 120.0 + max(0.0, momentum * 110.0) + max(0.0, (rsi_val - 50.0) / 4.0)
     atr = _atr(klines, length=14) or 0.0
     last_px = closes[-1]
-    swing = _swing_low(klines, lookback=8) or (
-        last_px - atr * 1.8 if atr else last_px * 0.98
-    )
+    swing = _swing_low(klines, lookback=8) or (last_px - atr * 1.8 if atr else last_px * 0.98)
     stop = round(min(swing, last_px - max(atr * 1.8, last_px * 0.02)), 6)
     target = round(last_px + max(atr * 3.0, last_px * 0.03), 6)
     confidence = _confidence_from_score(score, scale=150.0)
@@ -286,9 +280,7 @@ def momentum_candidate(
         return None
     if depth < 200_000.0:
         return None
-    score = (
-        move_15 * 420.0 + max(0.0, long_term * 220.0) + max(0.0, vol_boost - 1.0) * 30.0
-    )
+    score = move_15 * 420.0 + max(0.0, long_term * 220.0) + max(0.0, vol_boost - 1.0) * 30.0
     ctx_payload: MutableMapping[str, Any] = {
         "r15_pct": round(move_15 * 100.0, 3),
         "r60_pct": round(long_term * 100.0, 3),
@@ -353,9 +345,7 @@ def meme_candidate(
     context = _freeze_mapping(ctx_payload)
     last_px = float(features.get("last", 0.0))
     stop = round(last_px * (1.0 - 0.09), 6) if last_px else None
-    tp_ladder = (
-        [round(last_px * mult, 6) for mult in (1.1, 1.2, 1.35)] if last_px else []
-    )
+    tp_ladder = [round(last_px * mult, 6) for mult in (1.1, 1.2, 1.35)] if last_px else []
     confidence = _confidence_from_score(score, scale=1500.0)
     metadata = _freeze_mapping({**dict(context), "take_profit_ladder": tp_ladder})
     signal = StrategySignal(
@@ -382,11 +372,7 @@ def listing_candidate(
         return None
     vol_boost = float(features.get("vol_accel_5m_over_30m", 0.0))
     move = float(features.get("r60", 0.0))
-    score = (
-        max(0.0, 14.0 - age) * 6.0
-        + max(0.0, vol_boost - 1.0) * 24.0
-        + max(0.0, move) * 520.0
-    )
+    score = max(0.0, 14.0 - age) * 6.0 + max(0.0, vol_boost - 1.0) * 24.0 + max(0.0, move) * 520.0
     ctx_payload: MutableMapping[str, Any] = {
         "listing_age_days": round(age, 3),
         "vol_multiplier": round(vol_boost, 3),

@@ -1,9 +1,10 @@
-import os
 import importlib
+import os
+
 import pytest
 import respx
-from httpx import Response
 from fastapi.testclient import TestClient
+from httpx import Response
 
 
 @pytest.fixture(autouse=True)
@@ -44,9 +45,7 @@ def test_aggregate_portfolio_sums_equity_and_ignores_bad():
     respx.get("http://e1:8003/portfolio").mock(
         return_value=Response(200, json={"equity_usd": 123.45})
     )
-    respx.get("http://e2:8004/portfolio").mock(
-        return_value=Response(200, json={"equity_usd": 200})
-    )
+    respx.get("http://e2:8004/portfolio").mock(return_value=Response(200, json={"equity_usd": 200}))
     # Bad engine (down or invalid JSON)
     respx.get("http://e3:8005/portfolio").mock(return_value=Response(500, text="oops"))
     r = c.get("/aggregate/portfolio")
@@ -60,9 +59,7 @@ def test_aggregate_portfolio_sums_equity_and_ignores_bad():
 def test_aggregate_portfolio_handles_missing_equity():
     c = mk_client("http://e1:8003,http://e2:8004")
     # Missing equity field
-    respx.get("http://e1:8003/portfolio").mock(
-        return_value=Response(200, json={"cash": 50.0})
-    )
+    respx.get("http://e1:8003/portfolio").mock(return_value=Response(200, json={"cash": 50.0}))
     # None equity field
     respx.get("http://e2:8004/portfolio").mock(
         return_value=Response(200, json={"equity_usd": None})
@@ -114,9 +111,7 @@ def test_partial_failure_isolation():
     respx.get("http://e1:8003/health").mock(
         return_value=Response(200, json={"engine": "ok", "venue": "binance"})
     )
-    respx.get("http://e2:8004/health").mock(
-        return_value=Response(200, json={})  # empty but 200 OK
-    )
+    respx.get("http://e2:8004/health").mock(return_value=Response(200, json={}))  # empty but 200 OK
     respx.get("http://e3:8005/health").mock(side_effect=Exception("connection failed"))
     r = c.get("/aggregate/health")
     assert r.status_code == 200

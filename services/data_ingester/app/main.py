@@ -1,14 +1,16 @@
 import os
 import time
 from pathlib import Path
-from fastapi import FastAPI
-from loguru import logger
+
 import ccxt
 import pandas as pd
+from fastapi import FastAPI
+from loguru import logger
 
-from .config import settings
 from services.common import manifest
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
+
+from .config import settings
 
 app = FastAPI(title="data-ingester", version="0.1.0")
 install_dry_run_guard(app, allow_paths={"/health"})

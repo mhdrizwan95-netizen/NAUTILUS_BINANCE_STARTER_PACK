@@ -8,11 +8,11 @@ import time
 from dataclasses import dataclass, replace
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
-from engine.runtime.config import load_runtime_config, RuntimeConfig
-from engine.runtime.pipeline import StrategyPipeline, Signal, StrategyRegistry
-from engine.runtime.universe import UniverseManager, UniverseScreener, SymbolMetrics
 from engine.core.order_router import OrderRouter
 from engine.core.portfolio import Portfolio
+from engine.runtime.config import RuntimeConfig, load_runtime_config
+from engine.runtime.pipeline import Signal, StrategyPipeline, StrategyRegistry
+from engine.runtime.universe import SymbolMetrics, UniverseManager, UniverseScreener
 
 
 def _random_symbol(prefix: str, i: int) -> str:
@@ -52,9 +52,7 @@ class DummyClient:
         await asyncio.sleep(random.uniform(0, 0.005))
         return {}
 
-    async def futures_change_leverage(
-        self, symbol: str, leverage: int
-    ) -> Dict[str, Any]:
+    async def futures_change_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
         await asyncio.sleep(random.uniform(0.0, 0.01))
         sym = symbol.upper()
         if sym in self._mismatched:
@@ -64,9 +62,7 @@ class DummyClient:
         self._symbol_leverage[sym] = applied
         return {"symbol": sym, "leverage": applied}
 
-    async def position_risk(
-        self, *, market: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    async def position_risk(self, *, market: Optional[str] = None) -> List[Dict[str, Any]]:
         await asyncio.sleep(random.uniform(0.0, 0.005))
         return [
             {"symbol": sym, "leverage": lev, "positionAmt": 0, "entryPrice": 0}
@@ -82,8 +78,7 @@ class SyntheticExchange:
 
     def __post_init__(self) -> None:
         self.state: Dict[str, float] = {
-            sym: self.base_price * (1 + random.uniform(-0.05, 0.05))
-            for sym in self.symbols
+            sym: self.base_price * (1 + random.uniform(-0.05, 0.05)) for sym in self.symbols
         }
         self.metadata: Dict[str, Dict[str, float | bool]] = {}
 
@@ -108,9 +103,7 @@ class SyntheticExchange:
 
         bid_liq = max(20_000, depth * 0.45)  # satisfy min_liquidity_bid_size
         tick_pct = random.uniform(0.001, 0.05)
-        listing_age = random.uniform(
-            0, 10
-        )  # within 10 days (to meet ≤14 day requirement)
+        listing_age = random.uniform(0, 10)  # within 10 days (to meet ≤14 day requirement)
 
         news_flag = random.random() < 0.7  # 70% chance of news flag
         news_score = random.uniform(7, 10) if news_flag else random.uniform(0, 5)
@@ -151,9 +144,7 @@ class SyntheticExchange:
         for sym in self.symbols:
             metric = self._advance_symbol(sym)
             futures_metrics[sym] = metric
-            spot_metrics[sym] = replace(
-                metric, venue="spot", open_interest_usd=0.0, max_leverage=0
-            )
+            spot_metrics[sym] = replace(metric, venue="spot", open_interest_usd=0.0, max_leverage=0)
         return futures_metrics, spot_metrics, self.metadata.copy()
 
 
@@ -268,9 +259,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--symbols-per-strategy", type=int, default=50)
     parser.add_argument("--refresh-seconds", type=float, default=15.0)
     parser.add_argument("--signal-interval", type=float, default=1.0)
-    parser.add_argument(
-        "--burst", type=int, default=5, help="Signals per strategy per interval"
-    )
+    parser.add_argument("--burst", type=int, default=5, help="Signals per strategy per interval")
     parser.add_argument("--starting-cash", type=float, default=50_000.0)
     parser.add_argument("--base-price", type=float, default=100.0)
     parser.add_argument("--spike-chance", type=float, default=0.02)

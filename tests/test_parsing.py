@@ -4,7 +4,8 @@ T5: Unit tests for parsing parse_prometheus_text and key extraction helpers.
 Tests sample payloads from all four fallback chain shapes.
 """
 import unittest
-from ops.metrics_utils import parse_prometheus_text, from_json
+
+from ops.metrics_utils import from_json, parse_prometheus_text
 
 
 class TestParsing(unittest.TestCase):
@@ -146,9 +147,7 @@ class TestJsonHelpers(unittest.TestCase):
         # Test key extraction with fallbacks
         self.assertEqual(from_json(obj["pnl"], "realized", "pnl_realized"), 1000.0)
         self.assertEqual(from_json(obj["policy"], "drift", "drift_score"), 0.33)
-        self.assertEqual(
-            from_json(obj["policy"], "confidence", "policy_confidence"), 0.88
-        )
+        self.assertEqual(from_json(obj["policy"], "confidence", "policy_confidence"), 0.88)
 
     def test_invalid_inputs(self):
         """Test handling of None/invalid inputs."""
@@ -208,9 +207,7 @@ class TestFallbackShapes(unittest.TestCase):
         exe = obj.get("execution", obj)
         result = {
             "pnl_realized": from_json(pnl, "realized", "pnl_realized", "realized_usd"),
-            "pnl_unrealized": from_json(
-                pnl, "unrealized", "pnl_unrealized", "unrealized_usd"
-            ),
+            "pnl_unrealized": from_json(pnl, "unrealized", "pnl_unrealized", "unrealized_usd"),
             "drift_score": from_json(pol, "drift", "drift_score"),
             "policy_confidence": from_json(pol, "confidence", "policy_confidence"),
             "order_fill_ratio": from_json(exe, "fill_ratio", "order_fill_ratio"),
@@ -239,16 +236,10 @@ class TestFallbackShapes(unittest.TestCase):
         }
 
         result = {
-            "pnl_realized": from_json(
-                pnl_obj, "realized", "pnl_realized", "realized_usd"
-            ),
-            "pnl_unrealized": from_json(
-                pnl_obj, "unrealized", "pnl_unrealized", "unrealized_usd"
-            ),
+            "pnl_realized": from_json(pnl_obj, "realized", "pnl_realized", "realized_usd"),
+            "pnl_unrealized": from_json(pnl_obj, "unrealized", "pnl_unrealized", "unrealized_usd"),
             "drift_score": from_json(state_obj, "drift", "drift_score"),
-            "policy_confidence": from_json(
-                state_obj, "confidence", "policy_confidence"
-            ),
+            "policy_confidence": from_json(state_obj, "confidence", "policy_confidence"),
             "order_fill_ratio": from_json(state_obj, "fill_ratio", "order_fill_ratio"),
             "venue_latency_ms": from_json(
                 state_obj, "latency_ms", "venue_latency_ms", "exchange_latency_ms"

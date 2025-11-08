@@ -37,7 +37,7 @@ class DepegGuard:
         self.confirm = 0
         self.safe_until = 0.0
 
-    def _last(self, symbol: string) -> float:  # type: ignore[name-defined]
+    def _last(self, symbol: str) -> float:
         try:
             if self.md and hasattr(self.md, "last"):
                 px = self.md.last(symbol)

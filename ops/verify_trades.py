@@ -8,12 +8,13 @@ Usage (inside engine container):
 
 Exits 0 on success. Prints status code and response body.
 """
+import hashlib
+import hmac
 import os
 import sys
 import time
-import hmac
-import hashlib
 import urllib.parse
+
 from ops.net import create_client, request_with_retry_sync
 
 

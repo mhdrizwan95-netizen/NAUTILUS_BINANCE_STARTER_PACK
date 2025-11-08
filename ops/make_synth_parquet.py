@@ -1,5 +1,9 @@
 # ops/make_synth_parquet.py
-import numpy as np, pandas as pd, time, pathlib
+import pathlib
+import time
+
+import numpy as np
+import pandas as pd
 
 N = 5000
 ts0 = int(time.time_ns())

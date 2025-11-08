@@ -1,4 +1,5 @@
-import os, pathlib
+import os
+import pathlib
 
 mp = os.getenv("PROMETHEUS_MULTIPROC_DIR", "/tmp/prom_multiproc")
 pathlib.Path(mp).mkdir(parents=True, exist_ok=True)

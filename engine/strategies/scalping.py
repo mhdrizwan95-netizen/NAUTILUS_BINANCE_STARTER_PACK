@@ -1,19 +1,19 @@
-from __future__ import annotations
-
 """High-frequency scalping module driven by streaming market data."""
+
+from __future__ import annotations
 
 import math
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Callable, Deque, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable, Deque, Dict, Optional
 
 from engine import metrics
 from engine.config.defaults import SCALP_DEFAULTS
 from engine.config.env import env_bool, env_float, env_int
 from engine.core.market_resolver import resolve_market_choice
-from engine.universe.effective import StrategyUniverse
 from engine.state.cooldown import Cooldowns
+from engine.universe.effective import StrategyUniverse
 
 try:  # Optional dependency used for realistic slippage estimation
     from ops import slip_model as _slip_module  # type: ignore
