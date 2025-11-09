@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any
 
 CAPITAL_POLICY_PATH = Path("ops/capital_policy.json")
 
-DEFAULT_POLICY: Dict[str, Any] = {
+DEFAULT_POLICY: dict[str, Any] = {
     "refresh_sec": 30,
     "base_equity_frac": 0.20,
     "min_pool_usd": 10000.0,
@@ -34,9 +35,10 @@ DEFAULT_POLICY: Dict[str, Any] = {
 }
 
 log = logging.getLogger(__name__)
+_JSON_ERRORS = (OSError, json.JSONDecodeError)
 
 
-def load_capital_policy(path: Path | None = None, *, create: bool = True) -> Dict[str, Any]:
+def load_capital_policy(path: Path | None = None, *, create: bool = True) -> dict[str, Any]:
     """
     Load the capital policy from disk.
 
@@ -55,12 +57,12 @@ def load_capital_policy(path: Path | None = None, *, create: bool = True) -> Dic
 
     try:
         return json.loads(policy_path.read_text())
-    except Exception as exc:  # pragma: no cover - logged and fallback for resilience
+    except _JSON_ERRORS as exc:  # pragma: no cover - logged and fallback for resilience
         log.warning("Failed to load %s (%s). Using defaults.", policy_path, exc)
         return DEFAULT_POLICY.copy()
 
 
-def save_capital_policy(policy: Dict[str, Any], path: Path | None = None) -> None:
+def save_capital_policy(policy: dict[str, Any], path: Path | None = None) -> None:
     """
     Persist the provided capital policy atomically.
     """
@@ -80,7 +82,7 @@ def ensure_policy_file(path: Path | None = None) -> Path:
     return policy_path
 
 
-def enabled_models(policy: Dict[str, Any] | None = None) -> List[str]:
+def enabled_models(policy: dict[str, Any] | None = None) -> list[str]:
     """
     Return the list of models enabled by the current policy.
     """
@@ -94,14 +96,14 @@ def enabled_models(policy: Dict[str, Any] | None = None) -> List[str]:
     return []
 
 
-def is_model_enabled(model_name: str, policy: Dict[str, Any] | None = None) -> bool:
+def is_model_enabled(model_name: str, policy: dict[str, Any] | None = None) -> bool:
     """
     Convenience helper to check if a strategy is currently enabled.
     """
     return model_name in enabled_models(policy)
 
 
-def update_enabled_models(models: Iterable[str], *, merge: bool = True) -> Dict[str, Any]:
+def update_enabled_models(models: Iterable[str], *, merge: bool = True) -> dict[str, Any]:
     """
     Update the enabled models list. When merge is True we union with existing models,
     otherwise we replace the list entirely.

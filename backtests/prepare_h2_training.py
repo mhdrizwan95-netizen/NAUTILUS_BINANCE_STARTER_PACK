@@ -16,8 +16,13 @@ def load_parquet_ticks(path: str) -> pd.DataFrame:
                 df = df.rename(columns={c: "ts_ns"})
                 break
     if "ts_ns" not in df.columns:
-        raise ValueError("Parquet must contain 'ts_ns'.")
+        raise MissingTimestampError()
     return df.sort_values("ts_ns").reset_index(drop=True)
+
+
+class MissingTimestampError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Parquet must contain 'ts_ns'.")
 
 
 def downsample_macro(data: pd.DataFrame, window_sec: int = 300) -> list:

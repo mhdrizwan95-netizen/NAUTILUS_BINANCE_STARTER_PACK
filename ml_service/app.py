@@ -1,7 +1,6 @@
 # ml_service/app.py  — M11: Auto-retrain & Blue/Green + M13: H2 Hierarchical HMM
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -20,12 +19,12 @@ SCL_PATH = MODEL_DIR / "scaler_v1.joblib"
 POL_PATH = MODEL_DIR / "policy_v1.joblib"
 
 # M11: versioning + blue/green serving
-MODELS: Dict[str, dict] = {}  # tag -> {"hmm":..., "scaler":..., "policy":...}
+MODELS: dict[str, dict] = {}  # tag -> {"hmm":..., "scaler":..., "policy":...}
 ACTIVE_TAG_PATH = MODEL_DIR / "active_tag.txt"
 ACTIVE_H2_TAG_PATH = MODEL_DIR / "active_h2_tag.txt"
 
 # M13: H2 hierarchical models
-H2_MODELS: Dict[str, dict] = (
+H2_MODELS: dict[str, dict] = (
     {}
 )  # tag -> {"macro": hmm, "micro": {macro_state:int -> hmm}, "scaler_macro":..., "scaler_micro":..., "policy":...}
 
@@ -55,10 +54,18 @@ def _save_models(tag: str, hmm, scaler, policy):
     )
 
 
+class MissingModelArtifactsError(FileNotFoundError):
+    """Raised when a requested model tag is missing required artifacts."""
+
+    def __init__(self, tag: str):
+        super().__init__(f"model tag '{tag}' is missing required artifacts")
+        self.tag = tag
+
+
 def _load_tag(tag: str):
     paths = _tag_paths(tag)
     if not paths["hmm"].exists() or not paths["scaler"].exists():
-        raise FileNotFoundError(f"Tag {tag} incomplete")
+        raise MissingModelArtifactsError(tag)
     m = {
         "hmm": load(paths["hmm"]),
         "scaler": load(paths["scaler"]),
@@ -78,7 +85,7 @@ def _set_active_tag(tag: str):
     ACTIVE_TAG_PATH.write_text(tag)
 
 
-def _active_h2_tag() -> Optional[str]:
+def _active_h2_tag() -> str | None:
     return ACTIVE_H2_TAG_PATH.read_text().strip() if ACTIVE_H2_TAG_PATH.exists() else None
 
 
@@ -87,9 +94,9 @@ def _set_active_h2_tag(tag: str):
 
 
 app = FastAPI()
-hmm: Optional[GaussianHMM] = None
-scaler: Optional[StandardScaler] = None
-policy: Optional[GradientBoostingClassifier] = None
+hmm: GaussianHMM | None = None
+scaler: StandardScaler | None = None
+policy: GradientBoostingClassifier | None = None
 
 # ---------- Schemas ----------
 
@@ -97,10 +104,10 @@ policy: Optional[GradientBoostingClassifier] = None
 class TrainRequest(BaseModel):
     symbol: str = "BTCUSDT"
     # A list of sequences; each sequence is a list of feature vectors
-    feature_sequences: List[List[List[float]]]
+    feature_sequences: list[list[list[float]]]
     # Optional supervised labels aligned with each vector across all sequences
     # For simplicity: a flattened label vector (0=HOLD, 1=BUY, 2=SELL)
-    labels: Optional[List[int]] = None
+    labels: list[int] | None = None
     k_min: int = 3
     k_max: int = 5
     random_state: int = 7
@@ -108,21 +115,21 @@ class TrainRequest(BaseModel):
 
 
 class PartialFitRequest(BaseModel):
-    feature_sequences: List[List[List[float]]]
+    feature_sequences: list[list[list[float]]]
     max_iter: int = 25  # short update
     random_state: int = 7
 
 
 class InferRequest(BaseModel):
     symbol: str
-    features: List[float] = Field(..., description="Single feature vector")
+    features: list[float] = Field(..., description="Single feature vector")
     ts: int
-    tag: Optional[str] = None  # NEW: candidate tag for canary
+    tag: str | None = None  # NEW: candidate tag for canary
 
 
 class InferResponse(BaseModel):
     state: int
-    probs: List[float]
+    probs: list[float]
     confidence: float
     action: dict
 
@@ -130,7 +137,7 @@ class InferResponse(BaseModel):
 # ---------- Utils ----------
 
 
-def _concat_sequences(seqs: List[np.ndarray]) -> Tuple[np.ndarray, np.ndarray]:
+def _concat_sequences(seqs: list[np.ndarray]) -> tuple[np.ndarray, np.ndarray]:
     """Concatenate variable-length sequences for hmmlearn fit."""
     lengths = np.array([len(s) for s in seqs], dtype=int)
     X = np.vstack(seqs) if len(seqs) else np.empty((0, 0))
@@ -147,7 +154,7 @@ def _bic(hmm: GaussianHMM, X: np.ndarray, lengths: np.ndarray) -> float:
     return -2.0 * logL + p * np.log(len(X))
 
 
-def _standardize_fit(seqs: List[np.ndarray]) -> Tuple[List[np.ndarray], StandardScaler]:
+def _standardize_fit(seqs: list[np.ndarray]) -> tuple[list[np.ndarray], StandardScaler]:
     X, lengths = _concat_sequences(seqs)
     scaler = StandardScaler()
     scaler.fit(X)
@@ -155,7 +162,7 @@ def _standardize_fit(seqs: List[np.ndarray]) -> Tuple[List[np.ndarray], Standard
     return seqs_std, scaler
 
 
-def _standardize_apply(seqs: List[np.ndarray], scaler: StandardScaler) -> List[np.ndarray]:
+def _standardize_apply(seqs: list[np.ndarray], scaler: StandardScaler) -> list[np.ndarray]:
     return [scaler.transform(s) for s in seqs]
 
 
@@ -190,9 +197,9 @@ def _load_models():
 # --- new imports/schemas ---
 class H2TrainRequest(BaseModel):
     symbol: str
-    macro_sequences: List[List[float]]  # list of macro feature vectors (slow cadence)
-    micro_sequences_by_macro: Dict[
-        int, List[List[float]]
+    macro_sequences: list[list[float]]  # list of macro feature vectors (slow cadence)
+    micro_sequences_by_macro: dict[
+        int, list[list[float]]
     ]  # per macro label -> micro feature vectors
     n_macro: int = 3
     n_micro: int = 4
@@ -201,10 +208,10 @@ class H2TrainRequest(BaseModel):
 
 class H2InferRequest(BaseModel):
     symbol: str
-    macro_feats: List[float]
-    micro_feats: List[float]
+    macro_feats: list[float]
+    micro_feats: list[float]
     ts: int
-    tag: Optional[str] = None
+    tag: str | None = None
 
 
 class H2InferResponse(BaseModel):

@@ -16,17 +16,26 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import httpx
 
 from ops.strategy_router import WEIGHTS_PATH, _load_weights
 
+_METRIC_ERRORS = (
+    httpx.HTTPError,
+    httpx.RequestError,
+    asyncio.TimeoutError,
+    ValueError,
+)
+_CONFIG_ERRORS = (OSError, json.JSONDecodeError, ValueError, KeyError)
+_AUDIT_ERRORS = (OSError, json.JSONDecodeError)
+
 
 class CanaryEvaluator:
     """Evaluates canary model performance using statistical methods."""
 
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: dict[str, Any]):
         self.config = config
         self.min_trades = config.get("min_trades_for_eval", 50)
         self.min_hours = config.get("min_live_hours", 6)
@@ -34,7 +43,7 @@ class CanaryEvaluator:
         self.rollback_threshold_pct = config.get("rollback_threshold_pct", -20.0)
         self.metrics_url = os.getenv("OPS_METRICS_URL", "http://localhost:8002/metrics")
 
-    async def _fetch_model_metrics(self) -> Dict[str, Dict[str, Any]]:
+    async def _fetch_model_metrics(self) -> dict[str, dict[str, Any]]:
         """Fetch model-labeled metrics from OPS/Prometheus."""
         try:
             timeout = httpx.Timeout(5.0)
@@ -42,11 +51,11 @@ class CanaryEvaluator:
                 response = await session.get(self.metrics_url)
                 response.raise_for_status()
                 return self._parse_metrics(response.text)
-        except Exception as e:
-            logging.error(f"[CANARY] Failed to fetch metrics: {e}")
+        except _METRIC_ERRORS:
+            logging.exception("[CANARY] Failed to fetch metrics")
             return {}
 
-    def _parse_metrics(self, metrics_text: str) -> Dict[str, Dict[str, Any]]:
+    def _parse_metrics(self, metrics_text: str) -> dict[str, dict[str, Any]]:
         """Parse Prometheus-style metrics into model-focused data."""
         model_data = {}
 
@@ -94,7 +103,7 @@ class CanaryEvaluator:
 
         return model_data
 
-    def _parse_labels(self, labels_str: str) -> Dict[str, str]:
+    def _parse_labels(self, labels_str: str) -> dict[str, str]:
         """Parse Prometheus label string like 'venue="BINANCE",model="hmm_v3"'."""
         labels = {}
         for kv in labels_str.split(","):
@@ -104,7 +113,7 @@ class CanaryEvaluator:
                 labels[key.strip()] = value.strip('"')
         return labels
 
-    def _calculate_win_rate(self, metrics: Dict[str, Any]) -> float:
+    def _calculate_win_rate(self, metrics: dict[str, Any]) -> float:
         """Calculate win rate as filled orders / submitted orders."""
         submitted = metrics["orders_submitted"]
         if submitted == 0:
@@ -113,8 +122,8 @@ class CanaryEvaluator:
         return filled / submitted
 
     def _calculate_performance_score(
-        self, model_metrics: Dict[str, Any], baseline_metrics: Dict[str, Any]
-    ) -> Tuple[float, str]:
+        self, model_metrics: dict[str, Any], baseline_metrics: dict[str, Any]
+    ) -> tuple[float, str]:
         """
         Calculate comparative performance score.
 
@@ -161,7 +170,7 @@ class CanaryManager:
         self.evaluator = CanaryEvaluator(_load_weights())
         self.audit_log = []  # Can be persisted to disk
 
-    async def evaluate_canaries(self) -> Dict[str, Any]:
+    async def evaluate_canaries(self) -> dict[str, Any]:
         """
         Evaluate all active canary deployments.
 
@@ -216,9 +225,9 @@ class CanaryManager:
             results["evaluation_duration"] = time.time() - evaluation_start
             self._audit_evaluation(results)
 
-        except Exception as e:
-            results["error"] = f"Evaluation failed: {str(e)}"
-            logging.error(f"[CANARY] Evaluation error: {e}")
+        except _CONFIG_ERRORS as exc:
+            results["error"] = f"Evaluation failed: {exc}"
+            logging.exception("[CANARY] Evaluation error")
 
         return results
 
@@ -226,10 +235,10 @@ class CanaryManager:
         self,
         canary_name: str,
         weight: float,
-        model_metrics: Dict[str, Dict[str, Any]],
+        model_metrics: dict[str, dict[str, Any]],
         baseline_name: str,
-        config: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
         """Evaluate a single canary model's performance."""
         result = {
             "model": canary_name,
@@ -295,7 +304,7 @@ class CanaryManager:
         return result
 
     async def _promote_canary(
-        self, model_name: str, evaluation: Dict[str, Any], config: Dict[str, Any]
+        self, model_name: str, evaluation: dict[str, Any], config: dict[str, Any]
     ):
         """Promote a successful canary to full production."""
         try:
@@ -337,11 +346,11 @@ class CanaryManager:
             # Update capital allocation policy enabled list
             await self._update_capital_policy_on_promotion(model_name)
 
-        except Exception as e:
-            logging.error(f"[CANARY] Promotion failed for {model_name}: {e}")
+        except _CONFIG_ERRORS:
+            logging.exception("[CANARY] Promotion failed for %s", model_name)
 
     async def _rollback_canary(
-        self, model_name: str, evaluation: Dict[str, Any], config: Dict[str, Any]
+        self, model_name: str, evaluation: dict[str, Any], config: dict[str, Any]
     ):
         """Rollback an underperforming canary."""
         try:
@@ -374,10 +383,10 @@ class CanaryManager:
             # Update registry
             await self._update_registry(model_name, "rolled_back", evaluation)
 
-        except Exception as e:
-            logging.error(f"[CANARY] Rollback failed for {model_name}: {e}")
+        except _CONFIG_ERRORS:
+            logging.exception("[CANARY] Rollback failed for %s", model_name)
 
-    async def _update_registry(self, model_name: str, action: str, evaluation: Dict[str, Any]):
+    async def _update_registry(self, model_name: str, action: str, evaluation: dict[str, Any]):
         """Update the strategy registry with canary outcomes."""
         try:
             registry_path = Path("ops/strategy_registry.json")
@@ -395,10 +404,10 @@ class CanaryManager:
 
             registry_path.write_text(json.dumps(registry, indent=2))
 
-        except Exception as e:
-            logging.error(f"[CANARY] Registry update failed: {e}")
+        except _CONFIG_ERRORS:
+            logging.exception("[CANARY] Registry update failed")
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get comprehensive canary deployment status."""
         config = _load_weights()
         status = {
@@ -451,10 +460,10 @@ class CanaryManager:
                 capital_policy_path.write_text(json.dumps(policy, indent=2))
                 logging.info(f"[CANARY] Added {model_name} to capital allocation enabled list")
 
-        except Exception as e:
-            logging.error(f"[CANARY] Failed to update capital policy: {e}")
+        except _CONFIG_ERRORS:
+            logging.exception("[CANARY] Failed to update capital policy")
 
-    def _audit_evaluation(self, results: Dict[str, Any]):
+    def _audit_evaluation(self, results: dict[str, Any]):
         """Audit the evaluation results."""
         self.audit_log.append(results)
 
@@ -468,8 +477,8 @@ class CanaryManager:
             audit_path.parent.mkdir(exist_ok=True)
             with open(audit_path, "a") as f:
                 f.write(json.dumps(results) + "\n")
-        except Exception as e:
-            logging.warning(f"[CANARY] Audit logging failed: {e}")
+        except _AUDIT_ERRORS:
+            logging.warning("[CANARY] Audit logging failed", exc_info=True)
 
 
 # Global manager instance
@@ -509,8 +518,8 @@ async def canary_evaluation_loop(interval_minutes: int = 60):
             else:
                 logging.debug("[CANARY] Auto-promotion disabled, skipping evaluation")
 
-        except Exception as e:
-            logging.error(f"[CANARY] Evaluation loop error: {e}")
+        except _CONFIG_ERRORS:
+            logging.exception("[CANARY] Evaluation loop error")
 
         await asyncio.sleep(interval_seconds)
 
@@ -518,7 +527,7 @@ async def canary_evaluation_loop(interval_minutes: int = 60):
 # Test functions
 async def simulate_canary_performance(
     model_name: str = "test_canary", trades: int = 100, pnl: float = 250.0
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Simulate canary performance for testing (injects fake metrics)."""
     # This would normally push test metrics to the metrics endpoint
     # For demo purposes, just log what would happen

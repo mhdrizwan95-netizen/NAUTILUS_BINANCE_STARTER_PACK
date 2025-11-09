@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import time
 from collections import Counter
-from typing import List, Tuple
 
 
 class EventBORollup:
@@ -27,7 +26,7 @@ class EventBORollup:
         if symbol:
             self.by_symbol[(key, symbol)] += n
 
-    def top_symbols(self, key: str, k: int = 5) -> List[Tuple[str, int]]:
+    def top_symbols(self, key: str, k: int = 5) -> list[tuple[str, int]]:
         items = [(sym, n) for (kk, sym), n in self.by_symbol.items() if kk == key]
         return sorted(items, key=lambda x: x[1], reverse=True)[:k]
 
@@ -39,7 +38,7 @@ class EventBOBuckets:
         self.clock = clock
         self.bucket_sec = int(bucket_minutes) * 60
         self.max_buckets = int(max_buckets)
-        self.buckets: List[tuple[int, Counter, Counter]] = []
+        self.buckets: list[tuple[int, Counter, Counter]] = []
 
     def _current_start(self, now: float) -> int:
         return int(now // self.bucket_sec) * self.bucket_sec
@@ -60,8 +59,8 @@ class EventBOBuckets:
         if symbol:
             cnt_sym[(key, symbol)] = cnt_sym.get((key, symbol), 0) + n
 
-    def snapshot(self) -> List[dict]:
-        out: List[dict] = []
+    def snapshot(self) -> list[dict]:
+        out: list[dict] = []
         for start, cnt, cnt_sym in reversed(self.buckets):
             out.append(
                 {

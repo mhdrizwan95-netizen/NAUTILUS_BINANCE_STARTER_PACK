@@ -5,8 +5,9 @@ import asyncio
 import random
 import string
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any
 
 from engine.core.order_router import OrderRouter
 from engine.core.portfolio import Portfolio
@@ -21,12 +22,12 @@ def _random_symbol(prefix: str, i: int) -> str:
 
 
 class DummyClient:
-    def __init__(self, *, mismatched: Optional[Set[str]] = None) -> None:
-        self._symbol_leverage: Dict[str, int] = {}
+    def __init__(self, *, mismatched: set[str] | None = None) -> None:
+        self._symbol_leverage: dict[str, int] = {}
         self._mismatched = {sym.upper() for sym in (mismatched or set())}
 
     async def submit_market_quote(
-        self, symbol: str, side: str, quote: float, market: Optional[str] = None
+        self, symbol: str, side: str, quote: float, market: str | None = None
     ):
         await asyncio.sleep(random.uniform(0.0, 0.02))
         price = 100.0 * (1 + random.uniform(-0.01, 0.01))
@@ -52,7 +53,7 @@ class DummyClient:
         await asyncio.sleep(random.uniform(0, 0.005))
         return {}
 
-    async def futures_change_leverage(self, symbol: str, leverage: int) -> Dict[str, Any]:
+    async def futures_change_leverage(self, symbol: str, leverage: int) -> dict[str, Any]:
         await asyncio.sleep(random.uniform(0.0, 0.01))
         sym = symbol.upper()
         if sym in self._mismatched:
@@ -62,7 +63,7 @@ class DummyClient:
         self._symbol_leverage[sym] = applied
         return {"symbol": sym, "leverage": applied}
 
-    async def position_risk(self, *, market: Optional[str] = None) -> List[Dict[str, Any]]:
+    async def position_risk(self, *, market: str | None = None) -> list[dict[str, Any]]:
         await asyncio.sleep(random.uniform(0.0, 0.005))
         return [
             {"symbol": sym, "leverage": lev, "positionAmt": 0, "entryPrice": 0}
@@ -72,15 +73,15 @@ class DummyClient:
 
 @dataclass
 class SyntheticExchange:
-    symbols: List[str]
+    symbols: list[str]
     base_price: float = 100.0
     spike_chance: float = 0.02
 
     def __post_init__(self) -> None:
-        self.state: Dict[str, float] = {
+        self.state: dict[str, float] = {
             sym: self.base_price * (1 + random.uniform(-0.05, 0.05)) for sym in self.symbols
         }
-        self.metadata: Dict[str, Dict[str, float | bool]] = {}
+        self.metadata: dict[str, dict[str, float | bool]] = {}
 
     def _advance_symbol(self, sym: str) -> SymbolMetrics:
         price = self.state[sym]
@@ -134,13 +135,13 @@ class SyntheticExchange:
 
     def metrics_snapshot(
         self,
-    ) -> Tuple[
-        Dict[str, SymbolMetrics],
-        Dict[str, SymbolMetrics],
-        Dict[str, Dict[str, float | bool]],
+    ) -> tuple[
+        dict[str, SymbolMetrics],
+        dict[str, SymbolMetrics],
+        dict[str, dict[str, float | bool]],
     ]:
-        futures_metrics: Dict[str, SymbolMetrics] = {}
-        spot_metrics: Dict[str, SymbolMetrics] = {}
+        futures_metrics: dict[str, SymbolMetrics] = {}
+        spot_metrics: dict[str, SymbolMetrics] = {}
         for sym in self.symbols:
             metric = self._advance_symbol(sym)
             futures_metrics[sym] = metric
@@ -195,7 +196,7 @@ async def synthetic_signal_stream(
 
 async def run_synthetic_runtime(args: argparse.Namespace) -> None:
     config = load_runtime_config(args.config)
-    all_symbols: Set[str] = set()
+    all_symbols: set[str] = set()
     universes = config.universes or {}
     if not universes:
         universes = {"trend": None}

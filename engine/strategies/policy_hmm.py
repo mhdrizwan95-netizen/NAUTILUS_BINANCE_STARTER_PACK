@@ -6,7 +6,6 @@ import pickle  # nosec B403 - loads trusted local models only
 import time
 from collections import defaultdict, deque
 from pathlib import Path
-from typing import Deque, Dict, List, Optional, Tuple
 
 from ..config import load_strategy_config
 from .calibration import adjust_confidence, adjust_quote, cooldown_scale
@@ -18,18 +17,25 @@ S = load_strategy_config()
 STATE_EDGE = {0: 0.0, 1: 1.0, 2: -1.0}
 
 # Rolling buffers per symbol
-_prices: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
-_vols: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
-_last_signal_ts: Dict[str, float] = defaultdict(float)
+_prices: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
+_vols: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
+_last_signal_ts: dict[str, float] = defaultdict(float)
 
 
-def _vwap(prices: List[float], vols: List[float]) -> float:
-    num = sum(p * v for p, v in zip(prices, vols)) or 0.0
+class HMMModelNotFoundError(FileNotFoundError):
+    """Raised when the trained HMM policy file is missing."""
+
+    def __init__(self, model_path: Path, active_path: Path) -> None:
+        super().__init__(f"No HMM model found at {model_path} or {active_path}")
+
+
+def _vwap(prices: list[float], vols: list[float]) -> float:
+    num = sum(p * v for p, v in zip(prices, vols, strict=False)) or 0.0
     den = sum(vols) or 1.0
     return num / den
 
 
-def _zscore(x: List[float]) -> float:
+def _zscore(x: list[float]) -> float:
     n = len(x)
     if n < 2:
         return 0.0
@@ -39,7 +45,7 @@ def _zscore(x: List[float]) -> float:
     return (x[-1] - m) / sd
 
 
-def _vola(returns: List[float]) -> float:
+def _vola(returns: list[float]) -> float:
     # simple std of 1-min returns
     n = len(returns)
     if n < 2:
@@ -49,7 +55,7 @@ def _vola(returns: List[float]) -> float:
     return math.sqrt(max(var, 1e-12))
 
 
-def _features(sym: str) -> Optional[List[float]]:
+def _features(sym: str) -> list[float] | None:
     P, V = _prices[sym], _vols[sym]
     if len(P) < 3:  # need minimum data
         return None
@@ -75,7 +81,7 @@ def _load_model():
     active_path = Path("engine/models/active_hmm_policy.pkl")
     model_path = active_path if active_path.exists() else Path(S.hmm_model_path)
     if not model_path.exists():
-        raise FileNotFoundError(f"No HMM model found at {model_path} or {active_path}")
+        raise HMMModelNotFoundError(model_path, active_path)
     print(f"[HMM] Loading model from {model_path}")
     with open(model_path, "rb") as f:
         return pickle.load(f)  # nosec B301 - models are produced by trusted pipeline
@@ -91,7 +97,7 @@ def model():
     return _model
 
 
-def decide(sym: str) -> Optional[Tuple[str, float, Dict]]:
+def decide(sym: str) -> tuple[str, float, dict] | None:
     """Return (side, quote_usdt, meta) or None if no action."""
     # cooldown
     now = time.time()

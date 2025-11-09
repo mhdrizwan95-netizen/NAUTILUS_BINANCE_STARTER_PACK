@@ -4,10 +4,20 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import List
 
 from engine.config.defaults import GLOBAL_DEFAULTS, RISK_DEFAULTS
 from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
+
+
+class MissingFuturesBaseError(RuntimeError):
+    """Raised when a futures endpoint is required but missing."""
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger(__name__).warning("%s suppressed: %s", context, exc, exc_info=True)
+
+
+_CONFIG_FALLBACK_EXCEPTIONS = (MissingFuturesBaseError, ValueError, RuntimeError)
 
 
 class Settings:
@@ -113,11 +123,9 @@ class Settings:
                 self.api_key = self.api_key or None
                 self.api_secret = self.api_secret or None
 
-            # Validate futures base URL if in futures mode
-            if self.is_futures and not self.futures_base:
-                raise RuntimeError(
-                    f"BINANCE_FUTURES_BASE must be set for futures mode, got: {self.futures_base}"
-                )
+                # Validate futures base URL if in futures mode
+                if self.is_futures and not self.futures_base:
+                    raise MissingFuturesBaseError
 
         if venue == "KRAKEN":
             self.recv_window = 0
@@ -184,7 +192,7 @@ def _as_int(v: str | None, default: int) -> int:
         return default
 
 
-def _as_list(v: str | None) -> List[str]:
+def _as_list(v: str | None) -> list[str]:
     if not v:
         return []
     return [s.strip() for s in v.split(",") if s.strip()]
@@ -196,7 +204,7 @@ class RiskConfig:
     min_notional_usdt: float
     max_notional_usdt: float
     max_orders_per_min: int
-    trade_symbols: List[str] | None
+    trade_symbols: list[str] | None
     dust_threshold_usd: float
     # breakers
     exposure_cap_symbol_usd: float
@@ -296,7 +304,7 @@ def norm_symbol(sym: str) -> str:
     return f"{s}{QUOTE_CCY}"
 
 
-async def list_all_testnet_pairs() -> List[str]:
+async def list_all_testnet_pairs() -> list[str]:
     """Fetch all tradeable spot pairs from Binance testnet."""
     try:
         import httpx  # type: ignore
@@ -318,10 +326,10 @@ async def list_all_testnet_pairs() -> List[str]:
                     symbol = symbol_info.get("symbol", "")
                     if symbol and symbol.endswith("USDT"):
                         symbols.append(symbol)
-            return sorted(symbols)
-        except Exception:
-            # Fallback to a few hardcoded pairs
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
             return ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+        else:
+            return sorted(symbols)
 
 
 @dataclass(frozen=True)
@@ -359,7 +367,7 @@ def ibkr_min_notional_usd() -> float:
 class StrategyConfig:
     enabled: bool
     dry_run: bool
-    symbols: List[str]
+    symbols: list[str]
     interval_sec: int
     fast: int
     slow: int
@@ -398,7 +406,8 @@ def load_strategy_config() -> StrategyConfig:
         default_market = os.getenv("STRATEGY_DEFAULT_MARKET") or (
             "futures" if getattr(settings, "is_futures", False) else "spot"
         )
-    except Exception:
+    except _CONFIG_FALLBACK_EXCEPTIONS as exc:
+        _log_suppressed("strategy.default_market", exc)
         default_market = os.getenv("STRATEGY_DEFAULT_MARKET", "spot")
     return StrategyConfig(
         enabled=_as_bool(os.getenv("STRATEGY_ENABLED"), False),

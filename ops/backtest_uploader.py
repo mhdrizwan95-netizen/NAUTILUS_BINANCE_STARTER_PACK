@@ -10,77 +10,109 @@ This creates the closed-loop: research → registry → governance → deploymen
 
 import hashlib
 import json
+import logging
 import shutil
-import subprocess  # nosec B404 - intentional shell out to scp/rsync
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
 ARTIFACT_ROOT = Path("ops/model_artifacts")
+_REGISTRY_ERRORS = (OSError, json.JSONDecodeError)
+_JSON_ERRORS = (json.JSONDecodeError, TypeError, ValueError)
+
+
+class WeightsFileMissingError(FileNotFoundError):
+    """Raised when the specified weights file is missing."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Weights file not found: {path}")
 
 
 def utc_now():
     """Return ISO timestamp for consistent logging."""
-    return datetime.now(tz=timezone.utc).isoformat()
+    return datetime.now(tz=UTC).isoformat()
 
 
 def compute_hash(path: Path) -> str:
-    """Compute SHA-1 hash of file for integrity verification."""
+    """Compute SHA-256 hash of file for integrity verification."""
     try:
-        h = hashlib.sha1()
+        h = hashlib.sha256()
         with open(path, "rb") as f:
             while chunk := f.read(8192):
                 h.update(chunk)
         return h.hexdigest()[:8]
-    except Exception as e:
-        print(f"[Uploader] Hash computation failed: {e}")
+    except OSError as exc:
+        logging.warning("[Uploader] Hash computation failed: %s", exc, exc_info=True)
         return "nohash"
 
 
-def load_registry() -> Dict[str, Any]:
+def load_registry() -> dict[str, Any]:
     """Load existing strategy registry or create new one."""
     if REGISTRY_PATH.exists():
         try:
             return json.loads(REGISTRY_PATH.read_text())
-        except Exception as e:
-            print(f"[Uploader] Registry load failed: {e}")
+        except _REGISTRY_ERRORS as exc:
+            logging.warning("[Uploader] Registry load failed: %s", exc, exc_info=True)
 
     return {"current_model": None, "promotion_log": []}
 
 
-def save_registry(registry: Dict[str, Any]) -> None:
+def save_registry(registry: dict[str, Any]) -> None:
     """Atomically save registry to disk."""
     tmp = REGISTRY_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(registry, indent=2))
     tmp.replace(REGISTRY_PATH)
 
 
-def get_git_sha(short: bool = True) -> str:
-    """Get current git commit hash for experiment tracking."""
+def _read_git_ref(git_dir: Path, ref: str) -> str | None:
     try:
-        cmd = ["git", "rev-parse", "HEAD"]
-        if short:
-            cmd.insert(1, "--short")
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=".")
-        if result.returncode == 0:
-            return result.stdout.strip()
-        else:
-            print(f"[Uploader] Git SHA retrieval failed: {result.stderr}")
-            return f"nogit_{int(time.time())}"
-    except Exception as e:
-        print(f"[Uploader] Git SHA error: {e}")
-        return f"nogit_{int(time.time())}"
+        return (git_dir / ref).read_text(encoding="utf-8").strip()
+    except OSError:
+        packed = git_dir / "packed-refs"
+        try:
+            for line in packed.read_text(encoding="utf-8").splitlines():
+                if not line or line.startswith("#") or line.startswith("^"):
+                    continue
+                sha, name = line.split(" ", 1)
+                if name.strip() == ref:
+                    return sha.strip()
+        except OSError:
+            return None
+    return None
+
+
+def get_git_sha(short: bool = True) -> str:
+    """Get current git commit hash for experiment tracking without invoking subprocess."""
+    git_dir = Path(".git")
+    fallback = f"nogit_{int(time.time())}"
+    head_path = git_dir / "HEAD"
+    try:
+        head = head_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        logging.warning("[Uploader] Git HEAD read failed: %s", exc, exc_info=True)
+        return fallback
+
+    if head.startswith("ref:"):
+        ref = head.split(" ", 1)[1].strip()
+        sha = _read_git_ref(git_dir, ref) or ""
+    else:
+        sha = head
+
+    if not sha:
+        logging.warning("[Uploader] Git SHA unavailable; falling back")
+        return fallback
+    return sha[:7] if short else sha
 
 
 def register_model(
     tag: str,
     weights_path: str,
-    metrics_path: Optional[str] = None,
-    plot_path: Optional[str] = None,
-    config_path: Optional[str] = None,
-    extra_metrics: Optional[Dict[str, Any]] = None,
+    metrics_path: str | None = None,
+    plot_path: str | None = None,
+    config_path: str | None = None,
+    extra_metrics: dict[str, Any] | None = None,
     register_type: str = "backtest",
     description: str = "",
 ):
@@ -110,7 +142,7 @@ def register_model(
     # Copy weights (required)
     weights = Path(weights_path)
     if not weights.exists():
-        raise FileNotFoundError(f"Weights file not found: {weights_path}")
+        raise WeightsFileMissingError(weights_path)
 
     dest_weights = model_dir / weights.name
     shutil.copy2(weights, dest_weights)
@@ -129,7 +161,7 @@ def register_model(
         # Load metrics for initial scoring
         try:
             metrics_data = json.loads(mfile.read_text())
-        except Exception:
+        except _JSON_ERRORS:
             metrics_data = extra_metrics or {}
 
     if not dest_metrics and extra_metrics:
@@ -148,6 +180,7 @@ def register_model(
     if config_path and Path(config_path).exists():
         shutil.copy2(config_path, model_dir / Path(config_path).name)
 
+    metrics_data = metrics_data or {}
     # Create registry entry
     entry = {
         "sharpe": metrics_data.get("backtest_sharpe") if metrics_data else None,
@@ -204,7 +237,7 @@ def register_model(
     }
 
 
-def list_registered_models() -> Dict[str, Any]:
+def list_registered_models() -> dict[str, Any]:
     """Return summary of all registered models."""
     registry = load_registry()
 
@@ -300,6 +333,7 @@ Examples:
         print("   http://localhost:8002/strategy/leaderboard")
         print("=" * 60)
 
-    except Exception as e:
-        print(f"\n❌ REGISTRATION FAILED: {e}")
-        exit(1)
+    except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        logging.error("Registration failed: %s", exc, exc_info=True)
+        print(f"\n❌ REGISTRATION FAILED: {exc}")
+        raise SystemExit(1) from exc

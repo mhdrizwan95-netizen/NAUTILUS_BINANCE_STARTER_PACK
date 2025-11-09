@@ -1,5 +1,5 @@
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Dict
 
 from fastapi import Depends, FastAPI
 from fastapi.responses import JSONResponse
@@ -31,7 +31,7 @@ log_dry_run_banner("services.ml_service")
 
 
 @app.get("/health")
-def health() -> Dict[str, str]:
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 

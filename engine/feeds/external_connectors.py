@@ -18,10 +18,11 @@ import os
 import re
 import time
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any
 
 import httpx
 import yaml
@@ -34,6 +35,13 @@ from engine.metrics import (
 )
 
 logger = logging.getLogger(__name__)
+_FEED_ERRORS: tuple[type[Exception], ...] = (
+    asyncio.TimeoutError,
+    httpx.HTTPError,
+    ValueError,
+    RuntimeError,
+    KeyError,
+)
 
 EXTERNAL_EVENT_TOPIC = "events.external_feed"
 DEFAULT_CONFIG_PATH = Path(os.getenv("EXTERNAL_FEEDS_CONFIG", "config/external_feeds.yaml"))
@@ -44,13 +52,13 @@ class ExternalFeedEvent:
     """Normalized event payload handed to the signal bus."""
 
     source: str
-    payload: Dict[str, Any]
-    asset_hints: List[str] = field(default_factory=list)
+    payload: dict[str, Any]
+    asset_hints: list[str] = field(default_factory=list)
     priority: float = 0.5
-    expires_at: Optional[float] = None
+    expires_at: float | None = None
 
     def as_envelope(self) -> ExternalEvent:
-        meta: Dict[str, Any] = {"priority": self.priority}
+        meta: dict[str, Any] = {"priority": self.priority}
         if self.expires_at is not None:
             meta["expires_at"] = self.expires_at
         if self.asset_hints:
@@ -73,7 +81,7 @@ class ExternalFeedConnector:
         *,
         poll_interval: float = 30.0,
         default_priority: float = 0.5,
-        config: Optional[Dict[str, Any]] = None,
+        config: dict[str, Any] | None = None,
         timeout: float = 10.0,
     ) -> None:
         self.source = source
@@ -87,11 +95,11 @@ class ExternalFeedConnector:
 
     def build_event(
         self,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
-        asset_hints: Optional[Iterable[str]] = None,
-        priority: Optional[float] = None,
-        ttl_sec: Optional[float] = None,
+        asset_hints: Iterable[str] | None = None,
+        priority: float | None = None,
+        ttl_sec: float | None = None,
     ) -> ExternalFeedEvent:
         expires_at = time.time() + float(ttl_sec) if ttl_sec else None
         hints = [h.upper() for h in (asset_hints or [])]
@@ -103,7 +111,7 @@ class ExternalFeedConnector:
             expires_at=expires_at,
         )
 
-    async def collect(self) -> List[ExternalFeedEvent]:
+    async def collect(self) -> list[ExternalFeedEvent]:
         """
         Override in sub-classes.
 
@@ -135,7 +143,7 @@ class ExternalFeedConnector:
             except asyncio.CancelledError:
                 self._log.info("External feed '%s' cancelled", self.source)
                 break
-            except Exception as exc:
+            except _FEED_ERRORS as exc:
                 external_feed_errors_total.labels(self.source).inc()
                 self._log.warning("External feed '%s' failed: %s", self.source, exc, exc_info=True)
             await asyncio.sleep(self.poll_interval)
@@ -147,13 +155,13 @@ class ExternalFeedConnector:
 class _SeededConnectorMixin:
     """Utility mixin that emits events defined in config.seed_events."""
 
-    def __init__(self, *_, config: Optional[Dict[str, Any]] = None, **__) -> None:
+    def __init__(self, *_, config: dict[str, Any] | None = None, **__) -> None:
         cfg = config or {}
         seeds = cfg.get("seed_events") or []
         self._seed_events = deque(seeds)
         super().__init__(*_, config=cfg, **__)
 
-    def _drain_seed(self) -> Optional[ExternalFeedEvent]:
+    def _drain_seed(self) -> ExternalFeedEvent | None:
         if not self._seed_events:
             return None
         raw = self._seed_events.popleft() or {}
@@ -171,7 +179,7 @@ class _SeededConnectorMixin:
 class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
     """Fetch recent tweets via Twitter/X recent search API."""
 
-    def __init__(self, source: str, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, source: str, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         poll = cfg.get("poll_interval", 5.0)
         priority = cfg.get("priority", 0.9)
@@ -184,14 +192,14 @@ class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
             self.query = f"({joined}) lang:en"
         self.expansions = cfg.get("expansions") or []
         self.max_results = int(cfg.get("max_results", 25))
-        self.asset_keyword_map: Dict[str, List[str]] = {
+        self.asset_keyword_map: dict[str, list[str]] = {
             str(k).lower(): v for k, v in (cfg.get("asset_keyword_map") or {}).items()
         }
         self.ttl_sec = float(cfg.get("ttl_sec", 900))
-        self._since_id: Optional[str] = None
+        self._since_id: str | None = None
         self._warned_token = False
 
-    async def collect(self) -> List[ExternalFeedEvent]:
+    async def collect(self) -> list[ExternalFeedEvent]:
         if not self.bearer_token:
             if not self._warned_token:
                 self._log.warning(
@@ -200,7 +208,7 @@ class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
                 self._warned_token = True
             return []
         event = self._drain_seed()
-        events: List[ExternalFeedEvent] = [event] if event else []
+        events: list[ExternalFeedEvent] = [event] if event else []
         params = {
             "query": self.query or "(bitcoin OR eth OR doge) lang:en",
             "max_results": max(min(self.max_results, 100), 10),
@@ -222,7 +230,7 @@ class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
                     return events
                 resp.raise_for_status()
                 data = resp.json() or {}
-        except Exception as exc:
+        except _FEED_ERRORS as exc:
             external_feed_errors_total.labels(self.source).inc()
             self._log.warning("Twitter fetch failed: %s", exc)
             return events
@@ -257,8 +265,8 @@ class TwitterFirehoseConnector(_SeededConnectorMixin, ExternalFeedConnector):
             )
         return events
 
-    def _extract_assets(self, text: str) -> List[str]:
-        asset_hints: List[str] = []
+    def _extract_assets(self, text: str) -> list[str]:
+        asset_hints: list[str] = []
         lowered = text.lower()
         for key, assets in self.asset_keyword_map.items():
             if key in lowered:
@@ -289,7 +297,7 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
         "rebate",
     )
 
-    def __init__(self, source: str, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, source: str, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         poll = cfg.get("poll_interval", 45.0)
         priority = cfg.get("priority", 0.88)
@@ -301,17 +309,17 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
         )
         self.asset_suffixes = cfg.get("asset_suffixes") or ["USDT"]
         self.ttl_sec = float(cfg.get("ttl_sec", 1800))
-        self._seen_ids: Set[str] = set()
+        self._seen_ids: set[str] = set()
 
-    def _first_nonempty_text(self, article: Dict[str, Any], keys: Iterable[str]) -> Optional[str]:
+    def _first_nonempty_text(self, article: dict[str, Any], keys: Iterable[str]) -> str | None:
         for key in keys:
             value = article.get(key)
             if isinstance(value, str) and value.strip():
                 return value.strip()
         return None
 
-    def _extract_campaign_tags(self, *texts: Optional[str]) -> List[str]:
-        hits: Set[str] = set()
+    def _extract_campaign_tags(self, *texts: str | None) -> list[str]:
+        hits: set[str] = set()
         for text in texts:
             if not text:
                 continue
@@ -321,8 +329,8 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
                     hits.add(keyword)
         return sorted(hits)
 
-    def _extract_article_tags(self, article: Dict[str, Any]) -> List[str]:
-        raw_tags: List[str] = []
+    def _extract_article_tags(self, article: dict[str, Any]) -> list[str]:
+        raw_tags: list[str] = []
         for key in ("tags", "relatedTags", "categories", "category", "topics"):
             value = article.get(key)
             if isinstance(value, str) and value.strip():
@@ -337,11 +345,11 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
                             raw_tags.append(name.strip())
         return list(dict.fromkeys(raw_tags))
 
-    def _find_tickers_in_text(self, text: Optional[str]) -> List[str]:
+    def _find_tickers_in_text(self, text: str | None) -> list[str]:
         if not text:
             return []
         candidates = re.findall(r"\b[A-Z0-9]{3,10}\b", text)
-        tickers: List[str] = []
+        tickers: list[str] = []
         for cand in candidates:
             sym = cand.upper()
             if sym.endswith(tuple(self.asset_suffixes)):
@@ -351,8 +359,8 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
                     tickers.append(f"{sym}{suffix}")
         return tickers
 
-    async def collect(self) -> List[ExternalFeedEvent]:
-        events: List[ExternalFeedEvent] = []
+    async def collect(self) -> list[ExternalFeedEvent]:
+        events: list[ExternalFeedEvent] = []
         seed = self._drain_seed()
         if seed:
             events.append(seed)
@@ -361,7 +369,7 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
                 resp = await client.get(self.url)
                 resp.raise_for_status()
                 payload = resp.json() or {}
-        except Exception as exc:
+        except _FEED_ERRORS as exc:
             external_feed_errors_total.labels(self.source).inc()
             self._log.warning("Binance announcement fetch failed: %s", exc)
             return events
@@ -415,7 +423,7 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
             article_tags = self._extract_article_tags(article)
             campaign_tags = self._extract_campaign_tags(title, summary, content)
             language = article.get("language") or article.get("lang")
-            payload: Dict[str, Any] = {
+            payload: dict[str, Any] = {
                 "id": article_id,
                 "title": title,
                 "tickers": tickers,
@@ -453,9 +461,9 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
             self._seen_ids = set(list(self._seen_ids)[-200:])
         return events
 
-    def _extract_articles(self, payload: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_articles(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
         data = payload.get("data")
-        articles: List[Dict[str, Any]] = []
+        articles: list[dict[str, Any]] = []
         if isinstance(data, list):
             for item in data:
                 if isinstance(item, dict):
@@ -468,7 +476,7 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
                 articles.extend(data.get("articles") or [])
         return articles
 
-    def _extract_tickers(self, article: Dict[str, Any], title: str) -> List[str]:
+    def _extract_tickers(self, article: dict[str, Any], title: str) -> list[str]:
         tickers = []
         candidates = []
         if "symbols" in article:
@@ -489,7 +497,7 @@ class BinanceListingConnector(_SeededConnectorMixin, ExternalFeedConnector):
 class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
     """Fetch trending DEX pairs and emit events for high-velocity movers."""
 
-    def __init__(self, source: str, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, source: str, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         poll = cfg.get("poll_interval", 15.0)
         priority = cfg.get("priority", 0.7)
@@ -502,10 +510,10 @@ class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
         )
         self.ttl_sec = float(cfg.get("ttl_sec", 600))
         super().__init__(source, poll_interval=poll, default_priority=priority, config=cfg)
-        self._seen_pairs: Set[str] = set()
+        self._seen_pairs: set[str] = set()
 
-    async def collect(self) -> List[ExternalFeedEvent]:
-        events: List[ExternalFeedEvent] = []
+    async def collect(self) -> list[ExternalFeedEvent]:
+        events: list[ExternalFeedEvent] = []
         seed = self._drain_seed()
         if seed:
             events.append(seed)
@@ -515,7 +523,7 @@ class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
                 resp = await client.get(self.api_url, params=params)
                 resp.raise_for_status()
                 data = resp.json() or {}
-        except Exception as exc:
+        except _FEED_ERRORS as exc:
             external_feed_errors_total.labels(self.source).inc()
             self._log.warning("Dex connector fetch failed: %s", exc)
             return events
@@ -567,7 +575,7 @@ class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
             self._seen_pairs = set(list(self._seen_pairs)[-200:])
         return events
 
-    def _extract_pairs(self, data: Dict[str, Any]) -> List[Dict[str, Any]]:
+    def _extract_pairs(self, data: dict[str, Any]) -> list[dict[str, Any]]:
         if "pairs" in data and isinstance(data["pairs"], list):
             return data["pairs"]
         if "tokens" in data and isinstance(data["tokens"], list):
@@ -582,7 +590,7 @@ class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
             return default
 
     @staticmethod
-    def _nested(data: Dict[str, Any], path: Iterable[str]) -> Any:
+    def _nested(data: dict[str, Any], path: Iterable[str]) -> Any:
         cur = data
         for part in path:
             if isinstance(cur, dict):
@@ -595,7 +603,7 @@ class DexWhaleConnector(_SeededConnectorMixin, ExternalFeedConnector):
 class MacroCalendarConnector(_SeededConnectorMixin, ExternalFeedConnector):
     """Consume an ICS calendar of macro events."""
 
-    def __init__(self, source: str, config: Optional[Dict[str, Any]] = None) -> None:
+    def __init__(self, source: str, config: dict[str, Any] | None = None) -> None:
         cfg = config or {}
         poll = cfg.get("poll_interval", 1800.0)
         priority = cfg.get("priority", 0.4)
@@ -604,10 +612,10 @@ class MacroCalendarConnector(_SeededConnectorMixin, ExternalFeedConnector):
         self.ics_url = cfg.get("ics_url")
         self.include_keywords = [kw.lower() for kw in (cfg.get("include_keywords") or [])]
         self.ttl_sec = float(cfg.get("ttl_sec", 86400))
-        self._seen_events: Set[str] = set()
+        self._seen_events: set[str] = set()
 
-    async def collect(self) -> List[ExternalFeedEvent]:
-        events: List[ExternalFeedEvent] = []
+    async def collect(self) -> list[ExternalFeedEvent]:
+        events: list[ExternalFeedEvent] = []
         seed = self._drain_seed()
         if seed:
             events.append(seed)
@@ -618,12 +626,12 @@ class MacroCalendarConnector(_SeededConnectorMixin, ExternalFeedConnector):
                 resp = await client.get(self.ics_url)
                 resp.raise_for_status()
                 text = resp.text
-        except Exception as exc:
+        except _FEED_ERRORS as exc:
             external_feed_errors_total.labels(self.source).inc()
             self._log.warning("Macro calendar fetch failed: %s", exc)
             return events
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         horizon = now + timedelta(hours=self.lookahead_hours)
         for event in self._parse_ics(text):
             uid = event.get("uid")
@@ -656,12 +664,12 @@ class MacroCalendarConnector(_SeededConnectorMixin, ExternalFeedConnector):
             self._seen_events = set(list(self._seen_events)[-200:])
         return events
 
-    def _parse_ics(self, text: str) -> List[Dict[str, Any]]:
-        events: List[Dict[str, Any]] = []
+    def _parse_ics(self, text: str) -> list[dict[str, Any]]:
+        events: list[dict[str, Any]] = []
         blocks = text.split("BEGIN:VEVENT")
         for block in blocks[1:]:
             lines = block.splitlines()
-            event: Dict[str, Any] = {}
+            event: dict[str, Any] = {}
             for raw_line in lines:
                 line = raw_line.strip()
                 if line.startswith("UID:"):
@@ -682,14 +690,14 @@ class MacroCalendarConnector(_SeededConnectorMixin, ExternalFeedConnector):
         return events
 
     @staticmethod
-    def _parse_dt(value: str) -> Optional[datetime]:
+    def _parse_dt(value: str) -> datetime | None:
         value = value.strip()
         for fmt in ("%Y%m%dT%H%M%SZ", "%Y%m%dT%H%M%S", "%Y%m%d"):
             try:
                 dt = datetime.strptime(value, fmt)
                 if fmt.endswith("Z"):
-                    return dt.replace(tzinfo=timezone.utc)
-                return dt.replace(tzinfo=timezone.utc)
+                    return dt.replace(tzinfo=UTC)
+                return dt.replace(tzinfo=UTC)
             except ValueError:
                 continue
         return None
@@ -707,7 +715,7 @@ CONNECTOR_TYPES = {
 }
 
 
-def load_feed_config(path: Optional[Path | str] = None) -> Dict[str, Any]:
+def load_feed_config(path: Path | str | None = None) -> dict[str, Any]:
     """Load YAML config describing external feed connectors."""
     cfg_path = Path(path) if path else DEFAULT_CONFIG_PATH
     if not cfg_path.exists():
@@ -717,8 +725,8 @@ def load_feed_config(path: Optional[Path | str] = None) -> Dict[str, Any]:
     return data.get("feeds") or {}
 
 
-def build_connectors(feeds_cfg: Dict[str, Any]) -> List[ExternalFeedConnector]:
-    connectors: List[ExternalFeedConnector] = []
+def build_connectors(feeds_cfg: dict[str, Any]) -> list[ExternalFeedConnector]:
+    connectors: list[ExternalFeedConnector] = []
     for name, cfg in feeds_cfg.items():
         if not isinstance(cfg, dict):
             logger.warning("Feed config for %s must be a mapping", name)
@@ -736,8 +744,8 @@ def build_connectors(feeds_cfg: Dict[str, Any]) -> List[ExternalFeedConnector]:
 
 
 async def spawn_external_feeds_from_config(
-    path: Optional[Path | str] = None,
-) -> List[str]:
+    path: Path | str | None = None,
+) -> list[str]:
     """
     Build connectors from config and start their run loops.
 
@@ -747,7 +755,7 @@ async def spawn_external_feeds_from_config(
     connectors = build_connectors(feeds_cfg)
     if not connectors:
         return []
-    started: List[str] = []
+    started: list[str] = []
     loop = asyncio.get_running_loop()
     for connector in connectors:
         loop.create_task(connector.run(), name=f"external-feed-{connector.source}")

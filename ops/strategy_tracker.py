@@ -12,6 +12,15 @@ from ops.env import engine_endpoints
 from ops.prometheus import REGISTRY
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")
+_REGISTRY_ERRORS = (OSError, json.JSONDecodeError)
+_METRIC_FETCH_ERRORS = (
+    httpx.HTTPError,
+    httpx.RequestError,
+    asyncio.TimeoutError,
+    ValueError,
+)
+_PARSE_ERRORS = (ValueError, IndexError)
+_TRACKER_ERRORS = _REGISTRY_ERRORS + _METRIC_FETCH_ERRORS
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
@@ -42,8 +51,8 @@ def load_registry() -> dict:
     if REGISTRY_PATH.exists():
         try:
             return json.loads(REGISTRY_PATH.read_text())
-        except Exception:
-            pass
+        except _REGISTRY_ERRORS:
+            logging.warning("Failed to load strategy registry", exc_info=True)
     return {"current_model": None}
 
 
@@ -60,25 +69,31 @@ async def fetch_strategy_metrics(base_url: str, current_model: str | None = None
     """
     try:
         # Get metrics from engine
-        async with httpx.AsyncClient() as client:
-            r = await client.get(f"{base_url.rstrip('/')}/metrics", timeout=5.0)
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            r = await client.get(f"{base_url.rstrip('/')}/metrics")
         r.raise_for_status()
         txt = r.text
-    except Exception:
+    except _METRIC_FETCH_ERRORS:
+        logging.warning("Failed to fetch metrics from %s", base_url, exc_info=True)
         return {}
 
     # Crude scrape: extract metrics labelled by model_tag if exported
     data = {}
     for line in txt.splitlines():
         if "pnl_realized_total" in line and "model=" in line and "venue=" in line:
-            # e.g. pnl_realized_total{venue="BINANCE",model="hmm_v1"} 120.0
-            model = line.split('model="')[1].split('"')[0]
-            val = float(line.split()[-1])
+            try:
+                model = line.split('model="')[1].split('"')[0]
+                val = float(line.split()[-1])
+            except _PARSE_ERRORS:
+                continue
             data.setdefault(model, {"realized": val})
 
         if "pnl_unrealized_total" in line and "model=" in line:
-            model = line.split('model="')[1].split('"')[0]
-            val = float(line.split()[-1])
+            try:
+                model = line.split('model="')[1].split('"')[0]
+                val = float(line.split()[-1])
+            except _PARSE_ERRORS:
+                continue
             if model in data:
                 data[model]["unrealized"] = val
     # Fallback: if no model-labelled metrics were found, attribute aggregate engine PnL to current model
@@ -89,13 +104,13 @@ async def fetch_strategy_metrics(base_url: str, current_model: str | None = None
             if line.startswith("pnl_realized_total ") and " {" not in line:
                 try:
                     realized = float(line.split()[-1])
-                except Exception:
-                    pass
+                except _PARSE_ERRORS:
+                    continue
             if line.startswith("pnl_unrealized_total ") and " {" not in line:
                 try:
                     unrealized = float(line.split()[-1])
-                except Exception:
-                    pass
+                except _PARSE_ERRORS:
+                    continue
         if realized is not None or unrealized is not None:
             data[current_model] = {}
             if realized is not None:
@@ -171,7 +186,7 @@ async def strategy_tracker_loop():
                 logging.info(
                     f"[StrategyTracker] Updated {len(all_data)} models; current: {registry.get('current_model')}"
                 )
-        except Exception as e:
-            logging.warning(f"Strategy tracker error: {e}")
+        except _TRACKER_ERRORS:
+            logging.warning("Strategy tracker error", exc_info=True)
 
         await asyncio.sleep(10)

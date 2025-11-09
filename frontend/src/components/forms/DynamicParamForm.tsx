@@ -1,23 +1,23 @@
-import { useEffect, useRef } from 'react';
-import { Controller, useForm } from 'react-hook-form';
+import { useEffect, useRef } from "react";
+import { Controller, useForm } from "react-hook-form";
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
-import { stableHash } from '@/lib/equality';
-import type { ParamSchema } from '@/types/settings';
+} from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
+import { stableHash } from "@/lib/equality";
+import type { ParamSchema } from "@/types/settings";
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value) && !(value instanceof Date);
+  typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
 
 const clonePlain = <T,>(value: T): T => {
   if (Array.isArray(value)) {
@@ -44,22 +44,38 @@ type DynamicParamFormProps = {
   onChange?: (values: Record<string, unknown>) => void;
 };
 
+type ParamValues = Record<string, string | number | boolean>;
+
 export function DynamicParamForm({
   schema,
   initial,
   onSubmit,
-  submitLabel = 'Save',
+  submitLabel = "Save",
   onChange,
 }: DynamicParamFormProps) {
   const defaults = Object.fromEntries(
-    schema.fields.map((field) => [
-      field.key,
-      initial?.[field.key] ??
-        ('default' in field ? field.default : field.type === 'boolean' ? false : ''),
-    ]),
-  );
+    schema.fields.map((field) => {
+      const seed = initial?.[field.key] ?? ("default" in field ? field.default : undefined);
+      let value: string | number | boolean;
+      switch (field.type) {
+        case "boolean":
+          value = typeof seed === "boolean" ? seed : Boolean(seed);
+          break;
+        case "number":
+        case "integer":
+          value = typeof seed === "number" ? seed : Number(seed ?? 0);
+          break;
+        case "select":
+        case "string":
+        default:
+          value = typeof seed === "string" ? seed : String(seed ?? "");
+          break;
+      }
+      return [field.key, value];
+    }),
+  ) as ParamValues;
 
-  const { control, handleSubmit, watch } = useForm({ defaultValues: defaults });
+  const { control, handleSubmit, watch } = useForm<ParamValues>({ defaultValues: defaults });
 
   const watchedValues = watch();
   const lastHash = useRef<string | null>(null);
@@ -82,7 +98,7 @@ export function DynamicParamForm({
         <div key={field.key} className="grid gap-2">
           <Label htmlFor={field.key}>{field.label}</Label>
 
-          {field.type === 'boolean' && (
+          {field.type === "boolean" && (
             <Controller
               name={field.key}
               control={control}
@@ -96,17 +112,25 @@ export function DynamicParamForm({
             />
           )}
 
-          {field.type === 'string' && (
+          {field.type === "string" && (
             <Controller
               name={field.key}
               control={control}
               render={({ field: controllerField }) => (
-                <Input id={field.key} placeholder={field.placeholder} {...controllerField} />
+                <Input
+                  id={field.key}
+                  placeholder={field.placeholder}
+                  value={String(controllerField.value ?? "")}
+                  onChange={(event) => controllerField.onChange(event.target.value)}
+                  onBlur={controllerField.onBlur}
+                  name={controllerField.name}
+                  ref={controllerField.ref}
+                />
               )}
             />
           )}
 
-          {(field.type === 'number' || field.type === 'integer') && (
+          {(field.type === "number" || field.type === "integer") && (
             <Controller
               name={field.key}
               control={control}
@@ -115,15 +139,19 @@ export function DynamicParamForm({
                   <Input
                     id={field.key}
                     type="number"
-                    step={field.step ?? (field.type === 'integer' ? 1 : 0.1)}
-                    {...controllerField}
+                    step={field.step ?? (field.type === "integer" ? 1 : 0.1)}
+                    value={controllerField.value as number | string | undefined}
+                    onChange={(event) => controllerField.onChange(Number(event.target.value))}
+                    onBlur={controllerField.onBlur}
+                    name={controllerField.name}
+                    ref={controllerField.ref}
                   />
                   {field.min !== undefined && field.max !== undefined && (
                     <Slider
                       className="w-44"
                       min={field.min}
                       max={field.max}
-                      step={field.step ?? (field.type === 'integer' ? 1 : 0.1)}
+                      step={field.step ?? (field.type === "integer" ? 1 : 0.1)}
                       value={[Number(controllerField.value ?? field.default ?? field.min)]}
                       onValueChange={([value]) => controllerField.onChange(value)}
                     />
@@ -133,12 +161,15 @@ export function DynamicParamForm({
             />
           )}
 
-          {field.type === 'select' && (
+          {field.type === "select" && (
             <Controller
               name={field.key}
               control={control}
               render={({ field: controllerField }) => (
-                <Select value={controllerField.value as string} onValueChange={controllerField.onChange}>
+                <Select
+                  value={controllerField.value as string}
+                  onValueChange={controllerField.onChange}
+                >
                   <SelectTrigger id={field.key}>
                     <SelectValue placeholder="Select" />
                   </SelectTrigger>
@@ -154,7 +185,7 @@ export function DynamicParamForm({
             />
           )}
 
-          {'hint' in field && field.hint && (
+          {"hint" in field && field.hint && (
             <p className="text-xs text-muted-foreground">{field.hint}</p>
           )}
         </div>

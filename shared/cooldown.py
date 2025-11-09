@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, Optional
 
 
 class CooldownTracker:
@@ -13,9 +12,9 @@ class CooldownTracker:
 
     def __init__(self, cooldown_sec: float) -> None:
         self.cooldown_sec = float(max(0.0, cooldown_sec))
-        self._until: Dict[str, float] = {}
+        self._until: dict[str, float] = {}
 
-    def set(self, key: str, now: Optional[float] = None) -> float:
+    def set(self, key: str, now: float | None = None) -> float:
         """Arm cooldown for `key` and return the expiry timestamp.
 
         If `cooldown_sec` is 0, the key is considered immediately expired and
@@ -29,7 +28,7 @@ class CooldownTracker:
         self._until[key] = until
         return until
 
-    def active(self, key: str, now: Optional[float] = None) -> bool:
+    def active(self, key: str, now: float | None = None) -> bool:
         """Return True if `key` is currently under cooldown."""
         ts = float(now if now is not None else time.time())
         until = self._until.get(key)
@@ -37,14 +36,11 @@ class CooldownTracker:
             return False
         if ts >= until:
             # Expired – clean up entry lazily
-            try:
-                del self._until[key]
-            except Exception:
-                pass
+            self._until.pop(key, None)
             return False
         return True
 
-    def remaining(self, key: str, now: Optional[float] = None) -> float:
+    def remaining(self, key: str, now: float | None = None) -> float:
         """Return remaining cooldown seconds for `key` (0 if inactive)."""
         ts = float(now if now is not None else time.time())
         until = self._until.get(key, 0.0)

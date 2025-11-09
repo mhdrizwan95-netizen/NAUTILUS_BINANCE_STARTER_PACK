@@ -7,19 +7,19 @@ Provides unified interface across different exchanges (Binance crypto, IBKR trad
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Protocol
 
 
 class VenueClient(Protocol):
     """Unified interface that all venue adapters must implement."""
 
-    def get_last_price(self, symbol: str) -> Optional[float]:
+    def get_last_price(self, symbol: str) -> float | None:
         """Get latest price for a symbol. Returns None if unavailable."""
         ...
 
     def place_market_order(
         self, *, symbol: str, side: str, quote: float | None, quantity: float | None
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Place market order.
 
@@ -34,11 +34,11 @@ class VenueClient(Protocol):
         """
         ...
 
-    def account_snapshot(self) -> Dict[str, Any]:
+    def account_snapshot(self) -> dict[str, Any]:
         """Optional: Get account balances and equity."""
         return {"equity_usd": None, "cash_usd": None}
 
-    def positions(self) -> List[Dict[str, Any]]:
+    def positions(self) -> list[dict[str, Any]]:
         """Optional: Get current positions."""
         return []
 
@@ -52,7 +52,7 @@ class VenueEntry:
 
 
 # Global registry
-_REGISTRY: Dict[str, VenueEntry] = {}
+_REGISTRY: dict[str, VenueEntry] = {}
 
 
 def register_venue(name: str, client: VenueClient) -> None:
@@ -66,11 +66,11 @@ def get_venue(name: str) -> VenueEntry:
     key = name.upper()
     if key not in _REGISTRY:
         available = list_venues()
-        raise ValueError(f"VENUE_NOT_REGISTERED: {name}. Available: {available}")
+        raise VenueNotRegisteredError(name, available)
     return _REGISTRY[key]
 
 
-def list_venues() -> List[str]:
+def list_venues() -> list[str]:
     """List all registered venue names."""
     return sorted(_REGISTRY.keys())
 
@@ -83,3 +83,10 @@ def is_venue_registered(name: str) -> bool:
 def clear_venues() -> None:
     """Clear all registered venues (for testing)."""
     _REGISTRY.clear()
+
+
+class VenueNotRegisteredError(ValueError):
+    """Raised when an unknown venue is requested."""
+
+    def __init__(self, name: str, available: list[str]) -> None:
+        super().__init__(f"VENUE_NOT_REGISTERED: {name}. Available: {available}")

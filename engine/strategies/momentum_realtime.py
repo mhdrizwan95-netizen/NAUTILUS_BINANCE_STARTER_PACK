@@ -6,8 +6,9 @@ import logging
 import math
 import time
 from collections import defaultdict, deque
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Deque, Dict, Iterable, Optional
+from typing import TYPE_CHECKING
 
 from engine import metrics
 from engine.config.defaults import MOMENTUM_RT_DEFAULTS
@@ -19,6 +20,15 @@ if TYPE_CHECKING:  # pragma: no cover
     from .symbol_scanner import SymbolScanner
 
 logger = logging.getLogger("engine.momentum.realtime")
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 @dataclass(frozen=True)
@@ -41,7 +51,7 @@ class MomentumRealtimeConfig:
 
 
 def load_momentum_rt_config(
-    scanner: "SymbolScanner" | None = None,
+    scanner: SymbolScanner | None = None,
 ) -> MomentumRealtimeConfig:
     universe = StrategyUniverse(scanner).get("momentum_rt") or []
     symbols = tuple(universe)
@@ -116,7 +126,7 @@ def load_momentum_rt_config(
 
 
 def _recent(
-    points: Deque[tuple[float, float, float]], cutoff: float
+    points: deque[tuple[float, float, float]], cutoff: float
 ) -> Iterable[tuple[float, float, float]]:
     for ts, price, volume in points:
         if ts >= cutoff:
@@ -128,17 +138,17 @@ class MomentumStrategyModule:
 
     def __init__(
         self,
-        cfg: Optional[MomentumRealtimeConfig] = None,
+        cfg: MomentumRealtimeConfig | None = None,
         *,
         clock=time,
-        scanner: "SymbolScanner" | None = None,
+        scanner: SymbolScanner | None = None,
     ) -> None:
         base_cfg = cfg or load_momentum_rt_config(scanner)
         self.cfg = base_cfg
         self.enabled = self.cfg.enabled
         self._clock = clock
-        self._windows: Dict[str, Deque[tuple[float, float, float]]] = defaultdict(deque)
-        self._cooldown_until: Dict[str, float] = defaultdict(float)
+        self._windows: dict[str, deque[tuple[float, float, float]]] = defaultdict(deque)
+        self._cooldown_until: dict[str, float] = defaultdict(float)
         self._universe = StrategyUniverse(scanner)
         if self.cfg.symbols:
             self._explicit_symbols = {sym.split(".")[0].upper() for sym in self.cfg.symbols if sym}
@@ -150,8 +160,8 @@ class MomentumStrategyModule:
         symbol: str,
         price: float,
         ts: float,
-        volume: Optional[float] = None,
-    ) -> Optional[dict]:
+        volume: float | None = None,
+    ) -> dict | None:
         if not self.enabled:
             return None
         if price <= 0.0 or not math.isfinite(price):
@@ -220,13 +230,13 @@ class MomentumStrategyModule:
             metrics.momentum_rt_window_return_pct.labels(symbol=base, venue=venue.lower()).set(
                 pct_move_up * 100.0 if pct_move_up >= pct_move_down else -pct_move_down * 100.0
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
         if now < self._cooldown_until.get(base, 0.0):
             return None
 
-        side: Optional[str] = None
+        side: str | None = None
         reason = ""
         if (
             pct_move_up >= self.cfg.pct_move_threshold
@@ -272,7 +282,7 @@ class MomentumStrategyModule:
             metrics.momentum_rt_cooldown_epoch.labels(symbol=base, venue=venue.lower()).set(
                 cooldown_until
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
         logger.info(

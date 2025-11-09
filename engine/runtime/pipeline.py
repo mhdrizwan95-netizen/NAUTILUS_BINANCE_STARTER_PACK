@@ -5,8 +5,9 @@ import logging
 import time
 import uuid
 from collections import defaultdict
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, Optional
+from typing import Any
 
 from ..core import order_router
 from ..core.market_resolver import resolve_market
@@ -27,6 +28,21 @@ from .config import RuntimeConfig
 from .universe import UniverseManager
 
 log = logging.getLogger("engine.runtime.pipeline")
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    log.debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
 @dataclass(frozen=True)
@@ -35,11 +51,11 @@ class Signal:
     symbol: str
     side: str
     confidence: float
-    venue_hint: Optional[str] = None
-    stop: Optional[float] = None
-    take_profit: Optional[float] = None
-    ttl: Optional[float] = None
-    meta: Dict[str, float | str] = field(default_factory=dict)
+    venue_hint: str | None = None
+    stop: float | None = None
+    take_profit: float | None = None
+    ttl: float | None = None
+    meta: dict[str, float | str] = field(default_factory=dict)
 
     def normalized_strategy(self) -> str:
         return self.strategy.lower()
@@ -55,14 +71,14 @@ class ExecutionOrder:
     notional_fraction: float
     bucket: str
     quantity: float = 0.0
-    leverage: Optional[int] = None
-    configured_leverage: Optional[int] = None
-    applied_leverage: Optional[int] = None
+    leverage: int | None = None
+    configured_leverage: int | None = None
+    applied_leverage: int | None = None
     effective_leverage: int = 1
     margin_fraction: float = 0.0
     reduce_only: bool = False
-    stop: Optional[float] = None
-    take_profit: Optional[float] = None
+    stop: float | None = None
+    take_profit: float | None = None
     client_order_id: str = field(default_factory=lambda: f"runtime:{uuid.uuid4().hex[:18]}")
 
 
@@ -87,7 +103,7 @@ class StrategyProducer:
 
 class StrategyRegistry:
     def __init__(self) -> None:
-        self._factories: Dict[str, Callable[[RuntimeConfig, UniverseManager], StrategyProducer]] = (
+        self._factories: dict[str, Callable[[RuntimeConfig, UniverseManager], StrategyProducer]] = (
             {}
         )
 
@@ -105,19 +121,19 @@ class StrategyRegistry:
         for key, factory in self._factories.items():
             try:
                 yield factory(config, manager)
-            except Exception as exc:  # pragma: no cover - configuration error
-                log.warning("failed to instantiate strategy '%s': %s", key, exc)
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - configuration error
+                log.warning("failed to instantiate strategy '%s': %s", key, exc, exc_info=True)
 
 
 class BucketTracker:
     def __init__(self, config: RuntimeConfig) -> None:
         self.config = config
-        self._usage: Dict[str, float] = defaultdict(float)
+        self._usage: dict[str, float] = defaultdict(float)
         self._exposure: float = 0.0
         self._initialized = False
         self._initialize_metrics()
 
-    def snapshot(self) -> Dict[str, float]:
+    def snapshot(self) -> dict[str, float]:
         return dict(self._usage)
 
     def headroom(self, bucket: str) -> float:
@@ -154,15 +170,15 @@ class BucketTracker:
                 strategy_bucket_usage_fraction.labels(bucket=bucket).set(
                     self._usage.get(bucket, 0.0)
                 )
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("bucket_tracker.metric_init", exc)
         self._initialized = True
 
     def _set_metric(self, bucket: str) -> None:
         try:
             strategy_bucket_usage_fraction.labels(bucket=bucket).set(self._usage.get(bucket, 0.0))
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("bucket_tracker.metric_set", exc)
 
 
 class RiskAllocator:
@@ -170,9 +186,9 @@ class RiskAllocator:
         self.config = config
         self.portfolio = portfolio
         self.buckets = BucketTracker(config)
-        self._open_positions: Dict[str, int] = defaultdict(int)
+        self._open_positions: dict[str, int] = defaultdict(int)
         self.daily_loss_realized: float = 0.0
-        self._active_positions: Dict[str, Dict[str, float]] = defaultdict(dict)
+        self._active_positions: dict[str, dict[str, float]] = defaultdict(dict)
 
     def _select_bucket(self, strategy: str) -> str:
         strat = strategy.lower()
@@ -191,7 +207,7 @@ class RiskAllocator:
     def _bucket_budget(self, bucket: str) -> float:
         return getattr(self.config.buckets, bucket, 0.0)
 
-    def _pick_leverage(self, symbol: str) -> Optional[int]:
+    def _pick_leverage(self, symbol: str) -> int | None:
         leverage_map = self.config.futures.leverage
         return (
             leverage_map.get(symbol.upper())
@@ -199,14 +215,14 @@ class RiskAllocator:
             or leverage_map.get("default")
         )
 
-    def _desired_leverage(self, symbol: str) -> Optional[int]:
+    def _desired_leverage(self, symbol: str) -> int | None:
         overrides = getattr(self.config.futures, "desired_leverage", {}) or {}
         symbol_key = symbol.upper()
         if symbol_key in overrides:
             return overrides[symbol_key]
         return overrides.get("DEFAULT") or overrides.get("default")
 
-    def _effective_leverage(self, symbol: str, desired: Optional[int]) -> int:
+    def _effective_leverage(self, symbol: str, desired: int | None) -> int:
         if desired is not None and desired > 0:
             return max(1, int(desired))
         fallback = self._pick_leverage(symbol) or 1
@@ -232,7 +248,7 @@ class RiskAllocator:
         cash = float(getattr(state, "cash", 0.0) or 0.0)
         return max(equity, cash, 1.0)
 
-    def evaluate(self, signal: Signal) -> Optional[ExecutionOrder]:
+    def evaluate(self, signal: Signal) -> ExecutionOrder | None:
         strategy_key = signal.normalized_strategy()
         bucket = self._select_bucket(strategy_key)
         symbol_key = signal.symbol.upper()
@@ -348,11 +364,13 @@ class ExecutionRouter:
         self.risk = risk
         try:
             self.portfolio = router.portfolio_service()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("exec.portfolio_service", exc)
             self.portfolio = None
         try:
             self._client = router.exchange_client()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("exec.exchange_client", exc)
             self._client = None
 
     async def execute(self, order: ExecutionOrder) -> bool:
@@ -400,7 +418,7 @@ class ExecutionRouter:
                 quote=usd_notional,
                 market=venue_hint,
             )
-        except Exception as exc:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
             log.warning("[exec] market order failed for %s: %s", qualified, exc, exc_info=True)
             self.risk.cancel(order)
             return False
@@ -428,8 +446,13 @@ class ExecutionRouter:
                         float(order.stop),
                         abs(qty_filled),
                     )
-                except Exception:
-                    log.warning("[exec] stop placement failed for %s", qualified, exc_info=True)
+                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    log.warning(
+                        "[exec] stop placement failed for %s: %s",
+                        qualified,
+                        exc,
+                        exc_info=True,
+                    )
             if order.take_profit:
                 try:
                     await self.router.place_reduce_only_limit(
@@ -438,10 +461,11 @@ class ExecutionRouter:
                         abs(qty_filled),
                         float(order.take_profit),
                     )
-                except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS as exc:
                     log.warning(
-                        "[exec] take-profit placement failed for %s",
+                        "[exec] take-profit placement failed for %s: %s",
                         qualified,
+                        exc,
                         exc_info=True,
                     )
         self.risk.reconcile_position(order)
@@ -489,13 +513,13 @@ class ExecutionRouter:
                 strategy_leverage_applied.labels(strategy=strategy_key, symbol=symbol_key).set(
                     float(applied)
                 )
-                return True
 
             position = await self._fetch_position(symbol)
             if position:
                 try:
                     order.applied_leverage = int(float(position.get("leverage", 0) or 0))
-                except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    _log_suppressed("exec.position_leverage", exc)
                     order.applied_leverage = None
             applied = order.applied_leverage or order.effective_leverage or 1
             order.leverage = applied
@@ -506,18 +530,21 @@ class ExecutionRouter:
                 float(applied)
             )
             return True
-        except Exception:
-            log.warning("[exec] leverage preparation failed for %s", symbol, exc_info=True)
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            log.warning("[exec] leverage preparation failed for %s: %s", symbol, exc, exc_info=True)
             strategy_leverage_mismatch_total.labels(strategy=strategy_key, symbol=symbol_key).inc()
             return False
+        else:
+            return True
 
-    async def _fetch_position(self, symbol: str) -> Optional[dict[str, Any]]:
+    async def _fetch_position(self, symbol: str) -> dict[str, Any] | None:
         client = getattr(self, "_client", None)
         if client is None or not hasattr(client, "position_risk"):
             return None
         try:
             positions = await client.position_risk(market="futures")
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("exec.position_risk", exc)
             return None
         symbol_key = symbol.upper()
         for item in positions or []:
@@ -533,7 +560,7 @@ class StrategyPipeline:
         registry: StrategyRegistry,
         order_router: order_router.OrderRouter,
         manager: UniverseManager,
-        queue: Optional[asyncio.Queue[tuple[Signal, float]]] = None,
+        queue: asyncio.Queue[tuple[Signal, float]] | None = None,
     ) -> None:
         self.config = config
         self.registry = registry
@@ -561,8 +588,8 @@ class StrategyPipeline:
                 strategy_signal_queue_latency_sec.labels(strategy=signal.strategy.lower()).set(
                     latency
                 )
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("runtime.queue_metrics", exc)
 
             if signal.ttl and latency > signal.ttl:
                 log.debug(
@@ -588,12 +615,13 @@ class StrategyPipeline:
                         side=signal.side.upper(),
                         source=signal.strategy,
                     ).inc()
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
                 self.risk.cancel(order)
                 log.warning(
-                    "[runtime] execution failed for %s %s",
+                    "[runtime] execution failed for %s %s: %s",
                     signal.strategy,
                     signal.symbol,
+                    exc,
                     exc_info=True,
                 )
 

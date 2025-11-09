@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import os
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any
 
 from engine.core.market_resolver import resolve_market_choice
 from engine.core.order_router import OrderRouter
@@ -20,13 +22,30 @@ try:  # Optional when metrics are disabled in certain test contexts
         airdrop_expected_value_usd,
         airdrop_orders_total,
     )
-except Exception:  # pragma: no cover - metrics disabled
+except ImportError:  # pragma: no cover - metrics disabled
     airdrop_events_total = None  # type: ignore[assignment]
     airdrop_orders_total = None  # type: ignore[assignment]
     airdrop_cooldown_epoch = None  # type: ignore[assignment]
     airdrop_expected_value_usd = None  # type: ignore[assignment]
 
 _LOG = logging.getLogger("engine.strategies.airdrop_promo")
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+)
+_BUS_EXCEPTIONS = _SUPPRESSIBLE_EXCEPTIONS + (ImportError,)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    _LOG.debug("%s suppressed: %s", context, exc, exc_info=True)
+
 
 _QUOTE_REQUIREMENT_RE = re.compile(
     r"(?:trade|trading|volume|spend|buy)\s+(?:at\s+least\s+|minimum\s+of\s+|>=\s*)?"
@@ -62,7 +81,7 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _env_list(name: str, default: Iterable[str]) -> Tuple[str, ...]:
+def _env_list(name: str, default: Iterable[str]) -> tuple[str, ...]:
     raw = os.getenv(name)
     if raw is None:
         return tuple(default)
@@ -85,7 +104,7 @@ class AirdropPromoConfig:
     min_priority: float = 0.7
     max_spread_pct: float = 0.04
     cooldown_sec: float = 7200.0
-    keywords: Tuple[str, ...] = (
+    keywords: tuple[str, ...] = (
         "airdrop",
         "promotion",
         "launchpool",
@@ -95,8 +114,8 @@ class AirdropPromoConfig:
         "earn",
         "voucher",
     )
-    deny_keywords: Tuple[str, ...] = ("scam", "phishing")
-    allowed_sources: Tuple[str, ...] = ()
+    deny_keywords: tuple[str, ...] = ("scam", "phishing")
+    allowed_sources: tuple[str, ...] = ()
     metrics_enabled: bool = True
     publish_topic: str = "strategy.airdrop_promo_participation"
     default_market: str = "spot"
@@ -158,7 +177,7 @@ class AirdropPromoWatcher:
         router: OrderRouter,
         risk: RiskRails,
         rest_client: Any,
-        cfg: Optional[AirdropPromoConfig] = None,
+        cfg: AirdropPromoConfig | None = None,
         *,
         clock=time,
     ) -> None:
@@ -167,7 +186,7 @@ class AirdropPromoWatcher:
         self.rest_client = rest_client
         self.cfg = cfg or load_airdrop_promo_config()
         self.clock = clock
-        self._cooldowns: Dict[str, float] = {}
+        self._cooldowns: dict[str, float] = {}
         self._seen_promos: set[str] = set()
         self._allow_sources = {src.lower() for src in self.cfg.allowed_sources if src}
         self._executor = StrategyExecutor(
@@ -178,7 +197,7 @@ class AirdropPromoWatcher:
         )
 
     # ------------------------------------------------------------------ public API
-    async def on_external_event(self, evt: Dict[str, Any]) -> None:
+    async def on_external_event(self, evt: dict[str, Any]) -> None:
         if not self.cfg.enabled:
             return
 
@@ -260,7 +279,7 @@ class AirdropPromoWatcher:
                     "ts": now,
                 }
             )
-        except Exception as exc:  # noqa: BLE001
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
             _LOG.warning("[AIRDROP] execution failed for %s: %s", symbol, exc)
             self._record_order(symbol, "failed")
             self._set_cooldown(symbol, now)
@@ -278,8 +297,8 @@ class AirdropPromoWatcher:
         if expected_reward and airdrop_expected_value_usd:
             try:
                 airdrop_expected_value_usd.labels(symbol=symbol).set(float(expected_reward))
-            except Exception:  # pragma: no cover - metrics optional
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - metrics optional
+                _log_suppressed("airdrop.expected_reward_metric", exc)
 
         self._seen_promos.add(promo_id)
 
@@ -341,7 +360,7 @@ class AirdropPromoWatcher:
         self._seen_promos.clear()
 
     # ------------------------------------------------------------------ helpers
-    def _priority(self, evt: Dict[str, Any]) -> float:
+    def _priority(self, evt: dict[str, Any]) -> float:
         priority = evt.get("priority")
         if priority is None:
             priority = evt.get("payload", {}).get("priority")
@@ -350,7 +369,7 @@ class AirdropPromoWatcher:
         except (TypeError, ValueError):
             return 0.5
 
-    def _combine_text(self, payload: Dict[str, Any]) -> str:
+    def _combine_text(self, payload: dict[str, Any]) -> str:
         parts = [
             str(payload.get("title") or ""),
             str(payload.get("summary") or ""),
@@ -360,7 +379,7 @@ class AirdropPromoWatcher:
         ]
         return " ".join(part for part in parts if part).strip()
 
-    def _promo_identifier(self, evt: Dict[str, Any], payload: Dict[str, Any], text: str) -> str:
+    def _promo_identifier(self, evt: dict[str, Any], payload: dict[str, Any], text: str) -> str:
         fields = [
             payload.get("id"),
             payload.get("article_id"),
@@ -374,7 +393,7 @@ class AirdropPromoWatcher:
                 return str(field)
         return hex(abs(hash(text)))  # deterministic-ish fallback
 
-    def _select_symbol(self, evt: Dict[str, Any], payload: Dict[str, Any]) -> Optional[str]:
+    def _select_symbol(self, evt: dict[str, Any], payload: dict[str, Any]) -> str | None:
         candidates = []
         hints = evt.get("asset_hints") or []
         if isinstance(hints, list):
@@ -405,8 +424,8 @@ class AirdropPromoWatcher:
         self,
         text: str,
         symbol: str,
-    ) -> Tuple[Optional[float], Optional[float]]:
-        quote_requirement: Optional[float] = None
+    ) -> tuple[float | None, float | None]:
+        quote_requirement: float | None = None
         for match in _QUOTE_REQUIREMENT_RE.finditer(text):
             prefix = (match.group("prefix") or "").strip().lower()
             suffix = (match.group("suffix") or "").strip().lower()
@@ -419,7 +438,7 @@ class AirdropPromoWatcher:
             except (TypeError, ValueError):
                 continue
 
-        qty_requirement: Optional[float] = None
+        qty_requirement: float | None = None
         for match in _BASE_REQUIREMENT_RE.finditer(text):
             token = (match.group(2) or "").upper()
             if token in {"USD", "USDT", "BUSD", "FDUSD", "TUSD"}:
@@ -439,7 +458,7 @@ class AirdropPromoWatcher:
 
         return quote_requirement, qty_requirement
 
-    def _extract_expected_reward(self, text: str) -> Optional[float]:
+    def _extract_expected_reward(self, text: str) -> float | None:
         match = _REWARD_RE.search(text)
         if not match:
             return None
@@ -451,8 +470,8 @@ class AirdropPromoWatcher:
     def _calc_notional(
         self,
         price: float,
-        quote_requirement: Optional[float],
-        qty_requirement: Optional[float],
+        quote_requirement: float | None,
+        qty_requirement: float | None,
     ) -> float:
         equity = self._router_equity()
         if equity <= 0:
@@ -472,10 +491,10 @@ class AirdropPromoWatcher:
     def _router_equity(self) -> float:
         try:
             return float(self.router._portfolio.state.equity)  # type: ignore[attr-defined]
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             return 0.0
 
-    async def _price_snapshot(self, symbol: str) -> Optional[Tuple[float, float]]:
+    async def _price_snapshot(self, symbol: str) -> tuple[float, float] | None:
         client = self.rest_client
         if client is None:
             return None
@@ -512,17 +531,17 @@ class AirdropPromoWatcher:
         if self.cfg.metrics_enabled and airdrop_cooldown_epoch:
             try:
                 airdrop_cooldown_epoch.labels(symbol=symbol).set(expiry)
-            except Exception:  # pragma: no cover - metrics optional
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - metrics optional
+                _log_suppressed("airdrop.cooldown_metric", exc)
 
     async def _publish_participation(
         self,
         symbol: str,
         notional_usd: float,
         reference_price: float,
-        expected_reward: Optional[float],
+        expected_reward: float | None,
         promo_id: str,
-        payload: Dict[str, Any],
+        payload: dict[str, Any],
         *,
         dry_run: bool,
         market: str = "spot",
@@ -545,24 +564,24 @@ class AirdropPromoWatcher:
             from engine.core.event_bus import BUS
 
             BUS.fire(topic, data)
-        except Exception:
-            _LOG.debug("Failed to publish participation event for %s", promo_id, exc_info=True)
+        except _BUS_EXCEPTIONS as exc:
+            _log_suppressed("airdrop.publish_participation", exc)
 
     def _record_event(self, symbol: str, decision: str) -> None:
         if not self.cfg.metrics_enabled or not airdrop_events_total:
             return
         try:
             airdrop_events_total.labels(symbol=symbol, decision=decision).inc()
-        except Exception:  # pragma: no cover - metrics optional
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - metrics optional
+            _log_suppressed("airdrop.event_metric", exc)
 
     def _record_order(self, symbol: str, status: str) -> None:
         if not self.cfg.metrics_enabled or not airdrop_orders_total:
             return
         try:
             airdrop_orders_total.labels(symbol=symbol, status=status).inc()
-        except Exception:  # pragma: no cover - metrics optional
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - metrics optional
+            _log_suppressed("airdrop.order_metric", exc)
 
     @staticmethod
     def _safe_float(value: Any, *, default: float = 0.0) -> float:

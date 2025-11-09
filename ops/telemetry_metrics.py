@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from prometheus_client import Counter
 
+_COUNTER_ERRORS = (ValueError, RuntimeError, KeyError)
+
 _m19_actions = Counter(
     "m19_actions_total",
     "Total scheduler actions triggered",
@@ -21,7 +23,7 @@ def inc_scheduler_action(action: str) -> None:
     """Increment the scheduler action counter for the given action label."""
     try:
         _m19_actions.labels(action=str(action)).inc()
-    except Exception:
+    except _COUNTER_ERRORS:
         # Metrics recording must never break recovery automation.
         pass
 
@@ -30,7 +32,7 @@ def inc_guardian_incident(incident_type: str) -> None:
     """Increment the guardian incident counter."""
     try:
         _m20_incidents.labels(type=str(incident_type)).inc()
-    except Exception:
+    except _COUNTER_ERRORS:
         pass
 
 

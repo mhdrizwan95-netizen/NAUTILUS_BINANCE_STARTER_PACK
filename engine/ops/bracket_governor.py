@@ -1,8 +1,29 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any
+
+import httpx
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger("governance.bracket").debug("%s suppressed: %s", context, exc, exc_info=True)
+
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+    httpx.HTTPError,
+)
 
 
 class BracketGovernor:
@@ -21,11 +42,11 @@ class BracketGovernor:
         # Read bps once on startup; can be made dynamic later
         try:
             self.tp_bps = float(os.getenv("TP_BPS", "20.0"))  # 20 bps = 0.20%
-        except Exception:
+        except (TypeError, ValueError):
             self.tp_bps = 20.0
         try:
             self.sl_bps = float(os.getenv("SL_BPS", "30.0"))
-        except Exception:
+        except (TypeError, ValueError):
             self.sl_bps = 30.0
 
     def wire(self) -> None:
@@ -36,8 +57,8 @@ class BracketGovernor:
                 self.tp_bps,
                 self.sl_bps,
             )
-        except Exception:
-            self.log.warning("BracketGovernor failed to wire", exc_info=True)
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            self.log.exception("BracketGovernor failed to wire")
 
     async def _on_fill(self, evt: dict[str, Any]) -> None:
         try:
@@ -60,32 +81,26 @@ class BracketGovernor:
                 await self.router.place_reduce_only_limit(
                     qual, "SELL" if side == "BUY" else "BUY", abs(qty), float(tp_px)
                 )
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("bracket tp placement", exc)
 
             # Place/Amend SL reduce-only stop (obeys ALLOW_STOP_AMEND)
             try:
                 await self.router.amend_stop_reduce_only(
                     qual, "SELL" if side == "BUY" else "BUY", float(sl_px), abs(qty)
                 )
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("bracket stop placement", exc)
 
-            try:
-                self.log.info(
-                    "[BRACKET] %s side=%s qty=%.8f avg=%.6f TP=%.6f SL=%.6f",
-                    symbol,
-                    side,
-                    qty,
-                    avg,
-                    tp_px,
-                    sl_px,
-                )
-            except Exception:
-                pass
-        except Exception:
+            self.log.info(
+                "[BRACKET] %s side=%s qty=%.8f avg=%.6f TP=%.6f SL=%.6f",
+                symbol,
+                side,
+                qty,
+                avg,
+                tp_px,
+                sl_px,
+            )
+        except _SUPPRESSIBLE_EXCEPTIONS:
             # Never break event loop
-            try:
-                self.log.warning("BracketGovernor on_fill error", exc_info=True)
-            except Exception:
-                pass
+            self.log.exception("BracketGovernor on_fill error")

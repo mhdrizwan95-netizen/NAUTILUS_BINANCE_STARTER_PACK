@@ -5,25 +5,31 @@ import heapq
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
+
+_PUBLISH_ERRORS: tuple[type[Exception], ...] = (
+    RuntimeError,
+    ValueError,
+    ConnectionError,
+)
 
 
 @dataclass
 class QueuedEvent:
     topic: str
-    data: Dict[str, Any]
+    data: dict[str, Any]
     priority: float
-    expires_at: Optional[float] = None
-    source: Optional[str] = None
+    expires_at: float | None = None
+    source: str | None = None
 
 
 class SignalPriorityQueue:
     """Priority queue for strategy/events with cooperative dispatcher."""
 
     def __init__(self) -> None:
-        self._heap: list[Tuple[float, float, QueuedEvent]] = []
+        self._heap: list[tuple[float, float, QueuedEvent]] = []
         self._cv = asyncio.Condition()
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._running = False
 
     async def put(self, event: QueuedEvent) -> None:
@@ -48,7 +54,7 @@ class SignalPriorityQueue:
                     continue
                 try:
                     await bus.publish(evt.topic, evt.data)
-                except Exception as exc:
+                except _PUBLISH_ERRORS as exc:
                     logging.getLogger(__name__).debug(
                         "signal queue publish failed (%s): %s", evt.topic, exc, exc_info=True
                     )

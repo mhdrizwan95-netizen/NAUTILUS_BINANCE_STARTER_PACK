@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import random
 import time
-from typing import Any, Iterable, Optional
+from collections.abc import Iterable
+from typing import Any
 
 import httpx
 
@@ -18,7 +19,7 @@ def create_async_client(
     limits: httpx.Limits | None = None,
     timeout: httpx.Timeout | None = None,
     trust_env: bool = True,
-    headers: Optional[dict[str, str]] = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.AsyncClient:
     """Factory for AsyncClient with shared limits and timeout defaults."""
     return httpx.AsyncClient(
@@ -34,7 +35,7 @@ def create_client(
     limits: httpx.Limits | None = None,
     timeout: httpx.Timeout | None = None,
     trust_env: bool = True,
-    headers: Optional[dict[str, str]] = None,
+    headers: dict[str, str] | None = None,
 ) -> httpx.Client:
     """Factory for synchronous Clients with shared defaults."""
     return httpx.Client(

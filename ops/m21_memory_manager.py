@@ -28,14 +28,16 @@ import json
 import os
 import shutil
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 MEMORY_ROOT = os.path.join("data", "memory_vault")
 INDEX_PATH = os.path.join(MEMORY_ROOT, "lineage_index.json")
 os.makedirs(MEMORY_ROOT, exist_ok=True)
+_INDEX_ERRORS = (OSError, json.JSONDecodeError)
+_ARCHIVE_ERRORS = (OSError, shutil.Error, ValueError)
 
 
-def generate_fingerprint(file_path: str) -> Optional[str]:
+def generate_fingerprint(file_path: str) -> str | None:
     """
     Generate SHA-256 fingerprint for file integrity verification.
 
@@ -51,16 +53,15 @@ def generate_fingerprint(file_path: str) -> Optional[str]:
     try:
         hash_sha256 = hashlib.sha256()
         with open(file_path, "rb") as f:
-            # Read in 64KB chunks to handle large model files efficiently
             for chunk in iter(lambda: f.read(65536), b""):
                 hash_sha256.update(chunk)
         return hash_sha256.hexdigest()[:16]
-    except Exception as e:
-        print(f"⚠️  Failed to fingerprint {file_path}: {e}")
+    except (OSError, ValueError) as exc:
+        print(f"⚠️  Failed to fingerprint {file_path}: {exc}")
         return None
 
 
-def load_lineage_index() -> Dict[str, Any]:
+def load_lineage_index() -> dict[str, Any]:
     """
     Load the global lineage index from JSON file.
 
@@ -71,10 +72,10 @@ def load_lineage_index() -> Dict[str, Any]:
     """
     if os.path.exists(INDEX_PATH):
         try:
-            with open(INDEX_PATH, "r") as f:
+            with open(INDEX_PATH) as f:
                 return json.load(f)
-        except Exception as e:
-            print(f"⚠️  Failed to load lineage index: {e}")
+        except _INDEX_ERRORS as exc:
+            print(f"⚠️  Failed to load lineage index: {exc}")
 
     # Initialize fresh index
     return {
@@ -85,7 +86,7 @@ def load_lineage_index() -> Dict[str, Any]:
     }
 
 
-def save_lineage_index(index: Dict[str, Any]) -> None:
+def save_lineage_index(index: dict[str, Any]) -> None:
     """
     Persist the lineage index to disk.
 
@@ -98,11 +99,11 @@ def save_lineage_index(index: Dict[str, Any]) -> None:
 
         with open(INDEX_PATH, "w") as f:
             json.dump(index, f, indent=2, default=str)
-    except Exception as e:
-        print(f"⚠️  Failed to save lineage index: {e}")
+    except _INDEX_ERRORS as exc:
+        print(f"⚠️  Failed to save lineage index: {exc}")
 
 
-def find_recent_models(model_store_dir: str = None, limit: int = 5) -> List[str]:
+def find_recent_models(model_store_dir: str = None, limit: int = 5) -> list[str]:
     """
     Find recently created model files in the model store.
 
@@ -157,7 +158,7 @@ def extract_model_tag(model_path: str) -> str:
     return datetime.utcnow().strftime("v-%Y%m%dT%H%M%S")
 
 
-def archive_model(source_path: str, metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def archive_model(source_path: str, metadata: dict[str, Any]) -> dict[str, Any] | None:
     """
     Create a permanent fossil of the model in memory vault.
 
@@ -173,20 +174,16 @@ def archive_model(source_path: str, metadata: Dict[str, Any]) -> Optional[Dict[s
         return None
 
     try:
-        # Determine archive location
         tag = metadata.get("tag") or extract_model_tag(source_path)
         archive_dir = os.path.join(MEMORY_ROOT, tag)
         os.makedirs(archive_dir, exist_ok=True)
 
-        # Copy model file
         filename = f"{tag}.joblib"
         dest_path = os.path.join(archive_dir, filename)
         shutil.copy2(source_path, dest_path)
 
-        # Generate fingerprint for integrity checking
         fingerprint = generate_fingerprint(dest_path)
 
-        # Create metadata file
         meta_path = os.path.join(archive_dir, "metadata.json")
         meta_info = {
             **metadata,
@@ -200,7 +197,10 @@ def archive_model(source_path: str, metadata: Dict[str, Any]) -> Optional[Dict[s
 
         with open(meta_path, "w") as f:
             json.dump(meta_info, f, indent=2, default=str)
-
+    except _ARCHIVE_ERRORS as exc:
+        print(f"❌ Failed to archive model {source_path}: {exc}")
+        return None
+    else:
         print("✅ Model fossilized:")
         print(f"   Tag: {tag}")
         print(f"   Location: {archive_dir}")
@@ -208,12 +208,8 @@ def archive_model(source_path: str, metadata: Dict[str, Any]) -> Optional[Dict[s
 
         return meta_info
 
-    except Exception as e:
-        print(f"❌ Failed to archive model {source_path}: {e}")
-        return None
 
-
-def update_lineage(metadata: Dict[str, Any]) -> Dict[str, Any]:
+def update_lineage(metadata: dict[str, Any]) -> dict[str, Any]:
     """
     Add the archived model to the global lineage index.
 
@@ -242,7 +238,7 @@ def update_lineage(metadata: Dict[str, Any]) -> Dict[str, Any]:
     return index
 
 
-def collect_model_context() -> Dict[str, Any]:
+def collect_model_context() -> dict[str, Any]:
     """
     Gather context information about the current model training environment.
 
@@ -289,7 +285,7 @@ def collect_model_context() -> Dict[str, Any]:
     return context
 
 
-def archive_new_generation(notes: str = None) -> Optional[Dict[str, Any]]:
+def archive_new_generation(notes: str = None) -> dict[str, Any] | None:
     """
     Archive the most recent model as a new evolutionary generation.
 
@@ -336,7 +332,7 @@ def archive_new_generation(notes: str = None) -> Optional[Dict[str, Any]]:
     return archived
 
 
-def find_ancestor(tag_or_fingerprint: str) -> Optional[Dict[str, Any]]:
+def find_ancestor(tag_or_fingerprint: str) -> dict[str, Any] | None:
     """
     Locate a specific ancestral fossil by tag or fingerprint.
 
@@ -358,7 +354,7 @@ def find_ancestor(tag_or_fingerprint: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def unlock_model_ancestor(tag_or_fingerprint: str, restore_dir: str = None) -> Optional[str]:
+def unlock_model_ancestor(tag_or_fingerprint: str, restore_dir: str = None) -> str | None:
     """
     Duplicate an ancestor model for testing or rollback.
 
@@ -396,7 +392,7 @@ def unlock_model_ancestor(tag_or_fingerprint: str, restore_dir: str = None) -> O
     return unlocked_path
 
 
-def analyze_lineage() -> Dict[str, Any]:
+def analyze_lineage() -> dict[str, Any]:
     """
     Generate analytical insights about the evolutionary lineage.
 

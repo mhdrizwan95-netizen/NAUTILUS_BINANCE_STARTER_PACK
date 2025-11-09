@@ -9,6 +9,13 @@ from .driver import HistoricalDriver
 from .execution import ExecutionModel
 from .strategy_momentum import MomentumBreakout
 
+_SUPPRESSIBLE_EXCEPTIONS = (
+    httpx.HTTPError,
+    OSError,
+    RuntimeError,
+    ValueError,
+)
+
 
 def _train_if_due(last_train_ms: int, now_ms: int) -> int:
     period_ms = settings.TRAIN_CRON_MINUTES * 60 * 1000
@@ -20,9 +27,9 @@ def _train_if_due(last_train_ms: int, now_ms: int) -> int:
                     f"{settings.ML_SERVICE}/train",
                     json={"n_states": 4, "promote": settings.PROMOTE},
                 )
-                logger.info(f"train -> {r.status_code} {r.text[:200]}")
-        except Exception as e:
-            logger.warning(f"train failed: {e}")
+                logger.info("train -> {} {}", r.status_code, r.text[:200])
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            logger.exception("train failed")
         return now_ms
     return last_train_ms
 
@@ -36,8 +43,8 @@ def _get_params(strategy: str, instrument: str, features: dict) -> dict:
             )
             if r.status_code == 200:
                 return r.json()
-    except Exception as e:
-        logger.warning(f"param get failed: {e}")
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        logger.exception("param get failed")
     return {
         "config_id": "na",
         "params": {},
@@ -115,4 +122,4 @@ def run():
     trades = pd.DataFrame(execm.trades)
     eq.to_csv(results_dir / "equity.csv", index=False)
     trades.to_csv(results_dir / "trades.csv", index=False)
-    logger.info(f"Wrote results to {results_dir}")
+    logger.info("Wrote results to {}", results_dir)

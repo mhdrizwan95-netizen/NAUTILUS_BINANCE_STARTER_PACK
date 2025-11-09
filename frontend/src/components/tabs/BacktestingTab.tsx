@@ -1,29 +1,28 @@
-import {
-  Calendar as CalendarIcon,
-  Filter,
-  Play,
-  RotateCcw,
-  Download,
-  Loader2,
-} from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { DateRange } from 'react-day-picker';
-import { toast } from 'sonner';
+import { Calendar as CalendarIcon, Filter, Play, RotateCcw, Download, Loader2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { DateRange } from "react-day-picker";
+import { toast } from "sonner";
 
-import { EquityCurves } from '@/components/charts/EquityCurves';
-import { PnlBySymbol } from '@/components/charts/PnlBySymbol';
-import { ReturnsHistogram } from '@/components/charts/ReturnsHistogram';
-import { DynamicParamForm } from '@/components/forms/DynamicParamForm';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Calendar } from '@/components/ui/calendar';
-import { Card } from '@/components/ui/card';
-import { Checkbox } from '@/components/ui/checkbox';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Progress } from '@/components/ui/progress';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { EquityCurves } from "@/components/charts/EquityCurves";
+import { PnlBySymbol } from "@/components/charts/PnlBySymbol";
+import { ReturnsHistogram } from "@/components/charts/ReturnsHistogram";
+import { DynamicParamForm } from "@/components/forms/DynamicParamForm";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { Card } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Progress } from "@/components/ui/progress";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -31,18 +30,14 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
-import {
-  getStrategies,
-  pollBacktest,
-  startBacktest,
-} from '@/lib/api';
-import { useRenderCounter } from '@/lib/debug/why';
-import { stableHash } from '@/lib/equality';
-import { usePolling } from '@/lib/hooks';
-import { generateIdempotencyKey } from '@/lib/idempotency';
-import { useAppStore } from '@/lib/store';
-import type { StrategySummary } from '@/types/trading';
+} from "@/components/ui/table";
+import { getStrategies, pollBacktest, startBacktest } from "@/lib/api";
+import { useRenderCounter } from "@/lib/debug/why";
+import { stableHash } from "@/lib/equality";
+import { usePolling } from "@/lib/hooks";
+import { generateIdempotencyKey } from "@/lib/idempotency";
+import { useAppStore } from "@/lib/store";
+import type { StrategySummary } from "@/types/trading";
 
 type BacktestPoll = Awaited<ReturnType<typeof pollBacktest>>;
 
@@ -54,17 +49,17 @@ const getDefaultRange = (): DateRange => {
 };
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
     maximumFractionDigits: 2,
   }).format(value);
 }
 
 export function BacktestingTab() {
-  useRenderCounter('BacktestingTab');
+  useRenderCounter("BacktestingTab");
   const [strategies, setStrategies] = useState<StrategySummary[]>([]);
-  const [selectedStrategyId, setSelectedStrategyId] = useState<string>('');
+  const [selectedStrategyId, setSelectedStrategyId] = useState<string>("");
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>([]);
   const [dateRange, setDateRange] = useState<DateRange | undefined>(() => getDefaultRange());
   const [initialCapital, setInitialCapital] = useState(10000);
@@ -95,7 +90,7 @@ export function BacktestingTab() {
       })
       .catch((error) => {
         if (!controller.signal.aborted && error instanceof Error) {
-          toast.error('Unable to load strategies', { description: error.message });
+          toast.error("Unable to load strategies", { description: error.message });
         }
       });
     return () => controller.abort();
@@ -125,17 +120,17 @@ export function BacktestingTab() {
       const prevResult = previous.result ?? null;
       const nextResult = next.result ?? null;
       return JSON.stringify(prevResult) === JSON.stringify(nextResult);
-    }
+    },
   );
 
   useEffect(() => {
     if (polledJob) {
       setJobSnapshot(polledJob);
-      if (polledJob.status === 'done') {
-        toast.success('Backtest completed', { description: 'Results ready below' });
+      if (polledJob.status === "done") {
+        toast.success("Backtest completed", { description: "Results ready below" });
         setJobId(null);
-      } else if (polledJob.status === 'error') {
-        toast.error('Backtest failed');
+      } else if (polledJob.status === "error") {
+        toast.error("Backtest failed");
         setJobId(null);
       }
     }
@@ -151,19 +146,19 @@ export function BacktestingTab() {
 
   const handleStart = async () => {
     if (!opsToken.trim()) {
-      toast.error('Provide an OPS API token before launching a backtest');
+      toast.error("Provide an OPS API token before launching a backtest");
       return;
     }
     if (!opsActor.trim()) {
-      toast.error('Provide an operator call-sign before launching a backtest');
+      toast.error("Provide an operator call-sign before launching a backtest");
       return;
     }
     if (!selectedStrategy) {
-      toast.error('Select a strategy');
+      toast.error("Select a strategy");
       return;
     }
     if (!dateRange?.from || !dateRange?.to) {
-      toast.error('Select a date range');
+      toast.error("Select a date range");
       return;
     }
 
@@ -188,10 +183,10 @@ export function BacktestingTab() {
       );
       setJobId(response.jobId);
       setJobSnapshot(null);
-      toast('Backtest started', { description: `Job ${response.jobId}` });
+      toast("Backtest started", { description: `Job ${response.jobId}` });
     } catch (error) {
       if (error instanceof Error) {
-        toast.error('Unable to start backtest', { description: error.message });
+        toast.error("Unable to start backtest", { description: error.message });
       }
     } finally {
       setSubmitting(false);
@@ -206,31 +201,31 @@ export function BacktestingTab() {
     );
   };
 
-  const handleDownload = (type: 'csv' | 'json') => {
+  const handleDownload = (type: "csv" | "json") => {
     if (!pendingResult) return;
-    if (type === 'json') {
+    if (type === "json") {
       const blob = new Blob([JSON.stringify(pendingResult, null, 2)], {
-        type: 'application/json',
+        type: "application/json",
       });
       const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
+      const anchor = document.createElement("a");
       anchor.href = url;
-      anchor.download = `backtest-${selectedStrategy?.name ?? 'result'}.json`;
+      anchor.download = `backtest-${selectedStrategy?.name ?? "result"}.json`;
       anchor.click();
       URL.revokeObjectURL(url);
       return;
     }
 
     const trades = pendingResult.trades ?? [];
-    const header = 'time,symbol,side,qty,price,pnl';
+    const header = "time,symbol,side,qty,price,pnl";
     const rows = trades.map((trade) =>
-      [trade.time, trade.symbol, trade.side, trade.qty, trade.price, trade.pnl ?? ''].join(','),
+      [trade.time, trade.symbol, trade.side, trade.qty, trade.price, trade.pnl ?? ""].join(","),
     );
-    const blob = new Blob([`${header}\n${rows.join('\n')}`], { type: 'text/csv' });
+    const blob = new Blob([`${header}\n${rows.join("\n")}`], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
+    const anchor = document.createElement("a");
     anchor.href = url;
-    anchor.download = `backtest-${selectedStrategy?.name ?? 'trades'}.csv`;
+    anchor.download = `backtest-${selectedStrategy?.name ?? "trades"}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
   };
@@ -259,9 +254,13 @@ export function BacktestingTab() {
             <Label className="text-xs text-muted-foreground">Symbols</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="flex w-full items-center justify-start gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex w-full items-center justify-start gap-2"
+                >
                   <Filter className="h-4 w-4" />
-                  {selectedSymbols.length ? `${selectedSymbols.length} selected` : 'All symbols'}
+                  {selectedSymbols.length ? `${selectedSymbols.length} selected` : "All symbols"}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-60 p-0" align="start">
@@ -294,11 +293,15 @@ export function BacktestingTab() {
             <Label className="text-xs text-muted-foreground">Date Range</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="flex w-full items-center justify-start gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex w-full items-center justify-start gap-2"
+                >
                   <CalendarIcon className="h-4 w-4" />
                   {dateRange?.from && dateRange?.to
                     ? `${dateRange.from.toLocaleDateString()} – ${dateRange.to.toLocaleDateString()}`
-                    : 'Select range'}
+                    : "Select range"}
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="start" className="p-0">
@@ -346,27 +349,27 @@ export function BacktestingTab() {
           {selectedStrategy && (
             <div className="rounded-lg border border-border p-3">
               <h4 className="mb-2 text-sm font-medium">Parameters</h4>
-          <DynamicParamForm
-            key={selectedStrategy.id}
-            schema={selectedStrategy.paramsSchema}
-            initial={selectedStrategy.params}
-            submitLabel="Apply Overrides"
-            onChange={(next) => {
-              setOverrides((prev) => {
-                const prevHash = stableHash(prev);
-                const nextHash = stableHash(next);
-                return prevHash === nextHash ? prev : next;
-              });
-            }}
-            onSubmit={(values) => {
-              setOverrides((prev) => {
-                const prevHash = stableHash(prev);
-                const nextHash = stableHash(values);
-                return prevHash === nextHash ? prev : values;
-              });
-              toast('Overrides saved');
-            }}
-          />
+              <DynamicParamForm
+                key={selectedStrategy.id}
+                schema={selectedStrategy.paramsSchema}
+                initial={selectedStrategy.params}
+                submitLabel="Apply Overrides"
+                onChange={(next) => {
+                  setOverrides((prev) => {
+                    const prevHash = stableHash(prev);
+                    const nextHash = stableHash(next);
+                    return prevHash === nextHash ? prev : next;
+                  });
+                }}
+                onSubmit={(values) => {
+                  setOverrides((prev) => {
+                    const prevHash = stableHash(prev);
+                    const nextHash = stableHash(values);
+                    return prevHash === nextHash ? prev : values;
+                  });
+                  toast("Overrides saved");
+                }}
+              />
             </div>
           )}
 
@@ -381,7 +384,7 @@ export function BacktestingTab() {
               ) : (
                 <Play className="h-4 w-4" />
               )}
-              <span>{submitting ? 'Starting…' : 'Run Backtest'}</span>
+              <span>{submitting ? "Starting…" : "Run Backtest"}</span>
             </Button>
             <Button
               variant="outline"
@@ -402,7 +405,11 @@ export function BacktestingTab() {
               <div>
                 <h3 className="font-medium">Status</h3>
                 <p className="text-xs text-muted-foreground">
-                  {jobSnapshot?.status ? jobSnapshot.status.toUpperCase() : jobId ? 'Polling…' : 'Idle'}
+                  {jobSnapshot?.status
+                    ? jobSnapshot.status.toUpperCase()
+                    : jobId
+                      ? "Polling…"
+                      : "Idle"}
                 </p>
               </div>
               {jobSnapshot?.progress !== undefined && (
@@ -412,9 +419,7 @@ export function BacktestingTab() {
             <div className="mt-4">
               <Progress value={(jobSnapshot?.progress ?? 0) * 100} />
             </div>
-            {jobId && (
-              <p className="mt-2 text-xs text-muted-foreground">Job: {jobId}</p>
-            )}
+            {jobId && <p className="mt-2 text-xs text-muted-foreground">Job: {jobId}</p>}
           </Card>
 
           {pendingResult && (
@@ -423,11 +428,13 @@ export function BacktestingTab() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="font-medium">Summary</h3>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => handleDownload('csv')}>
-                      <Download className="mr-2 h-4 w-4" />Trades CSV
+                    <Button variant="outline" size="sm" onClick={() => handleDownload("csv")}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Trades CSV
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => handleDownload('json')}>
-                      <Download className="mr-2 h-4 w-4" />Full JSON
+                    <Button variant="outline" size="sm" onClick={() => handleDownload("json")}>
+                      <Download className="mr-2 h-4 w-4" />
+                      Full JSON
                     </Button>
                   </div>
                 </div>
@@ -460,9 +467,14 @@ export function BacktestingTab() {
                 <EquityCurves
                   data={pendingResult.equityCurve.map((point) => ({
                     t: point.t,
-                    [selectedStrategy?.name ?? 'Strategy']: point.equity,
+                    [selectedStrategy?.name ?? "Strategy"]: point.equity,
                   }))}
-                  series={[{ key: selectedStrategy?.name ?? 'Strategy', label: selectedStrategy?.name ?? 'Strategy' }]}
+                  series={[
+                    {
+                      key: selectedStrategy?.name ?? "Strategy",
+                      label: selectedStrategy?.name ?? "Strategy",
+                    },
+                  ]}
                 />
               </Card>
 
@@ -495,13 +507,15 @@ export function BacktestingTab() {
                       <TableRow key={`${trade.time}-${trade.symbol}-${trade.price}`}>
                         <TableCell>{new Date(trade.time).toLocaleString()}</TableCell>
                         <TableCell>{trade.symbol}</TableCell>
-                        <TableCell className={trade.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}>
+                        <TableCell
+                          className={trade.side === "buy" ? "text-emerald-400" : "text-red-400"}
+                        >
                           {trade.side.toUpperCase()}
                         </TableCell>
                         <TableCell>{trade.qty}</TableCell>
                         <TableCell>{formatCurrency(trade.price)}</TableCell>
                         <TableCell className="text-right">
-                          {trade.pnl !== undefined ? formatCurrency(trade.pnl) : '—'}
+                          {trade.pnl !== undefined ? formatCurrency(trade.pnl) : "—"}
                         </TableCell>
                       </TableRow>
                     ))}

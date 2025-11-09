@@ -8,6 +8,7 @@ Usage (inside engine container):
 
 Exits 0 on success. Prints status code and response body.
 """
+
 import hashlib
 import hmac
 import os
@@ -61,7 +62,7 @@ def main():
         if r.status_code == 429 and attempt < 2:
             try:
                 ra = int(r.headers.get("Retry-After", "2"))
-            except Exception:
+            except (TypeError, ValueError):
                 ra = 2
             time.sleep(max(1, ra))
             continue

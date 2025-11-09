@@ -22,7 +22,7 @@ import random
 import time
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request
@@ -33,6 +33,32 @@ from ops.env import engine_endpoints
 # Configuration
 WEIGHTS_PATH = Path("ops/strategy_weights.json")
 ENGINE_ENDPOINTS = engine_endpoints()
+_JSON_ERRORS = (OSError, json.JSONDecodeError)
+_HTTP_ERRORS = (httpx.HTTPError, httpx.RequestError, asyncio.TimeoutError)
+_ROUTER_ERRORS = _JSON_ERRORS + _HTTP_ERRORS + (RuntimeError, ValueError)
+
+
+class OpsTokenFileError(RuntimeError):
+    """Raised when OPS token file cannot be read."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Failed to read OPS_API_TOKEN_FILE ({path})")
+
+
+class OpsTokenMissingError(RuntimeError):
+    """Raised when the OPS token is not configured."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the strategy router"
+        )
+
+
+class NoStrategyConfiguredError(RuntimeError):
+    """Raised when no strategies are available for routing."""
+
+    def __init__(self) -> None:
+        super().__init__("No strategies available for routing")
 
 
 # Prometheus-style metrics (would replace with actual prometheus client)
@@ -68,7 +94,7 @@ class StrategyMetrics:
 metrics = StrategyMetrics()
 
 
-def _load_weights() -> Dict[str, Any]:
+def _load_weights() -> dict[str, Any]:
     """Load strategy weights configuration."""
     if not WEIGHTS_PATH.exists():
         # Return default configuration
@@ -84,12 +110,12 @@ def _load_weights() -> Dict[str, Any]:
 
     try:
         return json.loads(WEIGHTS_PATH.read_text())
-    except Exception as e:
-        logging.error(f"[ROUTER] Failed to load weights: {e}")
+    except _JSON_ERRORS:
+        logging.exception("[ROUTER] Failed to load weights")
         return {"current": "fallback", "weights": {"fallback": 1.0}}
 
 
-def choose_model(signal_id: Optional[str] = None) -> str:
+def choose_model(signal_id: str | None = None) -> str:
     """
     Select a model using weighted probabilistic routing.
 
@@ -116,7 +142,7 @@ def choose_model(signal_id: Optional[str] = None) -> str:
         current = config.get("current")
         fallback_model = current or next(iter(weights.keys()), None)
         if fallback_model is None:
-            raise RuntimeError("No strategies available for routing")
+            raise NoStrategyConfiguredError()
         weights = {fallback_model: 1.0}
         total_weight = 1.0
     elif abs(total_weight - 1.0) > 0.001:
@@ -156,7 +182,7 @@ def choose_model(signal_id: Optional[str] = None) -> str:
     return first_model
 
 
-async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
+async def route_signal(signal_data: dict[str, Any]) -> dict[str, Any]:
     """
     Route a trading signal to an appropriate model based on current weights.
 
@@ -209,8 +235,8 @@ async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 break
 
-        except Exception as e:
-            logging.warning(f"[ROUTER] Engine {endpoint} failed for {model}: {e}")
+        except _HTTP_ERRORS:
+            logging.warning("[ROUTER] Engine %s failed for %s", endpoint, model, exc_info=True)
             continue
 
     if not success:
@@ -225,7 +251,7 @@ async def route_signal(signal_data: Dict[str, Any]) -> Dict[str, Any]:
     return result
 
 
-async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str, Any]:
+async def route_signal_with_allocation(signal_data: dict[str, Any]) -> dict[str, Any]:
     """
     Route a trading signal with capital allocation and quota enforcement.
 
@@ -321,8 +347,8 @@ async def route_signal_with_allocation(signal_data: Dict[str, Any]) -> Dict[str,
 
                 break  # Success, exit engine loop
 
-        except Exception as e:
-            logging.warning(f"[ROUTER] Engine {endpoint} failed for {model}: {e}")
+        except _HTTP_ERRORS:
+            logging.warning("[ROUTER] Engine %s failed for %s", endpoint, model, exc_info=True)
             continue
 
     if not success:
@@ -367,7 +393,7 @@ async def fetch_price_for_symbol(symbol: str) -> float:
                             return float(price)
                         except (TypeError, ValueError):
                             pass
-        except Exception:
+        except _HTTP_ERRORS:
             continue
 
     logging.warning(f"[ROUTER] Price fetch failed for {symbol}")
@@ -384,13 +410,11 @@ def _load_ops_token() -> str:
         try:
             secret = Path(token_file).read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE ({token_file})") from exc
+            raise OpsTokenFileError(token_file) from exc
         if secret:
             token = secret
     if not token or token == "dev-token":
-        raise RuntimeError(
-            "Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the strategy router"
-        )
+        raise OpsTokenMissingError()
     return token
 
 
@@ -412,42 +436,39 @@ def _require_ops_token(request: Request) -> None:
         raise HTTPException(status_code=401, detail="Invalid or missing X-Ops-Token")
 
 
-def _engine_headers(extra: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    headers: Dict[str, str] = {"X-Ops-Token": get_ops_token()}
+def _engine_headers(extra: dict[str, str] | None = None) -> dict[str, str]:
+    headers: dict[str, str] = {"X-Ops-Token": get_ops_token()}
     if extra:
         headers.update(extra)
     return headers
 
 
 @router.post("/strategy/signal")
-async def strategy_signal_endpoint(signal_data: Dict[str, Any], request: Request) -> Dict[str, Any]:
+async def strategy_signal_endpoint(signal_data: dict[str, Any], request: Request) -> dict[str, Any]:
     """Primary endpoint for routing trading signals to models."""
+    _require_ops_token(request)
+    if not signal_data:
+        raise HTTPException(status_code=400, detail="Empty signal data")
+
+    required = ["symbol", "side"]
+    for field in required:
+        if not signal_data.get(field):
+            raise HTTPException(status_code=400, detail="symbol and side are required")
+    quote_value = signal_data.get("quote")
+    quantity_value = signal_data.get("quantity")
+    if (quote_value is None) == (quantity_value is None):
+        raise HTTPException(status_code=400, detail="Provide exactly one of quote or quantity")
+
     try:
-        _require_ops_token(request)
-        if not signal_data:
-            raise HTTPException(status_code=400, detail="Empty signal data")
-
-        # Validate required fields and order sizing
-        required = ["symbol", "side"]
-        for f in required:
-            if not signal_data.get(f):
-                raise HTTPException(status_code=400, detail="symbol and side are required")
-        q = signal_data.get("quote")
-        qty = signal_data.get("quantity")
-        if (q is None) == (qty is None):  # exactly one must be provided
-            raise HTTPException(status_code=400, detail="Provide exactly one of quote or quantity")
-
-        # Route and execute signal with capital allocation
         result = await route_signal_with_allocation(signal_data)
-        result["timestamp"] = time.time()
-
-        return result
-
     except HTTPException:
         raise
-    except Exception as e:
-        logging.error(f"[ROUTER] Signal routing failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Routing failed: {str(e)}")
+    except _ROUTER_ERRORS as exc:
+        logging.exception("[ROUTER] Signal routing failed")
+        raise HTTPException(status_code=500, detail=f"Routing failed: {exc}") from exc
+    else:
+        result["timestamp"] = time.time()
+        return result
 
 
 @router.get("/strategy/weights")
@@ -456,51 +477,42 @@ def get_weights_endpoint(request: Request):
     try:
         _require_ops_token(request)
         return _load_weights()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to load weights: {e}")
+    except _ROUTER_ERRORS as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to load weights: {exc}") from exc
 
 
 @router.post("/strategy/weights")
-async def set_weights_endpoint(body: Dict[str, Any], request: Request):
+async def set_weights_endpoint(body: dict[str, Any], request: Request):
     """Update strategy weights (admin operation)."""
+    _require_ops_token(request)
+    config = _load_weights()
+    if not config.get("manual_override_allowed", False):
+        raise HTTPException(status_code=403, detail="Manual overrides disabled")
+
+    new_weights = body.get("weights", {})
+    total = sum(new_weights.values())
+    if abs(total - 1.0) > 0.001:
+        raise HTTPException(status_code=400, detail=f"Weights must sum to 1.0, got {total}")
+
+    max_canary = config.get("max_canary_weight", 0.15)
+    current = config.get("current", "")
+    for model, weight in new_weights.items():
+        if model != current and weight > max_canary:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Canary weight {weight} exceeds max {max_canary} for {model}",
+            )
+
+    config["weights"] = new_weights
+    config["last_updated"] = int(time.time())
+
     try:
-        _require_ops_token(request)
-        config = _load_weights()
-
-        # Validate manual override permission
-        if not config.get("manual_override_allowed", False):
-            raise HTTPException(status_code=403, detail="Manual overrides disabled")
-
-        # Update weights
-        new_weights = body.get("weights", {})
-        total = sum(new_weights.values())
-
-        if abs(total - 1.0) > 0.001:
-            raise HTTPException(status_code=400, detail=f"Weights must sum to 1.0, got {total}")
-
-        # Validate no canary exceeds max
-        max_canary = config.get("max_canary_weight", 0.15)
-        current = config.get("current", "")
-        for model, weight in new_weights.items():
-            if model != current and weight > max_canary:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Canary weight {weight} exceeds max {max_canary} for {model}",
-                )
-
-        # Apply updates
-        config["weights"] = new_weights
-        config["last_updated"] = int(time.time())
-
         WEIGHTS_PATH.write_text(json.dumps(config, indent=2))
-
         logging.info(f"[ROUTER] 🔄 Weights updated: {new_weights}")
 
-        # Notify governance system
         try:
             from ops import governance_daemon
 
-            # Trigger governance event
             asyncio.create_task(
                 governance_daemon.BUS.publish(
                     "strategy.weights_updated",
@@ -509,41 +521,36 @@ async def set_weights_endpoint(body: Dict[str, Any], request: Request):
             )
         except ImportError:
             pass
-
-        return {"status": "success", "weights": new_weights}
-
     except HTTPException:
         raise
-    except Exception as e:
-        logging.error(f"[ROUTER] Weight update failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Update failed: {e}")
+    except _ROUTER_ERRORS as exc:
+        logging.exception("[ROUTER] Weight update failed")
+        raise HTTPException(status_code=500, detail=f"Update failed: {exc}") from exc
+    else:
+        return {"status": "success", "weights": new_weights}
 
 
 @router.post("/strategy/promote_canary")
-async def promote_canary_endpoint(body: Dict[str, Any], request: Request):
+async def promote_canary_endpoint(body: dict[str, Any], request: Request):
     """Manually promote a canary model (forced operation)."""
+    _require_ops_token(request)
+    candidate = body.get("model")
+    if not candidate:
+        raise HTTPException(status_code=400, detail="model required")
+
+    config = _load_weights()
+    if not config.get("manual_override_allowed", False):
+        raise HTTPException(status_code=403, detail="Manual promotes disabled")
+
+    old_current = config["current"]
+    config["current"] = candidate
+    config["weights"] = {candidate: 1.0}
+    config["last_updated"] = int(time.time())
+
     try:
-        _require_ops_token(request)
-        candidate = body.get("model")
-        if not candidate:
-            raise HTTPException(status_code=400, detail="model required")
-
-        config = _load_weights()
-
-        if not config.get("manual_override_allowed", False):
-            raise HTTPException(status_code=403, detail="Manual promotes disabled")
-
-        # Perform promotion
-        old_current = config["current"]
-        config["current"] = candidate
-        config["weights"] = {candidate: 1.0}  # Graduate to full production
-        config["last_updated"] = int(time.time())
-
         WEIGHTS_PATH.write_text(json.dumps(config, indent=2))
-
         logging.info(f"[ROUTER] 🚀 Manual promotion: {old_current} → {candidate}")
 
-        # Notify systems
         try:
             from ops import governance_daemon
 
@@ -559,18 +566,17 @@ async def promote_canary_endpoint(body: Dict[str, Any], request: Request):
             )
         except ImportError:
             pass
-
+    except HTTPException:
+        raise
+    except _ROUTER_ERRORS as exc:
+        logging.exception("[ROUTER] Promotion failed")
+        raise HTTPException(status_code=500, detail=f"Promotion failed: {exc}") from exc
+    else:
         return {
             "status": "promoted",
             "old_current": old_current,
             "new_current": candidate,
         }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logging.error(f"[ROUTER] Promotion failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Promotion failed: {e}")
 
 
 @router.get("/strategy/metrics")

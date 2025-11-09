@@ -15,6 +15,11 @@ class FillParams:
     max_slip_bp: float = 8.0
 
 
+class InvalidMidError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("Bad mid for fill")
+
+
 def realized_vol_bp(mid_history: list[float], window: int = 120) -> float:
     """Realized vol in bp over `window` deltas (simple)."""
     n = min(len(mid_history), window)
@@ -49,10 +54,11 @@ def fill_price(
     qty: float,
     l1_depth: float | None,
     mid_history: list[float],
-    params: FillParams = FillParams(),
+    params: FillParams | None = None,
 ) -> float:
+    params = params or FillParams()
     if not math.isfinite(mid) or mid <= 0:
-        raise ValueError("Bad mid for fill")
+        raise InvalidMidError()
     # depth_ratio: how much of top-of-book you consume (1.0 == all L1)
     depth_ratio = float(qty / max(l1_depth or qty, 1e-12))
     sbp = slip_bp(side, spread_bp, vol_bp, depth_ratio, params)

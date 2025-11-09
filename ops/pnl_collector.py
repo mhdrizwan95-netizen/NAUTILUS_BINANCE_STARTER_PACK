@@ -10,6 +10,15 @@ import httpx
 from ops.env import engine_endpoints
 from ops.prometheus import get_or_create_gauge
 
+try:  # pragma: no cover - respx only in tests
+    from respx.models import AllMockedAssertionError as _RespxAllMockedAssertionError
+except ImportError:  # pragma: no cover - prod deployments lack respx
+    _RESPX_MOCK_ERRORS: tuple[type[Exception], ...] = ()
+else:
+    _RESPX_MOCK_ERRORS = (_RespxAllMockedAssertionError,)
+
+_PNL_FETCH_ERRORS = (httpx.HTTPError,) + _RESPX_MOCK_ERRORS
+
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
 
@@ -46,18 +55,19 @@ async def _fetch_pnl(client: httpx.AsyncClient, base_url: str) -> dict:
         r = await client.get(f"{base}/portfolio", timeout=5.0)
         r.raise_for_status()
         return r.json()
-    except Exception:
+    except _PNL_FETCH_ERRORS:
         pass
     try:
         r = await client.get(f"{base}/account_snapshot", timeout=5.0)
         r.raise_for_status()
         return r.json()
-    except Exception:
+    except _PNL_FETCH_ERRORS:
         return {}
 
 
 async def pnl_collector_loop():
     """Continuously collect PnL from all engines."""
+    poll_errors = (httpx.HTTPError, ValueError)
     while True:
         try:
             endpoints = engine_endpoints()
@@ -67,7 +77,7 @@ async def pnl_collector_loop():
                     *[_fetch_pnl(client, e) for e in endpoints], return_exceptions=True
                 )
 
-            for e, res in zip(endpoints, results):
+            for e, res in zip(endpoints, results, strict=False):
                 if not isinstance(res, dict):
                     continue
                 venue = _venue_label(e)
@@ -78,10 +88,7 @@ async def pnl_collector_loop():
                 PNL_UNREALIZED.labels(venue=venue).set(unrealized)
 
             PNL_LAST_REFRESH.set(time.time())
-            try:
-                logging.info(f"PnL updated for {len(endpoints)} venues")
-            except Exception:
-                pass
-        except Exception as e:
-            logging.warning(f"PnL collector error: {e}")
+            logging.info("PnL updated for %s venues", len(endpoints))
+        except poll_errors as exc:
+            logging.warning("PnL collector error: %s", exc)
         await asyncio.sleep(10)

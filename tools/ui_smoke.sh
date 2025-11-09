@@ -28,4 +28,3 @@ else
 fi
 
 echo "UI smoke OK"
-

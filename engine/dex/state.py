@@ -13,10 +13,16 @@ import logging
 import os
 import time
 import uuid
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
-from typing import Dict, Iterable, List, Optional
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
+_STATE_IO_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    ValueError,
+    json.JSONDecodeError,
+)
 
 
 @dataclass(slots=True)
@@ -41,8 +47,8 @@ class DexPosition:
     trail_pct: float
     opened_at: float
     status: str = "open"
-    metadata: Dict[str, float] = field(default_factory=dict)
-    tp_targets: List[DexTarget] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
+    tp_targets: list[DexTarget] = field(default_factory=list)
     closed_at: float | None = None
 
     def to_dict(self) -> dict:
@@ -51,7 +57,7 @@ class DexPosition:
         return data
 
     @classmethod
-    def from_dict(cls, payload: dict) -> "DexPosition":
+    def from_dict(cls, payload: dict) -> DexPosition:
         targets = [
             DexTarget(**item) for item in payload.get("tp_targets", []) if isinstance(item, dict)
         ]
@@ -77,18 +83,18 @@ class DexPosition:
 class DexState:
     def __init__(self, path: str) -> None:
         self.path = path
-        self._positions: Dict[str, DexPosition] = {}
-        self._symbol_index: Dict[str, str] = {}
+        self._positions: dict[str, DexPosition] = {}
+        self._symbol_index: dict[str, str] = {}
         self._load()
 
     # Persistence -----------------------------------------------------------------
     def _load(self) -> None:
         try:
-            with open(self.path, "r", encoding="utf-8") as fh:
+            with open(self.path, encoding="utf-8") as fh:
                 raw = json.load(fh) or {}
         except FileNotFoundError:
             raw = {}
-        except Exception:
+        except _STATE_IO_ERRORS:
             raw = {}
 
         if isinstance(raw, dict):
@@ -112,7 +118,7 @@ class DexState:
             with open(tmp_path, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh, separators=(",", ":"), sort_keys=True)
             os.replace(tmp_path, self.path)
-        except Exception as exc:
+        except _STATE_IO_ERRORS as exc:
             # Persistence is best-effort; ignore failures.
             _LOGGER.debug("dex state save failed: %s", exc, exc_info=True)
 
@@ -120,7 +126,7 @@ class DexState:
     def positions(self) -> Iterable[DexPosition]:
         return list(self._positions.values())
 
-    def open_positions(self) -> List[DexPosition]:
+    def open_positions(self) -> list[DexPosition]:
         return [pos for pos in self._positions.values() if pos.status == "open"]
 
     def count_open(self) -> int:
@@ -129,7 +135,7 @@ class DexState:
     def has_open(self, symbol: str) -> bool:
         return symbol.upper() in self._symbol_index
 
-    def get_open(self, symbol: str) -> Optional[DexPosition]:
+    def get_open(self, symbol: str) -> DexPosition | None:
         pos_id = self._symbol_index.get(symbol.upper())
         if pos_id is None:
             return None
@@ -147,8 +153,8 @@ class DexState:
         notional: float,
         stop_loss_pct: float,
         trail_pct: float,
-        metadata: Optional[dict] = None,
-        targets: Optional[Iterable[tuple[float, float]]] = None,
+        metadata: dict[str, Any] | None = None,
+        targets: Iterable[tuple[float, float]] | None = None,
     ) -> DexPosition:
         pos_id = uuid.uuid4().hex
         tp_targets = [
@@ -174,7 +180,7 @@ class DexState:
         self._save()
         return position
 
-    def close_position(self, pos_id: str, *, reason: str | None = None) -> Optional[DexPosition]:
+    def close_position(self, pos_id: str, *, reason: str | None = None) -> DexPosition | None:
         position = self._positions.get(pos_id)
         if position is None:
             return None
@@ -211,7 +217,7 @@ class DexState:
         *,
         target_index: int | None = None,
         reason: str | None = None,
-    ) -> Optional[DexPosition]:
+    ) -> DexPosition | None:
         position = self._positions.get(pos_id)
         if position is None:
             return None
@@ -232,5 +238,5 @@ class DexState:
         self._save()
         return position
 
-    def refresh_position(self, pos_id: str) -> Optional[DexPosition]:
+    def refresh_position(self, pos_id: str) -> DexPosition | None:
         return self._positions.get(pos_id)

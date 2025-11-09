@@ -7,6 +7,16 @@ to gate wiring in app. Designed against a generic Binance-like schema.
 
 from __future__ import annotations
 
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
 
 class FillsListener:
     def __init__(self, ws_client, bus, log):
@@ -31,8 +41,5 @@ class FillsListener:
                         "avg_price": float(getattr(upd, "last_filled_price", 0.0) or 0.0),
                     }
                     self.bus.fire("trade.fill", payload)
-            except Exception as e:
-                try:
-                    self.log.warning("[FILLS-WS] update handling error: %s", e)
-                except Exception:
-                    pass
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                self.log.exception("[FILLS-WS] update handling error")

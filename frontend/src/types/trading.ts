@@ -1,16 +1,24 @@
-import type { ParamSchema } from './settings';
+import type { ParamSchema } from "./settings";
 
 // Trading domain types
-export type VenueType = 'crypto' | 'equities' | 'fx';
-export type MarketType = 'spot' | 'futures' | 'options';
-export type StrategyType = 'HMM' | 'MeanRev' | 'Breakout' | 'Scalp' | 'Momentum' | 'Meme' | 'Listing' | 'VolScan';
-export type ModeType = 'paper' | 'live';
+export type VenueType = "crypto" | "equities" | "fx";
+export type MarketType = "spot" | "futures" | "options";
+export type StrategyType =
+  | "HMM"
+  | "MeanRev"
+  | "Breakout"
+  | "Scalp"
+  | "Momentum"
+  | "Meme"
+  | "Listing"
+  | "VolScan";
+export type ModeType = "paper" | "live";
 
 export interface Venue {
   id: string;
   name: string;
   type: VenueType;
-  status: 'connected' | 'degraded' | 'offline';
+  status: "connected" | "degraded" | "offline";
   latency: number;
 }
 
@@ -39,14 +47,14 @@ export interface StrategyPerformance {
   strategyId: string;
   venueId: string;
   metrics: PerformanceMetrics;
-  health: 'optimal' | 'warning' | 'critical';
+  health: "optimal" | "warning" | "critical";
 }
 
 export interface Trade {
   id: string;
   timestamp: number;
   symbol: string;
-  side: 'buy' | 'sell';
+  side: "buy" | "sell";
   quantity: number;
   price: number;
   pnl?: number;
@@ -57,7 +65,7 @@ export interface Trade {
 export interface Alert {
   id: string;
   timestamp: number;
-  type: 'info' | 'warning' | 'error';
+  type: "info" | "warning" | "error";
   message: string;
   strategyId?: string;
 }
@@ -121,7 +129,7 @@ export type StrategySummary = {
   id: string;
   name: string;
   kind: string;
-  status: 'stopped' | 'running' | 'error';
+  status: "stopped" | "running" | "error";
   symbols: string[];
   paramsSchema: ParamSchema;
   params?: Record<string, unknown>;
@@ -142,7 +150,7 @@ export type BacktestResult = {
   trades?: Array<{
     time: string;
     symbol: string;
-    side: 'buy' | 'sell';
+    side: "buy" | "sell";
     qty: number;
     price: number;
     pnl?: number;

@@ -20,7 +20,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 
@@ -36,28 +36,32 @@ EQUITY_METRIC = "portfolio_equity_usd"
 # Setup logging
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 
+_JSON_ERRORS = (OSError, json.JSONDecodeError)
+_SAVE_ERRORS = (OSError, TypeError, ValueError)
+_FETCH_ERRORS = (httpx.HTTPError, httpx.RequestError, asyncio.TimeoutError, ValueError)
 
-def load_json(path: Path, default: Dict = None) -> Dict:
+
+def load_json(path: Path, default: dict = None) -> dict:
     """Safe JSON file loading with fallback."""
     if path.exists():
         try:
             return json.loads(path.read_text())
-        except Exception as e:
-            logging.warning(f"Failed to load {path}: {e}")
+        except _JSON_ERRORS:
+            logging.warning("Failed to load %s", path, exc_info=True)
     return default or {}
 
 
-def save_json(path: Path, data: Dict) -> None:
+def save_json(path: Path, data: dict) -> None:
     """Save data to JSON file atomically."""
     try:
         temp_path = path.with_suffix(".tmp")
         temp_path.write_text(json.dumps(data, indent=2))
         temp_path.replace(path)
-    except Exception as e:
-        logging.error(f"Failed to save {path}: {e}")
+    except _SAVE_ERRORS:
+        logging.exception("Failed to save %s", path)
 
 
-def parse_prometheus_metrics(metrics_text: str) -> Dict[str, Any]:
+def parse_prometheus_metrics(metrics_text: str) -> dict[str, Any]:
     """
     Parse Prometheus metrics text to extract equity and model performance data.
 
@@ -116,7 +120,7 @@ def parse_prometheus_metrics(metrics_text: str) -> Dict[str, Any]:
     return parsed
 
 
-def parse_labels(labels_str: str) -> Dict[str, str]:
+def parse_labels(labels_str: str) -> dict[str, str]:
     """Parse Prometheus label string like 'model="hmm_v4"'."""
     labels = {}
     for kv in labels_str.split(","):
@@ -127,7 +131,7 @@ def parse_labels(labels_str: str) -> Dict[str, str]:
     return labels
 
 
-async def fetch_live_metrics() -> Dict[str, Any]:
+async def fetch_live_metrics() -> dict[str, Any]:
     """
     Fetch live metrics from OPS/Prometheus.
 
@@ -139,13 +143,13 @@ async def fetch_live_metrics() -> Dict[str, Any]:
             response = await session.get(METRICS_URL)
             response.raise_for_status()
             return parse_prometheus_metrics(response.text)
-    except Exception as e:
-        logging.warning(f"Failed to fetch live metrics: {e}")
+    except _FETCH_ERRORS:
+        logging.warning("Failed to fetch live metrics", exc_info=True)
         # Fallback to registry-based metrics when Prometheus unavailable
         return fetch_registry_fallback()
 
 
-def fetch_registry_fallback() -> Dict[str, Any]:
+def fetch_registry_fallback() -> dict[str, Any]:
     """
     Fallback metrics fetching from strategy registry when live metrics unavailable.
 
@@ -174,8 +178,8 @@ def fetch_registry_fallback() -> Dict[str, Any]:
 
 
 def calculate_target_allocation(
-    policy: Dict[str, Any], equity: float, models: Dict[str, Any]
-) -> Dict[str, Dict[str, Any]]:
+    policy: dict[str, Any], equity: float, models: dict[str, Any]
+) -> dict[str, dict[str, Any]]:
     """
     Calculate target capital quotas for each model based on current performance and policy.
 
@@ -373,9 +377,9 @@ async def allocation_loop():
                 f"(equity=${equity:,.0f})"
             )
 
-        except Exception as e:
-            logging.error(f"[ALLOC] Loop error: {e}")
-            logging.error("[ALLOC] Continuing despite error...")
+        except _JSON_ERRORS + _FETCH_ERRORS + _SAVE_ERRORS:
+            logging.exception("[ALLOC] Loop error")
+            logging.info("[ALLOC] Continuing despite error...")
 
         await asyncio.sleep(refresh_interval)
 
@@ -389,7 +393,7 @@ def get_model_quota(model: str) -> float:
     return float(allocations.get("capital_quota_usd", {}).get(model, 0.0))
 
 
-def get_all_allocations() -> Dict[str, Any]:
+def get_all_allocations() -> dict[str, Any]:
     """Get complete current allocation state."""
     return load_json(
         ALLOCATIONS_PATH,
@@ -402,7 +406,7 @@ def get_all_allocations() -> Dict[str, Any]:
     )
 
 
-async def simulate_allocation_cycle(policy: Dict = None, metrics: Dict = None) -> Dict[str, Any]:
+async def simulate_allocation_cycle(policy: dict = None, metrics: dict = None) -> dict[str, Any]:
     """
     Simulate a single allocation cycle for testing.
 

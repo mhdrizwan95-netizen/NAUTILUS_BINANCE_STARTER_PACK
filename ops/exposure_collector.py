@@ -12,6 +12,8 @@ from ops.aggregate_exposure import _parse_endpoints, aggregate_exposure
 from ops.prometheus import REGISTRY
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+_AGGREGATE_ERRORS = (ValueError, RuntimeError, OSError)
+_TOTAL_ERRORS = (TypeError, ValueError)
 
 EXPOSURE_GAUGE = Gauge(
     "exposure_usd",
@@ -51,11 +53,12 @@ async def exposure_collector_loop():
             LAST_REFRESH.set(ts)
             try:
                 total = sum(float(v.get("exposure_usd", 0.0)) for v in agg.by_symbol.values())
+            except _TOTAL_ERRORS:
+                logging.debug("Exposure total aggregation failed", exc_info=True)
+            else:
                 logging.info(
                     f"Exposure updated: symbols={len(agg.by_symbol)} total={total:.2f} USD"
                 )
-            except Exception:
-                pass
-        except Exception as e:
-            logging.warning(f"Exposure collector error: {e}")
+        except _AGGREGATE_ERRORS as exc:
+            logging.warning("Exposure collector error: %s", exc, exc_info=True)
         await asyncio.sleep(10)  # refresh every 10s

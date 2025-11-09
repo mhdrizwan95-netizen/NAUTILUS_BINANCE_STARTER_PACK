@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
 import random
 import secrets
@@ -14,7 +15,7 @@ from functools import lru_cache
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from threading import RLock
-from typing import Any, Deque, Dict, List, Optional, Set
+from typing import Annotated, Any
 
 import httpx
 import yaml
@@ -39,9 +40,12 @@ from ops.governance_daemon import (
 )
 from ops.middleware.control_guard import (
     ControlContext,
+    ControlGuard,
     IdempotentGuard,
     TokenOnlyGuard,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _load_ops_token() -> str:
@@ -51,11 +55,9 @@ def _load_ops_token() -> str:
         try:
             token = Path(token_file).read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE ({token_file})") from exc
+            raise OpsTokenFileError(token_file) from exc
     if not token or token == "dev-token":
-        raise RuntimeError(
-            "Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Command Center API"
-        )
+        raise OpsTokenMissingError()
     return token
 
 
@@ -78,7 +80,7 @@ def http_error(
     status_code: int,
     code: str,
     message: str,
-    details: Optional[Dict[str, Any]] = None,
+    details: dict[str, Any] | None = None,
 ) -> None:
     """Raise an HTTPException with a structured payload."""
     raise HTTPException(
@@ -87,7 +89,7 @@ def http_error(
     )
 
 
-def _require_idempotency(request: Request) -> tuple[str, Optional[Dict[str, Any]]]:
+def _require_idempotency(request: Request) -> tuple[str, dict[str, Any] | None]:
     key = request.headers.get("Idempotency-Key")
     if not key:
         http_error(
@@ -95,37 +97,49 @@ def _require_idempotency(request: Request) -> tuple[str, Optional[Dict[str, Any]
             "idempotency.missing_header",
             "Missing Idempotency-Key header",
         )
+    assert key is not None
     cached = _idempotency_lookup(key)
     return key, cached
 
 
 router = APIRouter(prefix="/api", tags=["command-center"])
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    asyncio.TimeoutError,
+    httpx.HTTPError,
+)
 
-_IDEMPOTENCY_CACHE: OrderedDict[str, tuple[float, Dict[str, Any]]] = OrderedDict()
+_IDEMPOTENCY_CACHE: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
 _IDEMPOTENCY_LOCK = RLock()
 _IDEMPOTENCY_MAX = 512
 CONTROL_AUDIT_PATH = Path("ops/logs/control_actions.jsonl")
-_WS_SESSIONS: Dict[str, float] = {}
+_WS_SESSIONS: dict[str, float] = {}
 _WS_SESSION_LOCK = RLock()
 _WS_SESSION_TTL_SEC = float(os.getenv("OPS_WS_SESSION_TTL", "900"))
 
 
 class ConfigPatch(BaseModel):
-    DRY_RUN: Optional[bool] = None
-    SYMBOL_SCANNER_ENABLED: Optional[bool] = None
-    SOFT_BREACH_ENABLED: Optional[bool] = None
-    SOFT_BREACH_TIGHTEN_SL_PCT: Optional[float] = None
-    SOFT_BREACH_BREAKEVEN_OK: Optional[bool] = None
-    SOFT_BREACH_CANCEL_ENTRIES: Optional[bool] = None
+    DRY_RUN: bool | None = None
+    SYMBOL_SCANNER_ENABLED: bool | None = None
+    SOFT_BREACH_ENABLED: bool | None = None
+    SOFT_BREACH_TIGHTEN_SL_PCT: float | None = None
+    SOFT_BREACH_BREAKEVEN_OK: bool | None = None
+    SOFT_BREACH_CANCEL_ENTRIES: bool | None = None
 
 
 class StrategyPatch(BaseModel):
-    enabled: Optional[bool] = None
-    weights: Optional[Dict[str, float]] = None
+    enabled: bool | None = None
+    weights: dict[str, float] | None = None
 
 
 class CancelOrdersRequest(BaseModel):
-    orderIds: List[str]
+    orderIds: list[str]
 
 
 class TransferRequest(BaseModel):
@@ -137,14 +151,30 @@ class TransferRequest(BaseModel):
 
 class KillSwitchRequest(BaseModel):
     enabled: bool
-    reason: Optional[str] = None
+    reason: str | None = None
 
 
 class FlattenRequest(BaseModel):
-    dryRun: Optional[bool] = False
+    dryRun: bool | None = False
 
 
-def require_ops_token(x_ops_token: Optional[str] = Header(None)) -> None:
+class OpsTokenFileError(RuntimeError):
+    """Raised when the ops token file cannot be read."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Failed to read OPS_API_TOKEN_FILE ({path})")
+
+
+class OpsTokenMissingError(RuntimeError):
+    """Raised when the ops token is not configured."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Command Center API"
+        )
+
+
+def require_ops_token(x_ops_token: str | None = Header(None)) -> None:
     if x_ops_token != get_ops_token():
         http_error(
             status.HTTP_401_UNAUTHORIZED,
@@ -153,8 +183,15 @@ def require_ops_token(x_ops_token: Optional[str] = Header(None)) -> None:
         )
 
 
-def get_state() -> Dict[str, Any]:
+def get_state() -> dict[str, Any]:
     return ui_state.get_services()
+
+
+IdemGuardDep = Annotated[ControlContext, Depends(IdempotentGuard)]
+TokenGuardDep = Annotated[ControlContext, Depends(TokenOnlyGuard)]
+ControlContextDep = Annotated[ControlContext, Depends(ControlGuard())]
+StateDep = Annotated[dict[str, Any], Depends(get_state)]
+AuthDep = Annotated[None, Depends(require_ops_token)]
 
 
 # ---------------------------------------------------------------------------
@@ -162,27 +199,27 @@ def get_state() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 # Recent trades and alerts feeds (simple in-memory ring buffers)
-RECENT_TRADES: Deque[Dict[str, Any]] = deque(maxlen=500)
-ALERTS_FEED: Deque[Dict[str, Any]] = deque(maxlen=200)
+RECENT_TRADES: deque[dict[str, Any]] = deque(maxlen=500)
+ALERTS_FEED: deque[dict[str, Any]] = deque(maxlen=200)
 
 # Strategy parameter storage backed by a JSON file
 PARAMS_PATH = Path("ops/strategy_params.json")
 
 
-def _load_params() -> Dict[str, Any]:
+def _load_params() -> dict[str, Any]:
     if not PARAMS_PATH.exists():
         return {}
     try:
         return json.loads(PARAMS_PATH.read_text(encoding="utf-8"))
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         return {}
 
 
-def _save_params(payload: Dict[str, Any]) -> None:
+def _save_params(payload: dict[str, Any]) -> None:
     PARAMS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
-def _idempotency_lookup(key: str) -> Optional[Dict[str, Any]]:
+def _idempotency_lookup(key: str) -> dict[str, Any] | None:
     with _IDEMPOTENCY_LOCK:
         cached = _IDEMPOTENCY_CACHE.get(key)
         if cached:
@@ -190,7 +227,7 @@ def _idempotency_lookup(key: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _idempotency_store(key: str, response: Dict[str, Any]) -> None:
+def _idempotency_store(key: str, response: dict[str, Any]) -> None:
     with _IDEMPOTENCY_LOCK:
         _IDEMPOTENCY_CACHE[key] = (time.time(), response)
         _IDEMPOTENCY_CACHE.move_to_end(key)
@@ -198,7 +235,7 @@ def _idempotency_store(key: str, response: Dict[str, Any]) -> None:
             _IDEMPOTENCY_CACHE.popitem(last=False)
 
 
-def _idempotency_cached_response(idem_key: str) -> Optional[Dict[str, Any]]:
+def _idempotency_cached_response(idem_key: str) -> dict[str, Any] | None:
     if not idem_key:
         return None
     return _idempotency_lookup(idem_key)
@@ -215,7 +252,7 @@ def _decode_cursor(cursor: str) -> int:
         raw = base64.urlsafe_b64decode(cursor + padding)
         data = json.loads(raw.decode("utf-8"))
         offset = int(data.get("o", 0))
-    except Exception:  # pragma: no cover - defensive guard
+    except _SUPPRESSIBLE_EXCEPTIONS:  # pragma: no cover - defensive guard
         http_error(
             status.HTTP_400_BAD_REQUEST,
             "pagination.invalid_cursor",
@@ -234,11 +271,11 @@ def _decode_cursor(cursor: str) -> int:
 
 def _record_control_action(
     action: str,
-    actor: Optional[str],
-    approver: Optional[str],
+    actor: str | None,
+    approver: str | None,
     idempotency_key: str,
-    payload: Dict[str, Any],
-    result: Dict[str, Any],
+    payload: dict[str, Any],
+    result: dict[str, Any],
 ) -> None:
     try:
         CONTROL_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -253,16 +290,16 @@ def _record_control_action(
         }
         with CONTROL_AUDIT_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         # Audit logging best-effort; avoid interrupting control flow
         pass
 
 
 def _paginate_items(
-    items: List[Dict[str, Any]] | List[Any],
-    cursor: Optional[str],
+    items: list[dict[str, Any]] | list[Any],
+    cursor: str | None,
     limit: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     sequence = list(items)
     total = len(sequence)
     start = 0
@@ -291,8 +328,8 @@ def _paginate_items(
     }
 
 
-def _normalize_positions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    sanitized: List[Dict[str, Any]] = []
+def _normalize_positions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sanitized: list[dict[str, Any]] = []
     for idx, p in enumerate(rows):
         symbol = p.get("symbol") or p.get("product") or p.get("instrument") or "UNKNOWN"
         sanitized.append(
@@ -313,10 +350,10 @@ def _normalize_positions(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return sanitized
 
 
-async def _collect_positions(state: Dict[str, Any]) -> List[Dict[str, Any]]:
+async def _collect_positions(state: dict[str, Any]) -> list[dict[str, Any]]:
     try:
         raw = await state["portfolio"].list_open_positions()
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         raw = []
     return _normalize_positions(raw)
 
@@ -335,7 +372,7 @@ def _issue_ws_session() -> tuple[str, float]:
     return token, expiry
 
 
-def _validate_ws_session(session: Optional[str]) -> bool:
+def _validate_ws_session(session: str | None) -> bool:
     if not session:
         return False
     now = time.time()
@@ -350,8 +387,8 @@ def _validate_ws_session(session: Optional[str]) -> bool:
 
 @router.post("/ops/ws-session")
 async def create_ws_session(
-    guard: ControlContext = Depends(TokenOnlyGuard),
-) -> Dict[str, Any]:
+    guard: TokenGuardDep,
+) -> dict[str, Any]:
     """Issue a temporary session token for WebSocket subscriptions."""
     actor = (guard.actor or "").strip()
     if not actor:
@@ -372,9 +409,9 @@ async def create_ws_session(
     return {"session": session, "expires": expiry}
 
 
-def _yaml_schema_to_param_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
+def _yaml_schema_to_param_schema(raw: dict[str, Any]) -> dict[str, Any]:
     """Convert strategy_schemas YAML format into the UI ParamSchema contract."""
-    fields: list[Dict[str, Any]] = []
+    fields: list[dict[str, Any]] = []
     for key, spec in (raw.get("parameters") or {}).items():
         typ = (spec.get("type") or "").lower()
         if typ in {"int", "integer"}:
@@ -423,7 +460,7 @@ def _yaml_schema_to_param_schema(raw: Dict[str, Any]) -> Dict[str, Any]:
     return {"title": raw.get("strategy") or raw.get("title"), "fields": fields}
 
 
-def _load_strategy_schema(strategy_id: str) -> Dict[str, Any]:
+def _load_strategy_schema(strategy_id: str) -> dict[str, Any]:
     """Load YAML schema by strategy id; fallback to momentum_breakout if missing."""
     base = Path("strategy_schemas")
     candidates = [base / f"{strategy_id}.yaml", base / "momentum_breakout.yaml"]
@@ -432,27 +469,27 @@ def _load_strategy_schema(strategy_id: str) -> Dict[str, Any]:
             try:
                 raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
                 return _yaml_schema_to_param_schema(raw)
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 continue
     # Empty schema fallback
     return {"title": strategy_id, "fields": []}
 
 
 @router.get("/engine/status")
-async def engine_status(state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def engine_status(state: StateDep) -> Any:
     return await state["ops"].status()
 
 
 @router.get("/config/effective")
-async def config_effective(state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def config_effective(state: StateDep) -> Any:
     return await state["config"].get_effective()
 
 
 @router.put("/config")
 async def config_update(
     patch: ConfigPatch,
-    guard: ControlContext = Depends(IdempotentGuard),
-    state: Dict[str, Any] = Depends(get_state),
+    guard: IdemGuardDep,
+    state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
@@ -462,7 +499,7 @@ async def config_update(
     payload = {k: v for k, v in patch.dict().items() if v is not None}
     if not payload:
         result = await state["config"].get_effective()
-        payload_for_audit: Dict[str, Any] = {"noop": True}
+        payload_for_audit: dict[str, Any] = {"noop": True}
     else:
         try:
             result = await state["config"].patch(
@@ -489,9 +526,9 @@ async def config_update(
 
 @router.get("/strategies/governance")
 async def strategies_list(
-    cursor: Optional[str] = Query(None),
+    state: StateDep,
+    cursor: str | None = Query(None),
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
-    state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     """Original governance view of strategies (weights, enabled).
 
@@ -500,7 +537,7 @@ async def strategies_list(
     """
     payload = await state["strategy"].list()
     entries = payload.get("strategies") or []
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for idx, entry in enumerate(entries):
         item = dict(entry)
         strategy_id = entry.get("id") or f"strategy-{idx}"
@@ -529,8 +566,8 @@ async def strategies_list(
 async def strategies_patch(
     strategy_id: str,
     patch: StrategyPatch,
-    guard: ControlContext = Depends(IdempotentGuard),
-    state: Dict[str, Any] = Depends(get_state),
+    guard: IdemGuardDep,
+    state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
@@ -554,28 +591,28 @@ async def strategies_patch(
 
 
 @router.get("/universe/{strategy_id}")
-async def universe_get(strategy_id: str, state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def universe_get(strategy_id: str, state: StateDep) -> Any:
     return await state["scanner"].universe(strategy_id)
 
 
 @router.post("/universe/{strategy_id}/refresh")
 async def universe_refresh(
     strategy_id: str,
-    state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
+    state: StateDep,
+    _auth: AuthDep,
 ) -> Any:
     return await state["scanner"].refresh(strategy_id)
 
 
 @router.get("/orders/open")
 async def orders_open(
-    cursor: Optional[str] = Query(None),
+    state: StateDep,
+    cursor: str | None = Query(None),
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
-    state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     try:
         orders = await state["orders"].list_open_orders()
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         orders = []
 
     sanitized: list[dict[str, Any]] = []
@@ -591,7 +628,7 @@ async def orders_open(
         )
         try:
             created_at_int = int(created_at)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             created_at_int = now - idx * 1000
         symbol = order.get("symbol") or order.get("instrument") or "UNKNOWN"
         sanitized.append(
@@ -627,20 +664,20 @@ async def orders_open(
 @router.post("/orders/cancel")
 async def orders_cancel(
     body: CancelOrdersRequest,
-    state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
+    state: StateDep,
+    _auth: AuthDep,
 ) -> Any:
     try:
         return await state["orders"].cancel_many(body.orderIds)
-    except RuntimeError as exc:  # noqa: BLE001
+    except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/positions/open")
 async def positions_open(
-    cursor: Optional[str] = Query(None),
+    state: StateDep,
+    cursor: str | None = Query(None),
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
-    state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     sanitized = await _collect_positions(state)
     return _paginate_items(sanitized, cursor, limit)
@@ -648,8 +685,8 @@ async def positions_open(
 
 @router.post("/risk/soft-breach/now")
 async def soft_breach(
-    state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
+    state: StateDep,
+    _auth: AuthDep,
 ) -> Any:
     return await state["risk"].soft_breach_now()
 
@@ -657,8 +694,8 @@ async def soft_breach(
 @router.post("/ops/kill-switch")
 async def killswitch(
     payload: KillSwitchRequest,
-    guard: ControlContext = Depends(IdempotentGuard),
-    state: Dict[str, Any] = Depends(get_state),
+    guard: IdemGuardDep,
+    state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
@@ -683,8 +720,8 @@ async def killswitch(
 @router.post("/ops/flatten")
 async def flatten_portfolio(
     _body: FlattenRequest,
-    guard: ControlContext = Depends(IdempotentGuard),
-    state: Dict[str, Any] = Depends(get_state),
+    guard: IdemGuardDep,
+    state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
@@ -711,11 +748,11 @@ async def flatten_portfolio(
 
 @router.post("/governance/reload")
 async def governance_reload(
-    guard: ControlContext = Depends(TokenOnlyGuard),
+    guard: TokenGuardDep,
 ) -> Any:
     try:
         ok = governance_reload_policies()
-    except Exception as exc:  # pragma: no cover - defensive
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - defensive
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, f"Reload failed: {exc}") from exc
     if not ok:
         raise HTTPException(status.HTTP_500_INTERNAL_SERVER_ERROR, "Reload returned false")
@@ -732,24 +769,24 @@ async def governance_reload(
 
 
 @router.get("/feeds/status")
-async def feeds_status(state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def feeds_status(state: StateDep) -> Any:
     return await state["feeds"].status()
 
 
 @router.patch("/feeds/announcements")
 async def feeds_announcements(
-    body: Dict[str, Any],
-    state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
+    body: dict[str, Any],
+    state: StateDep,
+    _auth: AuthDep,
 ) -> Any:
     return await state["feeds"].patch_announcements(body)
 
 
 @router.patch("/feeds/meme")
 async def feeds_meme(
-    body: Dict[str, Any],
-    state: Dict[str, Any] = Depends(get_state),
-    _auth: None = Depends(require_ops_token),
+    body: dict[str, Any],
+    state: StateDep,
+    _auth: AuthDep,
 ) -> Any:
     return await state["feeds"].patch_meme(body)
 
@@ -757,8 +794,8 @@ async def feeds_meme(
 @router.post("/account/transfer")
 async def account_transfer(
     body: TransferRequest,
-    guard: ControlContext = Depends(IdempotentGuard),
-    state: Dict[str, Any] = Depends(get_state),
+    guard: IdemGuardDep,
+    state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
@@ -787,8 +824,8 @@ async def account_transfer(
 
 @router.post("/events/trade")
 async def post_trade_event(
-    item: Dict[str, Any],
-    _auth: None = Depends(require_ops_token),
+    item: dict[str, Any],
+    _auth: AuthDep,
 ) -> Any:
     # Capture recent trade for the frontend feed
     try:
@@ -802,7 +839,7 @@ async def post_trade_event(
                 "pnl": item.get("pnl"),
             }
         )
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         pass
     await broadcast_trade(item)
     await broadcast_event({"type": "trade", "payload": item})
@@ -814,9 +851,9 @@ async def post_trade_event(
 
 @router.get("/strategies")
 async def cc_strategies_list(
-    cursor: Optional[str] = Query(None),
+    state: StateDep,
+    cursor: str | None = Query(None),
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
-    state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     """Return strategy cards with paramsSchema and current params for the UI."""
     gov = await state["strategy"].list()
@@ -833,11 +870,11 @@ async def cc_strategies_list(
         try:
             uni = await state["scanner"].universe(sid)
             symbols = uni.get("symbols", [])
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             symbols = []
 
         # Minimal performance with dev-friendly sparkline when no live data
-        perf = {"pnl": 0.0}
+        perf: dict[str, Any] = {"pnl": 0.0}
         try:
             import random
             import time as _time
@@ -858,7 +895,7 @@ async def cc_strategies_list(
                 "sharpe": round(rnd.uniform(0.5, 1.3), 2),
                 "drawdown": round(rnd.uniform(0.05, 0.2), 2),
             }
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
         items.append(
@@ -879,13 +916,13 @@ async def cc_strategies_list(
 
 
 @router.get("/strategies/{strategy_id}")
-async def cc_strategy_get(strategy_id: str, state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def cc_strategy_get(strategy_id: str, state: StateDep) -> Any:
     params_store = _load_params()
     schema = _load_strategy_schema(strategy_id)
     try:
         uni = await state["scanner"].universe(strategy_id)
         symbols = uni.get("symbols", [])
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         symbols = []
     return {
         "id": strategy_id,
@@ -901,9 +938,9 @@ async def cc_strategy_get(strategy_id: str, state: Dict[str, Any] = Depends(get_
 @router.post("/strategies/{strategy_id}/start")
 async def cc_strategy_start(
     strategy_id: str,
-    body: Dict[str, Any] | None = None,
-    guard: ControlContext = Depends(IdempotentGuard),
-    state: Dict[str, Any] = Depends(get_state),
+    guard: IdemGuardDep,
+    state: StateDep,
+    body: dict[str, Any] | None = None,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
@@ -916,6 +953,11 @@ async def cc_strategy_start(
             store = _load_params()
             store[strategy_id] = body["params"]
             _save_params(store)
+    except HTTPException:
+        raise
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    else:
         response = {"ok": True, "action": "start", "strategyId": strategy_id}
         _record_control_action(
             "strategy.start",
@@ -927,17 +969,13 @@ async def cc_strategy_start(
         )
         _idempotency_store(idem_key, response)
         return response
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/strategies/{strategy_id}/stop")
 async def cc_strategy_stop(
     strategy_id: str,
-    guard: ControlContext = Depends(IdempotentGuard),
-    state: Dict[str, Any] = Depends(get_state),
+    guard: IdemGuardDep,
+    state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
@@ -946,6 +984,11 @@ async def cc_strategy_stop(
 
     try:
         await state["strategy"].patch(strategy_id, {"enabled": False})
+    except HTTPException:
+        raise
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    else:
         response = {"ok": True, "action": "stop", "strategyId": strategy_id}
         _record_control_action(
             "strategy.stop",
@@ -957,31 +1000,33 @@ async def cc_strategy_stop(
         )
         _idempotency_store(idem_key, response)
         return response
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/strategies/{strategy_id}/update")
 async def cc_strategy_update(
     strategy_id: str,
-    body: Dict[str, Any],
-    guard: ControlContext = Depends(IdempotentGuard),
-    state: Dict[str, Any] = Depends(get_state),
+    body: dict[str, Any],
+    guard: IdemGuardDep,
+    state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
     if cached:
         return cached
 
+    params = body.get("params") or {}
+    if not isinstance(params, dict):
+        raise HTTPException(status_code=400, detail="params must be an object")
+
     try:
-        params = body.get("params") or {}
-        if not isinstance(params, dict):
-            raise HTTPException(status_code=400, detail="params must be an object")
         store = _load_params()
         store[strategy_id] = params
         _save_params(store)
+    except HTTPException:
+        raise
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    else:
         response = {"ok": True, "action": "update", "strategyId": strategy_id}
         _record_control_action(
             "strategy.update",
@@ -993,10 +1038,6 @@ async def cc_strategy_update(
         )
         _idempotency_store(idem_key, response)
         return response
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 # Backtests: job tracker backed by filesystem so multiple workers share state
@@ -1008,7 +1049,7 @@ def _job_path(job_id: str) -> Path:
     return BACKTEST_DIR / f"{job_id}.json"
 
 
-def _save_job(job_id: str, payload: Dict[str, Any]) -> None:
+def _save_job(job_id: str, payload: dict[str, Any]) -> None:
     path = _job_path(job_id)
     # Best-effort atomic write
     with NamedTemporaryFile(
@@ -1021,16 +1062,16 @@ def _save_job(job_id: str, payload: Dict[str, Any]) -> None:
     tmp_path.replace(path)
 
 
-def _load_job(job_id: str) -> Dict[str, Any] | None:
+def _load_job(job_id: str) -> dict[str, Any] | None:
     path = _job_path(job_id)
     try:
         text = path.read_text(encoding="utf-8")
         return json.loads(text)
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         return None
 
 
-def _synth_backtest_result(strategy_name: str) -> Dict[str, Any]:
+def _synth_backtest_result(strategy_name: str) -> dict[str, Any]:
     # Synthetic equity and metrics
     now = int(time.time())
     equity = 10000.0
@@ -1075,10 +1116,7 @@ def _synth_backtest_result(strategy_name: str) -> Dict[str, Any]:
 
 
 @router.post("/backtests")
-async def cc_backtest_start(
-    payload: Dict[str, Any],
-    guard: ControlContext = Depends(IdempotentGuard),
-) -> Any:
+async def cc_backtest_start(payload: dict[str, Any], guard: IdemGuardDep) -> Any:
     idem_key = guard.idempotency_key or ""
     cached = _idempotency_cached_response(idem_key)
     if cached:
@@ -1100,7 +1138,7 @@ async def cc_backtest_start(
             # Produce result
             result = _synth_backtest_result(strategy_id or "strategy")
             _save_job(job, {"status": "done", "progress": 1.0, "result": result})
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             _save_job(job, {"status": "error", "progress": 1.0})
 
     # Schedule via event loop if available, and also a thread-based runner
@@ -1117,7 +1155,7 @@ async def cc_backtest_start(
         try:
             # Run the async job in a dedicated loop
             asyncio.run(_run(job_id, payload.get("strategyId")))
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             _save_job(job_id, {"status": "error", "progress": 1.0})
 
     t = threading.Thread(target=_thread_runner, name=f"backtest-{job_id}", daemon=True)
@@ -1150,12 +1188,12 @@ async def cc_backtest_poll(job_id: str) -> Any:
 
 
 async def _collect_metrics_bundle(
-    state: Dict[str, Any]
-) -> tuple[List[Dict[str, Any]], Dict[str, Any], Dict[str, Any]]:
+    state: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     metrics_source = os.getenv("UI_METRICS_SOURCE", "prom").lower()
     fetched_at = time.time()
     metrics_text = ""
-    enhanced_data: List[Dict[str, Any]] = []
+    enhanced_data: list[dict[str, Any]] = []
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             if metrics_source in {"direct", "engine"}:
@@ -1165,7 +1203,7 @@ async def _collect_metrics_bundle(
                         resp = await client.get(f"{base.rstrip('/')}/metrics")
                         if resp.status_code == 200:
                             texts.append(resp.text)
-                    except Exception:
+                    except _SUPPRESSIBLE_EXCEPTIONS:
                         continue
                 metrics_text = "\n".join(texts)
             else:
@@ -1175,15 +1213,15 @@ async def _collect_metrics_bundle(
         if metrics_text:
             parsed = pnl.parse_prometheus_metrics(metrics_text)
             enhanced_data = pnl.enhance_with_registry_data(parsed)
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         enhanced_data = []
 
     try:
         snapshot = await state["portfolio"].snapshot()
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         snapshot = {}
 
-    context: Dict[str, Any] = {
+    context: dict[str, Any] = {
         "metricsSource": metrics_source,
         "registryPath": str(pnl.REGISTRY_PATH),
         "fetchedAt": fetched_at,
@@ -1197,11 +1235,11 @@ async def _collect_metrics_bundle(
 
 @router.get("/metrics/summary")
 async def cc_metrics_summary(
-    from_: Optional[str] = None,
-    to: Optional[str] = None,
-    strategies: Optional[list[str]] = None,
-    symbols: Optional[list[str]] = None,
-    state: Dict[str, Any] = Depends(get_state),
+    state: StateDep,
+    from_: str | None = None,
+    to: str | None = None,
+    strategies: list[str] | None = None,
+    symbols: list[str] | None = None,
 ) -> Any:
     # Pull live metrics from Prometheus (via pnl_dashboard helpers)
     enhanced_data, snap, _context = await _collect_metrics_bundle(state)
@@ -1209,7 +1247,7 @@ async def cc_metrics_summary(
     open_positions = len(positions)
 
     # PnL attribution by symbol from positions
-    pnl_by_symbol: Dict[str, float] = {}
+    pnl_by_symbol: dict[str, float] = {}
     for p in positions:
         sym = p.get("symbol") or p.get("product") or "UNKNOWN"
         pnl_val = float(p.get("pnl") or p.get("unrealizedPnl") or p.get("unrealized_pnl") or 0.0)
@@ -1278,12 +1316,12 @@ async def cc_metrics_summary(
 
 @router.get("/metrics/models")
 async def cc_metrics_models(
-    cursor: Optional[str] = Query(None),
+    state: StateDep,
+    cursor: str | None = Query(None),
     limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
-    state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     enhanced_data, _snap, context = await _collect_metrics_bundle(state)
-    normalized: List[Dict[str, Any]] = []
+    normalized: list[dict[str, Any]] = []
     for item in enhanced_data:
         model = str(item.get("model") or "unknown")
         venue = str(item.get("venue") or "global")
@@ -1318,9 +1356,9 @@ async def cc_metrics_models(
 
 @router.get("/positions")
 async def cc_positions(
-    cursor: Optional[str] = Query(None),
+    state: StateDep,
+    cursor: str | None = Query(None),
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
-    state: Dict[str, Any] = Depends(get_state),
 ) -> Any:
     sanitized = await _collect_positions(state)
     return _paginate_items(sanitized, cursor, limit)
@@ -1328,7 +1366,7 @@ async def cc_positions(
 
 @router.get("/trades/recent")
 async def cc_trades_recent(
-    cursor: Optional[str] = Query(None),
+    cursor: str | None = Query(None),
     limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
 ) -> Any:
     rows = list(RECENT_TRADES)
@@ -1374,7 +1412,7 @@ async def cc_trades_recent(
 
 @router.get("/alerts")
 async def cc_alerts(
-    cursor: Optional[str] = Query(None),
+    cursor: str | None = Query(None),
     limit: int = Query(50, ge=1, le=MAX_PAGE_LIMIT),
 ) -> Any:
     rows = list(ALERTS_FEED)
@@ -1412,7 +1450,7 @@ async def cc_alerts(
 
 
 @router.post("/alerts")
-async def cc_alerts_post(item: Dict[str, Any], _auth: None = Depends(require_ops_token)) -> Any:
+async def cc_alerts_post(item: dict[str, Any], _auth: AuthDep) -> Any:
     row = {
         "time": item.get("time") or int(time.time() * 1000),
         "level": item.get("level") or item.get("type") or "info",
@@ -1424,7 +1462,7 @@ async def cc_alerts_post(item: Dict[str, Any], _auth: None = Depends(require_ops
 
 
 @router.get("/health")
-async def cc_health(state: Dict[str, Any] = Depends(get_state)) -> Any:
+async def cc_health(state: StateDep) -> Any:
     """Return venue/engine health for the dashboard."""
     try:
         from ops.engine_client import health as engine_health
@@ -1451,16 +1489,17 @@ async def cc_health(state: Dict[str, Any] = Depends(get_state)) -> Any:
                     "queue": int(eng.get("queue") or 0),
                 }
             ]
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        logger.exception("Failed to fetch engine health")
         out = [{"name": "trading-engine", "status": "down", "latencyMs": 0.0, "queue": 0}]
     return {"venues": out}
 
 
-_price_peers: Set[WebSocket] = set()
-_account_peers: Set[WebSocket] = set()
-_orders_peers: Set[WebSocket] = set()
-_trades_peers: Set[WebSocket] = set()
-_events_peers: Set[WebSocket] = set()
+_price_peers: set[WebSocket] = set()
+_account_peers: set[WebSocket] = set()
+_orders_peers: set[WebSocket] = set()
+_trades_peers: set[WebSocket] = set()
+_events_peers: set[WebSocket] = set()
 
 
 async def _guard_ws(websocket: WebSocket) -> None:
@@ -1470,7 +1509,7 @@ async def _guard_ws(websocket: WebSocket) -> None:
     raise WebSocketDisconnect()
 
 
-async def _ws_keep(websocket: WebSocket, peers: Set[WebSocket]) -> None:
+async def _ws_keep(websocket: WebSocket, peers: set[WebSocket]) -> None:
     await websocket.accept()
     peers.add(websocket)
     try:
@@ -1482,34 +1521,34 @@ async def _ws_keep(websocket: WebSocket, peers: Set[WebSocket]) -> None:
         peers.discard(websocket)
 
 
-async def _broadcast(peers: Set[WebSocket], message: Dict[str, Any]) -> None:
-    dead: List[WebSocket] = []
+async def _broadcast(peers: set[WebSocket], message: dict[str, Any]) -> None:
+    dead: list[WebSocket] = []
     for ws in list(peers):
         try:
             await ws.send_json(message)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             dead.append(ws)
     for ws in dead:
         peers.discard(ws)
 
 
-async def broadcast_price(message: Dict[str, Any]) -> None:
+async def broadcast_price(message: dict[str, Any]) -> None:
     await _broadcast(_price_peers, message)
 
 
-async def broadcast_account(message: Dict[str, Any]) -> None:
+async def broadcast_account(message: dict[str, Any]) -> None:
     await _broadcast(_account_peers, message)
 
 
-async def broadcast_order(message: Dict[str, Any]) -> None:
+async def broadcast_order(message: dict[str, Any]) -> None:
     await _broadcast(_orders_peers, message)
 
 
-async def broadcast_trade(message: Dict[str, Any]) -> None:
+async def broadcast_trade(message: dict[str, Any]) -> None:
     await _broadcast(_trades_peers, message)
 
 
-async def broadcast_event(message: Dict[str, Any]) -> None:
+async def broadcast_event(message: dict[str, Any]) -> None:
     await _broadcast(_events_peers, message)
 
 

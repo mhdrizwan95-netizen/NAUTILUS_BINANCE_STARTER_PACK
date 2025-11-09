@@ -1,7 +1,7 @@
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import ccxt
 import pandas as pd
@@ -12,6 +12,13 @@ from services.common import manifest
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 from .config import settings
+
+_FETCH_ERRORS = (
+    ccxt.BaseError,
+    ValueError,
+    RuntimeError,
+    OSError,
+)
 
 ExchangeClient = Any
 
@@ -46,12 +53,12 @@ def on_start() -> None:
 
 
 @app.get("/health")
-def health() -> Dict[str, str]:
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/ingest_once")
-def ingest_once() -> Dict[str, int]:
+def ingest_once() -> dict[str, int]:
     ex = _client()
     tf = settings.TIMEFRAME
     out = {"downloaded": 0}
@@ -98,7 +105,7 @@ def ingest_once() -> Dict[str, int]:
                     os.remove(path)
                 except FileNotFoundError:
                     logger.warning("Duplicate download missing on disk %s", path)
-        except Exception:
+        except _FETCH_ERRORS:
             logger.exception("ingest error for %s", sym)
         # Respect extra delay to avoid rate limits
         delay = max(int(settings.SLEEP_MS), 0) / 1000.0

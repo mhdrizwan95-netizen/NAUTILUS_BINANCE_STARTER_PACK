@@ -17,6 +17,15 @@ def _log_suppressed(context: str, exc: Exception) -> None:
     )
 
 
+_FUNDING_ERRORS: tuple[type[Exception], ...] = (
+    RuntimeError,
+    ValueError,
+    ConnectionError,
+    KeyError,
+    TypeError,
+)
+
+
 class FundingGuard:
     def __init__(self, router, bus=None, log: logging.Logger | None = None) -> None:
         self.router = router
@@ -41,17 +50,17 @@ class FundingGuard:
             for sym, obj in (data or {}).items():
                 try:
                     rate = float(obj.get("lastFundingRate") or obj.get("estimatedRate") or 0.0)
-                except Exception as exc:
+                except _FUNDING_ERRORS as exc:
                     _log_suppressed("funding_guard.rate_parse", exc)
                     rate = 0.0
                 if abs(rate) >= self.spike_threshold:
                     try:
                         if self.bus is not None:
                             self.bus.fire("risk.funding_spike", {"symbol": sym, "rate": rate})
-                    except Exception as exc:
+                    except _FUNDING_ERRORS as exc:
                         _log_suppressed("funding_guard.bus_fire", exc)
                     await self._mitigate(sym, rate)
-        except Exception as exc:
+        except _FUNDING_ERRORS as exc:
             _log_suppressed("funding_guard.bulk_fetch", exc)
             return
 
@@ -61,7 +70,7 @@ class FundingGuard:
             # Try to get position from portfolio state
             state = self.router.portfolio_service().state
             pos = state.positions.get(sym) or state.positions.get(sym.split(".")[0])
-        except Exception as exc:
+        except _FUNDING_ERRORS as exc:
             _log_suppressed("funding_guard.lookup_position", exc)
             pos = None
         if pos is None:
@@ -88,7 +97,7 @@ class FundingGuard:
         if self.hedge_ratio > 0:
             try:
                 await self._maybe_await(self.router.auto_net_hedge_btc(percent=self.hedge_ratio))
-            except Exception as exc:
+            except _FUNDING_ERRORS as exc:
                 _log_suppressed("funding_guard.auto_hedge", exc)
 
     async def _maybe_await(self, res: Any) -> Any:

@@ -6,7 +6,12 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Deque, Dict, Optional
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    OSError,
+    ValueError,
+    json.JSONDecodeError,
+)
 
 
 @dataclass
@@ -25,7 +30,7 @@ class TrendParams:
     cooldown_bars: int
 
     @classmethod
-    def from_config(cls, cfg) -> "TrendParams":
+    def from_config(cls, cfg) -> TrendParams:
         return cls(
             primary_fast=cfg.primary.fast,
             primary_slow=cfg.primary.slow,
@@ -41,7 +46,7 @@ class TrendParams:
             cooldown_bars=cfg.cooldown_bars,
         )
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return asdict(self)
 
     def update(self, **kwargs) -> None:
@@ -51,11 +56,11 @@ class TrendParams:
 
 
 class TrendAutoTuner:
-    def __init__(self, cfg, params: TrendParams, *, logger: Optional[logging.Logger] = None):
+    def __init__(self, cfg, params: TrendParams, *, logger: logging.Logger | None = None):
         self.cfg = cfg
         self.params = params
         self.enabled = bool(cfg.auto_tune_enabled)
-        self.history: Deque[Dict] = deque(maxlen=max(10, int(cfg.auto_tune_history or 200)))
+        self.history: deque[dict] = deque(maxlen=max(10, int(cfg.auto_tune_history or 200)))
         self._trades_since_update = 0
         self._state_path = Path(cfg.auto_tune_state_path or "data/runtime/trend_auto_tune.json")
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -63,7 +68,7 @@ class TrendAutoTuner:
         self._load_state()
 
     def observe_trade(
-        self, symbol: str, pnl_pct: float, stop_bps: float, meta: Dict | None = None
+        self, symbol: str, pnl_pct: float, stop_bps: float, meta: dict | None = None
     ) -> None:
         record = {
             "symbol": symbol,
@@ -146,7 +151,7 @@ class TrendAutoTuner:
                 "history": list(self.history)[-self.cfg.auto_tune_history :],
             }
             self._state_path.write_text(json.dumps(payload, indent=2))
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             self._log.debug("[TREND-AUTO] Failed to persist tuner state", exc_info=True)
 
     def _load_state(self) -> None:
@@ -164,5 +169,5 @@ class TrendAutoTuner:
                 len(self.history),
                 self.params.to_dict(),
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             self._log.warning("[TREND-AUTO] Failed to restore tuner state", exc_info=True)

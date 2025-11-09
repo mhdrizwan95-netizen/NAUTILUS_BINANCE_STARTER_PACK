@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 
-def _get(feats: Dict[str, Any], key: str, default: float | None = None) -> float | None:
+def _get(feats: dict[str, Any], key: str, default: float | None = None) -> float | None:
     try:
         v = feats.get(key)
         return float(v) if v is not None else default
-    except Exception:
+    except (TypeError, ValueError):
         return default
 
 
-def pred_ok(pred: dict, feats: Dict[str, Any]) -> bool:
+def pred_ok(pred: dict, feats: dict[str, Any]) -> bool:
     op = pred.get("op")
     feat = pred.get("feat")
     if not feat or not op:

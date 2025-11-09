@@ -10,7 +10,6 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
 
 import requests
 
@@ -27,7 +26,7 @@ class SymbolSpec:
     min_notional: float
 
 
-def fetch_binance_specs(quote="USDT") -> Dict[str, SymbolSpec]:
+def fetch_binance_specs(quote="USDT") -> dict[str, SymbolSpec]:
     logging.info("Fetching /exchangeInfo from Binance...")
     r = requests.get(BINANCE_INFO_URL, timeout=10)
     r.raise_for_status()
@@ -47,7 +46,7 @@ def fetch_binance_specs(quote="USDT") -> Dict[str, SymbolSpec]:
     return specs
 
 
-def write_specs(specs: Dict[str, SymbolSpec]):
+def write_specs(specs: dict[str, SymbolSpec]):
     out = {"BINANCE": {k: vars(v) for k, v in specs.items()}}
     tmp = SPECS_PATH.with_suffix(".tmp")
     tmp.write_text(json.dumps(out, indent=2))

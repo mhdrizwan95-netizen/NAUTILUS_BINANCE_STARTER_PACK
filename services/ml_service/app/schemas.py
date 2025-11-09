@@ -1,11 +1,11 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
 
 class TrainRequest(BaseModel):
     n_states: int = Field(default=4, ge=2, le=12)
-    tag: Optional[str] = None
+    tag: str | None = None
     promote: bool = True
 
 
@@ -18,15 +18,15 @@ class TrainResponse(BaseModel):
 
 
 class ModelInfo(BaseModel):
-    active_version: Optional[str]
+    active_version: str | None
     registry_size: int
-    metrics: Optional[Dict[str, Any]] = None
+    metrics: dict[str, Any] | None = None
 
 
 class PredictRequest(BaseModel):
-    logret: List[float] = Field(default_factory=list, description="Series of log returns")
+    logret: list[float] = Field(default_factory=list, description="Series of log returns")
 
 
 class PredictResponse(BaseModel):
-    regime_proba: List[float]
-    model_meta: Dict[str, Any]
+    regime_proba: list[float]
+    model_meta: dict[str, Any]

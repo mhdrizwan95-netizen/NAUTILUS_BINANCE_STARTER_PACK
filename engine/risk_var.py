@@ -11,13 +11,17 @@ If md is missing or ATR unavailable, we fall back to notional risk.
 
 from __future__ import annotations
 
-from typing import Any, Iterable, List
+from collections.abc import Iterable
+from typing import Any
+
+_SAFE_ATTR_ERRORS = (AttributeError, TypeError)
+_SAFE_VALUE_ERRORS = (TypeError, ValueError)
 
 
 def _get(attr: str, obj: Any, default=None):
     try:
         return getattr(obj, attr)
-    except Exception:
+    except _SAFE_ATTR_ERRORS:
         return default
 
 
@@ -42,7 +46,7 @@ def estimate_var_usd(
         try:
             if entry is not None and stop is not None:
                 return abs(float(entry) - float(stop)) * qty
-        except Exception:
+        except _SAFE_VALUE_ERRORS:
             pass
 
     # ATR fallback if provided
@@ -56,7 +60,7 @@ def estimate_var_usd(
             if last is None:
                 last = _get("avg_price", position, 0.0)
             return abs(float(last) * qty) * 0.01
-        except Exception:
+        except _SAFE_VALUE_ERRORS:
             pass
 
     # Fallback to notional magnitude (qty * last_price)
@@ -65,7 +69,7 @@ def estimate_var_usd(
         if last is None:
             last = _get("avg_price", position, 0.0)
         return abs(float(last) * qty) * 0.01
-    except Exception:
+    except _SAFE_VALUE_ERRORS:
         return 0.0
 
 
@@ -76,7 +80,7 @@ def sort_positions_by_var_desc(
     n: int = 14,
     *,
     use_stop_first: bool = True,
-) -> List[Any]:
+) -> list[Any]:
     return sorted(
         list(positions),
         key=lambda p: estimate_var_usd(p, md, tf, n, use_stop_first=use_stop_first),

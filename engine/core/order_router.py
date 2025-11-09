@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
+import inspect
+import json
 import logging
 import math
 import time
 from time import time as _now
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import httpx
 
@@ -23,10 +26,78 @@ Side = Literal["BUY", "SELL"]
 # Venue client registry
 _CLIENTS = {}  # {"BINANCE": binance_client, "IBKR": ibkr_client}
 _LOGGER = logging.getLogger(__name__)
+_ACCOUNT_ERRORS: tuple[type[Exception], ...] = (ValueError, TypeError, KeyError)
+_METRIC_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError)
+_CLIENT_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, RuntimeError, ValueError)
+
+try:
+    from engine.adapters.common import VenueRejected  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - optional dependency
+
+    class VenueRejected(Exception):
+        """Fallback when venue adapters are unavailable."""
+
+        ...
+
+
+_NETWORK_ERRORS = (httpx.HTTPError, asyncio.TimeoutError, ConnectionError)
+_PARSE_ERRORS = (ValueError, KeyError, json.JSONDecodeError)
+_ROUTE_ERRORS = _NETWORK_ERRORS + _PARSE_ERRORS + (RuntimeError, VenueRejected)
+_DATA_ERRORS = _PARSE_ERRORS + (AttributeError, TypeError)
+
+
+class MissingVenueClientError(ValueError):
+    """Raised when no venue client is registered."""
+
+    def __init__(self, venue: str) -> None:
+        super().__init__(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
+
+
+class MinNotionalViolationError(ValueError):
+    """Raised when quote falls below venue min notional."""
+
+    def __init__(self, quote: float, min_notional: float) -> None:
+        super().__init__(f"MIN_NOTIONAL: Quote {quote:.2f} below {min_notional:.2f}")
+
+
+class NoPriceAvailableError(ValueError):
+    """Raised when we cannot determine a last price for symbol."""
+
+    def __init__(self, symbol: str) -> None:
+        super().__init__(f"NO_PRICE: No last price for {symbol}")
+
+
+class SymbolSpecMissingError(ValueError):
+    """Raised when the venue lacks a symbol specification."""
+
+    def __init__(self, venue: str, base: str) -> None:
+        super().__init__(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
+
+
+class QuantityTooSmallError(ValueError):
+    """Raised when computed quantity falls below venue minimum."""
+
+    def __init__(self, quantity: float | None, min_qty: float) -> None:
+        super().__init__(f"QTY_TOO_SMALL: Rounded qty {quantity} < min_qty {min_qty}")
+
+
+class ClientMissingMethodError(ValueError):
+    """Raised when a venue client lacks a required method."""
+
+    def __init__(self, method: str) -> None:
+        super().__init__(f"CLIENT_MISSING_METHOD: {method}")
 
 
 def _log_suppressed(context: str, exc: Exception) -> None:
     _LOGGER.debug("%s suppressed exception: %s", context, exc, exc_info=True)
+
+
+def _safely(label: str, func, *args, **kwargs):
+    try:
+        return func(*args, **kwargs)
+    except _ROUTE_ERRORS as exc:
+        _log_suppressed(label, exc)
+        return None
 
 
 def set_exchange_client(venue: str, client):
@@ -128,7 +199,7 @@ async def _maybe_refresh_order_status(
             latest = await fetch(
                 symbol=clean_symbol, order_id=order_id, client_order_id=client_order_id
             )
-    except Exception as exc:  # noqa: BLE001
+    except _ROUTE_ERRORS as exc:
         logger.warning("[ORDER_REFRESH] status fetch failed for %s: %s", clean_symbol, exc)
         return
     logger.debug(
@@ -237,7 +308,7 @@ class OrderRouter:
             if futures_positions:
                 try:
                     self._import_futures_positions(futures_positions)
-                except Exception as exc:
+                except _ACCOUNT_ERRORS as exc:
                     _log_suppressed("order_router", exc)
 
             if not balances:
@@ -248,7 +319,7 @@ class OrderRouter:
                     if wallet:
                         self._portfolio.state.cash = wallet
                         self._portfolio.state.equity = wallet
-                except Exception as exc:
+                except _ACCOUNT_ERRORS as exc:
                     _log_suppressed("order_router", exc)
 
             self._last_snapshot = account
@@ -258,13 +329,13 @@ class OrderRouter:
 
                 st = self._portfolio.state
                 update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-            except Exception as exc:
+            except _METRIC_ERRORS as exc:
                 _log_suppressed("order_router", exc)
-        except Exception as e:
-            import logging
-
+        except _CLIENT_ERRORS as exc:
             logger = logging.getLogger(__name__)
-            logger.warning("[INIT] initialize_balances failed: %s; starting with empty balances", e)
+            logger.warning(
+                "[INIT] initialize_balances failed: %s; starting with empty balances", exc
+            )
             # Leave portfolio empty; snapshot_loaded will be false
 
     async def market_quote(
@@ -289,7 +360,7 @@ class OrderRouter:
         if venue in {"BINANCE", "BINANCE_MARGIN"}:
             client = _CLIENTS.get(venue)
             if client is None:
-                raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
+                raise MissingVenueClientError(venue)
 
             spec: SymbolSpec | None = (SPECS.get("BINANCE") or {}).get(base)
             if spec is None:
@@ -297,7 +368,7 @@ class OrderRouter:
 
             if float(quote) < float(spec.min_notional):
                 orders_rejected.inc()
-                raise ValueError(f"MIN_NOTIONAL: Quote {quote:.2f} below {spec.min_notional:.2f}")
+                raise MinNotionalViolationError(float(quote), float(spec.min_notional))
 
             submit = getattr(client, "submit_market_quote", None)
             if submit is None:
@@ -326,8 +397,8 @@ class OrderRouter:
 
             try:
                 REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-            except Exception as exc:
-                _log_suppressed("order_router", exc)
+            except _METRIC_ERRORS as exc:
+                _log_suppressed("order_router.metrics.submit_to_ack", exc)
 
             fee_bps = load_fee_config(venue).taker_bps
             filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or 0.0)
@@ -360,8 +431,8 @@ class OrderRouter:
                     )
                     st = self._portfolio.state
                     update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-            except Exception as exc:
-                _log_suppressed("order_router", exc)
+            except _ROUTE_ERRORS as exc:
+                _log_suppressed("order_router.apply_fill", exc)
 
             await self._maybe_emit_fill(res, symbol, side, venue=venue, intent="")
             return res
@@ -379,7 +450,8 @@ class OrderRouter:
         market: str | None = None,
     ) -> dict[str, Any]:
         """
-        Multi-venue order routing. Accepts venue-qualified symbols like "AAPL.IBKR" or "BTCUSDT.BINANCE"
+        Multi-venue order routing for venue-qualified symbols such as
+        "AAPL.IBKR" or "BTCUSDT.BINANCE".
         """
         # Blocking call for now - convert to async if needed
         import asyncio
@@ -438,8 +510,8 @@ class OrderRouter:
             return
         try:
             emit(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.emit_fill", exc)
 
     # ---- Safe router wrappers (capability-checked, no-throw) ----
     async def list_open_entries(self) -> list[dict]:
@@ -455,7 +527,7 @@ class OrderRouter:
                 res = await res
             if isinstance(res, list):
                 return res
-        except Exception:
+        except _ROUTE_ERRORS:
             return []
         return []
 
@@ -486,10 +558,11 @@ class OrderRouter:
             res = cancel_fn(**params)
             if hasattr(res, "__await__"):
                 await res  # type: ignore[func-returns-value]
-            return True
-        except Exception as exc:  # noqa: BLE001
-            logging.getLogger(__name__).debug("cancel_order failed: %s", exc, exc_info=True)
+        except _ROUTE_ERRORS:
+            logging.getLogger(__name__).debug("cancel_order failed", exc_info=True)
             return False
+        else:
+            return True
 
     async def cancel_open_order(self, order: dict) -> bool:
         symbol = str(order.get("symbol") or "").upper()
@@ -525,8 +598,8 @@ class OrderRouter:
             pos = getattr(self._portfolio.state, "positions", {}).get(base)
             if pos is None or abs(float(getattr(pos, "quantity", 0.0)) or 0.0) <= 0.0:
                 return
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.amend_stop_guard", exc)
         api_fn = getattr(client, "amend_reduce_only_stop", None)
         if api_fn is None:
             return
@@ -540,13 +613,13 @@ class OrderRouter:
         try:
             if "close_position" in api_fn.__code__.co_varnames:  # type: ignore[attr-defined]
                 params["close_position"] = True  # type: ignore[index]
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except AttributeError as exc:
+            _log_suppressed("order_router.amend_stop_close_field", exc)
         try:
             res = api_fn(**params)
             if hasattr(res, "__await__"):
                 await res
-        except Exception as e:
+        except _ROUTE_ERRORS as e:
             # Ignore benign not-found races
             msg = str(e).upper()
             if "NOT_FOUND" in msg or "ORDER_NOT_FOUND" in msg:
@@ -570,9 +643,10 @@ class OrderRouter:
                 res = api_fn(symbol=clean_symbol, side=side, quantity=float(qty))
             if hasattr(res, "__await__"):
                 res = await res
-            return res
-        except Exception:
+        except _ROUTE_ERRORS:
             return None
+        else:
+            return res
 
     async def _quote_to_quantity(
         self, symbol: str, side: Side, quote: float, *, market: str | None = None
@@ -586,14 +660,14 @@ class OrderRouter:
 
         client = _CLIENTS.get(venue)
         if client is None:
-            raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
+            raise MissingVenueClientError(venue)
 
         market_hint = market.lower() if isinstance(market, str) and market else None
         if venue == "BINANCE_MARGIN" and not market_hint:
             market_hint = "margin"
         px = await _resolve_last_price(client, venue, base, symbol, market=market_hint)
         if px is None or px <= 0:
-            raise ValueError(f"NO_PRICE: No last price for {symbol}")
+            raise NoPriceAvailableError(symbol)
 
         spec_key = "BINANCE" if venue == "BINANCE_MARGIN" else venue
         spec: SymbolSpec | None = (SPECS.get(spec_key) or {}).get(base)
@@ -603,9 +677,11 @@ class OrderRouter:
             spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
         elif venue == "KRAKEN" and spec is None:
             spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
+        if spec is None:
+            raise SymbolSpecMissingError(venue, base)
 
         if spec is None:
-            raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
+            raise SymbolSpecMissingError(venue, base)
 
         raw_qty = float(quote) / float(px)
         if venue == "KRAKEN":
@@ -613,7 +689,7 @@ class OrderRouter:
         else:
             qty = _round_step(raw_qty, spec.step_size)
         if qty <= 0:
-            raise ValueError(f"QTY_TOO_SMALL: Quote {quote:.4f} -> qty {qty:.8f}")
+            raise QuantityTooSmallError(qty, spec.min_qty if spec else 0.0)
         return qty
 
     def portfolio_snapshot(self):
@@ -671,7 +747,7 @@ async def _place_market_order_async_core(
     side: str,
     quote: float | None,
     quantity: float | None,
-    portfolio: Optional[Portfolio],
+    portfolio: Portfolio | None,
     *,
     market: str | None = None,
 ) -> dict[str, Any]:
@@ -688,7 +764,7 @@ async def _place_market_order_async_core(
 
     client = _CLIENTS.get(venue)
     if client is None:
-        raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
+        raise MissingVenueClientError(venue)
 
     market_hint: str | None = market.lower() if isinstance(market, str) and market else None
     if venue == "BINANCE_MARGIN" and not market_hint:
@@ -696,7 +772,7 @@ async def _place_market_order_async_core(
 
     px = await _resolve_last_price(client, venue, base, symbol, market=market_hint)
     if px is None or px <= 0:
-        raise ValueError(f"NO_PRICE: No last price for {symbol}")
+        raise NoPriceAvailableError(symbol)
 
     spec_key = "BINANCE" if venue == "BINANCE_MARGIN" else venue
     spec: SymbolSpec | None = (SPECS.get(spec_key) or {}).get(base)
@@ -708,17 +784,21 @@ async def _place_market_order_async_core(
         spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
 
     if spec is None:
-        raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
+        raise SymbolSpecMissingError(venue, base)
 
     step_size = float(spec.step_size)
     min_qty = float(spec.min_qty)
     min_notional = float(spec.min_notional)
 
     # Attempt to refine specs from live exchange filters
-    try:
-        filt = await client.exchange_filter(base, market=market_hint)
-    except Exception:
-        filt = None
+    filt = None
+    exchange_filter = getattr(client, "exchange_filter", None)
+    if exchange_filter is not None:
+        try:
+            maybe_filter = exchange_filter(base, market=market_hint)
+            filt = await maybe_filter if inspect.isawaitable(maybe_filter) else maybe_filter
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.exchange_filter", exc)
 
     if filt is not None:
         step_size = float(getattr(filt, "step_size", step_size) or step_size)
@@ -746,7 +826,7 @@ async def _place_market_order_async_core(
 
     if quantity is None or abs(quantity) < min_qty:
         orders_rejected.inc()
-        raise ValueError(f"QTY_TOO_SMALL: Rounded qty {quantity} < min_qty {min_qty}")
+        raise QuantityTooSmallError(quantity, min_qty)
 
     quantity_val = float(quantity)
     notional = abs(quantity_val) * float(px)
@@ -755,7 +835,7 @@ async def _place_market_order_async_core(
 
     if notional < min_notional:
         orders_rejected.inc()
-        raise ValueError(f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}")
+        raise MinNotionalViolationError(notional, min_notional)
 
     if venue == "IBKR":
         t0 = time.time()
@@ -763,8 +843,8 @@ async def _place_market_order_async_core(
         t1 = time.time()
         try:
             REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _METRIC_ERRORS as exc:
+            _log_suppressed("order_router.metrics.submit_to_ack", exc)
         fill_notional = abs(res.get("filled_qty_base", quantity)) * float(
             res.get("avg_fill_price", px)
         )
@@ -783,7 +863,7 @@ async def _place_market_order_async_core(
             if submit is None:
                 submit = getattr(client, "submit_market_order", None)
             if submit is None:
-                raise ValueError("CLIENT_MISSING_METHOD: submit_limit_order")
+                raise ClientMissingMethodError("submit_limit_order")
             t0 = time.time()
             res = await submit(
                 symbol=clean_symbol,
@@ -796,7 +876,7 @@ async def _place_market_order_async_core(
         elif quote is not None and (quantity is None or quantity == 0):
             submit = getattr(client, "submit_market_quote", None)
             if submit is None:
-                raise ValueError("CLIENT_MISSING_METHOD: submit_market_quote")
+                raise ClientMissingMethodError("submit_market_quote")
             t0 = time.time()
             call_kwargs = {"symbol": clean_symbol, "side": side, "quote": quote}
             if market_hint is not None:
@@ -812,7 +892,7 @@ async def _place_market_order_async_core(
             if submit is None:
                 submit = getattr(client, "place_market_order", None)
             if submit is None:
-                raise ValueError("CLIENT_MISSING_METHOD: submit_market_order")
+                raise ClientMissingMethodError("submit_market_order")
             t0 = time.time()
             call_kwargs = {
                 "symbol": clean_symbol,
@@ -833,13 +913,13 @@ async def _place_market_order_async_core(
         # Futures API commonly reports NEW+executedQty=0 even when filled; quickly re-query
         try:
             await _maybe_refresh_order_status(res, client, venue, clean_symbol, market_hint)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.refresh_status", exc)
 
         try:
             REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _METRIC_ERRORS as exc:
+            _log_suppressed("order_router.metrics.submit_to_ack", exc)
 
         fee_bps = load_fee_config(venue).taker_bps
         filled_qty = _as_float(res.get("executedQty"))
@@ -890,8 +970,8 @@ async def _place_market_order_async_core(
                 )
             st = portfolio.state
             update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.apply_fill", exc)
 
     REGISTRY["fees_paid_total"].inc(fee)
     res["fee_usd"] = float(fee)
@@ -901,7 +981,6 @@ async def _place_market_order_async_core(
         res.setdefault("market", market_hint)
     # Feature-gated slippage telemetry and policy (log-only)
     try:
-        import logging
         import os
 
         cap_spot = float(os.getenv("SPOT_TAKER_MAX_SLIP_BPS", "25"))
@@ -933,25 +1012,25 @@ async def _place_market_order_async_core(
                 from engine.core.event_bus import BUS
 
                 BUS.fire("event_bo.skip", {"symbol": base, "reason": "slippage"})
-            except Exception as exc:
-                _log_suppressed("order_router", exc)
+            except _ROUTE_ERRORS as exc:
+                _log_suppressed("order_router.slippage.skip_event", exc)
         # Histogram observation (optional)
         try:
             from engine.metrics import exec_slippage_bps as _slip_hist
 
             intent = os.getenv("SLIPPAGE_INTENT", "GENERIC")
             _slip_hist.labels(symbol=base, venue=venue, intent=intent).observe(slip_bps)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _METRIC_ERRORS as exc:
+            _log_suppressed("order_router.slippage.histogram", exc)
         # Emit slippage sample for overrides
         try:
             from engine.core.event_bus import BUS
 
             BUS.fire("exec.slippage", {"symbol": base, "venue": venue, "bps": slip_bps})
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
-    except Exception as exc:
-        _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.slippage.emit", exc)
+    except _ROUTE_ERRORS as exc:
+        _log_suppressed("order_router.slippage.block", exc)
     return res
 
 
@@ -1015,8 +1094,8 @@ class OrderRouterExt(OrderRouter):
         # Clear existing positions before import
         try:
             self._portfolio.state.positions.clear()
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.positions.clear", exc)
         for p in positions:
             try:
                 amt = float(p.get("positionAmt", 0.0) or 0.0)
@@ -1024,7 +1103,7 @@ class OrderRouterExt(OrderRouter):
                     continue
                 sym = str(p.get("symbol", "")).upper()
                 entry = float(p.get("entryPrice", 0.0) or 0.0)
-            except Exception as exc:
+            except _PARSE_ERRORS as exc:
                 _log_suppressed("order_router.position_import.parse", exc)
                 continue
             pos = self._portfolio.state.positions.setdefault(
@@ -1042,8 +1121,8 @@ class OrderRouterExt(OrderRouter):
         try:
             # trigger recalc with current last prices (may be zero)
             self._portfolio._recalculate()  # type: ignore[attr-defined]
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.positions.recalc", exc)
 
     async def fetch_account_snapshot(self) -> dict:
         """
@@ -1091,22 +1170,22 @@ class OrderRouterExt(OrderRouter):
                 if wallet > 0:
                     self._portfolio.state.cash = wallet
                     self._portfolio.state.equity = wallet
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.snapshot.cash", exc)
 
         if positions:
             try:
                 self._import_futures_positions(positions)
-            except Exception as exc:
-                _log_suppressed("order_router", exc)
+            except _ROUTE_ERRORS as exc:
+                _log_suppressed("order_router.snapshot.import", exc)
 
         try:
             from engine.metrics import update_portfolio_gauges
 
             st = self._portfolio.state
             update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _METRIC_ERRORS as exc:
+            _log_suppressed("order_router.snapshot.metrics", exc)
 
         return self._last_snapshot or {"balances": [], "positions": []}
 
@@ -1153,18 +1232,18 @@ class OrderRouterExt(OrderRouter):
 
         client = _CLIENTS.get(venue)
         if client is None:
-            raise ValueError(f"VENUE_CLIENT_MISSING: No client for venue {venue}")
+            raise MissingVenueClientError(venue)
 
         # Specs lookup
         spec, base, venue = self._symbol_spec(symbol)
         if spec is None:
-            raise ValueError(f"SPEC_MISSING: No lot-size spec for {venue}:{base}")
+            raise SymbolSpecMissingError(venue, base)
 
         # Round qty and price
         q_rounded = _round_step(float(quantity), spec.step_size)
         if abs(q_rounded) < spec.min_qty:
             orders_rejected.inc()
-            raise ValueError(f"QTY_TOO_SMALL: Rounded qty {q_rounded} < min_qty {spec.min_qty}")
+            raise QuantityTooSmallError(q_rounded, spec.min_qty)
 
         # Try to get tick size from live exchange filter
         tick_size = 0.0
@@ -1174,7 +1253,7 @@ class OrderRouterExt(OrderRouter):
                 await _CLIENTS["BINANCE"].exchange_filter(base) if spec_key == "BINANCE" else None
             )
             tick_size = float(getattr(filt, "tick_size", 0.0) or 0.0)
-        except Exception:
+        except _ROUTE_ERRORS:
             tick_size = 0.0
         p_rounded = _round_tick(float(price), tick_size)
 
@@ -1200,13 +1279,13 @@ class OrderRouterExt(OrderRouter):
             min_notional = max(min_notional, ibkr_min_notional_usd())
         if notional < min_notional:
             orders_rejected.inc()
-            raise ValueError(f"MIN_NOTIONAL: Notional {notional:.2f} below {min_notional:.2f}")
+            raise MinNotionalViolationError(notional, min_notional)
 
         # Submit
         clean_symbol = _normalize_symbol(symbol) if venue == "BINANCE" else symbol
         submit = getattr(client, "submit_limit_order", None)
         if submit is None:
-            raise ValueError("CLIENT_MISSING_METHOD: submit_limit_order")
+            raise ClientMissingMethodError("submit_limit_order")
         t0 = time.time()
         submit_kwargs = dict(
             symbol=clean_symbol,
@@ -1229,8 +1308,8 @@ class OrderRouterExt(OrderRouter):
 
         try:
             REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _METRIC_ERRORS as exc:
+            _log_suppressed("order_router.metrics.submit_to_ack", exc)
 
         # Treat IOC as taker
         fee_bps = load_fee_config(venue).taker_bps
@@ -1261,8 +1340,8 @@ class OrderRouterExt(OrderRouter):
                 )
                 st = self._portfolio.state
                 update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.shadow.apply_fill", exc)
 
         REGISTRY["fees_paid_total"].inc(fee)
         res["fee_usd"] = float(fee)
@@ -1301,8 +1380,8 @@ class OrderRouterExt(OrderRouter):
                 )
                 if market_px and market_px > 0:
                     last_px = market_px
-            except Exception as exc:
-                _log_suppressed("order_router", exc)
+            except _ROUTE_ERRORS as exc:
+                _log_suppressed("order_router.place_entry.market_px", exc)
         if last_px is None or last_px <= 0:
             last_px = 0.0
         # Optional risk-parity sizing override (when qty <= 0 or explicitly enabled)
@@ -1324,8 +1403,8 @@ class OrderRouterExt(OrderRouter):
                     max_usd = float(os.getenv("RISK_PARITY_MAX_NOTIONAL_USD", "500"))
                     qty = clamp_notional(computed, last_px, min_usd, max_usd)
                     logging.getLogger(__name__).info("[RISK-PARITY] %s qty=%.8f", symbol, qty)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.place_entry.risk_parity", exc)
         # Apply auto cutback/mute (feature-gated)
         try:
             if os.getenv("AUTO_CUTBACK_ENABLED", "").lower() in {"1", "true", "yes"}:
@@ -1349,8 +1428,8 @@ class OrderRouterExt(OrderRouter):
                         "reason": "SCALP_MUTED",
                         "symbol": symbol,
                     }
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.place_entry.cutback", exc)
         shadow = os.getenv("SCALP_MAKER_SHADOW", "").lower() in {"1", "true", "yes"}
         if intent.upper() == "SCALP" and shadow:
             ref = float(last_px)
@@ -1394,16 +1473,16 @@ class OrderRouterExt(OrderRouter):
                     "reason": "MIN_NOTIONAL_BLOCK",
                     "symbol": symbol,
                 }
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.place_entry.min_block", exc)
         res = await self._place_market_order_async(
             symbol=symbol, side=side, quote=None, quantity=qty, market=market_hint
         )
         # Emit trade.fill for synchronous fills
         try:
             self._emit_fill(res, symbol=symbol.split(".")[0], side=side, venue=venue, intent=intent)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.place_entry.emit", exc)
         return res
 
     # Utility methods used by guards/sizers
@@ -1414,7 +1493,7 @@ class OrderRouterExt(OrderRouter):
             for sym, pos in (st.positions or {}).items():
                 qty = float(getattr(pos, "quantity", 0.0) or 0.0)
                 out.append({"symbol": sym, "qty": qty})
-        except Exception:
+        except _ROUTE_ERRORS:
             return []
         return out
 
@@ -1424,17 +1503,17 @@ class OrderRouterExt(OrderRouter):
             from engine.risk_guardian import _write_trading_flag
 
             _write_trading_flag(bool(enabled))
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.set_trading_enabled", exc)
 
     def set_preferred_quote(self, quote: str) -> None:
         try:
             self._preferred_quote = quote.upper()
-        except Exception:
+        except AttributeError:
             self._preferred_quote = quote.upper()
 
     async def auto_net_hedge_btc(self, percent: float = 0.30):
-        # Placeholder: calculate net delta and open a BTCUSDT opposite position; best-effort noop for now
+        # Placeholder: calculate net delta and open a BTCUSDT hedge (best-effort noop)
         return None
 
 
@@ -1493,14 +1572,14 @@ class _MDAdapter:
         try:
             sym = self._default_symbol(symbol)
             return self.router.round_step(sym, qty)
-        except Exception:
+        except _DATA_ERRORS:
             return qty
 
     def round_tick(self, symbol: str, price: float) -> float:
         try:
             sym = self._default_symbol(symbol)
             return self.router.round_tick(sym, price)
-        except Exception:
+        except _DATA_ERRORS:
             return price
 
     def qty_step(self, symbol: str) -> float:
@@ -1508,7 +1587,7 @@ class _MDAdapter:
             sym = self._default_symbol(symbol)
             spec, _, _ = self.router._symbol_spec(sym)
             return float(getattr(spec, "step_size", 1e-6)) if spec else 1e-6
-        except Exception:
+        except _DATA_ERRORS:
             return 1e-6
 
     async def place_reduce_only_limit(self, symbol: str, side: Side, qty: float, price: float):
@@ -1573,11 +1652,11 @@ class _MDAdapter:
                             delattr(self, "_strategy_pending_meta")
                     except AttributeError:
                         pass
-                    except Exception:
+                    except _ROUTE_ERRORS:
                         try:
-                            setattr(self, "_strategy_pending_meta", None)
-                        except Exception as exc:
-                            _log_suppressed("order_router", exc)
+                            self._strategy_pending_meta = None
+                        except _ROUTE_ERRORS as exc:
+                            _log_suppressed("order_router.strategy_meta.clear", exc)
                 bus.fire("trade.fill", payload)
-        except Exception as exc:
-            _log_suppressed("order_router", exc)
+        except _ROUTE_ERRORS as exc:
+            _log_suppressed("order_router.emit_fill", exc)

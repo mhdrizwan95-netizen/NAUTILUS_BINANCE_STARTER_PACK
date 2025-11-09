@@ -6,20 +6,19 @@ import threading
 import time
 from collections import deque
 from threading import Lock
-from typing import Deque, Dict, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
-_LAT_SAMPLES: Deque[float] = deque(maxlen=512)
+_LAT_SAMPLES: deque[float] = deque(maxlen=512)
 _LAT_LOCK = threading.Lock()
-_LAST_LATENCY_BY_SYMBOL: Dict[str, float] = {}
+_LAST_LATENCY_BY_SYMBOL: dict[str, float] = {}
 
-_EQUITY_HISTORY: Deque[Tuple[float, float]] = deque()
+_EQUITY_HISTORY: deque[tuple[float, float]] = deque()
 _EQUITY_LOCK = threading.Lock()
 _EQUITY_PEAK: float = 0.0
 
 _PNL_LOCK = Lock()
-_PNL_WINDOW: Deque[Tuple[float, float]] = deque()
+_PNL_WINDOW: deque[tuple[float, float]] = deque()
 
 
 def _quantile(values: list[float], q: float) -> float:
@@ -48,7 +47,7 @@ def record_latency(latency_ms: float) -> None:
         _LAT_SAMPLES.append(value)
 
 
-def latency_quantiles() -> Tuple[float, float]:
+def latency_quantiles() -> tuple[float, float]:
     with _LAT_LOCK:
         samples = list(_LAT_SAMPLES)
     if not samples:
@@ -57,7 +56,7 @@ def latency_quantiles() -> Tuple[float, float]:
     return _quantile(samples, 0.5), _quantile(samples, 0.95)
 
 
-def latency_percentiles() -> Tuple[float, float]:
+def latency_percentiles() -> tuple[float, float]:
     return latency_quantiles()
 
 
@@ -77,7 +76,7 @@ def record_tick_latency(symbol: str, latency_ms: float) -> None:
             _LAST_LATENCY_BY_SYMBOL[key] = value
 
 
-def consume_latency(symbol: str) -> Optional[float]:
+def consume_latency(symbol: str) -> float | None:
     keys = [symbol.upper()]
     if "." not in symbol:
         keys.append(f"{symbol.upper()}.BINANCE")
@@ -89,7 +88,7 @@ def consume_latency(symbol: str) -> Optional[float]:
     return None
 
 
-def record_equity(equity_usd: float, *, now: Optional[float] = None) -> Tuple[float, float]:
+def record_equity(equity_usd: float, *, now: float | None = None) -> tuple[float, float]:
     global _EQUITY_PEAK
     try:
         equity = float(equity_usd)
@@ -130,9 +129,9 @@ def record_realized_total(realized_total_usd: float) -> float:
 
 # Legacy compatibility: previously forwarded metrics to the Deck API.
 # With the Command Center running inside the Ops service, these become no-ops.
-def publish_metrics(**_kwargs: Dict[str, object]) -> None:
+def publish_metrics(**_kwargs: dict[str, object]) -> None:
     return None
 
 
-def publish_fill(_fill: Dict) -> None:
+def publish_fill(_fill: dict) -> None:
     return None

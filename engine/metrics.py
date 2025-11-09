@@ -1,3 +1,4 @@
+import logging
 import os
 
 from fastapi import APIRouter, Response
@@ -9,8 +10,19 @@ from prometheus_client import (
     Histogram,
     generate_latest,
 )
+from prometheus_client import Counter as _Counter
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+_METRIC_INIT_ERRORS = (ValueError, RuntimeError)
+_METRIC_SET_ERRORS = (ValueError, RuntimeError, TypeError)
+_METRIC_EXPORT_ERRORS = _METRIC_SET_ERRORS + (OSError,)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.warning("metrics %s suppressed: %s", context, exc, exc_info=True)
+
 
 # Registry for access from other modules (defined early for conditional additions)
 REGISTRY = {}
@@ -101,13 +113,13 @@ mark_time_epoch = Gauge(
     multiprocess_mode="max",
 )
 health_state = Gauge("health_state", "0=OK,1=DEGRADED,2=HALTED", multiprocess_mode="max")
-try:
-    from prometheus_client import Counter as _Counter
 
-    health_transitions_total = _Counter("health_transitions_total", "Health FSM transitions", ["from", "to", "reason"])  # type: ignore
-    REGISTRY["health_transitions_total"] = health_transitions_total
-except Exception:
-    pass
+health_transitions_total = _Counter(
+    "health_transitions_total",
+    "Health FSM transitions",
+    ["from", "to", "reason"],
+)  # type: ignore
+REGISTRY["health_transitions_total"] = health_transitions_total
 
 MARK_PRICE = Gauge("mark_price_usd", "Live mark price", ["symbol", "venue"])
 mark_price_freshness_sec = Gauge(
@@ -143,9 +155,14 @@ entry_price_by_symbol = Gauge(
 unrealized_profit_by_symbol = Gauge(
     "unrealized_profit", "Unrealized profit (USD)", ["symbol"], multiprocess_mode="max"
 )
-mark_price_by_symbol = Gauge("mark_price", "Mark price (USD)", ["symbol"], multiprocess_mode="max")
+mark_price_by_symbol = Gauge(
+    "mark_price",
+    "Mark price (USD)",
+    ["symbol"],
+    multiprocess_mode="max",
+)
 
-# NOTE: Metrics declared here are shared across workers; ensure PROMETHEUS_MULTIPROC_DIR is set when running multiprocess exports.
+# NOTE: Metrics here are shared across workers; ensure PROMETHEUS_MULTIPROC_DIR is set.
 
 # Venue/risk telemetry
 venue_exposure_usd = Gauge(
@@ -681,13 +698,41 @@ REGISTRY = {
 try:
     from prometheus_client import Counter
     from prometheus_client import Gauge as _Gauge
+except ImportError:
+    Counter = None  # type: ignore[assignment]
+    _Gauge = None  # type: ignore[assignment]
 
-    event_bo_plans_total = Counter("event_bo_plans_total", "Event BO plans", ["venue", "symbol", "dry"])  # type: ignore
-    event_bo_trades_total = Counter("event_bo_trades_total", "Event BO trades", ["venue", "symbol"])  # type: ignore
-    event_bo_skips_total = Counter("event_bo_skips_total", "Event BO skips", ["reason", "symbol"])  # type: ignore
-    event_bo_half_size_applied_total = Counter("event_bo_half_size_applied_total", "Half-size applied", ["symbol"])  # type: ignore
-    event_bo_trail_updates_total = Counter("event_bo_trail_updates_total", "Trailing stop amends", ["symbol"])  # type: ignore
-    event_bo_trail_exits_total = Counter("event_bo_trail_exits_total", "Trailing exits (position closed)", ["symbol"])  # type: ignore
+if Counter and _Gauge:
+    event_bo_plans_total = Counter(
+        "event_bo_plans_total",
+        "Event BO plans",
+        ["venue", "symbol", "dry"],
+    )  # type: ignore
+    event_bo_trades_total = Counter(
+        "event_bo_trades_total",
+        "Event BO trades",
+        ["venue", "symbol"],
+    )  # type: ignore
+    event_bo_skips_total = Counter(
+        "event_bo_skips_total",
+        "Event BO skips",
+        ["reason", "symbol"],
+    )  # type: ignore
+    event_bo_half_size_applied_total = Counter(
+        "event_bo_half_size_applied_total",
+        "Half-size applied",
+        ["symbol"],
+    )  # type: ignore
+    event_bo_trail_updates_total = Counter(
+        "event_bo_trail_updates_total",
+        "Trailing stop amends",
+        ["symbol"],
+    )  # type: ignore
+    event_bo_trail_exits_total = Counter(
+        "event_bo_trail_exits_total",
+        "Trailing exits (position closed)",
+        ["symbol"],
+    )  # type: ignore
     event_bo_open_positions = _Gauge("event_bo_open_positions", "Open EVENT positions")  # type: ignore
     REGISTRY.update(
         {
@@ -700,9 +745,6 @@ try:
             "event_bo_open_positions": event_bo_open_positions,
         }
     )
-except Exception:
-    # Metrics export may be disabled in some contexts
-    pass
 
 # Optional execution slippage histogram (symbol, venue, intent)
 try:
@@ -713,14 +755,18 @@ try:
         buckets=(1, 2, 3, 5, 8, 10, 15, 20, 30, 50, 80, 100),
     )
     REGISTRY["exec_slippage_bps"] = exec_slippage_bps
-except Exception:
-    pass
+except _METRIC_INIT_ERRORS as exc:
+    _log_suppressed("init exec_slippage_bps", exc)
 
 # Guards telemetry
 try:
     risk_depeg_triggers_total = Counter("risk_depeg_triggers_total", "Depeg guard triggers")
     risk_depeg_active = Gauge("risk_depeg_active", "1 if depeg safe-mode active else 0")
-    funding_spike_events_total = Counter("funding_spike_events_total", "Funding spike events", ["symbol"])  # type: ignore
+    funding_spike_events_total = Counter(
+        "funding_spike_events_total",
+        "Funding spike events",
+        ["symbol"],
+    )  # type: ignore
     REGISTRY.update(
         {
             "risk_depeg_triggers_total": risk_depeg_triggers_total,
@@ -728,25 +774,37 @@ try:
             "funding_spike_events_total": funding_spike_events_total,
         }
     )
-except Exception:
-    pass
+except _METRIC_INIT_ERRORS as exc:
+    _log_suppressed("init guard_metrics", exc)
 
 try:
-    stop_validator_missing_total = Counter("stop_validator_missing_total", "Missing protection detected", ["symbol", "kind"])  # type: ignore
-    stop_validator_repaired_total = Counter("stop_validator_repaired_total", "Repairs performed", ["symbol", "kind"])  # type: ignore
+    stop_validator_missing_total = Counter(
+        "stop_validator_missing_total",
+        "Missing protection detected",
+        ["symbol", "kind"],
+    )  # type: ignore
+    stop_validator_repaired_total = Counter(
+        "stop_validator_repaired_total",
+        "Repairs performed",
+        ["symbol", "kind"],
+    )  # type: ignore
     REGISTRY.update(
         {
             "stop_validator_missing_total": stop_validator_missing_total,
             "stop_validator_repaired_total": stop_validator_repaired_total,
         }
     )
-except Exception:
-    pass
+except _METRIC_INIT_ERRORS as exc:
+    _log_suppressed("init stop_validator_metrics", exc)
 try:
-    stop_validator_alerts_total = Counter("stop_validator_alerts_total", "StopValidator telegram alerts", ["symbol", "kind"])  # type: ignore
+    stop_validator_alerts_total = Counter(
+        "stop_validator_alerts_total",
+        "StopValidator telegram alerts",
+        ["symbol", "kind"],
+    )  # type: ignore
     REGISTRY["stop_validator_alerts_total"] = stop_validator_alerts_total
-except Exception:
-    pass
+except _METRIC_INIT_ERRORS as exc:
+    _log_suppressed("init stop_validator_alerts_total", exc)
 
 _CORE_ENABLED = os.getenv("METRICS_DISABLE_CORE", "").lower() not in {
     "1",
@@ -799,8 +857,8 @@ def set_core_metric(name: str, value: float) -> None:
         return
     try:
         gauge.set(float(value))
-    except Exception:
-        pass
+    except _METRIC_SET_ERRORS as exc:
+        _log_suppressed("set_core_metric", exc)
 
 
 def set_core_symbol_metric(name: str, *, symbol: str, value: float) -> None:
@@ -811,14 +869,16 @@ def set_core_symbol_metric(name: str, *, symbol: str, value: float) -> None:
         return
     try:
         gauge.labels(symbol=symbol).set(float(value))
-        if name == "mark_price":
-            venue = os.getenv("VENUE", "BINANCE").lower()
-            try:
-                MARK_PRICE.labels(symbol=symbol, venue=venue).set(float(value))
-            except Exception:
-                pass
-    except Exception:
-        pass
+    except _METRIC_SET_ERRORS as exc:
+        _log_suppressed("set_core_symbol_metric", exc)
+        return
+    if name != "mark_price":
+        return
+    venue = os.getenv("VENUE", "BINANCE").lower()
+    try:
+        MARK_PRICE.labels(symbol=symbol, venue=venue).set(float(value))
+    except _METRIC_SET_ERRORS as exc:
+        _log_suppressed("set_mark_price_proxy", exc)
 
 
 def reset_core_metrics() -> None:
@@ -830,16 +890,16 @@ def reset_core_metrics() -> None:
             continue
         try:
             gauge.set(0.0)
-        except Exception:
-            pass
+        except _METRIC_SET_ERRORS as exc:
+            _log_suppressed("reset_core_metric", exc)
     for key in _CORE_SYMBOL_METRICS:
         gauge = REGISTRY.get(key)
         if gauge is None:
             continue
         try:
             gauge.clear()
-        except Exception:
-            pass
+        except _METRIC_SET_ERRORS as exc:
+            _log_suppressed("reset_core_symbol_metric", exc)
 
 
 def set_trading_enabled(enabled: bool) -> None:
@@ -851,8 +911,8 @@ def set_max_notional(value: float) -> None:
     """Set max notional gauge."""
     try:
         max_notional_usdt.set(float(value))
-    except Exception:
-        pass
+    except _METRIC_SET_ERRORS as exc:
+        _log_suppressed("set_max_notional", exc)
 
 
 def observe_http_request(
@@ -867,8 +927,8 @@ def observe_http_request(
     try:
         http_requests_total.labels(service, method, path, status).inc()
         http_request_latency_seconds.labels(service, method, path).observe(duration_seconds)
-    except Exception:
-        pass
+    except _METRIC_SET_ERRORS as exc:
+        _log_suppressed("observe_http_request", exc)
 
 
 @router.get("/metrics")
@@ -881,7 +941,8 @@ def get_metrics():
     """
     try:
         payload = generate_latest()
-    except Exception:
+    except _METRIC_EXPORT_ERRORS:
+        logger.exception("metrics export failed")
         # Fallback defensively in case registry state is transient
         registry = CollectorRegistry()
         payload = generate_latest(registry)

@@ -1,4 +1,5 @@
-import { QueryClient, DefaultOptions } from '@tanstack/react-query';
+import { QueryClient } from "@tanstack/react-query";
+import type { DefaultOptions } from "@tanstack/react-query";
 
 // Default query options for consistent behavior
 const defaultQueryOptions: DefaultOptions = {
@@ -12,7 +13,7 @@ const defaultQueryOptions: DefaultOptions = {
       // Don't retry on 4xx errors (client errors)
       if (error instanceof Error) {
         const maybeStatus = (error as Error & { status?: number }).status;
-        if (typeof maybeStatus === 'number' && maybeStatus >= 400 && maybeStatus < 500) {
+        if (typeof maybeStatus === "number" && maybeStatus >= 400 && maybeStatus < 500) {
           return false;
         }
       }
@@ -43,42 +44,42 @@ export const queryClient = new QueryClient({
 export const queryKeys = {
   // Dashboard queries
   dashboard: {
-    summary: (params: Record<string, unknown>) => ['dashboard', 'summary', params],
-    positions: () => ['dashboard', 'positions'],
-    trades: () => ['dashboard', 'trades'],
-    alerts: () => ['dashboard', 'alerts'],
-    health: () => ['dashboard', 'health'],
+    summary: (params: Record<string, unknown>) => ["dashboard", "summary", params],
+    positions: () => ["dashboard", "positions"],
+    trades: () => ["dashboard", "trades"],
+    alerts: () => ["dashboard", "alerts"],
+    health: () => ["dashboard", "health"],
   },
   // Strategy queries
   strategies: {
-    list: () => ['strategies', 'list'],
-    detail: (id: string) => ['strategies', 'detail', id],
+    list: () => ["strategies", "list"],
+    detail: (id: string) => ["strategies", "detail", id],
   },
   ops: {
-    status: () => ['ops', 'status'],
+    status: () => ["ops", "status"],
   },
   funding: {
-    portfolio: () => ['funding', 'portfolio'],
-    exposure: () => ['funding', 'exposure'],
-    pnl: () => ['funding', 'pnl'],
+    portfolio: () => ["funding", "portfolio"],
+    exposure: () => ["funding", "exposure"],
+    pnl: () => ["funding", "pnl"],
   },
   settings: {
-    config: () => ['settings', 'config'],
+    config: () => ["settings", "config"],
   },
   // Backtest queries
   backtests: {
-    status: (jobId: string) => ['backtests', 'status', jobId],
+    status: (jobId: string) => ["backtests", "status", jobId],
   },
 } as const;
 
 // Mutation keys for optimistic updates
 export const mutationKeys = {
   strategies: {
-    start: (id: string) => ['strategies', 'start', id],
-    stop: (id: string) => ['strategies', 'stop', id],
-    update: (id: string) => ['strategies', 'update', id],
+    start: (id: string) => ["strategies", "start", id],
+    stop: (id: string) => ["strategies", "stop", id],
+    update: (id: string) => ["strategies", "update", id],
   },
   backtests: {
-    start: () => ['backtests', 'start'],
+    start: () => ["backtests", "start"],
   },
 } as const;

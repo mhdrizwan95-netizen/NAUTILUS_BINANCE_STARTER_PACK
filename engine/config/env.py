@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, List, Optional
+from typing import Any
 
 from .defaults import ALL_DEFAULTS
 
@@ -45,7 +45,7 @@ def env_float(key: str, default: float) -> float:
         return float(default)
 
 
-def env_csv(key: str, default_csv: str) -> List[str]:
+def env_csv(key: str, default_csv: str) -> list[str]:
     raw = _get(key, default_csv)
     if not raw:
         return []
@@ -53,7 +53,7 @@ def env_csv(key: str, default_csv: str) -> List[str]:
     return parts
 
 
-def split_symbols(value: str | None) -> Optional[List[str]]:
+def split_symbols(value: str | None) -> list[str] | None:
     """Parse a CSV list of symbols, supporting '*' for allow-all."""
     if not value:
         return None

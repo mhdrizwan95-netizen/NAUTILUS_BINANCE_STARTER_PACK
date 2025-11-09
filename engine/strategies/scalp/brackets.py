@@ -3,20 +3,33 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Awaitable, Callable, Dict, Optional
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from engine.runtime import tasks
 
-ExitCallback = Callable[[Dict[str, Any]], Awaitable[None]]
+ExitCallback = Callable[[dict[str, Any]], Awaitable[None]]
 PriceFetcher = Callable[[str], float]
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    asyncio.TimeoutError,
+)
 
 
 def _is_async_callable(fn: Callable[..., Any]) -> bool:
-    call = getattr(fn, "__call__", None)
     if asyncio.iscoroutinefunction(fn):
         return True
-    if call and asyncio.iscoroutinefunction(call):
-        return True
+    if callable(fn):
+        try:
+            return asyncio.iscoroutinefunction(fn.__call__)  # type: ignore[attr-defined]
+        except AttributeError:
+            return False
     return False
 
 
@@ -28,12 +41,12 @@ class ScalpBracketManager:
         *,
         price_fetcher: PriceFetcher,
         submit_exit: ExitCallback,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         self._price_fetcher = price_fetcher
         self._price_fetcher_async = _is_async_callable(price_fetcher)
         self._exit_callback = submit_exit
-        self._tasks: Dict[str, asyncio.Task[Any]] = {}
+        self._tasks: dict[str, asyncio.Task[Any]] = {}
         self._log = logger or logging.getLogger(__name__)
 
     def watch(
@@ -82,7 +95,7 @@ class ScalpBracketManager:
         except asyncio.CancelledError:
             pass
 
-    async def _fetch_price(self, symbol: str) -> Optional[float]:
+    async def _fetch_price(self, symbol: str) -> float | None:
         try:
             if self._price_fetcher_async:
                 result = await self._price_fetcher(symbol)  # type: ignore[misc]
@@ -91,7 +104,7 @@ class ScalpBracketManager:
             if result is None:
                 return None
             return float(result)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return None
 
     async def _watch_loop(
@@ -110,7 +123,7 @@ class ScalpBracketManager:
         tag_prefix: str,
     ) -> None:
         deadline = time.time() + ttl
-        triggered: Optional[str] = None
+        triggered: str | None = None
         try:
             while time.time() < deadline:
                 price = await self._fetch_price(symbol)
@@ -123,11 +136,10 @@ class ScalpBracketManager:
                         triggered = "tp"
                     elif price <= stop_price:
                         triggered = "sl"
-                else:
-                    if price <= take_profit_price:
-                        triggered = "tp"
-                    elif price >= stop_price:
-                        triggered = "sl"
+                elif price <= take_profit_price:
+                    triggered = "tp"
+                elif price >= stop_price:
+                    triggered = "sl"
 
                 if triggered:
                     await self._submit(
@@ -156,7 +168,7 @@ class ScalpBracketManager:
         except asyncio.CancelledError:
             self._log.debug("Bracket watcher cancelled: %s", key)
             raise
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             self._log.exception("Bracket watcher error: %s", key)
         finally:
             self._tasks.pop(key, None)
@@ -186,5 +198,5 @@ class ScalpBracketManager:
         }
         try:
             await self._exit_callback(payload)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             self._log.warning("[SCALP] exit submission failed for %s", symbol, exc_info=True)

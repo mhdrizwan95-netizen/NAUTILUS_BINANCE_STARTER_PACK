@@ -3,7 +3,7 @@ from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
 from .config import settings
-from .trainer import train_once
+from .trainer import _SUPPRESSIBLE_EXCEPTIONS, train_once
 
 
 def main():
@@ -13,9 +13,9 @@ def main():
     def _job():
         try:
             res = train_once(n_states=settings.HMM_STATES, promote=True)
-            logger.info(f"retrain -> {res}")
-        except Exception as e:
-            logger.exception(f"retrain failed: {e}")
+            logger.info("retrain -> {}", res)
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            logger.exception("retrain failed")
 
     sched.add_job(
         _job,

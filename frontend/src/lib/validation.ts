@@ -1,21 +1,28 @@
-import { z } from 'zod';
+import { z } from "zod";
 
 // Trading mode validation
-export const modeSchema = z.enum(['paper', 'live']);
+export const modeSchema = z.enum(["paper", "live"]);
 
 // Venue status validation
-export const venueStatusSchema = z.enum(['connected', 'degraded', 'offline']);
+export const venueStatusSchema = z.enum(["connected", "degraded", "offline"]);
 
 // Venue type validation
-export const venueTypeSchema = z.enum(['crypto', 'equities', 'fx']);
+export const venueTypeSchema = z.enum(["crypto", "equities", "fx"]);
 
 // Strategy type validation
 export const strategyTypeSchema = z.enum([
-  'HMM', 'MeanRev', 'Breakout', 'Scalp', 'Momentum', 'Meme', 'Listing', 'VolScan'
+  "HMM",
+  "MeanRev",
+  "Breakout",
+  "Scalp",
+  "Momentum",
+  "Meme",
+  "Listing",
+  "VolScan",
 ]);
 
 // Market type validation
-export const marketTypeSchema = z.enum(['spot', 'futures', 'options']);
+export const marketTypeSchema = z.enum(["spot", "futures", "options"]);
 
 // Global metrics validation
 export const globalMetricsSchema = z.object({
@@ -55,10 +62,12 @@ export const performanceMetricsSchema = z.object({
   tradeCount: z.number().min(0),
   winRate: z.number().min(0).max(1),
   latency: z.number().min(0),
-  topSymbols: z.array(z.object({
-    symbol: z.string(),
-    pnl: z.number(),
-  })),
+  topSymbols: z.array(
+    z.object({
+      symbol: z.string(),
+      pnl: z.number(),
+    }),
+  ),
   sparkline: z.array(z.number()),
 });
 
@@ -67,7 +76,7 @@ export const strategyPerformanceSchema = z.object({
   strategyId: z.string(),
   venueId: z.string(),
   metrics: performanceMetricsSchema,
-  health: z.enum(['optimal', 'warning', 'critical']),
+  health: z.enum(["optimal", "warning", "critical"]),
 });
 
 // Trade validation
@@ -75,7 +84,7 @@ export const tradeSchema = z.object({
   id: z.string(),
   timestamp: z.number(),
   symbol: z.string(),
-  side: z.enum(['buy', 'sell']),
+  side: z.enum(["buy", "sell"]),
   quantity: z.number().positive(),
   price: z.number().positive(),
   pnl: z.number().optional(),
@@ -87,7 +96,7 @@ export const tradeSchema = z.object({
 export const alertSchema = z.object({
   id: z.string(),
   timestamp: z.number(),
-  type: z.enum(['info', 'warning', 'error']),
+  type: z.enum(["info", "warning", "error"]),
   message: z.string(),
   strategyId: z.string().optional(),
 });
@@ -114,7 +123,6 @@ export const positionSchema = z.object({
   pnl: z.number(),
 });
 
-
 // Dashboard summary validation
 export const dashboardSummarySchema = z.object({
   kpis: z.object({
@@ -125,10 +133,12 @@ export const dashboardSummarySchema = z.object({
     openPositions: z.number().min(0),
   }),
   equityByStrategy: z.array(z.record(z.string(), z.unknown())),
-  pnlBySymbol: z.array(z.object({
-    symbol: z.string(),
-    pnl: z.number(),
-  })),
+  pnlBySymbol: z.array(
+    z.object({
+      symbol: z.string(),
+      pnl: z.number(),
+    }),
+  ),
   returns: z.array(z.number()),
 });
 
@@ -163,12 +173,14 @@ export const pnlSnapshotSchema = z.object({
 
 // Health check validation
 export const healthCheckSchema = z.object({
-  venues: z.array(z.object({
-    name: z.string(),
-    status: z.enum(['ok', 'warn', 'down']),
-    latencyMs: z.number().min(0),
-    queue: z.number().min(0),
-  })),
+  venues: z.array(
+    z.object({
+      name: z.string(),
+      status: z.enum(["ok", "warn", "down"]),
+      latencyMs: z.number().min(0),
+      queue: z.number().min(0),
+    }),
+  ),
 });
 
 // Strategy summary validation
@@ -176,20 +188,26 @@ export const strategySummarySchema = z.object({
   id: z.string(),
   name: z.string(),
   kind: z.string(),
-  status: z.enum(['stopped', 'running', 'error']),
+  status: z.enum(["stopped", "running", "error"]),
   symbols: z.array(z.string()),
   paramsSchema: z.unknown(), // Will be validated separately
   params: z.record(z.unknown()).optional(),
-  performance: z.object({
-    pnl: z.number(),
-    equitySeries: z.array(z.object({
-      t: z.string(),
-      equity: z.number(),
-    })).optional(),
-    winRate: z.number().optional(),
-    sharpe: z.number().optional(),
-    drawdown: z.number().optional(),
-  }).optional(),
+  performance: z
+    .object({
+      pnl: z.number(),
+      equitySeries: z
+        .array(
+          z.object({
+            t: z.string(),
+            equity: z.number(),
+          }),
+        )
+        .optional(),
+      winRate: z.number().optional(),
+      sharpe: z.number().optional(),
+      drawdown: z.number().optional(),
+    })
+    .optional(),
 });
 
 export const paginationMetadataSchema = z.object({
@@ -250,23 +268,31 @@ export const backtestResultSchema = z.object({
     winRate: z.number(),
     trades: z.number(),
   }),
-  equityCurve: z.array(z.object({
-    t: z.string(),
-    equity: z.number(),
-  })),
-  pnlBySymbol: z.array(z.object({
-    symbol: z.string(),
-    pnl: z.number(),
-  })),
+  equityCurve: z.array(
+    z.object({
+      t: z.string(),
+      equity: z.number(),
+    }),
+  ),
+  pnlBySymbol: z.array(
+    z.object({
+      symbol: z.string(),
+      pnl: z.number(),
+    }),
+  ),
   returns: z.array(z.number()),
-  trades: z.array(z.object({
-    time: z.string(),
-    symbol: z.string(),
-    side: z.enum(['buy', 'sell']),
-    qty: z.number(),
-    price: z.number(),
-    pnl: z.number().optional(),
-  })).optional(),
+  trades: z
+    .array(
+      z.object({
+        time: z.string(),
+        symbol: z.string(),
+        side: z.enum(["buy", "sell"]),
+        qty: z.number(),
+        price: z.number(),
+        pnl: z.number().optional(),
+      }),
+    )
+    .optional(),
 });
 
 // API request validation schemas
@@ -291,13 +317,15 @@ export const strategyUpdateSchema = z.object({
 // Form validation schemas
 
 // Date range validation
-export const dateRangeSchema = z.object({
-  from: z.date(),
-  to: z.date(),
-}).refine((data) => data.from <= data.to, {
-  message: "Start date must be before or equal to end date",
-  path: ["from"],
-});
+export const dateRangeSchema = z
+  .object({
+    from: z.date(),
+    to: z.date(),
+  })
+  .refine((data) => data.from <= data.to, {
+    message: "Start date must be before or equal to end date",
+    path: ["from"],
+  });
 
 // Filter parameters validation
 export const dashboardFiltersSchema = z.object({
@@ -308,7 +336,7 @@ export const dashboardFiltersSchema = z.object({
 
 // User preferences validation
 export const userPreferencesSchema = z.object({
-  theme: z.enum(['light', 'dark', 'system']),
+  theme: z.enum(["light", "dark", "system"]),
   autoRefresh: z.boolean(),
   refreshInterval: z.number().min(5).max(300), // 5 seconds to 5 minutes
   soundEnabled: z.boolean(),
@@ -319,14 +347,16 @@ export const userPreferencesSchema = z.object({
 export function validateApiResponse<T>(
   schema: z.ZodSchema<T>,
   data: unknown,
-  context: string = 'API response'
+  context: string = "API response",
 ): T {
   try {
     return schema.parse(data);
   } catch (error) {
     if (error instanceof z.ZodError) {
       console.error(`${context} validation failed:`, error.errors);
-      throw new Error(`${context} validation failed: ${error.errors.map(e => e.message).join(', ')}`);
+      throw new Error(
+        `${context} validation failed: ${error.errors.map((e) => e.message).join(", ")}`,
+      );
     }
     throw error;
   }
@@ -335,7 +365,7 @@ export function validateApiResponse<T>(
 export function validateFormData<T>(
   schema: z.ZodSchema<T>,
   data: unknown,
-  context: string = 'Form data'
+  context: string = "Form data",
 ): T {
   try {
     return schema.parse(data);

@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 from .strategy_base import Strategy
 
@@ -8,7 +8,7 @@ class MomentumBreakout(Strategy):
         super().__init__("momentum_breakout", instrument)
         self._window = []
 
-    def on_bar(self, bar: Dict[str, Any], params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def on_bar(self, bar: dict[str, Any], params: dict[str, Any]) -> dict[str, Any] | None:
         lb = int(params.get("lookback", 60))
         thr = float(params.get("breakout_z", 2.0))
         self._window.append(bar["close"])

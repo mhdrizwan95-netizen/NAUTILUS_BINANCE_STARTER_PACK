@@ -1,24 +1,31 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 from pathlib import Path
-from typing import Dict
 
 from .config import CFG
 
 DB = Path("/app/data/universe.json")
+logger = logging.getLogger("universe.store")
+_STORE_ERRORS = (OSError, json.JSONDecodeError, ValueError)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
 class UniverseStore:
     def __init__(self) -> None:
-        self.state: Dict[str, dict] = {}
+        self.state: dict[str, dict] = {}
 
     async def load(self) -> None:
         if DB.exists():
             try:
                 self.state = json.loads(DB.read_text())
-            except Exception:
+            except _STORE_ERRORS as exc:
+                _log_suppressed("universe.store.load", exc)
                 self.state = {}
 
     def save(self) -> None:
@@ -83,10 +90,9 @@ class UniverseStore:
                         ent["healthy_scans"] = 0
                         ent["drought_scans"] = 0
                         modified = True
-                else:
-                    if ent.get("healthy_scans"):
-                        ent["healthy_scans"] = 0
-                        modified = True
+                elif ent.get("healthy_scans"):
+                    ent["healthy_scans"] = 0
+                    modified = True
 
             elif bucket == "candidate":
                 if not meets_turnover or not meets_trade:
@@ -115,5 +121,5 @@ class UniverseStore:
             out[ent.get("bucket", "quarantine")] += 1
         return out
 
-    def snapshot(self) -> Dict[str, dict]:
+    def snapshot(self) -> dict[str, dict]:
         return self.state

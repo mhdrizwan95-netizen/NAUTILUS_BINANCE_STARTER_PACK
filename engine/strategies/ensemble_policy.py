@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import time
 from dataclasses import replace
-from typing import Dict, Optional, Tuple
 
 from ..config import load_strategy_config
 from .calibration import adjust_confidence
@@ -37,15 +36,15 @@ class _StrategyConfigProxy:
 
 S = _StrategyConfigProxy(load_strategy_config())
 
-_last_ts: Dict[str, float] = {}
+_last_ts: dict[str, float] = {}
 
 
 def combine(
     symbol: str,
-    ma_side: Optional[str],
+    ma_side: str | None,
     ma_conf: float,
-    hmm_decision: Optional[Tuple[str, float, Dict]],
-) -> Optional[Tuple[str, float, Dict]]:
+    hmm_decision: tuple[str, float, dict] | None,
+) -> tuple[str, float, dict] | None:
     """
     Combine MA + HMM into one consensus decision.
     Returns (side, quote, meta) or None.

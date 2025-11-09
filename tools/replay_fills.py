@@ -11,6 +11,7 @@ Input file format (JSON list):
   {"symbol": "BTCUSDT.BINANCE", "side": "SELL", "qty": 0.001, "price": 50500.0, "fee_usd": 0.05}
 ]
 """
+
 from __future__ import annotations
 
 import json

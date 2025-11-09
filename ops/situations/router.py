@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 
 from .matcher import Matcher
 from .models import Situation
@@ -22,22 +23,22 @@ async def _boot():
 
 
 @router.get("/situations")
-def list_situations() -> Dict[str, Any]:
+def list_situations() -> dict[str, Any]:
     return {"situations": [s.model_dump() for s in _store.list()]}
 
 
 @router.post("/situations")
-async def add_situation(sit_def: Dict[str, Any]):
+async def add_situation(sit_def: dict[str, Any]):
     try:
         s = Situation(**sit_def)
-    except Exception as e:
-        raise HTTPException(400, f"invalid situation: {e}")
+    except ValidationError as exc:
+        raise HTTPException(400, f"invalid situation: {exc}") from exc
     await _store.add_or_update(s)
     return {"ok": True}
 
 
 @router.patch("/situations/{name}")
-async def patch_situation(name: str, patch: Dict[str, Any]):
+async def patch_situation(name: str, patch: dict[str, Any]):
     s = await _store.patch(name, patch)
     if not s:
         raise HTTPException(404, "not found")
@@ -45,7 +46,7 @@ async def patch_situation(name: str, patch: Dict[str, Any]):
 
 
 @router.post("/situations/control/priorities")
-async def update_priorities(body: Dict[str, Any]):
+async def update_priorities(body: dict[str, Any]):
     ok = True
     for u in body.get("updates", []):
         ok = (await _store.update_priority(u.get("name"), float(u.get("priority", 0)))) and ok
@@ -53,14 +54,14 @@ async def update_priorities(body: Dict[str, Any]):
 
 
 @router.post("/situations/feedback/outcome")
-async def post_feedback(body: Dict[str, Any]):
+async def post_feedback(body: dict[str, Any]):
     # Placeholder: in production, persist and update online EV per situation
     # body: { event_id, pnl_usd, hold_sec, filled, ... }
     return {"ok": True}
 
 
 @router.get("/situations/events/recent")
-def recent_events(limit: int = 100) -> Dict[str, Any]:
+def recent_events(limit: int = 100) -> dict[str, Any]:
     items = list(_matcher.recent)[-int(limit) :]
     return {"items": items}
 
@@ -85,7 +86,7 @@ async def events_stream():
 
 
 @router.post("/situations/ingest_bar")
-async def ingest_bar(bar: Dict[str, Any]):
+async def ingest_bar(bar: dict[str, Any]):
     # bar: { symbol, ts, feats{...} } (ts optional)
     symbol = bar.get("symbol")
     feats = bar.get("feats") or {}

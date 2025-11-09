@@ -7,7 +7,7 @@ Defines the complete order lifecycle from creation to terminal state.
 import time
 import uuid
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Literal
 
 # Type definitions for better type safety
 OrderType = Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"]
@@ -30,18 +30,18 @@ class OrderRecord:
     side: OrderSide
     order_type: OrderType
     quantity: float
-    price: Optional[float] = None  # Limit price or stop-limit limit price
-    stop_price: Optional[float] = None  # Stop trigger price
+    price: float | None = None  # Limit price or stop-limit limit price
+    stop_price: float | None = None  # Stop trigger price
     tif: TimeInForce = "GTC"  # Time in force
     status: OrderStatus = "NEW"
-    venue_order_id: Optional[str] = None  # Venue-specific order ID
-    oco_group_id: Optional[str] = None  # OCO (one cancels other) group identifier
+    venue_order_id: str | None = None  # Venue-specific order ID
+    oco_group_id: str | None = None  # OCO (one cancels other) group identifier
     filled_qty: float = 0.0
     avg_fill_price: float = 0.0
     fee_usd: float = 0.0
     created_ms: int = 0
     updated_ms: int = 0
-    additional_data: Optional[Dict[str, Any]] = None  # Extension field
+    additional_data: dict[str, Any] | None = None  # Extension field
 
     def __post_init__(self):
         """Initialize timestamps if not provided."""
@@ -85,12 +85,12 @@ class OrderRecord:
         self.status = status
         self.updated_ms = int(time.time() * 1000)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for serialization."""
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "OrderRecord":
+    def from_dict(cls, data: dict[str, Any]) -> "OrderRecord":
         """Create from dictionary (deserialization)."""
         return cls(**data)
 

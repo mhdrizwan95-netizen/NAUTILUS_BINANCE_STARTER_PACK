@@ -5,11 +5,11 @@ import sqlite3
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any
 
 _DB = None
 _LOCK = threading.Lock()
-_Q: "queue.Queue[Tuple[str, Tuple[Any,...]]]" = queue.Queue()
+_Q: queue.Queue[tuple[str, tuple[Any, ...]]] = queue.Queue()
 
 
 def _conn(db_path: str) -> sqlite3.Connection:
@@ -25,7 +25,7 @@ def _conn(db_path: str) -> sqlite3.Connection:
 
 def init(db_path="data/runtime/trades.db", schema="engine/storage/schema.sql"):
     con = _conn(db_path)
-    with open(schema, "r", encoding="utf-8") as f:
+    with open(schema, encoding="utf-8") as f:
         con.executescript(f.read())
     con.commit()
     # background flusher
@@ -54,12 +54,12 @@ def _flush_loop(con: sqlite3.Connection):
             last = time.time()
 
 
-def enqueue(sql: str, params: Tuple[Any, ...]):
+def enqueue(sql: str, params: tuple[Any, ...]):
     _Q.put((sql, params))
 
 
 # convenience wrappers
-def insert_order(d: Dict[str, Any]):
+def insert_order(d: dict[str, Any]):
     enqueue(
         """INSERT OR REPLACE INTO orders(id,venue,symbol,side,qty,price,status,ts_accept,ts_update)
                VALUES(?,?,?,?,?,?,?,?,?)""",
@@ -77,7 +77,7 @@ def insert_order(d: Dict[str, Any]):
     )
 
 
-def insert_fill(d: Dict[str, Any]):
+def insert_fill(d: dict[str, Any]):
     enqueue(
         """INSERT OR REPLACE INTO fills(id,order_id,venue,symbol,side,qty,price,fee_ccy,fee,ts)
                VALUES(?,?,?,?,?,?,?,?,?,?)""",

@@ -13,12 +13,12 @@ import argparse
 import asyncio
 import json
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from ops import capital_allocator
 
 
-def load_policy(path: Path | None = None) -> Dict[str, Any]:
+def load_policy(path: Path | None = None) -> dict[str, Any]:
     """Load capital policy JSON with a friendly fallback."""
     policy_path = path or capital_allocator.POLICY_PATH
     policy = capital_allocator.load_json(
@@ -40,7 +40,7 @@ def load_policy(path: Path | None = None) -> Dict[str, Any]:
     return policy
 
 
-async def run_rebalance(live: bool, policy_path: Path | None) -> Dict[str, Any]:
+async def run_rebalance(live: bool, policy_path: Path | None) -> dict[str, Any]:
     """Execute a single allocation cycle, returning the raw result."""
     policy = load_policy(policy_path)
 
@@ -54,7 +54,7 @@ async def run_rebalance(live: bool, policy_path: Path | None) -> Dict[str, Any]:
     return result
 
 
-def summarise(result: Dict[str, Any]) -> Dict[str, Any]:
+def summarise(result: dict[str, Any]) -> dict[str, Any]:
     """Lightweight summary for CLI output."""
     detail = {
         "equity_usd": round(result["equity"], 2),
@@ -72,7 +72,7 @@ def summarise(result: Dict[str, Any]) -> Dict[str, Any]:
     return detail
 
 
-def write_allocations(result: Dict[str, Any], path: Path) -> None:
+def write_allocations(result: dict[str, Any], path: Path) -> None:
     """Persist allocation state in the same shape as the allocator loop."""
     payload = {
         "capital_quota_usd": result["final_quotas"],

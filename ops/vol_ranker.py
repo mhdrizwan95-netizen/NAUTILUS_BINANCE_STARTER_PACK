@@ -11,8 +11,8 @@ from __future__ import annotations
 import argparse
 import os
 import time
-from typing import List, Optional
 
+import httpx
 import pandas as pd
 
 from ops.net import create_client, request_with_retry_sync
@@ -21,9 +21,10 @@ BINANCE_API = os.getenv("BINANCE_API", "https://api.binance.com/api/v3/klines")
 OUTPUT_FILE = os.getenv("VOL_TOP_FILE", "data/top_symbols.txt")
 TOP_N = int(os.getenv("VOL_TOP_N", 20))
 WINDOW_MIN = int(os.getenv("VOL_WINDOW_MIN", 60))  # last 60 min
+_SUPPRESSIBLE_EXCEPTIONS = (OSError, ValueError, TypeError, httpx.HTTPError)
 
 
-def get_symbols() -> List[str]:
+def get_symbols() -> list[str]:
     try:
         with create_client() as client:
             r = request_with_retry_sync(
@@ -40,12 +41,13 @@ def get_symbols() -> List[str]:
             for s in data.get("symbols", [])
             if s.get("quoteAsset") == "USDT" and s.get("status") == "TRADING"
         ]
-        return syms
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         return ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
+    else:
+        return syms
 
 
-def get_klines(symbol: str, limit: int = 60) -> Optional[pd.DataFrame]:
+def get_klines(symbol: str, limit: int = 60) -> pd.DataFrame | None:
     url = f"{BINANCE_API}?symbol={symbol}&interval=1m&limit={limit}"
     try:
         with create_client() as client:
@@ -72,9 +74,10 @@ def get_klines(symbol: str, limit: int = 60) -> Optional[pd.DataFrame]:
             return None
         df["c"] = df["c"].astype(float)
         df["v"] = df["v"].astype(float)
-        return df
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         return None
+    else:
+        return df
 
 
 def score_symbol(symbol: str) -> float:
@@ -85,9 +88,10 @@ def score_symbol(symbol: str) -> float:
         ret = df["c"].pct_change().dropna()
         vol = ret.std()
         volscore = float(vol) * float(df["v"].mean())
-        return float(volscore)
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         return 0.0
+    else:
+        return float(volscore)
 
 
 def run_once() -> int:
@@ -134,8 +138,8 @@ def main() -> None:
     while True:
         try:
             run_once()
-        except Exception as e:
-            print(f"[vol_ranker] error during refresh: {e}")
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            print(f"[vol_ranker] error during refresh: {exc}")
         time.sleep(refresh_sec)
 
 

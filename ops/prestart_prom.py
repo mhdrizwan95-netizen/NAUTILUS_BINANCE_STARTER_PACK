@@ -8,5 +8,6 @@ pathlib.Path(mp).mkdir(parents=True, exist_ok=True)
 for p in pathlib.Path(mp).glob("*.db"):
     try:
         p.unlink()
-    except Exception:
-        pass
+    except OSError:
+        # Best-effort cleanup; stale files will be overwritten as new workers register.
+        continue

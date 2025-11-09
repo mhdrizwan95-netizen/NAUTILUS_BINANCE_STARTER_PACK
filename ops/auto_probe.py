@@ -3,14 +3,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import random
 import time
 from collections import defaultdict, deque
 from random import SystemRandom
-from typing import Deque, Dict, List, Optional
 
 import httpx
 
 _RNG = SystemRandom()
+_HTTP_ERRORS = (httpx.HTTPError, asyncio.TimeoutError)
+_ENV_ERRORS = (TypeError, ValueError)
 
 # --- Symbol feed caching infrastructure ---
 _SYMBOL_CACHE: deque[str] = deque(maxlen=500)
@@ -29,8 +31,8 @@ def _normalize(sym: str) -> str:
 
 
 async def fetch_candidates(
-    client: httpx.AsyncClient, feed_url: str, fallback: List[str], limit: int
-) -> List[str]:
+    client: httpx.AsyncClient, feed_url: str, fallback: list[str], limit: int
+) -> list[str]:
     global _SYMBOL_CACHE_EXP
     now = time.time()
     if now < _SYMBOL_CACHE_EXP and _SYMBOL_CACHE:  # serve warm cache
@@ -54,7 +56,7 @@ async def fetch_candidates(
 
         k = min(limit, len(unique))
         return unique[:k] if k else fallback
-    except Exception:
+    except _HTTP_ERRORS:
         # on any error, soft-fallback to cache or all the way to fallback
         if _SYMBOL_CACHE:
             k = min(limit, len(_SYMBOL_CACHE))
@@ -65,14 +67,14 @@ async def fetch_candidates(
 def env_f(name: str, default: float) -> float:
     try:
         return float(os.getenv(name, str(default)))
-    except Exception:
+    except _ENV_ERRORS:
         return default
 
 
 def env_i(name: str, default: int) -> int:
     try:
         return int(os.getenv(name, str(default)))
-    except Exception:
+    except _ENV_ERRORS:
         return default
 
 
@@ -90,7 +92,7 @@ class CircuitBreaker:
         self.err_threshold = err_threshold
         self.window_sec = window_sec
         self.cooldown_sec = cooldown_sec
-        self._events: Deque[float] = deque()
+        self._events: deque[float] = deque()
         self._cool_until = 0.0
 
     def record_error(self) -> None:
@@ -117,7 +119,7 @@ class RateLimiter:
 
     def __init__(self, max_per_min: int) -> None:
         self.max_per_min = max_per_min
-        self.events: Deque[float] = deque()
+        self.events: deque[float] = deque()
 
     def allow(self) -> bool:
         now = time.time()
@@ -130,7 +132,7 @@ class RateLimiter:
         return True
 
 
-async def get_universe(engine_base: str) -> List[str]:
+async def get_universe(engine_base: str) -> list[str]:
     # Try engine universe first, else fall back to OPS if present
     urls = [
         f"{engine_base}/universe",
@@ -151,7 +153,7 @@ async def get_universe(engine_base: str) -> List[str]:
                         if s.endswith("USDT"):
                             out.append(s)
                     return out
-            except Exception:
+            except _HTTP_ERRORS:
                 continue
     return ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
 
@@ -168,7 +170,7 @@ async def symbol_info(engine_base: str, symbol: str) -> dict:
             r = await client.get(f"{engine_base}/symbol_info", params={"symbol": symbol})
             if r.status_code == 200:
                 return r.json()
-    except Exception:
+    except _HTTP_ERRORS:
         pass
 
     # Fallback: query risk config for a global min_notional
@@ -181,7 +183,7 @@ async def symbol_info(engine_base: str, symbol: str) -> dict:
                 mn = cfg.get("min_notional_usdt")
                 if isinstance(mn, (int, float)):
                     min_notional = float(mn)
-    except Exception:
+    except _HTTP_ERRORS:
         pass
 
     # Synthesize defaults; step sizes are conservative
@@ -196,8 +198,8 @@ async def symbol_info(engine_base: str, symbol: str) -> dict:
 
 
 async def fetch_all_prices(
-    engine_base: str, client: Optional[httpx.AsyncClient] = None
-) -> Dict[str, float]:
+    engine_base: str, client: httpx.AsyncClient | None = None
+) -> dict[str, float]:
     """Fetch all prices in one batch call - reuse client if provided."""
     try:
         # Use provided client or create a temporary one
@@ -218,7 +220,9 @@ async def fetch_all_prices(
 
         # Normalize to floats
         return {k: float(v) for k, v in data.items()}
-    except Exception:
+    except (TypeError, ValueError):
+        return {}
+    except _HTTP_ERRORS:
         return {}
 
 
@@ -259,7 +263,12 @@ async def submit_market_quote(
                 continue
             # Don't retry on client errors (4xx except 429)
             raise
-        except Exception:
+        except httpx.RequestError:
+            jitter = _RNG.uniform(0, backoff * 0.3)
+            await asyncio.sleep(backoff + jitter)
+            backoff = min(backoff * backoff_multiplier, max_backoff_sec)
+            continue
+        except _HTTP_ERRORS:
             # For network/other errors, still retry once with minimal backoff
             jitter = _RNG.uniform(0, backoff * 0.3)
             await asyncio.sleep(backoff + jitter)
@@ -276,9 +285,9 @@ async def probe_symbol(
     cooldown_sec: int,
     limiter: RateLimiter,
     sem: asyncio.Semaphore,
-    last_probe_ts: Dict[str, float],
+    last_probe_ts: dict[str, float],
     dry_run: bool,
-    price_map: Dict[str, float],
+    price_map: dict[str, float],
     breaker: CircuitBreaker,
 ) -> dict:
     """Probe a symbol using shared client, batched prices, and circuit breaker protection."""
@@ -325,7 +334,12 @@ async def probe_symbol(
             if last and avg_px:
                 slip_bps = abs(avg_px - last) / last * 10_000.0
             ok_slip = (slip_bps is None) or (slip_bps <= slip_bps_max)
-
+        except _HTTP_ERRORS as exc:
+            # Record error for circuit breaker
+            breaker.record_error()
+            last_probe_ts[symbol] = now
+            return {"symbol": symbol, "error": str(exc), "quote": quote}
+        else:
             last_probe_ts[symbol] = now
             return {
                 "symbol": symbol,
@@ -336,11 +350,6 @@ async def probe_symbol(
                 "slip_bps": slip_bps,
                 "slip_ok": ok_slip,
             }
-        except Exception as e:
-            # Record error for circuit breaker
-            breaker.record_error()
-            last_probe_ts[symbol] = now
-            return {"symbol": symbol, "error": str(e), "quote": quote}
 
 
 async def main():
@@ -358,7 +367,7 @@ async def main():
     args = ap.parse_args()
 
     engine_base = args.engine.rstrip("/")
-    symbols: List[str]
+    symbols: list[str]
     if args.symbols:
         symbols = [s.strip() for s in args.symbols.split(",") if s.strip()]
     else:
@@ -377,7 +386,7 @@ async def main():
 
     limiter = RateLimiter(args.max_orders_per_min)
     sem = asyncio.Semaphore(args.max_parallel)
-    last_probe_ts: Dict[str, float] = defaultdict(lambda: 0.0)
+    last_probe_ts: dict[str, float] = defaultdict(lambda: 0.0)
 
     # Create long-lived HTTP client with connection pooling
     limits = httpx.Limits(max_keepalive_connections=10, max_connections=10)

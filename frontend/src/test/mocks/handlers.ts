@@ -1,19 +1,19 @@
-import { http, HttpResponse } from 'msw';
+import { http, HttpResponse } from "msw";
 
 // Mock data generators
 const generateMockStrategies = () => [
   {
-    id: 'hmm',
-    name: 'HMM',
-    kind: 'HMM',
-    status: 'running' as const,
-    symbols: ['BTC/USDT', 'ETH/USDT'],
+    id: "hmm",
+    name: "HMM",
+    kind: "HMM",
+    status: "running" as const,
+    symbols: ["BTC/USDT", "ETH/USDT"],
     paramsSchema: { fields: [] },
     performance: {
-      pnl: 1250.50,
+      pnl: 1250.5,
       equitySeries: [
-        { t: '2025-01-01', equity: 10000 },
-        { t: '2025-01-02', equity: 10150 },
+        { t: "2025-01-01", equity: 10000 },
+        { t: "2025-01-02", equity: 10150 },
       ],
       winRate: 0.68,
       sharpe: 1.8,
@@ -21,17 +21,17 @@ const generateMockStrategies = () => [
     },
   },
   {
-    id: 'meanrev',
-    name: 'MeanRev',
-    kind: 'MeanRev',
-    status: 'stopped' as const,
-    symbols: ['AAPL', 'TSLA'],
+    id: "meanrev",
+    name: "MeanRev",
+    kind: "MeanRev",
+    status: "stopped" as const,
+    symbols: ["AAPL", "TSLA"],
     paramsSchema: { fields: [] },
     performance: {
       pnl: -320.25,
       equitySeries: [
-        { t: '2025-01-01', equity: 10000 },
-        { t: '2025-01-02', equity: 9680 },
+        { t: "2025-01-01", equity: 10000 },
+        { t: "2025-01-02", equity: 9680 },
       ],
       winRate: 0.45,
       sharpe: 0.3,
@@ -49,27 +49,27 @@ const generateMockDashboardSummary = () => ({
     openPositions: 12,
   },
   equityByStrategy: [
-    { t: '2025-01-01', HMM: 10000, MeanRev: 10000 },
-    { t: '2025-01-02', HMM: 11250, MeanRev: 9680 },
+    { t: "2025-01-01", HMM: 10000, MeanRev: 10000 },
+    { t: "2025-01-02", HMM: 11250, MeanRev: 9680 },
   ],
   pnlBySymbol: [
-    { symbol: 'BTC/USDT', pnl: 1250.50 },
-    { symbol: 'ETH/USDT', pnl: 596.75 },
-    { symbol: 'AAPL', pnl: -320.25 },
+    { symbol: "BTC/USDT", pnl: 1250.5 },
+    { symbol: "ETH/USDT", pnl: 596.75 },
+    { symbol: "AAPL", pnl: -320.25 },
   ],
   returns: [0.02, -0.03, 0.015, 0.008, -0.005],
 });
 
 const generateMockPositions = () => [
   {
-    symbol: 'BTC/USDT',
+    symbol: "BTC/USDT",
     qty: 0.5,
     entry: 45000,
     mark: 46500,
     pnl: 750,
   },
   {
-    symbol: 'ETH/USDT',
+    symbol: "ETH/USDT",
     qty: 5,
     entry: 2800,
     mark: 2950,
@@ -79,56 +79,56 @@ const generateMockPositions = () => [
 
 const generateMockTrades = () => [
   {
-    id: 'trade-1',
+    id: "trade-1",
     timestamp: Date.now() - 300000,
-    symbol: 'BTC/USDT',
-    side: 'buy' as const,
+    symbol: "BTC/USDT",
+    side: "buy" as const,
     quantity: 0.5,
     price: 45000,
     pnl: 750,
-    strategyId: 'hmm',
-    venueId: 'binance',
+    strategyId: "hmm",
+    venueId: "binance",
   },
   {
-    id: 'trade-2',
+    id: "trade-2",
     timestamp: Date.now() - 600000,
-    symbol: 'ETH/USDT',
-    side: 'sell' as const,
+    symbol: "ETH/USDT",
+    side: "sell" as const,
     quantity: 2,
     price: 2900,
     pnl: -200,
-    strategyId: 'meanrev',
-    venueId: 'bybit',
+    strategyId: "meanrev",
+    venueId: "bybit",
   },
 ];
 
 const generateMockAlerts = () => [
   {
-    id: 'alert-1',
+    id: "alert-1",
     timestamp: Date.now() - 120000,
-    type: 'warning' as const,
-    message: 'High volatility detected on BTC/USDT',
-    strategyId: 'hmm',
+    type: "warning" as const,
+    message: "High volatility detected on BTC/USDT",
+    strategyId: "hmm",
   },
   {
-    id: 'alert-2',
+    id: "alert-2",
     timestamp: Date.now() - 300000,
-    type: 'info' as const,
-    message: 'Strategy HMM performance above threshold',
+    type: "info" as const,
+    message: "Strategy HMM performance above threshold",
   },
 ];
 
 const generateMockHealth = () => ({
   venues: [
     {
-      name: 'Binance',
-      status: 'ok' as const,
+      name: "Binance",
+      status: "ok" as const,
       latencyMs: 45,
       queue: 2,
     },
     {
-      name: 'Bybit',
-      status: 'ok' as const,
+      name: "Bybit",
+      status: "ok" as const,
       latencyMs: 52,
       queue: 1,
     },
@@ -151,17 +151,17 @@ const mockExposureAggregate = () => ({
     venues: 2,
   },
   by_symbol: {
-    'BTCUSDT.BINANCE': {
+    "BTCUSDT.BINANCE": {
       qty_base: 1.25,
       last_price_usd: 59000,
       exposure_usd: 73750,
     },
-    'ETHUSDT.BINANCE': {
+    "ETHUSDT.BINANCE": {
       qty_base: 10,
       last_price_usd: 3200,
       exposure_usd: 32000,
     },
-    'AAPL.IBKR': {
+    "AAPL.IBKR": {
       qty_base: 120,
       last_price_usd: 170,
       exposure_usd: 20400,
@@ -206,14 +206,14 @@ const mockConfigEffective = () => ({
 // HTTP request handlers
 export const handlers = [
   // Strategies endpoints
-  http.get('/api/strategies', () => {
+  http.get("/api/strategies", () => {
     return HttpResponse.json(generateMockStrategies());
   }),
 
-  http.get('/api/strategies/:id', ({ params }) => {
+  http.get("/api/strategies/:id", ({ params }) => {
     const { id } = params;
     const strategies = generateMockStrategies();
-    const strategy = strategies.find(s => s.id === id);
+    const strategy = strategies.find((s) => s.id === id);
 
     if (!strategy) {
       return new HttpResponse(null, { status: 404 });
@@ -222,7 +222,7 @@ export const handlers = [
     return HttpResponse.json(strategy);
   }),
 
-  http.post('/api/strategies/:id/start', async ({ params, request }) => {
+  http.post("/api/strategies/:id/start", async ({ params, request }) => {
     const { id } = params;
     await request.json();
 
@@ -233,7 +233,7 @@ export const handlers = [
     });
   }),
 
-  http.post('/api/strategies/:id/stop', ({ params }) => {
+  http.post("/api/strategies/:id/stop", ({ params }) => {
     const { id } = params;
 
     // Simulate stopping strategy
@@ -243,7 +243,7 @@ export const handlers = [
     });
   }),
 
-  http.post('/api/strategies/:id/update', async ({ params, request }) => {
+  http.post("/api/strategies/:id/update", async ({ params, request }) => {
     const { id } = params;
     await request.json();
 
@@ -255,59 +255,59 @@ export const handlers = [
   }),
 
   // Dashboard endpoints
-  http.get('/api/metrics/summary', ({ request }) => {
+  http.get("/api/metrics/summary", ({ request }) => {
     const url = new URL(request.url);
     url.searchParams.toString(); // Parsed for parity with real handler
     return HttpResponse.json(generateMockDashboardSummary());
   }),
 
-  http.get('/api/positions', () => {
+  http.get("/api/positions", () => {
     return HttpResponse.json(generateMockPositions());
   }),
 
-  http.get('/api/trades/recent', () => {
+  http.get("/api/trades/recent", () => {
     return HttpResponse.json(generateMockTrades());
   }),
 
-  http.get('/api/alerts', () => {
+  http.get("/api/alerts", () => {
     return HttpResponse.json(generateMockAlerts());
   }),
 
-  http.get('/api/health', () => {
+  http.get("/api/health", () => {
     return HttpResponse.json(generateMockHealth());
   }),
 
-  http.get('/aggregate/portfolio', () => {
+  http.get("/aggregate/portfolio", () => {
     return HttpResponse.json(mockPortfolioAggregate());
   }),
 
-  http.get('/aggregate/exposure', () => {
+  http.get("/aggregate/exposure", () => {
     return HttpResponse.json(mockExposureAggregate());
   }),
 
-  http.get('/aggregate/pnl', () => {
+  http.get("/aggregate/pnl", () => {
     return HttpResponse.json(mockPnlSnapshot());
   }),
 
-  http.get('/api/config/effective', () => {
+  http.get("/api/config/effective", () => {
     return HttpResponse.json(mockConfigEffective());
   }),
 
   // Backtest endpoints
-  http.post('/api/backtests', async ({ request }) => {
+  http.post("/api/backtests", async ({ request }) => {
     await request.json();
 
     // Simulate starting backtest
     return HttpResponse.json({
       jobId: `backtest-${Date.now()}`,
-      status: 'queued',
+      status: "queued",
     });
   }),
 
-  http.get('/api/backtests/:jobId', () => {
+  http.get("/api/backtests/:jobId", () => {
     // Simulate backtest progress
     return HttpResponse.json({
-      status: 'completed',
+      status: "completed",
       progress: 100,
       result: {
         metrics: {
@@ -318,19 +318,19 @@ export const handlers = [
           trades: 45,
         },
         equityCurve: [
-          { t: '2025-01-01', equity: 10000 },
-          { t: '2025-01-31', equity: 11500 },
+          { t: "2025-01-01", equity: 10000 },
+          { t: "2025-01-31", equity: 11500 },
         ],
         pnlBySymbol: [
-          { symbol: 'BTC/USDT', pnl: 1200 },
-          { symbol: 'ETH/USDT', pnl: 300 },
+          { symbol: "BTC/USDT", pnl: 1200 },
+          { symbol: "ETH/USDT", pnl: 300 },
         ],
         returns: [0.02, 0.015, -0.01, 0.03, 0.008],
         trades: [
           {
-            time: '2025-01-15T10:30:00Z',
-            symbol: 'BTC/USDT',
-            side: 'buy' as const,
+            time: "2025-01-15T10:30:00Z",
+            symbol: "BTC/USDT",
+            side: "buy" as const,
             qty: 0.5,
             price: 45000,
             pnl: 800,

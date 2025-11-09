@@ -11,7 +11,6 @@ import asyncio
 import functools
 import logging
 from dataclasses import dataclass
-from typing import Dict
 
 from web3 import Web3
 from web3.contract import Contract
@@ -60,6 +59,26 @@ MAX_ALLOWANCE = 2**256 - 1
 logger = logging.getLogger("engine.dex.wallet")
 
 
+class DexRpcUrlMissingError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("DEX_RPC_URL missing")
+
+
+class DexPrivateKeyMissingError(ValueError):
+    def __init__(self) -> None:
+        super().__init__("DEX_PRIVATE_KEY missing")
+
+
+class DexRpcConnectionError(RuntimeError):
+    def __init__(self, rpc_url: str) -> None:
+        super().__init__(f"Failed to connect to RPC {rpc_url}")
+
+
+class DexTransactionRevertedError(RuntimeError):
+    def __init__(self, tx_hash: str) -> None:
+        super().__init__(f"Transaction reverted: {tx_hash}")
+
+
 @dataclass(slots=True)
 class TokenInfo:
     address: str
@@ -76,17 +95,17 @@ class DexWallet:
         max_gas_price_wei: int,
     ) -> None:
         if not rpc_url:
-            raise ValueError("DEX_RPC_URL missing")
+            raise DexRpcUrlMissingError()
         if not private_key:
-            raise ValueError("DEX_PRIVATE_KEY missing")
+            raise DexPrivateKeyMissingError()
         self.w3 = Web3(Web3.HTTPProvider(rpc_url, request_kwargs={"timeout": 30}))
         if not self.w3.is_connected():
-            raise RuntimeError(f"Failed to connect to RPC {rpc_url}")
+            raise DexRpcConnectionError(rpc_url)
         self.chain_id = chain_id
         self._acct = self.w3.eth.account.from_key(private_key)
         self.address = self._acct.address
         self.max_gas_price_wei = max_gas_price_wei
-        self._token_cache: Dict[str, TokenInfo] = {}
+        self._token_cache: dict[str, TokenInfo] = {}
         self._lock = asyncio.Lock()
         logger.info("[DEX] wallet online address=%s chain_id=%s", self.address, chain_id)
 
@@ -153,7 +172,7 @@ class DexWallet:
             functools.partial(self.w3.eth.wait_for_transaction_receipt, tx_hash, timeout=180),
         )
         if receipt.status != 1:
-            raise RuntimeError(f"Transaction reverted: {tx_hash.hex()}")
+            raise DexTransactionRevertedError(tx_hash.hex())
         return receipt
 
     async def balance_of(self, token: str) -> int:

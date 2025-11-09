@@ -15,7 +15,9 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
+
+import httpx
 
 from ops.net import create_async_client, request_with_retry
 
@@ -28,13 +30,15 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "")
 SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK", "")
+_JSON_ERRORS = (OSError, json.JSONDecodeError)
+_SEND_ERRORS = (httpx.HTTPError, httpx.RequestError)
 
 # Incident log paths
 INCIDENT_LOG = os.path.join("data", "processed", "m20", "incident_log.jsonl")
 RECOVERY_LOG = os.path.join("data", "processed", "m20", "recovery_actions.jsonl")
 
 
-def read_last_incident() -> Optional[Dict[str, Any]]:
+def read_last_incident() -> dict[str, Any] | None:
     """
     Read the most recent incident from the M20 incident log.
 
@@ -46,30 +50,29 @@ def read_last_incident() -> Optional[Dict[str, Any]]:
         return None
 
     try:
-        with open(INCIDENT_LOG, "r") as f:
+        with open(INCIDENT_LOG) as f:
             lines = f.readlines()
             if not lines:
                 logger.info("No incidents in log")
                 return None
 
-            # Get the last (most recent) line
             last_line = lines[-1].strip()
             if last_line:
                 return json.loads(last_line)
 
-    except Exception as e:
-        logger.error(f"Error reading incident log: {e}")
+    except _JSON_ERRORS:
+        logger.exception("Error reading incident log")
 
     return None
 
 
-def read_last_recovery() -> Optional[Dict[str, Any]]:
+def read_last_recovery() -> dict[str, Any] | None:
     """Read the most recent recovery action."""
     if not os.path.exists(RECOVERY_LOG):
         return None
 
     try:
-        with open(RECOVERY_LOG, "r") as f:
+        with open(RECOVERY_LOG) as f:
             lines = f.readlines()
             if not lines:
                 return None
@@ -78,13 +81,13 @@ def read_last_recovery() -> Optional[Dict[str, Any]]:
             if last_line:
                 return json.loads(last_line)
 
-    except Exception as e:
-        logger.error(f"Error reading recovery log: {e}")
+    except _JSON_ERRORS:
+        logger.exception("Error reading recovery log")
 
     return None
 
 
-def format_incident_message(incident: Dict[str, Any]) -> str:
+def format_incident_message(incident: dict[str, Any]) -> str:
     """Format incident data into human-readable notification message."""
     timestamp = incident.get("timestamp", datetime.utcnow().isoformat())
     status = incident.get("status", "unknown").upper()
@@ -117,7 +120,7 @@ def format_incident_message(incident: Dict[str, Any]) -> str:
     return message
 
 
-def format_recovery_message(recovery: Dict[str, Any]) -> str:
+def format_recovery_message(recovery: dict[str, Any]) -> str:
     """Format recovery action data into notification message."""
     timestamp = recovery.get("timestamp", datetime.utcnow().isoformat())
     incidents = recovery.get("incident_types", [])
@@ -151,7 +154,7 @@ def format_custom_message(message: str, severity: str = "info", source: str = "s
     return formatted
 
 
-async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, bool]:
+async def send_to_platforms(message: str, platforms: list = None) -> dict[str, bool]:
     """
     Send message to configured platforms.
 
@@ -233,8 +236,8 @@ async def send_to_platforms(message: str, platforms: list = None) -> Dict[str, b
                     logger.warning(f"Unknown platform: {platform}")
                     results[platform] = False
 
-            except Exception as e:
-                logger.error(f"Failed to send to {platform}: {e}")
+            except _SEND_ERRORS:
+                logger.exception("Failed to send to %s", platform)
                 results[platform] = False
 
     return results

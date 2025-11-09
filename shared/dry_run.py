@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Awaitable, Callable, Iterable, Set
+from collections.abc import Awaitable, Callable, Iterable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -18,7 +18,7 @@ def dry_run_enabled() -> bool:
 
 
 def install_dry_run_guard(app: FastAPI, allow_paths: Iterable[str] | None = None) -> None:
-    whitelisted: Set[str] = {"/health", "/metrics"}
+    whitelisted: set[str] = {"/health", "/metrics"}
     if allow_paths:
         whitelisted.update(allow_paths)
 

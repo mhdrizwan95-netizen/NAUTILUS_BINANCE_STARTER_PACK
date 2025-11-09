@@ -1,6 +1,31 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from collections.abc import Callable, Iterable
+from typing import Any
+
+import httpx
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger("engine.stop_validator").debug(
+        "%s suppressed: %s", context, exc, exc_info=True
+    )
+
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+    httpx.HTTPError,
+)
 
 
 class _ProtView:
@@ -41,8 +66,8 @@ class StopValidator:
         try:
             if bus is not None:
                 bus.subscribe("trade.fill", self.on_fill)
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("stop validator subscribe", exc)
 
     async def on_fill(self, evt: dict) -> None:
         if not bool(self.cfg.get("STOP_VALIDATOR_ENABLED", False)):
@@ -50,89 +75,111 @@ class StopValidator:
         await asyncio.sleep(int(self.cfg.get("STOP_VALIDATOR_GRACE_SEC", 2)))
         await self._validate_symbol(str(evt.get("symbol", "")))
 
+    def _inc_metric(self, attr: str, **labels: Any) -> None:
+        metric = getattr(self.metrics, attr, None)
+        if metric is None:
+            return
+        try:
+            metric.labels(**labels).inc()
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed(f"{attr} metric", exc)
+
+    async def _fetch_protection(self, symbol: str) -> _ProtView:
+        list_fn: Callable[[str], Iterable[dict]] | None = getattr(
+            self.router, "list_open_protection", None
+        )
+        if not callable(list_fn):
+            return _ProtView(None)
+        try:
+            items = await list_fn(symbol)
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("list_open_protection", exc)
+            return _ProtView(None)
+        return _ProtView(list(items) if isinstance(items, list) else None)
+
+    def _market_refs(self, symbol: str) -> tuple[float, float]:
+        try:
+            atr = float(self.md.atr(symbol, tf="1m", n=14) or 0.0)
+            last = float(self.md.last(symbol) or 0.0)
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("stop validator market refs", exc)
+            return 0.0, 0.0
+        return atr, last
+
+    async def _notify_repair(self, symbol: str, price: float) -> None:
+        if not bool(self.cfg.get("STOPVAL_NOTIFY_ENABLED", False)) or self.bus is None:
+            return
+        now = float(self.clock.time())
+        last = self._last_alert.get(symbol, 0.0)
+        if now - last < int(self.cfg.get("STOPVAL_NOTIFY_DEBOUNCE_SEC", 60)):
+            return
+        try:
+            self.bus.fire(
+                "notify.telegram",
+                {"text": "\ud83d\udee1\ufe0f Stop repaired on *%s* at `%s`" % (symbol, price)},
+            )
+            if hasattr(self.metrics, "stop_validator_alerts_total"):
+                self.metrics.stop_validator_alerts_total.labels(symbol=symbol, kind="SL").inc()
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("stop validator notify", exc)
+            return
+        self._last_alert[symbol] = now
+
     async def run(self) -> None:
         if not bool(self.cfg.get("STOP_VALIDATOR_ENABLED", False)):
             return
         while True:
             try:
                 await self._sweep_positions()
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("stop validator sweep loop", exc)
             await asyncio.sleep(int(self.cfg.get("STOP_VALIDATOR_INTERVAL_SEC", 5)))
 
     async def _sweep_positions(self) -> None:
         try:
-            st = self.router.portfolio_service().state
-            for sym, pos in (st.positions or {}).items():
-                qty = float(getattr(pos, "quantity", 0.0) or 0.0)
-                if abs(qty) <= 0:
-                    continue
-                await self._validate_symbol(sym)
-        except Exception:
-            pass
+            state = self.router.portfolio_service().state
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("stop validator state sweep", exc)
+            return
+        for sym, pos in (state.positions or {}).items():
+            qty = float(getattr(pos, "quantity", 0.0) or 0.0)
+            if qty == 0.0:
+                continue
+            await self._validate_symbol(sym)
 
     async def _validate_symbol(self, symbol: str) -> None:
         if not symbol:
             return
         try:
-            st = self.router.portfolio_service().state
-            pos = st.positions.get(symbol) or st.positions.get(symbol.split(".")[0])
-            if pos is None:
-                return
-            qty = float(getattr(pos, "quantity", 0.0) or 0.0)
-            side = "LONG" if qty > 0 else "SHORT"
-            prot_items = None
-            try:
-                li = getattr(self.router, "list_open_protection", None)
-                if callable(li):
-                    prot_items = await li(symbol)
-            except Exception:
-                prot_items = None
-            prot = _ProtView(prot_items if isinstance(prot_items, list) else None)
-
-            # Desired SL price: use ATR fallback if not in state
-            atr = 0.0
-            last = 0.0
-            try:
-                atr = float(self.md.atr(symbol, tf="1m", n=14) or 0.0)
-                last = float(self.md.last(symbol) or 0.0)
-            except Exception:
-                pass
-            want_sl = (last - atr) if side == "LONG" else (last + atr)
-            if not prot.has_stop_for(side):
-                try:
-                    self.metrics.stop_validator_missing_total.labels(symbol=symbol, kind="SL").inc()
-                except Exception:
-                    pass
-                if bool(self.cfg.get("STOP_VALIDATOR_REPAIR", False)):
-                    await self.router.amend_stop_reduce_only(
-                        symbol, "SELL" if side == "LONG" else "BUY", want_sl, abs(qty)
-                    )
-                    try:
-                        self.metrics.stop_validator_repaired_total.labels(
-                            symbol=symbol, kind="SL"
-                        ).inc()
-                    except Exception:
-                        pass
-                    self.log.warning("[STOPVAL] Repaired SL %s", symbol)
-                    # Optional notify bridge (debounced)
-                    if bool(self.cfg.get("STOPVAL_NOTIFY_ENABLED", False)) and self.bus is not None:
-                        now = float(self.clock.time())
-                        last = self._last_alert.get(symbol, 0.0)
-                        if now - last >= int(self.cfg.get("STOPVAL_NOTIFY_DEBOUNCE_SEC", 60)):
-                            try:
-                                self.bus.fire(
-                                    "notify.telegram",
-                                    {
-                                        "text": f"\ud83d\udee1\ufe0f Stop repaired on *{symbol}* at `{want_sl}`"
-                                    },
-                                )
-                                if hasattr(self.metrics, "stop_validator_alerts_total"):
-                                    self.metrics.stop_validator_alerts_total.labels(
-                                        symbol=symbol, kind="SL"
-                                    ).inc()
-                            except Exception:
-                                pass
-                            self._last_alert[symbol] = now
-        except Exception:
-            pass
+            state = self.router.portfolio_service().state
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("stop validator state fetch", exc)
+            return
+        pos = state.positions.get(symbol) or state.positions.get(symbol.split(".")[0])
+        if pos is None:
+            return
+        qty = float(getattr(pos, "quantity", 0.0) or 0.0)
+        if qty == 0.0:
+            return
+        side = "LONG" if qty > 0 else "SHORT"
+        prot = await self._fetch_protection(symbol)
+        atr, last = self._market_refs(symbol)
+        want_sl = (last - atr) if side == "LONG" else (last + atr)
+        if prot.has_stop_for(side):
+            return
+        self._inc_metric("stop_validator_missing_total", symbol=symbol, kind="SL")
+        if not bool(self.cfg.get("STOP_VALIDATOR_REPAIR", False)):
+            return
+        try:
+            await self.router.amend_stop_reduce_only(
+                symbol,
+                "SELL" if side == "LONG" else "BUY",
+                want_sl,
+                abs(qty),
+            )
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            self.log.exception("[STOPVAL] Repair failed for %s", symbol)
+            return
+        self._inc_metric("stop_validator_repaired_total", symbol=symbol, kind="SL")
+        self.log.warning("[STOPVAL] Repaired SL %s", symbol)
+        await self._notify_repair(symbol, want_sl)

@@ -3,9 +3,18 @@ from __future__ import annotations
 import argparse
 import glob
 import json
+import logging
 
 import httpx
 import pandas as pd
+
+logger = logging.getLogger("pipeline.seed_feedback")
+_LOAD_ERRORS = (OSError, ValueError, FileNotFoundError, pd.errors.EmptyDataError)
+_REQUEST_ERRORS = (httpx.HTTPError, ConnectionError)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
 def post_outcomes(pattern: str, endpoint: str, timeout: float = 2.0) -> int:
@@ -17,7 +26,8 @@ def post_outcomes(pattern: str, endpoint: str, timeout: float = 2.0) -> int:
         for path in paths:
             try:
                 df = pd.read_parquet(path)
-            except Exception:
+            except _LOAD_ERRORS as exc:
+                _log_suppressed(f"seed_feedback.load.{path}", exc)
                 continue
             for row in df.itertuples(index=False):
                 payload = {
@@ -31,9 +41,9 @@ def post_outcomes(pattern: str, endpoint: str, timeout: float = 2.0) -> int:
                     r = client.post(endpoint, json=payload)
                     r.raise_for_status()
                     total += 1
-                except Exception:
-                    # best-effort seeding; continue
-                    pass
+                except _REQUEST_ERRORS as exc:
+                    _log_suppressed("seed_feedback.post", exc)
+                    continue
     return total
 
 

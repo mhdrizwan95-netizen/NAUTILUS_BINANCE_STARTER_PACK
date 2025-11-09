@@ -1,6 +1,6 @@
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
 from loguru import logger
 from watchdog.events import FileSystemEventHandler
@@ -12,8 +12,15 @@ from .config import settings
 _MODEL_LOCK = threading.RLock()
 _MODEL = None
 _SCALER = None
-_META: Dict[str, Any] = {}
-_OBSERVER: Optional[Observer] = None
+_META: dict[str, Any] = {}
+_OBSERVER: Observer | None = None
+
+
+class ModelNotLoadedError(RuntimeError):
+    """Raised when inference is requested before a model is trained."""
+
+    def __init__(self) -> None:
+        super().__init__("no active model is loaded")
 
 
 def _load_active_model():
@@ -75,7 +82,7 @@ def predict_proba(logret_series):
             _load_active_model()
             model, scaler, meta = _MODEL, _SCALER, _META
     if model is None:
-        raise RuntimeError("No active model. Train first.")
+        raise ModelNotLoadedError()
     import numpy as np
 
     X = np.asarray(logret_series, dtype=float).reshape(-1, 1)

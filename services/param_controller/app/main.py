@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, HTTPException
@@ -22,12 +22,12 @@ def on_start() -> None:
 
 
 @app.get("/health")
-def health() -> Dict[str, str]:
+def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.post("/preset/register/{strategy}/{instrument}")
-def register_preset(strategy: str, instrument: str, body: Dict[str, Any]) -> Dict[str, bool]:
+def register_preset(strategy: str, instrument: str, body: dict[str, Any]) -> dict[str, bool]:
     pid = body.get("preset_id")
     params = body.get("params")
     if not pid or not isinstance(params, dict):
@@ -38,8 +38,8 @@ def register_preset(strategy: str, instrument: str, body: Dict[str, Any]) -> Dic
 
 @app.get("/param/{strategy}/{instrument}")
 def get_param(
-    strategy: str, instrument: str, features: Optional[Dict[str, float]] = None
-) -> Dict[str, Any]:
+    strategy: str, instrument: str, features: dict[str, float] | None = None
+) -> dict[str, Any]:
     presets = store.list_presets(settings.PC_DB, strategy, instrument)
     if not presets:
         raise HTTPException(404, "no presets registered")
@@ -75,8 +75,8 @@ def get_param(
 
 @app.post("/learn/outcome/{strategy}/{instrument}/{preset_id}")
 def report_outcome(
-    strategy: str, instrument: str, preset_id: str, body: Dict[str, Any]
-) -> Dict[str, bool]:
+    strategy: str, instrument: str, preset_id: str, body: dict[str, Any]
+) -> dict[str, bool]:
     reward = float(body.get("reward", 0.0))
     features = body.get("features", {})
     store.log_outcome(settings.PC_DB, strategy, instrument, preset_id, reward, features)

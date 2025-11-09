@@ -1,25 +1,25 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 
-def _merge_dicts(*sources: Dict[str, Any]) -> Dict[str, Any]:
-    merged: Dict[str, Any] = {}
+def _merge_dicts(*sources: dict[str, Any]) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
     for src in sources:
         merged.update(src)
     return merged
 
 
-ENGINE_DEFAULTS: Dict[str, Any] = {
+ENGINE_DEFAULTS: dict[str, Any] = {
     "EVENTBUS_MAX_WORKERS": 8,
 }
 
-GLOBAL_DEFAULTS: Dict[str, Any] = {
+GLOBAL_DEFAULTS: dict[str, Any] = {
     "TRADE_SYMBOLS": "*",
     "DRY_RUN": True,
 }
 
-RISK_DEFAULTS: Dict[str, Any] = {
+RISK_DEFAULTS: dict[str, Any] = {
     "TRADING_ENABLED": False,
     "MIN_NOTIONAL_USDT": 10.0,
     "MAX_NOTIONAL_USDT": 1000.0,
@@ -45,7 +45,7 @@ RISK_DEFAULTS: Dict[str, Any] = {
     "SOFT_BREACH_LOG_ORDERS": True,
 }
 
-TREND_DEFAULTS: Dict[str, Any] = {
+TREND_DEFAULTS: dict[str, Any] = {
     "TREND_ENABLED": False,
     "TREND_DRY_RUN": True,
     "TREND_SYMBOLS": "",
@@ -86,7 +86,7 @@ TREND_DEFAULTS: Dict[str, Any] = {
     "TREND_REGIME_RSI": 14,
 }
 
-SCALP_DEFAULTS: Dict[str, Any] = {
+SCALP_DEFAULTS: dict[str, Any] = {
     "SCALP_ENABLED": False,
     "SCALP_DRY_RUN": True,
     "SCALP_SYMBOLS": "",
@@ -114,7 +114,7 @@ SCALP_DEFAULTS: Dict[str, Any] = {
     "SCALP_BOOK_STALE_SEC": 5.0,
 }
 
-MOMENTUM_RT_DEFAULTS: Dict[str, Any] = {
+MOMENTUM_RT_DEFAULTS: dict[str, Any] = {
     "MOMENTUM_RT_ENABLED": False,
     "MOMENTUM_RT_DRY_RUN": True,
     "MOMENTUM_RT_SYMBOLS": "",
@@ -132,7 +132,7 @@ MOMENTUM_RT_DEFAULTS: Dict[str, Any] = {
     "MOMENTUM_RT_PREFER_FUTURES": True,
 }
 
-MOMENTUM_15M_DEFAULTS: Dict[str, Any] = {
+MOMENTUM_15M_DEFAULTS: dict[str, Any] = {
     "MOMENTUM_15M_ENABLED": False,
     "MOMENTUM_15M_DRY_RUN": True,
     "MOMENTUM_15M_SYMBOL": "PI_XBTUSD.KRAKEN",
@@ -142,7 +142,7 @@ MOMENTUM_15M_DEFAULTS: Dict[str, Any] = {
     "MOMENTUM_15M_REARM_SEC": 2.0,
 }
 
-MEME_SENTIMENT_DEFAULTS: Dict[str, Any] = {
+MEME_SENTIMENT_DEFAULTS: dict[str, Any] = {
     "MEME_SENTIMENT_ENABLED": False,
     "MEME_SENTIMENT_DRY_RUN": True,
     "MEME_SENTIMENT_RISK_PCT": 0.0075,
@@ -170,7 +170,7 @@ MEME_SENTIMENT_DEFAULTS: Dict[str, Any] = {
     "SOCIAL_SENTIMENT_SOURCES": "",
 }
 
-SYMBOL_SCANNER_DEFAULTS: Dict[str, Any] = {
+SYMBOL_SCANNER_DEFAULTS: dict[str, Any] = {
     "SYMBOL_SCANNER_ENABLED": False,
     "SYMBOL_SCANNER_UNIVERSE": "TOP_50_BY_VOLUME",
     "SYMBOL_SCANNER_INTERVAL_SEC": 300,
@@ -186,15 +186,15 @@ SYMBOL_SCANNER_DEFAULTS: Dict[str, Any] = {
     "SYMBOL_SCANNER_STATE_PATH": "data/runtime/symbol_scanner_state.json",
 }
 
-BROKER_DEFAULTS: Dict[str, Any] = {
+BROKER_DEFAULTS: dict[str, Any] = {
     "IBKR_ENABLED": False,
 }
 
-AUTOTRAIN_SHARED_DEFAULTS: Dict[str, Any] = {
+AUTOTRAIN_SHARED_DEFAULTS: dict[str, Any] = {
     "LEDGER_DB": "/shared/manifest.sqlite",
 }
 
-DATA_INGESTER_DEFAULTS: Dict[str, Any] = {
+DATA_INGESTER_DEFAULTS: dict[str, Any] = {
     "DATA_LANDING": "/data/incoming",
     "EXCHANGE": "binance",
     "SYMBOLS": "BTC/USDT,ETH/USDT",
@@ -206,7 +206,7 @@ DATA_INGESTER_DEFAULTS: Dict[str, Any] = {
     "LOG_LEVEL": "INFO",
 }
 
-ML_SERVICE_DEFAULTS: Dict[str, Any] = {
+ML_SERVICE_DEFAULTS: dict[str, Any] = {
     "DATA_DIR": "/data",
     "MODEL_DIR": "/models",
     "REGISTRY_DIR": "/models/registry",
@@ -227,7 +227,7 @@ ML_SERVICE_DEFAULTS: Dict[str, Any] = {
     "LOG_LEVEL": "INFO",
 }
 
-PARAM_CONTROLLER_DEFAULTS: Dict[str, Any] = {
+PARAM_CONTROLLER_DEFAULTS: dict[str, Any] = {
     "PC_DB": "/shared/param_controller.sqlite",
     "EPSILON": 0.05,
     "L2": 1.0,
@@ -235,7 +235,7 @@ PARAM_CONTROLLER_DEFAULTS: Dict[str, Any] = {
     "LOG_LEVEL": "INFO",
 }
 
-BACKTEST_RUNNER_DEFAULTS: Dict[str, Any] = {
+BACKTEST_RUNNER_DEFAULTS: dict[str, Any] = {
     "RESEARCH_DIR": "/research",
     "DATA_INCOMING": "/data/incoming",
     "ML_SERVICE": "http://ml_service:8000",
@@ -255,7 +255,7 @@ BACKTEST_RUNNER_DEFAULTS: Dict[str, Any] = {
     "LOG_LEVEL": "INFO",
 }
 
-ALL_DEFAULTS: Dict[str, Any] = _merge_dicts(
+ALL_DEFAULTS: dict[str, Any] = _merge_dicts(
     ENGINE_DEFAULTS,
     GLOBAL_DEFAULTS,
     RISK_DEFAULTS,

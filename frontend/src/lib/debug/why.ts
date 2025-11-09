@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from "react";
 
 type PropsRecord = Record<string, unknown>;
 
@@ -11,10 +11,7 @@ export function useWhyDidYouUpdate(componentName: string, props: PropsRecord): v
   useEffect(() => {
     if (previousProps.current) {
       const changes: Record<string, { from: unknown; to: unknown }> = {};
-      const allKeys = new Set([
-        ...Object.keys(previousProps.current),
-        ...Object.keys(props),
-      ]);
+      const allKeys = new Set([...Object.keys(previousProps.current), ...Object.keys(props)]);
       allKeys.forEach((key) => {
         const previousValue = previousProps.current?.[key];
         const nextValue = props[key];

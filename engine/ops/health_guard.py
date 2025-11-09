@@ -2,16 +2,28 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
 from engine.config.env import env_bool, env_float
 from engine.core.event_bus import BUS
 
 _LOG = logging.getLogger("engine.ops.health_guard")
+_SUPPRESSIBLE_GUARD_ERRORS = (
+    asyncio.CancelledError,
+    AttributeError,
+    RuntimeError,
+    ValueError,
+    TypeError,
+)
 
 
-def _truthy(value: Optional[str]) -> bool:
+def _log_suppressed(context: str, exc: Exception) -> None:
+    _LOG.warning("SOFT-BREACH suppressed %s: %s", context, exc, exc_info=True)
+
+
+def _truthy(value: str | None) -> bool:
     if isinstance(value, bool):
         return value
     if value is None:
@@ -42,7 +54,7 @@ class SoftBreachGuard:
             log_orders=env_bool("SOFT_BREACH_LOG_ORDERS", True),
         )
 
-    async def on_cross_health_soft(self, breach: Dict[str, Any]) -> None:
+    async def on_cross_health_soft(self, breach: dict[str, Any]) -> None:
         if not self.cfg.enabled:
             return
 
@@ -63,9 +75,8 @@ class SoftBreachGuard:
                     "payload": {"kind": kind, "details": details},
                 },
             )
-        except Exception:  # noqa: BLE001
-            # best-effort emit; guard actions already executed
-            pass
+        except _SUPPRESSIBLE_GUARD_ERRORS as exc:
+            _log_suppressed("bus publish", exc)
 
     async def _cancel_entry_orders(self) -> None:
         orders = await self._list_open_orders()
@@ -87,9 +98,9 @@ class SoftBreachGuard:
                     kwargs = self._cancel_kwargs(order)
                     res = cancel(**kwargs)
                     ok = await res if asyncio.iscoroutine(res) else bool(res)
-            except Exception:  # noqa: BLE001
+            except _SUPPRESSIBLE_GUARD_ERRORS as exc:
                 ok = False
-                _LOG.exception("SOFT-BREACH: cancel failed for %s", order)
+                _log_suppressed("cancel entry order", exc)
 
             if ok:
                 cancelled += 1
@@ -115,11 +126,11 @@ class SoftBreachGuard:
         for pos in positions:
             try:
                 await self._tighten_position(pos, orders)
-            except Exception:  # noqa: BLE001
-                _LOG.exception("SOFT-BREACH: tighten failed for %s", pos.get("symbol"))
+            except _SUPPRESSIBLE_GUARD_ERRORS as exc:
+                _log_suppressed(f"tighten position {pos.get('symbol')}", exc)
 
     async def _tighten_position(
-        self, pos: Dict[str, Any], orders: Iterable[Dict[str, Any]] | None
+        self, pos: dict[str, Any], orders: Iterable[dict[str, Any]] | None
     ) -> None:
         qty = float(pos.get("quantity") or pos.get("qty") or pos.get("qty_base") or 0.0)
         if abs(qty) <= 0:
@@ -187,7 +198,7 @@ class SoftBreachGuard:
                 raise
             await place(amend_symbol, amend_side, abs(qty))
 
-    async def _list_open_orders(self) -> list[Dict[str, Any]]:
+    async def _list_open_orders(self) -> list[dict[str, Any]]:
         try:
             res = await self.router.list_open_entries()
         except AttributeError:
@@ -198,7 +209,7 @@ class SoftBreachGuard:
             res = await result if asyncio.iscoroutine(result) else result
         return list(res or [])
 
-    def _portfolio_positions(self) -> list[Dict[str, Any]]:
+    def _portfolio_positions(self) -> list[dict[str, Any]]:
         state = getattr(self.portfolio, "state", None)
         if state is None:
             return []
@@ -213,12 +224,13 @@ class SoftBreachGuard:
                         "avg_price": getattr(pos, "avg_price", 0.0),
                     }
                 )
-            except Exception:  # noqa: BLE001
+            except _SUPPRESSIBLE_GUARD_ERRORS as exc:
+                _log_suppressed("portfolio snapshot decode", exc)
                 continue
         return values
 
     @staticmethod
-    def _is_entry_order(order: Dict[str, Any]) -> bool:
+    def _is_entry_order(order: dict[str, Any]) -> bool:
         meta = order.get("meta") or {}
         if isinstance(meta, dict) and str(meta.get("kind", "")).lower() in {
             "entry",
@@ -242,7 +254,7 @@ class SoftBreachGuard:
         return True
 
     @staticmethod
-    def _matching_stop(symbol: str, orders: Iterable[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    def _matching_stop(symbol: str, orders: Iterable[dict[str, Any]]) -> dict[str, Any] | None:
         base = symbol.split(".")[0].upper()
         for order in orders:
             sym = str(order.get("symbol") or "").upper()
@@ -262,11 +274,11 @@ class SoftBreachGuard:
         return None
 
     @staticmethod
-    def _cancel_kwargs(order: Dict[str, Any]) -> Dict[str, Any]:
+    def _cancel_kwargs(order: dict[str, Any]) -> dict[str, Any]:
         symbol = str(order.get("symbol") or "").upper()
         order_id = order.get("orderId") or order.get("order_id")
         client_order_id = order.get("clientOrderId") or order.get("client_order_id")
-        kwargs: Dict[str, Any] = {"symbol": symbol}
+        kwargs: dict[str, Any] = {"symbol": symbol}
         if order_id is not None:
             kwargs["order_id"] = order_id
         if client_order_id:

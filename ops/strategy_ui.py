@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 
+_JSON_ERRORS = (OSError, json.JSONDecodeError)
+
 
 def generate_html_table(registry_path: Path) -> str:
     """Generate HTML table rows from strategy registry."""
@@ -39,7 +41,7 @@ def generate_html_table(registry_path: Path) -> str:
                 try:
                     # Truncate to just date/time for display
                     last_promotion = last_promotion[:16].replace("T", " ")
-                except Exception:
+                except (TypeError, AttributeError):
                     pass
 
             row = f'<tr class="{css_class}"><td>{model_name}</td><td>{version}</td><td class="sharpe">{sharpe}</td><td>{drawdown}</td><td class="positive">{realized}</td><td>{trades}</td><td>{last_promotion}</td></tr>'
@@ -47,8 +49,11 @@ def generate_html_table(registry_path: Path) -> str:
 
         return "\n".join(rows)
 
-    except Exception as e:
-        return f"<tr><td colspan='7' style='color: red;'>Error loading registry: {str(e)[:50]}</td></tr>"
+    except _JSON_ERRORS as exc:
+        return (
+            "<tr><td colspan='7' style='color: red;'>Error loading registry: "
+            f"{str(exc)[:50]}</td></tr>"
+        )
 
 
 def get_strategy_ui_html() -> str:
@@ -57,21 +62,17 @@ def get_strategy_ui_html() -> str:
 
     try:
         table_rows = generate_html_table(registry_path)
-
-        # Get current model for page title
-        current_model = "Unknown"
-        if registry_path.exists():
-            try:
-                registry = json.loads(registry_path.read_text())
-                current_model = registry.get("current_model", current_model)
-            except Exception:
-                pass
-
-    except Exception as e:
+    except _JSON_ERRORS as exc:
         table_rows = (
-            f"<tr><td colspan='7' style='color: red;'>Critical error: {str(e)[:100]}</td></tr>"
+            f"<tr><td colspan='7' style='color: red;'>Critical error: {str(exc)[:100]}</td></tr>"
         )
-        current_model = "Error"
+    current_model = "Unknown"
+    if registry_path.exists():
+        try:
+            registry = json.loads(registry_path.read_text())
+            current_model = registry.get("current_model", current_model)
+        except _JSON_ERRORS:
+            pass
 
     # Professional dark theme HTML dashboard
     html = """<html lang="en">

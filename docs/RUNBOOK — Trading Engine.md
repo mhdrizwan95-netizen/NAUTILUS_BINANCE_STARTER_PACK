@@ -225,4 +225,3 @@ If WS is unstable: keep listener off (EXEC_FILLS_LISTENER_ENABLED=false); router
 	•	Funding guard trims; enable hedge once trims are clean.
 
 ⸻
-

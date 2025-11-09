@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { TrendingUp, DollarSign, BarChart2, Save } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { TrendingUp, DollarSign, BarChart2, Save } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
 import {
   getAggregatePortfolio,
@@ -10,34 +10,28 @@ import {
   getConfigEffective,
   updateConfig,
   type ControlRequestOptions,
-} from '../../lib/api';
-import { generateIdempotencyKey } from '../../lib/idempotency';
-import { queryKeys } from '../../lib/queryClient';
-import { useAppStore } from '../../lib/store';
+} from "../../lib/api";
+import { generateIdempotencyKey } from "../../lib/idempotency";
+import { queryKeys } from "../../lib/queryClient";
+import { useAppStore } from "../../lib/store";
 import {
   exposureAggregateSchema,
   pnlSnapshotSchema,
   portfolioAggregateSchema,
   validateApiResponse,
   configEffectiveSchema,
-} from '../../lib/validation';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '../ui/card';
-import { Input } from '../ui/input';
-import { Skeleton } from '../ui/skeleton';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
+} from "../../lib/validation";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Input } from "../ui/input";
+import { Skeleton } from "../ui/skeleton";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 
 function formatCurrency(value: number, opts: Intl.NumberFormatOptions = {}) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
     maximumFractionDigits: 2,
     minimumFractionDigits: 2,
     ...opts,
@@ -49,7 +43,7 @@ function formatPercent(value: number) {
 }
 
 function formatEpoch(epoch: number | null | undefined) {
-  if (!epoch) return '—';
+  if (!epoch) return "—";
   const date = new Date(epoch * 1000);
   return date.toLocaleString();
 }
@@ -63,7 +57,7 @@ export function FundingTab() {
     queryKey: queryKeys.funding.portfolio(),
     queryFn: () =>
       getAggregatePortfolio().then((data) =>
-        validateApiResponse(portfolioAggregateSchema, data, 'Aggregate portfolio'),
+        validateApiResponse(portfolioAggregateSchema, data, "Aggregate portfolio"),
       ),
     refetchInterval: 30_000,
   });
@@ -72,7 +66,7 @@ export function FundingTab() {
     queryKey: queryKeys.funding.exposure(),
     queryFn: () =>
       getAggregateExposure().then((data) =>
-        validateApiResponse(exposureAggregateSchema, data, 'Exposure aggregate'),
+        validateApiResponse(exposureAggregateSchema, data, "Exposure aggregate"),
       ),
     refetchInterval: 30_000,
   });
@@ -81,7 +75,7 @@ export function FundingTab() {
     queryKey: queryKeys.funding.pnl(),
     queryFn: () =>
       getAggregatePnl().then((data) =>
-        validateApiResponse(pnlSnapshotSchema, data, 'PnL snapshot'),
+        validateApiResponse(pnlSnapshotSchema, data, "PnL snapshot"),
       ),
     refetchInterval: 30_000,
   });
@@ -90,7 +84,7 @@ export function FundingTab() {
     queryKey: queryKeys.settings.config(),
     queryFn: () =>
       getConfigEffective().then((data) =>
-        validateApiResponse(configEffectiveSchema, data, 'Runtime config'),
+        validateApiResponse(configEffectiveSchema, data, "Runtime config"),
       ),
     staleTime: 60_000,
   });
@@ -102,7 +96,7 @@ export function FundingTab() {
     if (!configQuery.data || budgetTouched) return;
     const buckets = configQuery.data.effective?.buckets ?? {};
     const mapped = Object.entries(buckets).reduce<Record<string, number>>((acc, [key, val]) => {
-      acc[key] = typeof val === 'number' ? val : Number(val ?? 0);
+      acc[key] = typeof val === "number" ? val : Number(val ?? 0);
       return acc;
     }, {});
     setBudgetDraft(mapped);
@@ -117,19 +111,19 @@ export function FundingTab() {
       options: ControlRequestOptions;
     }) => updateConfig({ buckets }, options),
     onSuccess: (data) => {
-      toast.success('Capital buckets updated');
+      toast.success("Capital buckets updated");
       setBudgetTouched(false);
       const buckets = data.effective?.buckets ?? {};
       const mapped = Object.entries(buckets).reduce<Record<string, number>>((acc, [key, val]) => {
-        acc[key] = typeof val === 'number' ? val : Number(val ?? 0);
+        acc[key] = typeof val === "number" ? val : Number(val ?? 0);
         return acc;
       }, {});
       setBudgetDraft(mapped);
       queryClient.setQueryData(queryKeys.settings.config(), data);
     },
     onError: (error: unknown) => {
-      toast.error('Failed to update capital buckets', {
-        description: error instanceof Error ? error.message : 'Unknown error',
+      toast.error("Failed to update capital buckets", {
+        description: error instanceof Error ? error.message : "Unknown error",
       });
     },
   });
@@ -148,7 +142,7 @@ export function FundingTab() {
     if (!exposureQuery.data) return [];
     return Object.entries(exposureQuery.data.by_symbol)
       .map(([key, value]) => {
-        const [symbol, venue = 'UNKNOWN'] = key.split('.');
+        const [symbol, venue = "UNKNOWN"] = key.split(".");
         return {
           key,
           symbol,
@@ -207,11 +201,11 @@ export function FundingTab() {
             }
             onClick={() => {
               if (!opsToken.trim()) {
-                toast.error('Provide an OPS token in Settings before updating buckets');
+                toast.error("Provide an OPS token in Settings before updating buckets");
                 return;
               }
               if (!opsActor.trim()) {
-                toast.error('Provide an operator call-sign before updating capital buckets');
+                toast.error("Provide an operator call-sign before updating capital buckets");
                 return;
               }
               updateBudgetsMutation.mutate({
@@ -219,13 +213,13 @@ export function FundingTab() {
                 options: {
                   token: opsToken.trim(),
                   actor: opsActor.trim(),
-                  idempotencyKey: generateIdempotencyKey('buckets'),
+                  idempotencyKey: generateIdempotencyKey("buckets"),
                 },
               });
             }}
           >
             <Save className="mr-2 h-4 w-4" />
-            {updateBudgetsMutation.isPending ? 'Saving…' : 'Save allocations'}
+            {updateBudgetsMutation.isPending ? "Saving…" : "Save allocations"}
           </Button>
         </CardHeader>
         <CardContent>
@@ -258,7 +252,7 @@ export function FundingTab() {
                 <span>Total allocation</span>
                 <span
                   className={
-                    Math.abs(totalBudget - 1) <= 0.001 ? 'text-emerald-400' : 'text-amber-400'
+                    Math.abs(totalBudget - 1) <= 0.001 ? "text-emerald-400" : "text-amber-400"
                   }
                 >
                   {totalBudget.toFixed(3)}
@@ -274,13 +268,11 @@ export function FundingTab() {
           title="Total Equity"
           description="Aggregate across all venues"
           icon={<TrendingUp className="h-4 w-4 text-emerald-400" />}
-          value={
-            portfolioQuery.data ? formatCurrency(portfolioQuery.data.equity_usd) : '—'
-          }
+          value={portfolioQuery.data ? formatCurrency(portfolioQuery.data.equity_usd) : "—"}
           footer={
             portfolioQuery.data
               ? `Return: ${formatPercent(portfolioQuery.data.return_pct)}`
-              : 'Return: —'
+              : "Return: —"
           }
           loading={portfolioQuery.isLoading}
         />
@@ -288,13 +280,11 @@ export function FundingTab() {
           title="Cash on Hand"
           description="Liquid capital available"
           icon={<DollarSign className="h-4 w-4 text-cyan-400" />}
-          value={
-            portfolioQuery.data ? formatCurrency(portfolioQuery.data.cash_usd) : '—'
-          }
+          value={portfolioQuery.data ? formatCurrency(portfolioQuery.data.cash_usd) : "—"}
           footer={
             portfolioQuery.data
               ? `Gain/Loss: ${formatCurrency(portfolioQuery.data.gain_usd)}`
-              : 'Gain/Loss: —'
+              : "Gain/Loss: —"
           }
           loading={portfolioQuery.isLoading}
         />
@@ -302,14 +292,14 @@ export function FundingTab() {
           title="Tracked Symbols"
           description="Positions & watchlist coverage"
           icon={<BarChart2 className="h-4 w-4 text-violet-400" />}
-          value={exposureQuery.data ? exposureQuery.data.totals.count.toString() : '—'}
+          value={exposureQuery.data ? exposureQuery.data.totals.count.toString() : "—"}
           footer={
             exposureQuery.data
               ? `Exposure: ${formatCurrency(exposureQuery.data.totals.exposure_usd, {
                   maximumFractionDigits: 0,
                   minimumFractionDigits: 0,
                 })}`
-              : 'Exposure: —'
+              : "Exposure: —"
           }
           loading={exposureQuery.isLoading}
         />
@@ -349,9 +339,7 @@ export function FundingTab() {
                       <TableCell>
                         <Badge variant="secondary">{row.venue}</Badge>
                       </TableCell>
-                      <TableCell className="text-right font-mono">
-                        {row.qty.toFixed(6)}
-                      </TableCell>
+                      <TableCell className="text-right font-mono">{row.qty.toFixed(6)}</TableCell>
                       <TableCell className="text-right font-mono">
                         {formatCurrency(row.price)}
                       </TableCell>
@@ -407,7 +395,7 @@ export function FundingTab() {
                         </TableCell>
                         <TableCell
                           className={`text-right font-mono ${
-                            positive ? 'text-emerald-400' : 'text-rose-400'
+                            positive ? "text-emerald-400" : "text-rose-400"
                           }`}
                         >
                           {formatCurrency(row.total)}
@@ -442,9 +430,7 @@ function MetricCard({ title, description, value, icon, footer, loading }: Metric
           <CardTitle className="text-sm text-zinc-200">{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
         </div>
-        <div className="rounded-full border border-zinc-700/50 bg-zinc-900/70 p-2">
-          {icon}
-        </div>
+        <div className="rounded-full border border-zinc-700/50 bg-zinc-900/70 p-2">{icon}</div>
       </CardHeader>
       <CardContent>
         {loading ? (

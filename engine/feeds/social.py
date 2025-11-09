@@ -13,11 +13,10 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict, deque
-from typing import Dict
 
 _BUCKET_SEC = 300.0
 _HISTORY = 6
-_buckets: Dict[str, deque[tuple[float, int]]] = defaultdict(lambda: deque(maxlen=_HISTORY + 1))
+_buckets: dict[str, deque[tuple[float, int]]] = defaultdict(lambda: deque(maxlen=_HISTORY + 1))
 
 
 def _roll(symbol: str) -> None:

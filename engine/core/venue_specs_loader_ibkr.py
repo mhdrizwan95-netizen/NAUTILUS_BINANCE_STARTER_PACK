@@ -8,7 +8,6 @@ Fetches minSize from IBKR contracts and updates venue_specs.json.
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict
 
 from ib_insync import IB, Stock
 
@@ -22,7 +21,7 @@ class SymbolSpec:
     min_notional: float
 
 
-def fetch_ibkr_specs(symbols: list[str]) -> Dict[str, SymbolSpec]:
+def fetch_ibkr_specs(symbols: list[str]) -> dict[str, SymbolSpec]:
     ib = IB()
     ib.connect(
         host=os.getenv("IBKR_HOST", "127.0.0.1"),
@@ -46,7 +45,7 @@ def fetch_ibkr_specs(symbols: list[str]) -> Dict[str, SymbolSpec]:
     return out
 
 
-def write_specs(specs: Dict[str, SymbolSpec]):
+def write_specs(specs: dict[str, SymbolSpec]):
     if SPECS_PATH.exists():
         import json
 

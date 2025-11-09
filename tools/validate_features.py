@@ -11,6 +11,7 @@ Checks:
 - no NaN/inf in close; log returns finite
 - reasonable ranges (close > 0, |logret| < 1.0)
 """
+
 from __future__ import annotations
 
 import math

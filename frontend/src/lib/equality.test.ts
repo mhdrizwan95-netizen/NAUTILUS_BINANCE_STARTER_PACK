@@ -1,9 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it } from "vitest";
 
-import { stableHash } from './equality';
+import { stableHash } from "./equality";
 
-describe('stableHash', () => {
-  it('produces identical hashes for equivalent objects regardless of key order', () => {
+describe("stableHash", () => {
+  it("produces identical hashes for equivalent objects regardless of key order", () => {
     const alpha = {
       b: 1,
       a: {
@@ -22,7 +22,7 @@ describe('stableHash', () => {
     expect(stableHash(alpha)).toBe(stableHash(beta));
   });
 
-  it('distinguishes structurally different values', () => {
+  it("distinguishes structurally different values", () => {
     const base = { a: 1, b: [1, 2, 3] };
     const variant = { a: 1, b: [1, 2, 4] };
 

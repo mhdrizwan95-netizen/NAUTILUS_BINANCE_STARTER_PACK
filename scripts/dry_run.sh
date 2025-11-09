@@ -60,14 +60,15 @@ echo "==> starting services"
 docker compose --env-file "$env_file" start "${SERVICES[@]}"
 
 echo "==> running health checks"
+HEALTH_FLAGS=(--fail --silent --retry 10 --retry-delay 2 --retry-all-errors --max-time 10 --retry-connrefused)
 if echo " ${SERVICES[*]} " | grep -q " ops "; then
-  curl -fsS --retry 5 --retry-delay 2 http://localhost:8002/health >/dev/null
+  curl "${HEALTH_FLAGS[@]}" http://localhost:8002/health >/dev/null
 fi
 if echo " ${SERVICES[*]} " | grep -q " engine_binance "; then
-  curl -fsS --retry 5 --retry-delay 2 http://localhost:8003/readyz >/dev/null
+  curl "${HEALTH_FLAGS[@]}" http://localhost:8003/readyz >/dev/null
 fi
 if echo " ${SERVICES[*]} " | grep -q " engine_binance_exporter "; then
-  curl -fsS --retry 5 --retry-delay 2 http://localhost:9103/health >/dev/null
+  curl "${HEALTH_FLAGS[@]}" http://localhost:9103/health >/dev/null
 fi
 
 if [[ "$detach" == "1" ]]; then

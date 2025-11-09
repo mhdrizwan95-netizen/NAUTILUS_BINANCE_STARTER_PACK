@@ -12,10 +12,10 @@ by callers (RiskRails integrates read-only via is_quarantined()).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
-from typing import Dict, Tuple
 
 
 @dataclass
@@ -27,8 +27,9 @@ class QuarantinePolicy:
 
 class _Registry:
     def __init__(self) -> None:
-        self._stops: Dict[str, list[float]] = {}
-        self._blocked_until: Dict[str, float] = {}
+        self._logger = logging.getLogger(__name__)
+        self._stops: dict[str, list[float]] = {}
+        self._blocked_until: dict[str, float] = {}
         self.policy = QuarantinePolicy()
         self._path = os.path.join("state", "quarantine.json")
         self._load()
@@ -45,7 +46,7 @@ class _Registry:
             self._blocked_until[sym] = now + self.policy.quarantine_sec
         self._save()
 
-    def is_quarantined(self, symbol: str) -> Tuple[bool, float]:
+    def is_quarantined(self, symbol: str) -> tuple[bool, float]:
         sym = symbol.split(".")[0].upper()
         until = self._blocked_until.get(sym, 0.0)
         now = time.time()
@@ -67,11 +68,12 @@ class _Registry:
         try:
             if not os.path.exists(self._path):
                 return
-            with open(self._path, "r", encoding="utf-8") as fh:
+            with open(self._path, encoding="utf-8") as fh:
                 data = json.load(fh) or {}
             self._stops = {k: list(map(float, v)) for k, v in data.get("stops", {}).items()}
             self._blocked_until = {k: float(v) for k, v in data.get("blocked", {}).items()}
-        except Exception:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            self._logger.warning("failed to load quarantine registry: %s", exc, exc_info=True)
             self._stops = {}
             self._blocked_until = {}
 
@@ -80,8 +82,8 @@ class _Registry:
             os.makedirs("state", exist_ok=True)
             with open(self._path, "w", encoding="utf-8") as fh:
                 json.dump({"stops": self._stops, "blocked": self._blocked_until}, fh)
-        except Exception:
-            pass
+        except OSError as exc:
+            self._logger.warning("failed to persist quarantine registry: %s", exc, exc_info=True)
 
 
 REGISTRY = _Registry()

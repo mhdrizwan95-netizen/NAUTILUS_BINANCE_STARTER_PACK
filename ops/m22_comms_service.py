@@ -19,7 +19,7 @@ import json
 import logging
 import os
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -53,6 +53,8 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 DISCORD_WEBHOOK = os.getenv("DISCORD_WEBHOOK", "")
 SLACK_WEBHOOK = os.getenv("SLACK_WEBHOOK", "")
+_JSON_ERRORS = (OSError, json.JSONDecodeError)
+_HTTP_ERRORS = (httpx.HTTPError, httpx.RequestError)
 
 # System data paths (compatible with M19-M21)
 M19_STATE_FILE = os.path.join("data", "processed", "m19", "scheduler_state.json")
@@ -76,14 +78,14 @@ def safe_json_load(filepath: str, default: Any = None) -> Any:
     default = default or {}
     try:
         if os.path.exists(filepath):
-            with open(filepath, "r") as f:
+            with open(filepath) as f:
                 return json.load(f)
-    except Exception as e:
-        logger.warning(f"Failed to load {filepath}: {e}")
+    except _JSON_ERRORS as exc:
+        logger.warning("Failed to load %s: %s", filepath, exc)
     return default
 
 
-def read_recent_incidents(limit: int = 10) -> List[Dict[str, Any]]:
+def read_recent_incidents(limit: int = 10) -> list[dict[str, Any]]:
     """
     Read recent incident records from M20 incident log.
 
@@ -98,50 +100,48 @@ def read_recent_incidents(limit: int = 10) -> List[Dict[str, Any]]:
         return incidents
 
     try:
-        with open(M20_INCIDENT_LOG, "r") as f:
+        with open(M20_INCIDENT_LOG) as f:
             for line in f:
                 if line.strip():
                     try:
                         incident = json.loads(line.strip())
                         incidents.append(incident)
-                    except json.JSONDecodeError as e:
-                        logger.warning(f"Invalid incident JSON: {e}")
+                    except json.JSONDecodeError as exc:
+                        logger.warning("Invalid incident JSON: %s", exc)
 
-        # Sort by timestamp descending and slice
         incidents.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    except _JSON_ERRORS:
+        logger.exception("Error reading incident log")
+        return []
+    else:
         return incidents[:limit]
 
-    except Exception as e:
-        logger.error(f"Error reading incident log: {e}")
-        return []
 
-
-def read_recovery_actions(limit: int = 10) -> List[Dict[str, Any]]:
+def read_recovery_actions(limit: int = 10) -> list[dict[str, Any]]:
     """Read recent recovery action records."""
     actions = []
     if not os.path.exists(M20_RECOVERY_LOG):
         return actions
 
     try:
-        with open(M20_RECOVERY_LOG, "r") as f:
-            lines = f.readlines()[-limit:]  # Get last N lines
+        with open(M20_RECOVERY_LOG) as f:
+            lines = f.readlines()[-limit:]
 
         for line in lines:
             if line.strip():
                 try:
                     action = json.loads(line.strip())
                     actions.append(action)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Invalid recovery action JSON: {e}")
-
+                except json.JSONDecodeError as exc:
+                    logger.warning("Invalid recovery action JSON: %s", exc)
+    except _JSON_ERRORS:
+        logger.exception("Error reading recovery action log")
+        return []
+    else:
         return actions
 
-    except Exception as e:
-        logger.error(f"Error reading recovery action log: {e}")
-        return []
 
-
-def get_evolutionary_summary() -> Dict[str, Any]:
+def get_evolutionary_summary() -> dict[str, Any]:
     """Get summary of organism evolutionary state from M21 lineage."""
     lineage = safe_json_load(M21_LINEAGE_INDEX, {"models": []})
 
@@ -160,7 +160,7 @@ def get_evolutionary_summary() -> Dict[str, Any]:
     }
 
 
-def get_system_health() -> Dict[str, Any]:
+def get_system_health() -> dict[str, Any]:
     """Aggregate health status from all system components."""
     # Load latest metrics and state
     state = safe_json_load(M19_STATE_FILE, {})
@@ -223,11 +223,11 @@ async def send_telegram_message(message: str) -> bool:
             response = await client.post(url, json=payload)
             response.raise_for_status()
 
-            logger.info(f"Message sent to Telegram chat {TELEGRAM_CHAT_ID}")
+            logger.info("Message sent to Telegram chat %s", TELEGRAM_CHAT_ID)
             return True
 
-    except Exception as e:
-        logger.error(f"Failed to send Telegram message: {e}")
+    except _HTTP_ERRORS:
+        logger.exception("Failed to send Telegram message")
         return False
 
 
@@ -246,8 +246,8 @@ async def send_discord_message(message: str) -> bool:
             logger.info("Message sent to Discord webhook")
             return True
 
-    except Exception as e:
-        logger.error(f"Failed to send Discord message: {e}")
+    except _HTTP_ERRORS:
+        logger.exception("Failed to send Discord message")
         return False
 
 
@@ -266,12 +266,12 @@ async def send_slack_message(message: str) -> bool:
             logger.info("Message sent to Slack webhook")
             return True
 
-    except Exception as e:
-        logger.error(f"Failed to send Slack message: {e}")
+    except _HTTP_ERRORS:
+        logger.exception("Failed to send Slack message")
         return False
 
 
-async def broadcast_alert(message: str, platforms: List[str] = None) -> Dict[str, bool]:
+async def broadcast_alert(message: str, platforms: list[str] = None) -> dict[str, bool]:
     """
     Broadcast alert message to configured platforms.
 
@@ -424,7 +424,7 @@ def get_evolution():
 
 
 @app.post("/alert")
-async def post_alert(alert_payload: Dict[str, Any], background_tasks: BackgroundTasks):
+async def post_alert(alert_payload: dict[str, Any], background_tasks: BackgroundTasks):
     """
     Send alert message via configured communication platforms.
 

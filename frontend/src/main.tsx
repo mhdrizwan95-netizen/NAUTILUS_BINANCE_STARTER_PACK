@@ -1,7 +1,6 @@
-
 import { createRoot } from "react-dom/client";
 
-import App from "./App.tsx";
+import { App } from "./App.tsx";
 import "./index.css";
 import { AppErrorBoundary } from "./components/ErrorBoundary";
 import { QueryProvider } from "./components/QueryProvider";
@@ -9,13 +8,13 @@ import {
   setupGlobalErrorHandling,
   setupPerformanceObserver,
   setupQueryMonitoring,
-  trackWebVitals
+  trackWebVitals,
 } from "./lib/monitoring";
 import { queryClient } from "./lib/queryClient";
 import { initializeSecurity } from "./lib/security";
 
 if (import.meta.env?.VITE_DRY_RUN === "1") {
-  console.info("DRY_RUN=1 — Command Center is running in read-only mode.");
+  console.warn("DRY_RUN=1 — Command Center is running in read-only mode.");
   document.documentElement.dataset.dryRun = "true";
 }
 
@@ -31,5 +30,5 @@ createRoot(document.getElementById("root")!).render(
     <QueryProvider>
       <App />
     </QueryProvider>
-  </AppErrorBoundary>
+  </AppErrorBoundary>,
 );

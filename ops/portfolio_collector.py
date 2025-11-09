@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 
@@ -12,6 +12,16 @@ from ops.env import engine_endpoints
 from ops.prometheus import get_or_create_gauge
 
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+_HTTP_ERRORS = (httpx.HTTPError, httpx.RequestError, asyncio.TimeoutError)
+
+try:  # pragma: no cover - respx only in tests
+    from respx.models import AllMockedAssertionError as _RespxAllMockedAssertionError
+except ImportError:  # pragma: no cover - prod deployments lack respx
+    _RESPX_SNAPSHOT_ERRORS: tuple[type[Exception], ...] = ()
+else:
+    _RESPX_SNAPSHOT_ERRORS = (_RespxAllMockedAssertionError,)
+
+_SNAPSHOT_FETCH_ERRORS = _HTTP_ERRORS + _RESPX_SNAPSHOT_ERRORS
 
 
 def _venue_label(base_url: str) -> str:
@@ -57,7 +67,7 @@ _BASELINE_DAYKEY: str | None = None
 
 
 def _daykey_now(t: float | None = None) -> str:
-    dt = datetime.fromtimestamp(t or time.time(), tz=timezone.utc)
+    dt = datetime.fromtimestamp(t or time.time(), tz=UTC)
     return dt.strftime("%Y-%m-%d")
 
 
@@ -69,14 +79,14 @@ async def _fetch_snapshot(client: httpx.AsyncClient, base_url: str) -> dict:
         r = await client.get(f"{base}/portfolio", timeout=6.0)
         r.raise_for_status()
         return r.json()
-    except Exception:
+    except _SNAPSHOT_FETCH_ERRORS:
         pass
     # 2) Fallback to account_snapshot if portfolio fails
     try:
         r = await client.get(f"{base}/account_snapshot", timeout=6.0)
         r.raise_for_status()
         return r.json()
-    except Exception:
+    except _SNAPSHOT_FETCH_ERRORS:
         return {}
 
 
@@ -108,6 +118,8 @@ async def portfolio_collector_loop(interval_sec: int = 10):
     # short-lived processes begin with a clean slate.
     _BASELINE_EQUITY = None
     _BASELINE_DAYKEY = None
+
+    collector_errors = _HTTP_ERRORS + (ValueError, KeyError, TypeError)
 
     while True:
         try:
@@ -160,13 +172,12 @@ async def portfolio_collector_loop(interval_sec: int = 10):
             PORTFOLIO_RET.set(ret)
 
             PORTFOLIO_LAST.set(now)
-            try:
-                logging.info(
-                    f"Portfolio totals updated: equity={total_equity:.2f} cash={total_cash:.2f}"
-                )
-            except Exception:
-                pass
-        except Exception as e:
-            logging.warning(f"Portfolio collector error: {e}")
+            logging.info(
+                "Portfolio totals updated: equity=%.2f cash=%.2f",
+                total_equity,
+                total_cash,
+            )
+        except collector_errors as exc:
+            logging.warning("Portfolio collector error: %s", exc, exc_info=True)
 
         await asyncio.sleep(interval_sec)

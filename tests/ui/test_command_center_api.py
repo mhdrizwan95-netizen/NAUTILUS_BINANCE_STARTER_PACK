@@ -387,7 +387,7 @@ def test_metrics_models_returns_paginated_envelope(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def _fake_collect(
-        _state: dict[str, Any]
+        _state: dict[str, Any],
     ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
         models = [
             {

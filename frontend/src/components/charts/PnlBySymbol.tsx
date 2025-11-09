@@ -7,7 +7,7 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-} from 'recharts';
+} from "recharts";
 
 type PnlBySymbolProps = {
   data: Array<{ symbol: string; pnl: number }>;

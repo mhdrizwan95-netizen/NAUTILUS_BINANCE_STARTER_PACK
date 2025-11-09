@@ -4,22 +4,45 @@ import asyncio
 import inspect
 import logging
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, Dict, List, Optional, Sequence
+from typing import Any
 
 from engine import metrics
 from engine.idempotency import CACHE, append_jsonl
 from engine.risk import RiskRails
 
 _LOGGER = logging.getLogger(__name__)
+_RECORDER_ERRORS: tuple[type[Exception], ...] = (RuntimeError, ValueError)
+_ROUTER_ERRORS: tuple[type[Exception], ...] = (
+    RuntimeError,
+    ValueError,
+    ConnectionError,
+)
+_ROUTER_META_ERRORS: tuple[type[Exception], ...] = (
+    AttributeError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
+
+class SignalValidationError(ValueError):
+    def __init__(self, field: str) -> None:
+        super().__init__(f"signal requires {field}")
+
+
+class RouterSubmissionUnavailableError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("router does not expose required submission method")
 
 
 def _log_suppressed(context: str, exc: Exception) -> None:
     _LOGGER.debug("%s suppressed exception: %s", context, exc, exc_info=True)
 
 
-def _bool(value: Any) -> Optional[bool]:
+def _bool(value: Any) -> bool | None:
     if value is None:
         return None
     if isinstance(value, bool):
@@ -32,34 +55,29 @@ def _bool(value: Any) -> Optional[bool]:
             return False
     try:
         return bool(int(value))
-    except Exception:  # noqa: BLE001 - defensive
+    except (TypeError, ValueError):
         return bool(value)
 
 
-def _idempotency_key(signal: Dict[str, Any], hint: Optional[str] = None) -> str:
+def _idempotency_key(signal: dict[str, Any], hint: str | None = None) -> str:
     if hint:
         return hint
     strategy = str(signal.get("strategy") or "strategy").lower()
     symbol = str(signal.get("symbol") or "?").upper()
     side = str(signal.get("side") or "?").upper()
-    ts = signal.get("ts")
-    try:
-        ts_part = int(ts)
-    except Exception:  # noqa: BLE001 - fallback to now
+    ts_value = signal.get("ts")
+    if ts_value is None:
         ts_part = int(time.time())
+    else:
+        try:
+            ts_part = int(ts_value)
+        except (TypeError, ValueError):
+            ts_part = int(time.time())
     return f"sig:{strategy}:{symbol}:{side}:{ts_part}"
 
 
 def _is_async_callable(fn: Any) -> bool:
-    if inspect.iscoroutinefunction(fn):
-        return True
-    call = getattr(fn, "__call__", None)
-    if call and inspect.iscoroutinefunction(call):
-        return True
-    func = getattr(fn, "__func__", None)
-    if func and inspect.iscoroutinefunction(func):
-        return True
-    return False
+    return inspect.iscoroutinefunction(fn)
 
 
 @dataclass(frozen=True)
@@ -71,14 +89,14 @@ class RecordedOrder:
     side: str
     tag: str
     status: str
-    quote: Optional[float]
-    quantity: Optional[float]
-    market: Optional[str]
+    quote: float | None
+    quantity: float | None
+    market: str | None
     meta: Any
     idempotency_key: str
-    size: Optional[float]
-    size_type: Optional[str]
-    signal: Dict[str, Any]
+    size: float | None
+    size_type: str | None
+    signal: dict[str, Any]
 
 
 class StrategyExecutor:
@@ -90,10 +108,10 @@ class StrategyExecutor:
         risk: RiskRails,
         router: Any,
         default_dry_run: bool,
-        config_hash_getter: Optional[Callable[[], str]] = None,
+        config_hash_getter: Callable[[], str] | None = None,
         source: str = "strategy",
         backtest_mode: bool = False,
-        order_recorder: Optional[Callable[[RecordedOrder], None]] = None,
+        order_recorder: Callable[[RecordedOrder], None] | None = None,
     ) -> None:
         self._risk = risk
         self._router = router
@@ -102,7 +120,7 @@ class StrategyExecutor:
         self._source = source
         self._backtest_mode = bool(backtest_mode)
         self._order_recorder = order_recorder
-        self._recorded_orders: List[RecordedOrder] = []
+        self._recorded_orders: list[RecordedOrder] = []
 
     @property
     def recorded_orders(self) -> Sequence[RecordedOrder]:
@@ -110,11 +128,11 @@ class StrategyExecutor:
 
     async def execute(
         self,
-        signal: Dict[str, Any],
+        signal: dict[str, Any],
         *,
-        idem_key: Optional[str] = None,
-        dry_run_override: Optional[bool] = None,
-    ) -> Dict[str, Any]:
+        idem_key: str | None = None,
+        dry_run_override: bool | None = None,
+    ) -> dict[str, Any]:
         key = _idempotency_key(signal, idem_key)
         cached = CACHE.get(key)
         if cached:
@@ -122,7 +140,7 @@ class StrategyExecutor:
 
         symbol = str(signal.get("symbol") or "").strip()
         if not symbol:
-            raise ValueError("signal requires symbol")
+            raise SignalValidationError("symbol")
         side = str(signal.get("side") or "").upper() or "BUY"
         market = signal.get("market")
         if isinstance(market, str):
@@ -226,24 +244,24 @@ class StrategyExecutor:
         *,
         timestamp: float,
         status: str,
-        order_ctx: Dict[str, Any],
-        signal: Dict[str, Any],
+        order_ctx: dict[str, Any],
+        signal: dict[str, Any],
         idem_key: str,
     ) -> None:
-        size: Optional[float]
-        size_type: Optional[str]
+        size: float | None
+        size_type: str | None
         quantity = order_ctx.get("quantity")
         quote = order_ctx.get("quote")
         if quantity is not None:
             try:
                 size = float(quantity)
-            except Exception:  # noqa: BLE001 - defensive conversion
+            except (TypeError, ValueError):
                 size = None
             size_type = "quantity"
         elif quote is not None:
             try:
                 size = float(quote)
-            except Exception:  # noqa: BLE001 - defensive conversion
+            except (TypeError, ValueError):
                 size = None
             size_type = "quote"
         else:
@@ -269,16 +287,16 @@ class StrategyExecutor:
         if self._order_recorder:
             try:
                 self._order_recorder(recorded)
-            except Exception as exc:
+            except _RECORDER_ERRORS as exc:
                 _log_suppressed("strategy_executor", exc)
 
     def execute_sync(
         self,
-        signal: Dict[str, Any],
+        signal: dict[str, Any],
         *,
-        idem_key: Optional[str] = None,
-        dry_run_override: Optional[bool] = None,
-    ) -> Dict[str, Any]:
+        idem_key: str | None = None,
+        dry_run_override: bool | None = None,
+    ) -> dict[str, Any]:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -299,13 +317,13 @@ class StrategyExecutor:
         side: str,
         quote: Any,
         quantity: Any,
-        market_hint: Optional[str],
+        market_hint: str | None,
         tag: str,
         meta: Any,
     ) -> Any:
         submit_callable = None
-        call_kwargs: Dict[str, Any] = {}
-        fallback_args: Optional[tuple[Any, ...]] = None
+        call_kwargs: dict[str, Any] = {}
+        fallback_args: tuple[Any, ...] | None = None
 
         if quote is not None:
             submit_callable = getattr(self._router, "market_quote", None)
@@ -354,7 +372,8 @@ class StrategyExecutor:
                 )
                 fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
         if submit_callable is None:
-            raise RuntimeError("router does not expose market order submission")
+            _LOGGER.error("router missing market order submission method")
+            raise RouterSubmissionUnavailableError()
 
         loop = asyncio.get_running_loop()
         context = {
@@ -366,9 +385,9 @@ class StrategyExecutor:
         }
         cleanup = False
         try:
-            setattr(self._router, "_strategy_pending_meta", context)
+            self._router._strategy_pending_meta = context
             cleanup = True
-        except Exception:  # noqa: BLE001
+        except _ROUTER_META_ERRORS:
             cleanup = False
 
         is_async_callable = _is_async_callable(submit_callable)
@@ -411,16 +430,16 @@ class StrategyExecutor:
                 try:
                     if getattr(self._router, "_strategy_pending_meta", None) is context:
                         delattr(self._router, "_strategy_pending_meta")
-                except Exception as exc:
-                    _log_suppressed("strategy_executor", exc)
+                except _ROUTER_ERRORS as exc:
+                    _log_suppressed("strategy_executor.cleanup", exc)
         return result
 
-    def _safe_config_hash(self) -> Optional[str]:
+    def _safe_config_hash(self) -> str | None:
         if not self._config_hash_getter:
             return None
         try:
             return str(self._config_hash_getter())
-        except Exception:  # noqa: BLE001
+        except (RuntimeError, ValueError, TypeError):
             return None
 
 

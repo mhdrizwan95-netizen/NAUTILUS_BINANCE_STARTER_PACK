@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Sequence
+from collections.abc import Sequence
 
 import httpx
 
@@ -13,6 +13,20 @@ from ops.ui_api import broadcast_account, broadcast_price
 from ops.ui_services import PortfolioService
 
 logger = logging.getLogger(__name__)
+_STREAM_ERRORS = (
+    httpx.HTTPError,
+    asyncio.TimeoutError,
+    ConnectionError,
+    RuntimeError,
+    ValueError,
+    TypeError,
+)
+_SNAPSHOT_ERRORS = _STREAM_ERRORS + (OSError,)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
+
 
 BINANCE_PRICE_URL = "https://api.binance.com/api/v3/ticker/price"
 
@@ -38,8 +52,8 @@ async def price_stream(symbols: Sequence[str], interval: float = 2.0) -> None:
                             "price": price,
                         }
                     )
-                except Exception as exc:  # noqa: BLE001
-                    logger.debug("price_stream: failed to fetch %s price: %s", symbol, exc)
+                except _STREAM_ERRORS as exc:
+                    _log_suppressed(f"price_stream.{symbol}", exc)
             await asyncio.sleep(interval)
 
 
@@ -59,8 +73,8 @@ async def account_broadcaster(portfolio: PortfolioService, interval: float = 2.0
                         "ts": snapshot.get("ts"),
                     }
                 )
-        except Exception as exc:  # noqa: BLE001
-            logger.debug("account_broadcaster: failed to publish snapshot: %s", exc)
+        except _SNAPSHOT_ERRORS as exc:
+            _log_suppressed("account_broadcaster.snapshot", exc)
         await asyncio.sleep(interval)
 
 

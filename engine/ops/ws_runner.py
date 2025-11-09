@@ -14,8 +14,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from random import SystemRandom
-from typing import Awaitable, Callable
+
+import httpx
 
 _RNG = SystemRandom()
 
@@ -24,6 +26,20 @@ def _log_suppressed(context: str, exc: Exception) -> None:
     logging.getLogger("engine.ops.ws_runner").debug(
         "%s suppressed exception: %s", context, exc, exc_info=True
     )
+
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+    httpx.HTTPError,
+)
 
 
 class WSRunner:
@@ -57,22 +73,19 @@ class WSRunner:
                 if self.cfg.get("WS_HEALTH_ENABLED", False):
                     try:
                         self.bus.fire("health.state", {"state": 0, "reason": "ws_connected"})
-                    except Exception as exc:
+                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
                         _log_suppressed("ws_runner.health_online", exc)
                 self.last_evt_ts = float(self.clock.time())
                 async for upd in ws.order_updates():
                     self.last_evt_ts = float(self.clock.time())
                     await self.on_update(upd)
-            except Exception as e:
-                try:
-                    self.log.warning("[WS] error: %s", e)
-                except Exception as exc:
-                    _log_suppressed("ws_runner.log_error", exc)
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                self.log.exception("[WS] error")
             finally:
                 if self.cfg.get("WS_HEALTH_ENABLED", False):
                     try:
                         self.bus.fire("health.state", {"state": 1, "reason": "ws_disconnected"})
-                    except Exception as exc:
+                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
                         _log_suppressed("ws_runner.health_offline", exc)
                 await self._watchdog()
 
@@ -88,5 +101,5 @@ class WSRunner:
         if (self.clock.time() - self.last_evt_ts) > timeout:
             try:
                 self.bus.fire("health.state", {"state": 1, "reason": "ws_silent"})
-            except Exception as exc:
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
                 _log_suppressed("ws_runner.health_watchdog", exc)

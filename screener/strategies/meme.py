@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, Sequence
+from collections.abc import Mapping, Sequence
+from typing import Any
 
 from shared.meme_utils import compute_meme_metrics
 
@@ -35,11 +36,11 @@ class MemeCoinScreener(StrategyScreener):
     def evaluate(
         self,
         symbol: str,
-        meta: Optional[Mapping[str, Any]],
+        meta: Mapping[str, Any] | None,
         klines: Sequence[Sequence[Any]],
         book: Mapping[str, Any],
         features: Mapping[str, Any],
-    ) -> Optional[StrategyCandidate]:
+    ) -> StrategyCandidate | None:
         vol_spike = float(features.get("vol_accel_1m_over_30m", 0.0))
         if vol_spike < 4.0:
             return None

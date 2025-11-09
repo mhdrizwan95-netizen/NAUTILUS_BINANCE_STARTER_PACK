@@ -2,7 +2,6 @@
 import json
 import os
 import pickle
-from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -91,7 +90,7 @@ def features(df: pd.DataFrame) -> np.ndarray:
     return X, states
 
 
-def train_proxy_probe(df: pd.DataFrame, X: np.ndarray) -> Tuple[np.ndarray, SGDClassifier]:
+def train_proxy_probe(df: pd.DataFrame, X: np.ndarray) -> tuple[np.ndarray, SGDClassifier]:
     # 3-class (short/hold/long) with probability outputs (softmax via log_loss)
     y = (df["action"].astype(int) + 1).values  # {-1,0,1} -> {0,1,2}
     clf = SGDClassifier(loss="log_loss", learning_rate="constant", eta0=LR, max_iter=2000)
@@ -106,7 +105,7 @@ def train_proxy_probe(df: pd.DataFrame, X: np.ndarray) -> Tuple[np.ndarray, SGDC
     return probs, clf
 
 
-def guarded_update(df: pd.DataFrame) -> Dict:
+def guarded_update(df: pd.DataFrame) -> dict:
     if len(df) < 200:
         return {"status": "skipped", "reason": "not_enough_data", "n": len(df)}
 
@@ -167,14 +166,14 @@ def guarded_update(df: pd.DataFrame) -> Dict:
         import joblib
 
         joblib.dump(policy, POLICY_PATH)
-    except Exception:
+    except (ImportError, OSError, RuntimeError):
         with open(POLICY_PATH + ".pkl", "wb") as f:
             pickle.dump(policy, f)
 
     # Metrics
     winrate = float((df[df["action"] != 0]["pnl"] > 0).mean()) if (df["action"] != 0).any() else 0.0
     avg_reward = float((r * base_w).mean())
-    entropy = float((-(p_new * np.log(p_new + 1e-8)).sum(axis=1).mean()))
+    entropy = float(-(p_new * np.log(p_new + 1e-8)).sum(axis=1).mean())
 
     # Learning curve
     import matplotlib.pyplot as plt

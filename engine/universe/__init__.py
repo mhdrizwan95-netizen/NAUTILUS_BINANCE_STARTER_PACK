@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, List
 
 import httpx
 
 from engine.config import get_settings, load_risk_config, norm_symbol
 
 from .effective import StrategyUniverse
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    ValueError,
+    httpx.HTTPError,
+)
 
 __all__ = [
     "StrategyUniverse",
@@ -23,7 +32,7 @@ _UNIVERSE_CACHE_TTL = 300.0  # seconds
 _DEFAULT_UNIVERSE = [norm_symbol(s) for s in ("BTCUSDT", "ETHUSDT", "BNBUSDT")]
 
 
-def _fetch_binance_universe() -> List[str]:
+def _fetch_binance_universe() -> list[str]:
     """Pull exchangeInfo from the active Binance base (spot or futures)."""
     settings = get_settings()
     if getattr(settings, "venue", "BINANCE").upper() != "BINANCE":
@@ -38,7 +47,7 @@ def _fetch_binance_universe() -> List[str]:
     response.raise_for_status()
 
     payload = response.json()
-    symbols: List[str] = []
+    symbols: list[str] = []
     for symbol_info in payload.get("symbols", []):
         status = symbol_info.get("status")
         symbol = symbol_info.get("symbol", "")
@@ -48,7 +57,7 @@ def _fetch_binance_universe() -> List[str]:
     return sorted(set(symbols)) or _DEFAULT_UNIVERSE
 
 
-def _dynamic_universe() -> List[str]:
+def _dynamic_universe() -> list[str]:
     """Return cached exchange universe with a small TTL to avoid hammering REST."""
     now = time.time()
     cached = _UNIVERSE_CACHE.get("symbols") or []
@@ -58,7 +67,7 @@ def _dynamic_universe() -> List[str]:
 
     try:
         symbols = _fetch_binance_universe()
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         symbols = _DEFAULT_UNIVERSE
 
     _UNIVERSE_CACHE["symbols"] = symbols
@@ -66,18 +75,18 @@ def _dynamic_universe() -> List[str]:
     return list(symbols)
 
 
-def configured_universe() -> List[str]:
+def configured_universe() -> list[str]:
     """Universe as BASEQUOTE (no venue suffix)."""
     if _RCFG.trade_symbols:
         return [norm_symbol(s) for s in _RCFG.trade_symbols]
     return _dynamic_universe()
 
 
-async def last_prices() -> Dict[str, float]:
+async def last_prices() -> dict[str, float]:
     """Fetch last prices for all configured symbols (router's exchange client)."""
     from engine.app import _price_map  # Global mark price map for bulk fetch
 
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     for s in configured_universe():
         symbol = s.replace("USDT", "")
         if symbol in _price_map:
@@ -92,7 +101,6 @@ async def last_prices() -> Dict[str, float]:
             from engine.app import router as order_router
 
             out[s] = await order_router.get_last_price(f"{s}.BINANCE")
-        except Exception:
-            # best-effort; leave missing if not available
+        except _SUPPRESSIBLE_EXCEPTIONS:
             continue
     return out

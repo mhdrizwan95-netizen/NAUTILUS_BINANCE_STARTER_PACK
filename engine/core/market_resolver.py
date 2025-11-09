@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable
 from functools import lru_cache
-from typing import Dict, Iterable, Optional
 
 _ALLOWED_MARKETS = ("spot", "margin", "futures", "options")
 
 
-def _parse_inline_map(raw: str) -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
+def _parse_inline_map(raw: str) -> dict[str, str]:
+    mapping: dict[str, str] = {}
     for token in raw.split(","):
         token = token.strip()
         if not token or ":" not in token:
@@ -22,9 +22,9 @@ def _parse_inline_map(raw: str) -> Dict[str, str]:
     return mapping
 
 
-def _load_file_map(path: str) -> Dict[str, str]:
+def _load_file_map(path: str) -> dict[str, str]:
     try:
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             text = fh.read()
     except OSError:
         return {}
@@ -39,7 +39,7 @@ def _load_file_map(path: str) -> Dict[str, str]:
     except json.JSONDecodeError:
         pass
     # Fallback: simple KEY:VALUE per line
-    mapping: Dict[str, str] = {}
+    mapping: dict[str, str] = {}
     for line in text.splitlines():
         line = line.strip()
         if not line or line.startswith("#") or ":" not in line:
@@ -50,8 +50,8 @@ def _load_file_map(path: str) -> Dict[str, str]:
 
 
 @lru_cache(maxsize=1)
-def _market_map() -> Dict[str, str]:
-    mapping: Dict[str, str] = {}
+def _market_map() -> dict[str, str]:
+    mapping: dict[str, str] = {}
     inline = os.getenv("MARKET_ROUTE_MAP", "")
     if inline:
         mapping.update(_parse_inline_map(inline))
@@ -84,8 +84,8 @@ def resolve_market(symbol: str, default: str | None) -> str | None:
 
 def resolve_market_choice(
     symbol: str,
-    default: Optional[str] = None,
-    allowed: Optional[Iterable[str]] = None,
+    default: str | None = None,
+    allowed: Iterable[str] | None = None,
 ) -> str:
     """
     Resolve the market preference for ``symbol`` while enforcing an allowed set.

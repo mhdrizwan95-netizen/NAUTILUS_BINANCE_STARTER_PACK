@@ -1,10 +1,8 @@
-from typing import List
-
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
 
-def _split_symbols(raw: str) -> List[str]:
+def _split_symbols(raw: str) -> list[str]:
     return [symbol.strip() for symbol in raw.split(",") if symbol.strip()]
 
 
@@ -21,7 +19,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field("INFO")
 
     @property
-    def symbol_list(self) -> List[str]:
+    def symbol_list(self) -> list[str]:
         return _split_symbols(self.SYMBOLS)
 
 

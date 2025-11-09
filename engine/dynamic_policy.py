@@ -5,7 +5,7 @@ Use these helpers in RiskRails instead of env-driven constants.
 
 import math
 from dataclasses import dataclass
-from typing import Dict, Literal, Optional, Tuple
+from typing import Literal
 
 Mode = Literal["red", "yellow", "green"]
 
@@ -18,7 +18,7 @@ class MarketSnapshot:
     spread_bps: float
     book_depth_usd: float
     vol1m_usd: float
-    funding_rate_8h: Optional[float] = None
+    funding_rate_8h: float | None = None
     event_heat: float = 0.0
     velocity: float = 0.0
     liq_score: float = 0.0
@@ -30,7 +30,7 @@ class AccountState:
     open_risk_sum_pct: float
     open_positions: int
     exposure_total_usd: float
-    exposure_by_symbol_usd: Dict[str, float]
+    exposure_by_symbol_usd: dict[str, float]
 
 
 @dataclass
@@ -100,7 +100,7 @@ def target_stop_pct(strat: StrategyContext, mkt: MarketSnapshot) -> float:
 
 def dynamic_position_notional_usd(
     mode: Mode, strat: StrategyContext, mkt: MarketSnapshot, acct: AccountState
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     stop_pct = target_stop_pct(strat, mkt)
     risk_pct = per_trade_risk_pct(mode, strat)
     free_risk = max(
@@ -118,7 +118,7 @@ def dynamic_position_notional_usd(
     return (max(0.0, size_usd), stop_pct)
 
 
-def dynamic_concurrent_limits(mode: Mode, acct: AccountState) -> Tuple[int, float]:
+def dynamic_concurrent_limits(mode: Mode, acct: AccountState) -> tuple[int, float]:
     base_positions = {"red": 3, "yellow": 6, "green": 10}[mode]
     base_risk_cap = {"red": 0.03, "yellow": 0.06, "green": 0.09}[mode]
     import math as _m
@@ -129,7 +129,7 @@ def dynamic_concurrent_limits(mode: Mode, acct: AccountState) -> Tuple[int, floa
     return (positions, residual_cap)
 
 
-def dynamic_drawdown_limits(mode: Mode, regime: RegimeSignal) -> Tuple[float, float]:
+def dynamic_drawdown_limits(mode: Mode, regime: RegimeSignal) -> tuple[float, float]:
     base_daily = {"red": 0.035, "yellow": 0.055, "green": 0.075}[mode]
     base_peak = {"red": 0.12, "yellow": 0.18, "green": 0.24}[mode]
     stress = max(0.0, regime.drawdown_pct_7d - 0.08)

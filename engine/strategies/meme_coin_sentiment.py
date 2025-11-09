@@ -1,16 +1,19 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import math
 import os
 import re
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any
 
 from engine.config.defaults import MEME_SENTIMENT_DEFAULTS
 from engine.config.env import env_bool, env_csv, env_float, env_int, env_str
+from engine.core.event_bus import BUS
 from engine.core.market_resolver import resolve_market_choice
 from engine.core.order_router import OrderRouter
 from engine.execution.execute import StrategyExecutor
@@ -24,12 +27,23 @@ try:  # Metrics are optional in some test contexts
         meme_sentiment_events_total,
         meme_sentiment_orders_total,
     )
-except Exception:  # pragma: no cover - metrics disabled
+except ImportError:  # pragma: no cover - metrics disabled
     meme_sentiment_events_total = None  # type: ignore[assignment]
     meme_sentiment_orders_total = None  # type: ignore[assignment]
     meme_sentiment_cooldown_epoch = None  # type: ignore[assignment]
 
 _LOG = logging.getLogger("engine.strategies.meme_sentiment")
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+)
 
 
 @dataclass(frozen=True)
@@ -51,9 +65,9 @@ class MemeCoinConfig:
     max_spread_pct: float = 0.035
     cooldown_sec: float = 1_200.0
     trade_lock_sec: float = 600.0
-    deny_keywords: Tuple[str, ...] = ("rug", "rugpull", "scam", "honeypot")
-    allow_sources: Tuple[str, ...] = ()
-    quote_priority: Tuple[str, ...] = ("USDT", "USDC", "BUSD")
+    deny_keywords: tuple[str, ...] = ("rug", "rugpull", "scam", "honeypot")
+    allow_sources: tuple[str, ...] = ()
+    quote_priority: tuple[str, ...] = ("USDT", "USDC", "BUSD")
     metrics_enabled: bool = True
     publish_topic: str = "strategy.meme_sentiment_trade"
     default_market: str = "spot"
@@ -182,7 +196,7 @@ class _ScoreMeta:
     sentiment: float
     price_change: float
     priority: float
-    raw_payload: Dict[str, Any] = field(default_factory=dict)
+    raw_payload: dict[str, Any] = field(default_factory=dict)
 
 
 class MemeCoinSentiment:
@@ -205,7 +219,7 @@ class MemeCoinSentiment:
         router: OrderRouter,
         risk: RiskRails,
         rest_client: Any,
-        cfg: Optional[MemeCoinConfig] = None,
+        cfg: MemeCoinConfig | None = None,
         *,
         clock=time,
     ) -> None:
@@ -225,7 +239,7 @@ class MemeCoinSentiment:
         )
 
     # ------------------------------------------------------------------ public
-    async def on_external_event(self, evt: Dict[str, Any]) -> None:
+    async def on_external_event(self, evt: dict[str, Any]) -> None:
         if not self.cfg.enabled:
             return
         source = str(evt.get("source") or "").lower()
@@ -309,7 +323,7 @@ class MemeCoinSentiment:
                     "ts": now,
                 }
             )
-        except Exception as exc:  # noqa: BLE001
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
             _LOG.warning("[MEME] execution failed for %s: %s", symbol, exc)
             self._record_order(symbol, "failed")
             self._set_cooldown(symbol, now)
@@ -373,7 +387,7 @@ class MemeCoinSentiment:
         self._arm_global_lock(now)
 
     # ----------------------------------------------------------------- helpers
-    def _passes_priority(self, evt: Dict[str, Any]) -> bool:
+    def _passes_priority(self, evt: dict[str, Any]) -> bool:
         priority = evt.get("priority")
         if priority is None:
             priority = evt.get("payload", {}).get("priority")
@@ -384,7 +398,7 @@ class MemeCoinSentiment:
         except (TypeError, ValueError):
             return False
 
-    def _contains_banned_terms(self, evt: Dict[str, Any]) -> bool:
+    def _contains_banned_terms(self, evt: dict[str, Any]) -> bool:
         payload = evt.get("payload") or {}
         text_parts = [
             str(payload.get("text") or ""),
@@ -394,7 +408,7 @@ class MemeCoinSentiment:
         text = " ".join(text_parts).lower()
         return any(term.lower() in text for term in self.cfg.deny_keywords)
 
-    def _score_event(self, evt: Dict[str, Any]) -> _ScoreMeta:
+    def _score_event(self, evt: dict[str, Any]) -> _ScoreMeta:
         payload = evt.get("payload") or {}
         metrics = payload.get("metrics") or {}
 
@@ -480,10 +494,10 @@ class MemeCoinSentiment:
     def _router_equity(self) -> float:
         try:
             return float(self.router._portfolio.state.equity)  # type: ignore[attr-defined]
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return 0.0
 
-    async def _price_snapshot(self, symbol: str) -> Optional[Tuple[float, float]]:
+    async def _price_snapshot(self, symbol: str) -> tuple[float, float] | None:
         client = self.rest_client
         if client is None:
             return None
@@ -536,10 +550,8 @@ class MemeCoinSentiment:
             "market": market,
         }
         try:
-            from engine.core.event_bus import BUS
-
             await BUS.publish(topic, payload)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             # Publishing is best-effort; do not raise.
             pass
 
@@ -565,21 +577,19 @@ class MemeCoinSentiment:
             "market": market,
         }
         try:
-            from engine.core.event_bus import BUS
-
             await BUS.publish(
                 "strategy.meme_sentiment_bracket",
                 meta,
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
-    def _set_cooldown(self, symbol: str, now: Optional[float] = None) -> None:
+    def _set_cooldown(self, symbol: str, now: float | None = None) -> None:
         until = self._cooldowns.set(symbol, now=now or self.clock.time())
         if self.cfg.metrics_enabled and meme_sentiment_cooldown_epoch is not None and until:
             try:
                 meme_sentiment_cooldown_epoch.labels(symbol=symbol).set(until)
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
 
     def _cooldown_active(self, symbol: str, now: float) -> bool:
@@ -595,7 +605,7 @@ class MemeCoinSentiment:
             return
         try:
             meme_sentiment_events_total.labels(symbol=symbol, decision=decision).inc()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
     def _record_order(self, symbol: str, status: str) -> None:
@@ -603,10 +613,10 @@ class MemeCoinSentiment:
             return
         try:
             meme_sentiment_orders_total.labels(symbol=symbol, status=status).inc()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
-    def _select_symbol(self, evt: Dict[str, Any]) -> Optional[str]:
+    def _select_symbol(self, evt: dict[str, Any]) -> str | None:
         hints = evt.get("asset_hints") or []
         payload = evt.get("payload") or {}
         if not hints:
@@ -617,7 +627,7 @@ class MemeCoinSentiment:
                 return symbol
         return None
 
-    def _normalize_symbol(self, raw: str) -> Optional[str]:
+    def _normalize_symbol(self, raw: str) -> str | None:
         if not raw:
             return None
         sym = raw.upper().strip()

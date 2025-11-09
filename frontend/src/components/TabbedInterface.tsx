@@ -1,17 +1,26 @@
-import { LayoutDashboard, Target, Wallet, Brain, Settings } from 'lucide-react';
-import { motion } from 'motion/react';
-import { Suspense, lazy } from 'react';
+import { LayoutDashboard, Target, Wallet, Brain, Settings } from "lucide-react";
+import { motion } from "motion/react";
+import { Suspense, lazy } from "react";
 
-import { Skeleton } from './ui/skeleton';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
-
+import { Skeleton } from "./ui/skeleton";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 
 // Lazy load tab components for better performance
-const DashboardTab = lazy(() => import('./tabs/DashboardTab').then(module => ({ default: module.DashboardTab })));
-const StrategyTab = lazy(() => import('./tabs/StrategyTab').then(module => ({ default: module.StrategyTab })));
-const FundingTab = lazy(() => import('./tabs/FundingTab').then(module => ({ default: module.FundingTab })));
-const BacktestingTab = lazy(() => import('./tabs/BacktestingTab').then(module => ({ default: module.BacktestingTab })));
-const SettingsTab = lazy(() => import('./tabs/SettingsTab').then(module => ({ default: module.SettingsTab })));
+const DashboardTab = lazy(() =>
+  import("./tabs/DashboardTab").then((module) => ({ default: module.DashboardTab })),
+);
+const StrategyTab = lazy(() =>
+  import("./tabs/StrategyTab").then((module) => ({ default: module.StrategyTab })),
+);
+const FundingTab = lazy(() =>
+  import("./tabs/FundingTab").then((module) => ({ default: module.FundingTab })),
+);
+const BacktestingTab = lazy(() =>
+  import("./tabs/BacktestingTab").then((module) => ({ default: module.BacktestingTab })),
+);
+const SettingsTab = lazy(() =>
+  import("./tabs/SettingsTab").then((module) => ({ default: module.SettingsTab })),
+);
 
 export function TabbedInterface() {
   return (
@@ -23,36 +32,36 @@ export function TabbedInterface() {
     >
       <Tabs defaultValue="dashboard" className="flex-1 flex flex-col overflow-hidden">
         <TabsList className="w-full justify-start border-b border-zinc-800/50 bg-transparent rounded-none px-8 h-12 flex-shrink-0">
-          <TabsTrigger 
-            value="dashboard" 
+          <TabsTrigger
+            value="dashboard"
             className="gap-2 data-[state=active]:bg-zinc-800/50 data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-t-lg rounded-b-none"
           >
             <LayoutDashboard className="w-4 h-4" />
             <span>Dashboard</span>
           </TabsTrigger>
-          <TabsTrigger 
-            value="strategy" 
+          <TabsTrigger
+            value="strategy"
             className="gap-2 data-[state=active]:bg-zinc-800/50 data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-t-lg rounded-b-none"
           >
             <Target className="w-4 h-4" />
             <span>Strategy</span>
           </TabsTrigger>
-          <TabsTrigger 
-            value="funding" 
+          <TabsTrigger
+            value="funding"
             className="gap-2 data-[state=active]:bg-zinc-800/50 data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-t-lg rounded-b-none"
           >
             <Wallet className="w-4 h-4" />
             <span>Funding</span>
           </TabsTrigger>
-          <TabsTrigger 
-            value="backtesting" 
+          <TabsTrigger
+            value="backtesting"
             className="gap-2 data-[state=active]:bg-zinc-800/50 data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-t-lg rounded-b-none"
           >
             <Brain className="w-4 h-4" />
             <span>Backtesting / ML</span>
           </TabsTrigger>
-          <TabsTrigger 
-            value="settings" 
+          <TabsTrigger
+            value="settings"
             className="gap-2 data-[state=active]:bg-zinc-800/50 data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-t-lg rounded-b-none"
           >
             <Settings className="w-4 h-4" />

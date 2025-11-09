@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import yaml
 
@@ -25,7 +25,7 @@ class BucketAllocations:
 
 @dataclass(frozen=True)
 class PerStrategyRisk:
-    per_trade_pct: Dict[str, float] = field(
+    per_trade_pct: dict[str, float] = field(
         default_factory=lambda: {
             "trend": 0.02,
             "momentum": 0.02,
@@ -39,14 +39,14 @@ class PerStrategyRisk:
 
 @dataclass(frozen=True)
 class FuturesSettings:
-    leverage: Dict[str, int] = field(
+    leverage: dict[str, int] = field(
         default_factory=lambda: {
             "BTCUSDT": 5,
             "ETHUSDT": 5,
             "default": 3,
         }
     )
-    desired_leverage: Dict[str, Optional[int]] = field(default_factory=dict)
+    desired_leverage: dict[str, int | None] = field(default_factory=dict)
     hedge_mode: bool = True
 
 
@@ -81,28 +81,28 @@ class UniverseFilterConfig:
     venues: tuple[str, ...]
     min_24h_volume_usdt: float
     min_price_usdt: float
-    max_price_usdt: Optional[float]
-    min_futures_open_interest_usdt: Optional[float]
-    min_leverage_supported: Optional[int]
+    max_price_usdt: float | None
+    min_futures_open_interest_usdt: float | None
+    min_leverage_supported: int | None
     exclude_prefixes: tuple[str, ...]
     exclude_suffixes: tuple[str, ...]
     exclude_contains: tuple[str, ...]
     include_symbols: tuple[str, ...]
-    min_30d_trend_pct: Optional[float]
-    max_bid_ask_spread_pct: Optional[float]
-    min_5m_atr_pct: Optional[float]
-    min_price_change_pct_last_1h: Optional[float]
-    min_liquidity_bid_size: Optional[float]
-    min_orderbook_depth_usdt: Optional[float]
-    min_tick_size_pct: Optional[float]
-    new_listing_within_days: Optional[int]
+    min_30d_trend_pct: float | None
+    max_bid_ask_spread_pct: float | None
+    min_5m_atr_pct: float | None
+    min_price_change_pct_last_1h: float | None
+    min_liquidity_bid_size: float | None
+    min_orderbook_depth_usdt: float | None
+    min_tick_size_pct: float | None
+    new_listing_within_days: int | None
     has_major_news_flag: bool
-    max_concurrent_symbols: Optional[int]
-    sort_by: Tuple[str, ...]
-    max_symbols: Optional[int]
+    max_concurrent_symbols: int | None
+    sort_by: tuple[str, ...]
+    max_symbols: int | None
 
     @staticmethod
-    def from_dict(name: str, payload: dict) -> "UniverseFilterConfig":
+    def from_dict(name: str, payload: dict) -> UniverseFilterConfig:
         venues = tuple(
             str(v).lower()
             for v in (payload.get("venues") or payload.get("exchange_type") or ["futures"])
@@ -175,12 +175,27 @@ class RuntimeConfig:
     symbols: SymbolUniverse = field(default_factory=SymbolUniverse)
     scanner: ScannerSettings = field(default_factory=ScannerSettings)
     bus: BusSettings = field(default_factory=BusSettings)
-    universes: Dict[str, "UniverseFilterConfig"] = field(default_factory=dict)
-    snapshot_dir: Optional[str] = None
+    universes: dict[str, UniverseFilterConfig] = field(default_factory=dict)
+    snapshot_dir: str | None = None
     demo_mode: bool = False  # Generates sample signals when true
 
 
-def _as_float(value: Optional[float], default: float) -> float:
+class InvalidLeverageOverride(ValueError):
+    def __init__(self, symbol: str, value: Any):
+        super().__init__(f"invalid leverage value for {symbol}: {value!r}")
+        self.symbol = symbol
+        self.value = value
+
+
+class LeverageOutOfRange(ValueError):
+    def __init__(self, symbol: str, value: int, max_value: int):
+        super().__init__(f"leverage for {symbol} must be between 1 and {max_value}, got {value}")
+        self.symbol = symbol
+        self.value = value
+        self.max_value = max_value
+
+
+def _as_float(value: float | None, default: float) -> float:
     try:
         return float(value) if value is not None else default
     except (TypeError, ValueError):
@@ -192,9 +207,9 @@ def _normalize_symbol(symbol: str) -> str:
 
 
 def _parse_leverage_overrides(
-    raw: Optional[Dict[str, Any]],
-) -> Dict[str, Optional[int]]:
-    overrides: Dict[str, Optional[int]] = {}
+    raw: dict[str, Any] | None,
+) -> dict[str, int | None]:
+    overrides: dict[str, int | None] = {}
     if not raw:
         return overrides
     for symbol, value in raw.items():
@@ -208,11 +223,9 @@ def _parse_leverage_overrides(
         try:
             leverage_int = int(value)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
-            raise ValueError(f"Invalid leverage value for {sym}: {value!r}") from exc
+            raise InvalidLeverageOverride(sym, value) from exc
         if leverage_int < 1 or leverage_int > _MAX_FUTURES_LEVERAGE:
-            raise ValueError(
-                f"Leverage for {sym} must be between 1 and {_MAX_FUTURES_LEVERAGE}, got {leverage_int}"
-            )
+            raise LeverageOutOfRange(sym, leverage_int, _MAX_FUTURES_LEVERAGE)
         overrides[sym] = leverage_int
     return overrides
 

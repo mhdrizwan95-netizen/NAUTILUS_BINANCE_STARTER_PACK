@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Optional, Tuple
+from typing import Any
 
 from .signal_math import confidence_from_score
 
@@ -10,9 +11,9 @@ from .signal_math import confidence_from_score
 class MemeMetrics:
     score: float
     confidence: float
-    stop_price: Optional[float]
-    targets: Tuple[float, ...]
-    context: Dict[str, Any]
+    stop_price: float | None
+    targets: tuple[float, ...]
+    context: dict[str, Any]
 
 
 def generate_meme_bracket(
@@ -21,7 +22,7 @@ def generate_meme_bracket(
     stop_pct: float,
     take_profit_pct: float,
     trail_pct: float,
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """Return (stop_px, take_profit_px, trail_stop_px) for a long entry.
 
     All percentages are fractional (e.g., 0.10 => 10%).
@@ -41,8 +42,8 @@ def compute_meme_metrics(
     vol_spike: float,
     move_fraction: float,
     depth_usd: float,
-    sentiment: Optional[float],
-    last_price: Optional[float],
+    sentiment: float | None,
+    last_price: float | None,
     stop_pct: float,
     target_multipliers: Iterable[float],
 ) -> MemeMetrics:
@@ -64,8 +65,8 @@ def compute_meme_metrics(
     score *= 1.0 + max(min(sent, 1.5), -1.5) * 0.1
     confidence = confidence_from_score(score, scale=150.0)
 
-    stop_px: Optional[float] = None
-    targets: Tuple[float, ...] = ()
+    stop_px: float | None = None
+    targets: tuple[float, ...] = ()
     if last_price and last_price > 0:
         stop_px = float(last_price) * (1.0 - max(0.0, float(stop_pct)))
         ladders = []
@@ -73,11 +74,11 @@ def compute_meme_metrics(
         for m in target_multipliers:
             try:
                 ladders.append(base * (1.0 + max(0.0, float(m))))
-            except Exception:
+            except (TypeError, ValueError):
                 continue
         targets = tuple(ladders)
 
-    ctx: Dict[str, Any] = {
+    ctx: dict[str, Any] = {
         "vol_spike": round(vs, 3),
         "move_fraction": round(mv, 6),
         "depth_usd": round(depth, 3),

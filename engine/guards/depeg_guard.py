@@ -18,6 +18,15 @@ def _log_suppressed(context: str, exc: Exception) -> None:
     )
 
 
+_DEPEG_ERRORS: tuple[type[Exception], ...] = (
+    RuntimeError,
+    ValueError,
+    ConnectionError,
+    KeyError,
+    TypeError,
+)
+
+
 class DepegGuard:
     def __init__(
         self, router, md=None, bus=None, clock=time, log: logging.Logger | None = None
@@ -48,7 +57,7 @@ class DepegGuard:
             if self.md and hasattr(self.md, "last"):
                 px = self.md.last(symbol)
                 return float(px) if px else 0.0
-        except Exception as exc:
+        except _DEPEG_ERRORS as exc:
             _log_suppressed("depeg_guard.last.md", exc)
         try:
             # Fallback to router price
@@ -59,7 +68,7 @@ class DepegGuard:
                 loop = asyncio.get_event_loop()
                 px = loop.run_until_complete(px)  # in case called sync
             return float(px) if px else 0.0
-        except Exception as exc:
+        except _DEPEG_ERRORS as exc:
             _log_suppressed("depeg_guard.last.router", exc)
             return 0.0
 
@@ -71,7 +80,7 @@ class DepegGuard:
                 usdt_usdc = self._last("USDTUSDC")
                 if usdt_usdc:
                     devs.append(abs(usdt_usdc - 1.0) * 100.0)
-        except Exception as exc:
+        except _DEPEG_ERRORS as exc:
             _log_suppressed("depeg_guard.dev.usdt_usdc", exc)
         try:
             if "BTCUSDT" in self.watch_symbols and "BTCUSDC" in self.watch_symbols:
@@ -80,7 +89,7 @@ class DepegGuard:
                 if btc_usdt and btc_usdc:
                     implied = btc_usdt / btc_usdc
                     devs.append(abs(implied - 1.0) * 100.0)
-        except Exception as exc:
+        except _DEPEG_ERRORS as exc:
             _log_suppressed("depeg_guard.dev.btc_pairs", exc)
         return max(devs) if devs else 0.0
 
@@ -101,7 +110,7 @@ class DepegGuard:
                 if self.bus is not None:
                     self.bus.fire("risk.depeg_trigger", {"deviation_pct": dev})
                     self.bus.fire("health.state", {"state": 2, "reason": "depeg_trigger"})
-            except Exception as exc:
+            except _DEPEG_ERRORS as exc:
                 _log_suppressed("depeg_guard.bus_fire", exc)
             await self._apply_actions(dev)
 
@@ -111,7 +120,7 @@ class DepegGuard:
         try:
             if hasattr(self.router, "set_trading_enabled"):
                 await self._maybe_await(self.router.set_trading_enabled(False))
-        except Exception as exc:
+        except _DEPEG_ERRORS as exc:
             _log_suppressed("depeg_guard.disable_trading", exc)
         if self.exit_risk:
             # Best-effort flatten
@@ -119,7 +128,7 @@ class DepegGuard:
             try:
                 if hasattr(self.router, "list_positions"):
                     positions = await self._maybe_await(self.router.list_positions())
-            except Exception as exc:
+            except _DEPEG_ERRORS as exc:
                 _log_suppressed("depeg_guard.list_positions", exc)
                 positions = []
             for p in positions or []:
@@ -134,13 +143,13 @@ class DepegGuard:
                     await self._maybe_await(
                         self.router.place_reduce_only_market(sym, side, abs(qty))
                     )
-                except Exception as e:
-                    self.log.warning("[DEPEG] exit fail %s: %s", getattr(p, "symbol", "?"), e)
+                except _DEPEG_ERRORS as exc:
+                    self.log.warning("[DEPEG] exit fail %s: %s", getattr(p, "symbol", "?"), exc)
         if self.switch_quote:
             try:
                 if hasattr(self.router, "set_preferred_quote"):
                     self.router.set_preferred_quote("USDC")
-            except Exception as exc:
+            except _DEPEG_ERRORS as exc:
                 _log_suppressed("depeg_guard.switch_quote", exc)
 
     async def _maybe_await(self, res: Any) -> Any:

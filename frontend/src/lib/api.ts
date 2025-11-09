@@ -8,9 +8,9 @@ import type {
   Alert,
   Order,
   MetricsModel,
-} from '@/types/trading';
+} from "@/types/trading";
 
-import type { ConfigEffective } from './validation';
+import type { ConfigEffective } from "./validation";
 
 export interface ControlRequestOptions {
   signal?: AbortSignal;
@@ -19,11 +19,11 @@ export interface ControlRequestOptions {
   idempotencyKey?: string;
 }
 
-const BASE = '';
+const BASE = "";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
-const API_VERSION = 'v1';
- 
+const API_VERSION = "v1";
+
 export interface FetchPageOptions {
   cursor?: string;
   limit?: number;
@@ -37,14 +37,17 @@ interface TimeoutSignal {
   cleanup: () => void;
 }
 
-const createTimeoutSignal = (signal?: AbortSignal, timeoutMs: number = DEFAULT_TIMEOUT_MS): TimeoutSignal => {
+const createTimeoutSignal = (
+  signal?: AbortSignal,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): TimeoutSignal => {
   if (signal?.aborted) {
     return { signal, cleanup: () => {} };
   }
 
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => {
-    controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, 'TimeoutError'));
+    controller.abort(new DOMException(`Request timed out after ${timeoutMs}ms`, "TimeoutError"));
   }, timeoutMs);
 
   let relayAbort: (() => void) | undefined;
@@ -53,13 +56,13 @@ const createTimeoutSignal = (signal?: AbortSignal, timeoutMs: number = DEFAULT_T
     relayAbort = () => {
       controller.abort(signal.reason);
     };
-    signal.addEventListener('abort', relayAbort, { once: true });
+    signal.addEventListener("abort", relayAbort, { once: true });
   }
 
   const cleanup = () => {
     window.clearTimeout(timeoutId);
     if (signal && relayAbort) {
-      signal.removeEventListener('abort', relayAbort);
+      signal.removeEventListener("abort", relayAbort);
     }
   };
 
@@ -73,8 +76,8 @@ async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): P
     const response = await fetch(`${BASE}${path}`, {
       ...init,
       headers: {
-        'Content-Type': 'application/json',
-        'X-API-Version': API_VERSION,
+        "Content-Type": "application/json",
+        "X-API-Version": API_VERSION,
         ...(init?.headers ?? {}),
       },
       signal: timeoutSignal,
@@ -117,7 +120,7 @@ async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): P
 
     return response.json() as Promise<T>;
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'TimeoutError') {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
       throw new Error(`Request to ${path} timed out after ${DEFAULT_TIMEOUT_MS}ms`);
     }
     throw error;
@@ -129,13 +132,13 @@ async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): P
 const buildControlHeaders = (options?: ControlRequestOptions): Record<string, string> => {
   const headers: Record<string, string> = {};
   if (options?.token) {
-    headers['X-Ops-Token'] = options.token;
+    headers["X-Ops-Token"] = options.token;
   }
   if (options?.idempotencyKey) {
-    headers['Idempotency-Key'] = options.idempotencyKey;
+    headers["Idempotency-Key"] = options.idempotencyKey;
   }
   if (options?.actor) {
-    headers['X-Ops-Actor'] = options.actor;
+    headers["X-Ops-Actor"] = options.actor;
   }
   return headers;
 };
@@ -143,10 +146,10 @@ const buildControlHeaders = (options?: ControlRequestOptions): Record<string, st
 const buildPageQuery = (options?: FetchPageOptions): URLSearchParams => {
   const params = new URLSearchParams();
   if (options?.cursor) {
-    params.set('cursor', options.cursor);
+    params.set("cursor", options.cursor);
   }
   if (options?.limit) {
-    params.set('limit', String(options.limit));
+    params.set("limit", String(options.limit));
   }
   return params;
 };
@@ -168,7 +171,7 @@ export interface PageResponse<T> {
 export const getStrategies = (options?: FetchStrategiesOptions) => {
   const params = buildPageQuery(options);
   const query = params.toString();
-  const path = query ? `/api/strategies?${query}` : '/api/strategies';
+  const path = query ? `/api/strategies?${query}` : "/api/strategies";
   return api<PageResponse<StrategySummary>>(path, undefined, options?.signal);
 };
 export const getStrategy = (id: string, signal?: AbortSignal) =>
@@ -180,13 +183,13 @@ export const startStrategy = (
 ) =>
   api(
     `/api/strategies/${id}/start`,
-    { method: 'POST', body: JSON.stringify({ params }), headers: buildControlHeaders(options) },
+    { method: "POST", body: JSON.stringify({ params }), headers: buildControlHeaders(options) },
     options?.signal,
   );
 export const stopStrategy = (id: string, options?: ControlRequestOptions) =>
   api(
     `/api/strategies/${id}/stop`,
-    { method: 'POST', headers: buildControlHeaders(options) },
+    { method: "POST", headers: buildControlHeaders(options) },
     options?.signal,
   );
 export const updateStrategy = (
@@ -196,30 +199,33 @@ export const updateStrategy = (
 ) =>
   api(
     `/api/strategies/${id}/update`,
-    { method: 'POST', body: JSON.stringify({ params }), headers: buildControlHeaders(options) },
+    { method: "POST", body: JSON.stringify({ params }), headers: buildControlHeaders(options) },
     options?.signal,
   );
 
 // Backtests
-export const startBacktest = (payload: {
-  strategyId: string;
-  params?: Record<string, unknown>;
-  symbols?: string[];
-  startDate: string;
-  endDate: string;
-  initialCapital?: number;
-  feeBps?: number;
-  slippageBps?: number;
-}, options?: ControlRequestOptions) =>
+export const startBacktest = (
+  payload: {
+    strategyId: string;
+    params?: Record<string, unknown>;
+    symbols?: string[];
+    startDate: string;
+    endDate: string;
+    initialCapital?: number;
+    feeBps?: number;
+    slippageBps?: number;
+  },
+  options?: ControlRequestOptions,
+) =>
   api<{ jobId: string }>(
-    '/api/backtests',
-    { method: 'POST', body: JSON.stringify(payload), headers: buildControlHeaders(options) },
+    "/api/backtests",
+    { method: "POST", body: JSON.stringify(payload), headers: buildControlHeaders(options) },
     options?.signal,
   );
 
 export const pollBacktest = (jobId: string, signal?: AbortSignal) =>
   api<{
-    status: 'queued' | 'running' | 'done' | 'error';
+    status: "queued" | "running" | "done" | "error";
     progress: number;
     result?: BacktestResult;
   }>(`/api/backtests/${jobId}`, undefined, signal);
@@ -234,7 +240,7 @@ export const getDashboardSummary = (q: URLSearchParams, signal?: AbortSignal) =>
       maxDrawdown: number;
       openPositions: number;
     };
-    equityByStrategy: Array<{ t: string; [strategyId: string]: number }>;
+    equityByStrategy: Array<{ t: string } & Record<string, number | string>>;
     pnlBySymbol: Array<{ symbol: string; pnl: number }>;
     returns: number[];
   }>(`/api/metrics/summary?${q.toString()}`, undefined, signal);
@@ -242,76 +248,76 @@ export const getDashboardSummary = (q: URLSearchParams, signal?: AbortSignal) =>
 export const getPositions = (options?: FetchPageOptions) => {
   const params = buildPageQuery(options);
   const query = params.toString();
-  const path = query ? `/api/positions?${query}` : '/api/positions';
-  return api<PageResponse<{ symbol: string; qty: number; entry: number; mark: number; pnl: number }>>(
-    path,
-    undefined,
-    options?.signal,
-  );
+  const path = query ? `/api/positions?${query}` : "/api/positions";
+  return api<
+    PageResponse<{ symbol: string; qty: number; entry: number; mark: number; pnl: number }>
+  >(path, undefined, options?.signal);
 };
 
 export const getRecentTrades = (options?: FetchPageOptions) => {
   const params = buildPageQuery({ limit: options?.limit ?? 100, cursor: options?.cursor });
   const query = params.toString();
-  const path = query ? `/api/trades/recent?${query}` : '/api/trades/recent';
+  const path = query ? `/api/trades/recent?${query}` : "/api/trades/recent";
   return api<PageResponse<Trade>>(path, undefined, options?.signal);
 };
 
 export const getAlerts = (options?: FetchPageOptions) => {
   const params = buildPageQuery({ limit: options?.limit ?? 50, cursor: options?.cursor });
   const query = params.toString();
-  const path = query ? `/api/alerts?${query}` : '/api/alerts';
+  const path = query ? `/api/alerts?${query}` : "/api/alerts";
   return api<PageResponse<Alert>>(path, undefined, options?.signal);
 };
 
 export const getOpenOrders = (options?: FetchPageOptions) => {
   const params = buildPageQuery({ cursor: options?.cursor, limit: options?.limit ?? 100 });
   const query = params.toString();
-  const path = query ? `/api/orders/open?${query}` : '/api/orders/open';
+  const path = query ? `/api/orders/open?${query}` : "/api/orders/open";
   return api<PageResponse<Order>>(path, undefined, options?.signal);
 };
 
 export const getMetricsModels = (options?: FetchPageOptions) => {
   const params = buildPageQuery({ cursor: options?.cursor, limit: options?.limit ?? 50 });
   const query = params.toString();
-  const path = query ? `/api/metrics/models?${query}` : '/api/metrics/models';
+  const path = query ? `/api/metrics/models?${query}` : "/api/metrics/models";
   return api<PageResponse<MetricsModel>>(path, undefined, options?.signal);
 };
 
 export const getHealth = (signal?: AbortSignal) =>
   api<{
-    venues: Array<{ name: string; status: 'ok' | 'warn' | 'down'; latencyMs: number; queue: number }>;
-  }>('/api/health', undefined, signal);
+    venues: Array<{
+      name: string;
+      status: "ok" | "warn" | "down";
+      latencyMs: number;
+      queue: number;
+    }>;
+  }>("/api/health", undefined, signal);
 
 // Aggregated portfolio & exposure
 export const getAggregatePortfolio = (signal?: AbortSignal) =>
-  api<PortfolioAggregate>('/aggregate/portfolio', undefined, signal);
+  api<PortfolioAggregate>("/aggregate/portfolio", undefined, signal);
 
 export const getAggregateExposure = (signal?: AbortSignal) =>
-  api<ExposureAggregate>('/aggregate/exposure', undefined, signal);
+  api<ExposureAggregate>("/aggregate/exposure", undefined, signal);
 
 export const getAggregatePnl = (signal?: AbortSignal) =>
-  api<PnlSnapshot>('/aggregate/pnl', undefined, signal);
+  api<PnlSnapshot>("/aggregate/pnl", undefined, signal);
 
 export const getOpsStatus = (signal?: AbortSignal) =>
   api<{ ok: boolean; state: { trading_enabled?: boolean } & Record<string, unknown> }>(
-    '/status',
+    "/status",
     undefined,
     signal,
   );
 
 // Config
 export const getConfigEffective = (signal?: AbortSignal) =>
-  api<ConfigEffective>('/api/config/effective', undefined, signal);
+  api<ConfigEffective>("/api/config/effective", undefined, signal);
 
-export const updateConfig = (
-  payload: Record<string, unknown>,
-  options: ControlRequestOptions,
-) =>
+export const updateConfig = (payload: Record<string, unknown>, options: ControlRequestOptions) =>
   api<ConfigEffective>(
-    '/api/config',
+    "/api/config",
     {
-      method: 'PUT',
+      method: "PUT",
       body: JSON.stringify(payload),
       headers: buildControlHeaders(options),
     },
@@ -321,16 +327,14 @@ export const updateConfig = (
 export const setTradingEnabled = (
   enabled: boolean,
   options: ControlRequestOptions,
-  reason?: string
+  reason?: string,
 ) =>
   api<{ trading_enabled: boolean; ts: number }>(
-    '/api/ops/kill-switch',
+    "/api/ops/kill-switch",
     {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(
-        reason && reason.trim()
-          ? { enabled, reason: reason.trim() }
-          : { enabled }
+        reason && reason.trim() ? { enabled, reason: reason.trim() } : { enabled },
       ),
       headers: buildControlHeaders(options),
     },
@@ -343,9 +347,9 @@ export const flattenPositions = (options: ControlRequestOptions) =>
     requested: number;
     succeeded: number;
   }>(
-    '/api/ops/flatten',
+    "/api/ops/flatten",
     {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify({}),
       headers: buildControlHeaders(options),
     },
@@ -354,9 +358,9 @@ export const flattenPositions = (options: ControlRequestOptions) =>
 
 export const issueWebsocketSession = (options: ControlRequestOptions) =>
   api<{ session: string; expires: number }>(
-    '/api/ops/ws-session',
+    "/api/ops/ws-session",
     {
-      method: 'POST',
+      method: "POST",
       headers: buildControlHeaders(options),
     },
     options?.signal,

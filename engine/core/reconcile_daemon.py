@@ -7,7 +7,7 @@ Reconciles discrepancies automatically on boot and continuously during runtime.
 
 import asyncio
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from ..metrics import REGISTRY
 from .oms_models import OrderRecord, new_order_id
@@ -21,6 +21,13 @@ _reconcile_imported = REGISTRY.metric(
 )
 _reconcile_closed = REGISTRY.metric(
     "reconcile_closed_total", "Orders closed during reconciliation", "counter"
+)
+_SYNC_ERRORS: tuple[type[Exception], ...] = (
+    asyncio.TimeoutError,
+    ConnectionError,
+    ValueError,
+    KeyError,
+    RuntimeError,
 )
 
 
@@ -39,8 +46,8 @@ async def reconcile_loop(interval: int = 30) -> None:
             _reconcile_runs.inc()
             await asyncio.sleep(interval)
 
-        except Exception as e:
-            logging.warning("[SYNC] Reconciliation error: %s", e)
+        except _SYNC_ERRORS as exc:
+            logging.warning("[SYNC] Reconciliation error: %s", exc)
             await asyncio.sleep(interval)
 
 
@@ -105,17 +112,17 @@ async def _perform_reconciliation() -> None:
                         # Found remote order not in local OMS - import it
                         await _import_remote_order(remote_order, venue)
 
-            except Exception as ven_e:
+            except _SYNC_ERRORS as ven_e:
                 logging.warning("[SYNC] Venue %s reconciliation failed: %s", venue, ven_e)
 
         # Persist updated OMS state
         _oms._persist()
 
-    except Exception as e:
-        logging.error("[SYNC] Reconciliation failure: %s", e)
+    except _SYNC_ERRORS:
+        logging.exception("[SYNC] Reconciliation failure")
 
 
-async def _import_remote_order(remote_order: Dict[str, Any], venue: str) -> None:
+async def _import_remote_order(remote_order: dict[str, Any], venue: str) -> None:
     """
     Import an externally placed order into local OMS.
 
@@ -162,15 +169,14 @@ async def _import_remote_order(remote_order: Dict[str, Any], venue: str) -> None
             symbol,
         )
 
-    except Exception as e:
-        logging.error(
-            "[SYNC] Failed to import remote order %s: %s",
+    except _SYNC_ERRORS:
+        logging.exception(
+            "[SYNC] Failed to import remote order %s",
             remote_order.get("order_id"),
-            e,
         )
 
 
-async def reconcile_once() -> Dict[str, int]:
+async def reconcile_once() -> dict[str, int]:
     """
     Perform a single reconciliation run.
 

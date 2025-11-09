@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, MutableMapping, Optional, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
+from typing import Any
 
 from .base import (
     StrategyCandidate,
@@ -38,11 +39,11 @@ class MomentumBreakoutScreener(StrategyScreener):
     def evaluate(
         self,
         symbol: str,
-        meta: Optional[Mapping[str, Any]],
+        meta: Mapping[str, Any] | None,
         klines: Sequence[Sequence[Any]],
         book: Mapping[str, Any],
         features: Mapping[str, Any],
-    ) -> Optional[StrategyCandidate]:
+    ) -> StrategyCandidate | None:
         move_15 = float(features.get("r15", 0.0))
         long_term = float(features.get("r60", 0.0))
         vol_boost = float(features.get("vol_accel_5m_over_30m", 0.0))

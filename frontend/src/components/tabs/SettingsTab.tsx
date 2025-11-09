@@ -1,55 +1,46 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Copy, Download, RefreshCw } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy, Download, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
-import { getConfigEffective, type ControlRequestOptions, updateConfig } from '../../lib/api';
-import { generateIdempotencyKey } from '../../lib/idempotency';
-import { queryKeys } from '../../lib/queryClient';
-import { useAppStore } from '../../lib/store';
-import {
-  configEffectiveSchema,
-  validateApiResponse,
-} from '../../lib/validation';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '../ui/card';
-import { Input } from '../ui/input';
-import { Label } from '../ui/label';
-import { Skeleton } from '../ui/skeleton';
-import { Textarea } from '../ui/textarea';
+import { getConfigEffective, type ControlRequestOptions, updateConfig } from "../../lib/api";
+import { generateIdempotencyKey } from "../../lib/idempotency";
+import { queryKeys } from "../../lib/queryClient";
+import { useAppStore } from "../../lib/store";
+import { configEffectiveSchema, validateApiResponse } from "../../lib/validation";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Skeleton } from "../ui/skeleton";
+import { Textarea } from "../ui/textarea";
 
 const CONFIG_FLAGS = [
   {
-    key: 'DRY_RUN' as const,
-    label: 'Dry Run',
-    description: 'Route execution in simulation mode without placing real orders.',
+    key: "DRY_RUN" as const,
+    label: "Dry Run",
+    description: "Route execution in simulation mode without placing real orders.",
   },
   {
-    key: 'SYMBOL_SCANNER_ENABLED' as const,
-    label: 'Symbol Scanner',
-    description: 'Continuously refresh the universe scanner feed.',
+    key: "SYMBOL_SCANNER_ENABLED" as const,
+    label: "Symbol Scanner",
+    description: "Continuously refresh the universe scanner feed.",
   },
   {
-    key: 'SOFT_BREACH_ENABLED' as const,
-    label: 'Soft Breach Guard',
-    description: 'Alerts and guard-rail for risk rails before hard stops trigger.',
+    key: "SOFT_BREACH_ENABLED" as const,
+    label: "Soft Breach Guard",
+    description: "Alerts and guard-rail for risk rails before hard stops trigger.",
   },
   {
-    key: 'SOFT_BREACH_BREAKEVEN_OK' as const,
-    label: 'Breakeven Allowed',
-    description: 'Permit breakeven exits when a soft breach fires.',
+    key: "SOFT_BREACH_BREAKEVEN_OK" as const,
+    label: "Breakeven Allowed",
+    description: "Permit breakeven exits when a soft breach fires.",
   },
   {
-    key: 'SOFT_BREACH_CANCEL_ENTRIES' as const,
-    label: 'Cancel Entries',
-    description: 'Cancel outstanding entry orders when a soft breach triggers.',
+    key: "SOFT_BREACH_CANCEL_ENTRIES" as const,
+    label: "Cancel Entries",
+    description: "Cancel outstanding entry orders when a soft breach triggers.",
   },
 ];
 
@@ -61,14 +52,14 @@ export function SettingsTab() {
   const setOpsActor = useAppStore((state) => state.setOpsActor);
   const [opsTokenInput, setOpsTokenInput] = useState(opsToken);
   const [opsActorInput, setOpsActorInput] = useState(opsActor);
-  const [overrideDraft, setOverrideDraft] = useState('{}');
+  const [overrideDraft, setOverrideDraft] = useState("{}");
   const [overrideTouched, setOverrideTouched] = useState(false);
 
   const configQuery = useQuery({
     queryKey: queryKeys.settings.config(),
     queryFn: () =>
       getConfigEffective().then((data) =>
-        validateApiResponse(configEffectiveSchema, data, 'Runtime config')
+        validateApiResponse(configEffectiveSchema, data, "Runtime config"),
       ),
     refetchInterval: 60_000,
   });
@@ -90,7 +81,7 @@ export function SettingsTab() {
     const raw =
       configQuery.data?.effective?.SOFT_BREACH_TIGHTEN_SL_PCT ??
       configQuery.data?.overrides?.SOFT_BREACH_TIGHTEN_SL_PCT;
-    return typeof raw === 'number' ? raw : null;
+    return typeof raw === "number" ? raw : null;
   }, [configQuery.data]);
 
   const updateMutation = useMutation({
@@ -102,30 +93,25 @@ export function SettingsTab() {
       options: ControlRequestOptions;
     }) => {
       const response = await updateConfig(patch, options);
-      return validateApiResponse(
-        configEffectiveSchema,
-        response,
-        'Updated runtime config'
-      );
+      return validateApiResponse(configEffectiveSchema, response, "Updated runtime config");
     },
     onSuccess: (data) => {
-      toast.success('Runtime configuration updated');
+      toast.success("Runtime configuration updated");
       setOverrideTouched(false);
       setOverrideDraft(JSON.stringify(data.overrides ?? {}, null, 2));
       queryClient.setQueryData(queryKeys.settings.config(), data);
     },
     onError: (error: unknown) => {
-      toast.error('Failed to update configuration', {
-        description:
-          error instanceof Error ? error.message : 'Unknown error occurred',
+      toast.error("Failed to update configuration", {
+        description: error instanceof Error ? error.message : "Unknown error occurred",
       });
     },
   });
 
   const overridesInvalid = useMemo(() => {
     try {
-      const parsed = JSON.parse(overrideDraft || '{}');
-      return !(parsed && typeof parsed === 'object' && !Array.isArray(parsed));
+      const parsed = JSON.parse(overrideDraft || "{}");
+      return !(parsed && typeof parsed === "object" && !Array.isArray(parsed));
     } catch {
       return true;
     }
@@ -133,24 +119,24 @@ export function SettingsTab() {
 
   const handleSubmit = () => {
     if (!opsToken.trim()) {
-      toast.error('Provide an OPS API token to update configuration');
+      toast.error("Provide an OPS API token to update configuration");
       return;
     }
     if (!opsActorInput.trim()) {
-      toast.error('Provide an operator call-sign for audit logging');
+      toast.error("Provide an operator call-sign for audit logging");
       return;
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(overrideDraft || '{}');
+      parsed = JSON.parse(overrideDraft || "{}");
     } catch (error) {
-      toast.error('Overrides JSON is invalid', {
+      toast.error("Overrides JSON is invalid", {
         description: error instanceof Error ? error.message : undefined,
       });
       return;
     }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      toast.error('Overrides must be a JSON object');
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      toast.error("Overrides must be a JSON object");
       return;
     }
     updateMutation.mutate({
@@ -158,7 +144,7 @@ export function SettingsTab() {
       options: {
         token: opsToken.trim(),
         actor: opsActorInput.trim(),
-        idempotencyKey: generateIdempotencyKey('config'),
+        idempotencyKey: generateIdempotencyKey("config"),
       },
     });
   };
@@ -177,10 +163,10 @@ export function SettingsTab() {
   const handleDownload = (payload: unknown, filename: string) => {
     try {
       const blob = new Blob([JSON.stringify(payload, null, 2)], {
-        type: 'application/json',
+        type: "application/json",
       });
       const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
+      const link = document.createElement("a");
       link.href = url;
       link.download = filename;
       document.body.appendChild(link);
@@ -188,7 +174,7 @@ export function SettingsTab() {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
     } catch (error) {
-      toast.error('Download failed', {
+      toast.error("Download failed", {
         description: error instanceof Error ? error.message : undefined,
       });
     }
@@ -228,9 +214,12 @@ export function SettingsTab() {
             autoComplete="off"
           />
           <p className="text-xs text-zinc-500">
-            When running locally, export <code>OPS_API_TOKEN</code> or <code>OPS_API_TOKEN_FILE</code> and reuse that value here for authenticated updates.
+            When running locally, export <code>OPS_API_TOKEN</code> or{" "}
+            <code>OPS_API_TOKEN_FILE</code> and reuse that value here for authenticated updates.
           </p>
-          <Label htmlFor="ops-actor" className="pt-2">Operator (audit log, required)</Label>
+          <Label htmlFor="ops-actor" className="pt-2">
+            Operator (audit log, required)
+          </Label>
           <Input
             id="ops-actor"
             type="text"
@@ -257,9 +246,7 @@ export function SettingsTab() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() =>
-                handleCopy(configQuery.data?.overrides ?? {}, 'Overrides JSON')
-              }
+              onClick={() => handleCopy(configQuery.data?.overrides ?? {}, "Overrides JSON")}
               disabled={configQuery.isLoading}
             >
               <Copy className="mr-2 h-4 w-4" />
@@ -269,10 +256,7 @@ export function SettingsTab() {
               variant="outline"
               size="sm"
               onClick={() =>
-                handleDownload(
-                  configQuery.data?.effective ?? {},
-                  'runtime-config.json'
-                )
+                handleDownload(configQuery.data?.effective ?? {}, "runtime-config.json")
               }
               disabled={configQuery.isLoading}
             >
@@ -301,14 +285,12 @@ export function SettingsTab() {
                     className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-4"
                   >
                     <div className="flex items-center justify-between pb-2">
-                      <p className="text-sm font-medium text-zinc-200">
-                        {flag.label}
-                      </p>
+                      <p className="text-sm font-medium text-zinc-200">{flag.label}</p>
                       <Badge
-                        variant={enabled ? 'secondary' : 'outline'}
-                        className={enabled ? 'bg-emerald-500/10 text-emerald-300' : ''}
+                        variant={enabled ? "secondary" : "outline"}
+                        className={enabled ? "bg-emerald-500/10 text-emerald-300" : ""}
                       >
-                        {enabled ? 'ENABLED' : 'DISABLED'}
+                        {enabled ? "ENABLED" : "DISABLED"}
                       </Badge>
                     </div>
                     <p className="text-xs text-zinc-500">{flag.description}</p>
@@ -318,14 +300,12 @@ export function SettingsTab() {
             </div>
           )}
           <div className="mt-6 rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-4">
-            <p className="text-sm font-medium text-zinc-200">
-              Soft Breach tighten stop-loss
-            </p>
+            <p className="text-sm font-medium text-zinc-200">Soft Breach tighten stop-loss</p>
             <p className="text-xs text-zinc-500">
               Percentage applied to tighten the stop-loss when a soft breach occurs.
             </p>
             <div className="mt-3 text-lg font-semibold text-zinc-100">
-              {tightenPct !== null ? `${(tightenPct * 100).toFixed(1)}%` : '—'}
+              {tightenPct !== null ? `${(tightenPct * 100).toFixed(1)}%` : "—"}
             </div>
           </div>
         </CardContent>
@@ -343,11 +323,9 @@ export function SettingsTab() {
             variant="secondary"
             size="sm"
             onClick={handleSubmit}
-            disabled={
-              updateMutation.isPending || overridesInvalid || !overrideTouched
-            }
+            disabled={updateMutation.isPending || overridesInvalid || !overrideTouched}
           >
-            {updateMutation.isPending ? 'Saving…' : 'Save overrides'}
+            {updateMutation.isPending ? "Saving…" : "Save overrides"}
           </Button>
         </CardHeader>
         <CardContent>
@@ -380,7 +358,8 @@ export function SettingsTab() {
         <CardHeader>
           <CardTitle>Effective Configuration</CardTitle>
           <CardDescription>
-            Resulting payload served to clients (<code>config/runtime.yaml</code> merged with overrides).
+            Resulting payload served to clients (<code>config/runtime.yaml</code> merged with
+            overrides).
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -397,7 +376,8 @@ export function SettingsTab() {
       </Card>
 
       <p className="text-xs text-zinc-500">
-        Updates apply immediately and are persisted by the Ops service. Keep your token secure; the Command Center never stores it beyond this session.
+        Updates apply immediately and are persisted by the Ops service. Keep your token secure; the
+        Command Center never stores it beyond this session.
       </p>
     </div>
   );

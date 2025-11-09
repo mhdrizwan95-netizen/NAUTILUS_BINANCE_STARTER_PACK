@@ -9,7 +9,22 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
+
+try:
+    from ib_insync.util import IBError
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    IBError = None  # type: ignore[assignment]
+
 from engine.connectors.ibkr_client import IbkrClient
+
+logger = logging.getLogger(__name__)
+IBKR_ERRORS: tuple[type[Exception], ...] = (IBError,) if IBError is not None else ()
+QUOTE_UNSUPPORTED_MSG = "QUOTE_UNSUPPORTED: IBKR router must convert quote to integer shares"
+
+
+def _log_suppressed(context: str, err: Exception) -> None:
+    logger.warning("[IBKR Venue] %s: %s", context, err, exc_info=True)
 
 
 class IbkrVenue:
@@ -32,7 +47,7 @@ class IbkrVenue:
     ) -> dict[str, Any]:
         """Place market order via IBKR. Only supports quantity (integer shares)."""
         if quote is not None:
-            raise ValueError("QUOTE_UNSUPPORTED: IBKR router must convert quote to integer shares")
+            raise ValueError(QUOTE_UNSUPPORTED_MSG)
 
         clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
         quantity_int = int(quantity or 0)
@@ -60,21 +75,21 @@ class IbkrVenue:
         """List open orders for IBKR reconciliation."""
         try:
             orders = self._c.ib.openOrders()
-            return [
-                {
-                    "order_id": str(o.orderId),
-                    "symbol": o.contract.symbol,
-                    "side": o.action,
-                    "type": o.orderType,
-                    "price": o.l_auxPrice or o.lmtPrice or 0.0,
-                    "stop_price": o.auxPrice if o.orderType.startswith("STP") else 0.0,
-                    "origQty": o.totalQuantity,
-                    "executedQty": 0.0,  # IBKR doesn't expose partial fills easily
-                    "status": "Submitted",  # IBKR openOrders are active
-                    "timeInForce": o.tif or "GTC",
-                }
-                for o in orders
-            ]
-        except Exception as e:
-            logging.warning(f"[IBKR] Failed to list open orders: {e}")
+        except (*IBKR_ERRORS, httpx.HTTPError, ValueError, KeyError) as exc:
+            _log_suppressed("list open orders failed", exc)
             return []
+        return [
+            {
+                "order_id": str(o.orderId),
+                "symbol": o.contract.symbol,
+                "side": o.action,
+                "type": o.orderType,
+                "price": o.l_auxPrice or o.lmtPrice or 0.0,
+                "stop_price": o.auxPrice if o.orderType.startswith("STP") else 0.0,
+                "origQty": o.totalQuantity,
+                "executedQty": 0.0,  # IBKR doesn't expose partial fills easily
+                "status": "Submitted",  # IBKR openOrders are active
+                "timeInForce": o.tif or "GTC",
+            }
+            for o in orders
+        ]

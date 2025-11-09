@@ -2,7 +2,7 @@ import json
 import shutil
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from joblib import dump, load
 from loguru import logger
@@ -20,7 +20,7 @@ def _current_symlink() -> Path:
     return Path(settings.CURRENT_SYMLINK)
 
 
-def save_version(model, scaler, metadata: Dict[str, Any]) -> Path:
+def save_version(model, scaler, metadata: dict[str, Any]) -> Path:
     ts = time.strftime("%Y-%m-%dT%H-%M-%SZ", time.gmtime())
     version_id = f"{ts}__hmm{metadata.get('n_states','x')}"
     version_dir = _registry() / version_id

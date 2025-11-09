@@ -5,9 +5,11 @@ import logging
 import os
 import ssl
 import time
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import websockets
+from websockets.exceptions import WebSocketException
 
 from engine.metrics import (
     ENTRY_PRICE_USD,
@@ -20,6 +22,17 @@ from engine.metrics import (
 )
 
 logger = logging.getLogger("kraken_ws")
+
+_JSON_ERRORS: tuple[type[Exception], ...] = (json.JSONDecodeError, TypeError)
+_FLOAT_ERRORS: tuple[type[Exception], ...] = (TypeError, ValueError)
+_PROM_ERRORS: tuple[type[Exception], ...] = (ValueError, TypeError)
+_CALLBACK_ERRORS: tuple[type[Exception], ...] = (RuntimeError, ValueError, TypeError)
+_WS_ERRORS: tuple[type[Exception], ...] = (
+    asyncio.TimeoutError,
+    WebSocketException,
+    OSError,
+    ConnectionError,
+)
 
 
 def _log_suppressed(context: str, exc: Exception) -> None:
@@ -36,8 +49,8 @@ async def _safe_call(cb, *args):
         res = cb(*args)
         if inspect.isawaitable(res):
             asyncio.ensure_future(res)
-    except Exception as exc:
-        logger.warning("[WS] callback error: %s", exc)
+    except _CALLBACK_ERRORS as exc:
+        _log_suppressed("kraken_ws.callback", exc)
 
 
 class KrakenWS:
@@ -91,7 +104,7 @@ class KrakenWS:
                     async for msg in ws:
                         try:
                             data = json.loads(msg)
-                        except Exception as exc:
+                        except _JSON_ERRORS as exc:
                             logger.warning("[WS] invalid message: %s", exc)
                             continue
 
@@ -106,11 +119,11 @@ class KrakenWS:
                             ask = data.get("ask") or 0.0
                             try:
                                 price = (float(bid) + float(ask)) / 2.0
-                            except Exception:
+                            except _FLOAT_ERRORS:
                                 price = 0.0
                         try:
                             price_f = float(price)
-                        except Exception:
+                        except _FLOAT_ERRORS:
                             price_f = 0.0
                         if price_f <= 0.0:
                             continue
@@ -121,16 +134,16 @@ class KrakenWS:
                                 cache_fn = getattr(self._rest_client, "cache_price", None)
                                 if callable(cache_fn):
                                     cache_fn(sym, price_f)
-                        except Exception as exc:
+                        except _CALLBACK_ERRORS as exc:
                             _log_suppressed("kraken_ws.cache_price", exc)
                         await _safe_call(self._emit_price, sym, price_f, data)
-            except Exception as exc:
-                logger.error("[WS] Kraken WS connection error: %s", exc)
+            except _WS_ERRORS:
+                logger.exception("[WS] Kraken WS connection error")
                 try:
                     ctr = REGISTRY.get("ws_disconnects_total")
                     if ctr:
                         ctr.inc()
-                except Exception as counter_exc:
+                except _PROM_ERRORS as counter_exc:
                     _log_suppressed("kraken_ws.disconnect_metric", counter_exc)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2.0, 30.0)
@@ -145,7 +158,7 @@ class KrakenWS:
             if hasattr(portfolio, "update_price"):
                 try:
                     portfolio.update_price(sym, mark)
-                except Exception as exc:
+                except _CALLBACK_ERRORS as exc:
                     _log_suppressed("kraken_ws.portfolio_update_price", exc)
 
             positions = None
@@ -175,10 +188,10 @@ class KrakenWS:
             try:
                 position_amt_by_symbol.labels(symbol=base_symbol).set(qty)
                 unrealized_profit_by_symbol.labels(symbol=base_symbol).set(upnl)
-            except Exception as exc:
+            except _PROM_ERRORS as exc:
                 _log_suppressed("kraken_ws.unrealized_metrics", exc)
-        except Exception as e:
-            logger.warning(f"[WS] Error updating UPNL for {sym}: {e}")
+        except _CALLBACK_ERRORS as exc:
+            logger.warning("[WS] Error updating UPNL for %s: %s", sym, exc)
 
     def set_price_callback(self, cb):
         self._on_price_cb = cb
@@ -192,17 +205,17 @@ class KrakenWS:
         if self._price_hook:
             try:
                 ts_float = float(ts) if isinstance(ts, (int, float)) else time.time()
-            except Exception:
+            except _FLOAT_ERRORS:
                 ts_float = time.time()
             try:
                 self._price_hook(qual, sym, float(price), ts_float)
-            except Exception as exc:
-                logger.warning("[WS] price hook error for %s: %s", sym, exc)
+            except _CALLBACK_ERRORS as exc:
+                _log_suppressed("kraken_ws.price_hook", exc)
         if not cb:
             return
         try:
             res = cb(qual, price, ts)
             if inspect.isawaitable(res):
                 asyncio.ensure_future(res)
-        except Exception as exc:
-            logger.warning(f"[WS] Error in price callback for {sym}: {exc}")
+        except _CALLBACK_ERRORS as exc:
+            _log_suppressed("kraken_ws.price_callback", exc)

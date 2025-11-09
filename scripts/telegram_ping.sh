@@ -78,4 +78,3 @@ fi
 
 echo "error: curl failed (exit $status)." >&2
 exit $status
-

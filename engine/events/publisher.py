@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Iterable, List, Sequence
+from collections.abc import Iterable, Sequence
 
 from engine import metrics
 from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
@@ -15,8 +15,8 @@ _LOG = logging.getLogger("engine.events.publisher")
 _DEFAULT_PRIORITY = 0.5
 
 
-def _normalize_hints(candidates: Iterable[str]) -> List[str]:
-    hints: List[str] = []
+def _normalize_hints(candidates: Iterable[str]) -> list[str]:
+    hints: list[str] = []
     for item in candidates:
         if not item:
             continue
@@ -26,7 +26,7 @@ def _normalize_hints(candidates: Iterable[str]) -> List[str]:
         hints.append(text.upper())
     # Remove duplicates while preserving order
     seen = set()
-    deduped: List[str] = []
+    deduped: list[str] = []
     for hint in hints:
         if hint in seen:
             continue
@@ -35,9 +35,9 @@ def _normalize_hints(candidates: Iterable[str]) -> List[str]:
     return deduped
 
 
-def _derive_hints(event: ExternalEvent) -> List[str]:
+def _derive_hints(event: ExternalEvent) -> list[str]:
     payload = event.payload or {}
-    candidates: List[str] = []
+    candidates: list[str] = []
     for key in ("asset_hints", "symbols", "symbol", "tickers", "pairs", "pair"):
         value = payload.get(key)
         if isinstance(value, (list, tuple, set)):

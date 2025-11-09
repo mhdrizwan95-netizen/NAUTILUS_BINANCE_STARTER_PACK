@@ -15,7 +15,6 @@ import asyncio
 import logging
 import os
 import time
-from typing import Dict, List
 
 from engine.events.publisher import publish_external_event
 from engine.events.schemas import ExternalEvent
@@ -27,20 +26,36 @@ from engine.metrics import (
 LOGGER = logging.getLogger("engine.feeds.binance_announcements")
 EVENT_SOURCE = "binance_announcements"
 DEFAULT_PRIORITY = 0.85
+_FETCH_ERRORS = (
+    asyncio.TimeoutError,
+    ConnectionError,
+    RuntimeError,
+    ValueError,
+)
+_PUBLISH_ERRORS = (
+    RuntimeError,
+    ValueError,
+)
 
 
-async def _fetch_announcements() -> List[Dict]:
+def _log_suppressed(context: str, exc: Exception) -> None:
+    LOGGER.debug("%s suppressed: %s", context, exc, exc_info=True)
+
+
+async def _fetch_announcements() -> list[dict]:
     """Placeholder fetcher – override with a real implementation."""
 
     return []
 
 
 async def _publish(
-    payload: Dict[str, object],
+    payload: dict[str, object],
     *,
     priority: float = DEFAULT_PRIORITY,
     ttl_sec: float | None = None,
 ) -> None:
+    symbol_hint = str(payload.get("symbol") or "")
+    asset_hints = [symbol_hint] if symbol_hint else []
     meta = {"priority": priority}
     if ttl_sec is not None:
         meta["ttl_sec"] = ttl_sec
@@ -49,7 +64,7 @@ async def _publish(
         event,
         priority=priority,
         expires_at=(time.time() + ttl_sec) if ttl_sec is not None else None,
-        asset_hints=[payload.get("symbol")],
+        asset_hints=asset_hints,
     )
 
 
@@ -110,14 +125,10 @@ async def run() -> None:
                     try:
                         await _publish(payload, ttl_sec=ttl)
                         seen[key] = now + ttl
-                    except Exception as exc:  # noqa: BLE001
+                    except _PUBLISH_ERRORS as exc:
                         external_feed_errors_total.labels(EVENT_SOURCE).inc()
-                        LOGGER.debug(
-                            "binance announcement publish failed: %s",
-                            exc,
-                            exc_info=True,
-                        )
-        except Exception as exc:  # noqa: BLE001
+                        _log_suppressed("binance_announcements.publish", exc)
+        except _FETCH_ERRORS as exc:
             external_feed_errors_total.labels(EVENT_SOURCE).inc()
             LOGGER.warning("binance announcement loop error: %s", exc, exc_info=True)
 

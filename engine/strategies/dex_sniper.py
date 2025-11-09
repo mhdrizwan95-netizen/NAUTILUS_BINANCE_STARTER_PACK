@@ -10,12 +10,29 @@ so real swap adapters can be dropped in later without touching orchestration.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from engine.core.event_bus import BUS
 from engine.dex import DexConfig, DexExecutor, DexState
 
 logger = logging.getLogger("engine.strategies.dex_sniper")
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
+
+class DexSniperConfigurationError(RuntimeError):
+    """Raised when DexSniper is misconfigured."""
+
+    def __init__(self) -> None:
+        super().__init__("DexExecutor instance is required")
 
 
 class DexSniper:
@@ -28,7 +45,7 @@ class DexSniper:
         self.cfg = cfg
         self.state = state or DexState(cfg.state_path)
         if executor is None:
-            raise ValueError("DexExecutor required")
+            raise DexSniperConfigurationError()
         self.executor = executor
 
     # --------------------------------------------------------------------- helpers
@@ -47,7 +64,7 @@ class DexSniper:
         except (TypeError, ValueError):
             return 0.0
 
-    def _validate_candidate(self, payload: Dict[str, Any]) -> bool:
+    def _validate_candidate(self, payload: dict[str, Any]) -> bool:
         liq = self._sanitize_float(payload.get("liq") or payload.get("liquidity"))
         if liq and liq < self.cfg.min_liq_usd:
             logger.debug("[DEX] liquidity %.0f below floor %.0f", liq, self.cfg.min_liq_usd)
@@ -70,7 +87,7 @@ class DexSniper:
     def _targets(self) -> Iterable[tuple[float, float]]:
         return self.cfg.tp_targets
 
-    async def handle_candidate(self, payload: Dict[str, Any]) -> bool:
+    async def handle_candidate(self, payload: dict[str, Any]) -> bool:
         if not self.cfg.exec_enabled:
             return False
 
@@ -102,7 +119,7 @@ class DexSniper:
             fill = await self.executor.buy(
                 symbol=symbol, token_address=token_addr, notional_usd=notional
             )
-        except Exception as exc:  # noqa: BLE001
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
             logger.warning("[DEX] execution failed for %s: %s", symbol, exc)
             return False
 
@@ -139,8 +156,10 @@ class DexSniper:
                     "pos_id": position.pos_id,
                 },
             )
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            logger.debug(
+                "[DEX] failed to publish open event for %s", position.symbol, exc_info=True
+            )
 
     # --------------------------------------------------------------------- public
     async def flatten_all(self) -> None:
@@ -148,8 +167,8 @@ class DexSniper:
         for pos in list(self.state.open_positions()):
             try:
                 await self.executor.sell(symbol=pos.symbol, token_address=pos.address, qty=pos.qty)
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                logger.warning("[DEX] flatten failed for %s", pos.symbol, exc_info=True)
             self.state.close_position(pos.pos_id, reason="flatten_all")
 
     def active_symbols(self) -> list[str]:

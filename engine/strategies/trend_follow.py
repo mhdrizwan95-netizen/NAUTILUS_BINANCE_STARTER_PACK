@@ -4,7 +4,7 @@ import logging
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import httpx
 
@@ -15,6 +15,17 @@ from engine.core.market_resolver import resolve_market_choice
 from engine.universe.effective import StrategyUniverse
 
 from .trend_params import TrendAutoTuner, TrendParams
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    httpx.HTTPError,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from .symbol_scanner import SymbolScanner
@@ -39,7 +50,7 @@ class TrendTF:
 class TrendStrategyConfig:
     enabled: bool
     dry_run: bool
-    symbols: List[str]
+    symbols: list[str]
     fetch_limit: int
     refresh_sec: int
     atr_length: int
@@ -68,7 +79,7 @@ class TrendStrategyConfig:
     regime: TrendTF
 
 
-def load_trend_config(scanner: "SymbolScanner" | None = None) -> TrendStrategyConfig:
+def load_trend_config(scanner: SymbolScanner | None = None) -> TrendStrategyConfig:
     universe = StrategyUniverse(scanner).get("trend") or []
     primary = TrendTF(
         interval=env_str("TREND_PRIMARY_INTERVAL", TREND_DEFAULTS["TREND_PRIMARY_INTERVAL"]),
@@ -141,13 +152,13 @@ def load_trend_config(scanner: "SymbolScanner" | None = None) -> TrendStrategyCo
     )
 
 
-def _sma(values: List[float], length: int) -> Optional[float]:
+def _sma(values: list[float], length: int) -> float | None:
     if length <= 0 or len(values) < length:
         return None
     return sum(values[-length:]) / float(length)
 
 
-def _rsi(values: List[float], length: int) -> Optional[float]:
+def _rsi(values: list[float], length: int) -> float | None:
     if length <= 1 or len(values) <= length:
         return None
     gains = []
@@ -164,10 +175,10 @@ def _rsi(values: List[float], length: int) -> Optional[float]:
     return 100.0 - (100.0 / (1.0 + rs))
 
 
-def _atr(klines: List[List[float]], length: int) -> Optional[float]:
+def _atr(klines: list[list[float]], length: int) -> float | None:
     if length <= 0 or len(klines) <= length:
         return None
-    trs: List[float] = []
+    trs: list[float] = []
     prev_close = float(klines[-length - 1][4])
     for row in klines[-length:]:
         high = float(row[2])
@@ -181,7 +192,7 @@ def _atr(klines: List[List[float]], length: int) -> Optional[float]:
     return sum(trs) / len(trs)
 
 
-def _swing_low(klines: List[List[float]], lookback: int) -> Optional[float]:
+def _swing_low(klines: list[list[float]], lookback: int) -> float | None:
     if lookback <= 0 or len(klines) < lookback:
         return None
     lows = [float(row[3]) for row in klines[-lookback:]]
@@ -200,10 +211,10 @@ class TrendStrategyModule:
         self,
         cfg: TrendStrategyConfig,
         *,
-        client: Optional["_SyncKlinesClient"] = None,
+        client: _SyncKlinesClient | None = None,
         clock=time,
-        logger: Optional[logging.Logger] = None,
-        scanner: Optional["SymbolScanner"] = None,
+        logger: logging.Logger | None = None,
+        scanner: SymbolScanner | None = None,
     ) -> None:
         self.cfg = cfg
         self.enabled = bool(cfg.enabled)
@@ -217,26 +228,26 @@ class TrendStrategyModule:
         try:
             settings = get_settings()
             self._venue = getattr(settings, "venue", "BINANCE").upper()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
         self._default_market = "futures" if cfg.allow_shorts else "spot"
-        self._cache: Dict[str, Dict[str, List[List[float]]]] = defaultdict(dict)
-        self._last_fetch: Dict[Tuple[str, str], float] = defaultdict(float)
-        self._state: Dict[str, str] = defaultdict(lambda: "FLAT")
-        self._cooldown_until: Dict[str, float] = defaultdict(float)
-        self._entry_quote: Dict[str, float] = {}
-        self._entry_price: Dict[str, float] = {}
-        self._stop_levels: Dict[str, float] = {}
-        self._targets: Dict[str, float] = {}
+        self._cache: dict[str, dict[str, list[list[float]]]] = defaultdict(dict)
+        self._last_fetch: dict[tuple[str, str], float] = defaultdict(float)
+        self._state: dict[str, str] = defaultdict(lambda: "FLAT")
+        self._cooldown_until: dict[str, float] = defaultdict(float)
+        self._entry_quote: dict[str, float] = {}
+        self._entry_price: dict[str, float] = {}
+        self._stop_levels: dict[str, float] = {}
+        self._targets: dict[str, float] = {}
         try:
             from engine import metrics as MET
 
             self._metrics = MET
-        except Exception:
+        except ImportError:
             self._metrics = None
 
     # --- public API ---
-    def handle_tick(self, symbol: str, price: float, ts: float) -> Optional[Dict[str, float | str]]:
+    def handle_tick(self, symbol: str, price: float, ts: float) -> dict[str, float | str] | None:
         if not self.enabled:
             return None
         base = symbol.split(".")[0].upper()
@@ -254,8 +265,8 @@ class TrendStrategyModule:
         if snap is None:
             return None
 
-        action: Optional[Dict[str, float | str | Dict[str, float | str]]] = None
-        meta: Dict[str, float | str] = {
+        action: dict[str, float | str | dict[str, float | str]] | None = None
+        meta: dict[str, float | str] = {
             "primary_fast": snap["primary_fast"],
             "primary_slow": snap["primary_slow"],
             "rsi": snap["rsi_primary"],
@@ -329,7 +340,7 @@ class TrendStrategyModule:
         if action and "meta" in action:
             try:
                 self._log.info("[TREND] %s %s meta=%s", base, action["side"], action["meta"])
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
         return action
 
@@ -360,11 +371,11 @@ class TrendStrategyModule:
             if isinstance(snap, dict):
                 equity = snap.get("equity") or snap.get("cash") or 0.0
                 return float(equity or 0.0)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return 0.0
         return 0.0
 
-    def _long_entry_ready(self, snap: Dict[str, float]) -> bool:
+    def _long_entry_ready(self, snap: dict[str, float]) -> bool:
         fast = snap.get("primary_fast")
         slow = snap.get("primary_slow")
         sec_fast = snap.get("secondary_fast")
@@ -398,7 +409,7 @@ class TrendStrategyModule:
             return False
         return True
 
-    def _long_exit_ready(self, price: float, snap: Dict[str, float]) -> bool:
+    def _long_exit_ready(self, price: float, snap: dict[str, float]) -> bool:
         rsi = snap.get("rsi_primary")
         fast = snap.get("primary_fast")
         slow = snap.get("primary_slow")
@@ -423,7 +434,7 @@ class TrendStrategyModule:
                 side=side,
                 state=state,
             ).inc()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
     def _observe_stop_distance(self, symbol: str, distance_bps: float) -> None:
@@ -433,11 +444,11 @@ class TrendStrategyModule:
             self._metrics.trend_follow_stop_distance_bp.labels(
                 symbol=symbol, venue=self._venue
             ).observe(max(distance_bps, 0.0))
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
     def _record_trade(
-        self, symbol: str, pnl_pct: float, stop_bps: float, meta: Dict | None = None
+        self, symbol: str, pnl_pct: float, stop_bps: float, meta: dict | None = None
     ) -> None:
         result = "breakeven"
         if pnl_pct > 0.05:
@@ -452,11 +463,11 @@ class TrendStrategyModule:
                 self._metrics.trend_follow_trade_pnl_pct.labels(
                     symbol=symbol, venue=self._venue, result=result
                 ).observe(abs(pnl_pct))
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
         try:
             self._auto_tuner.observe_trade(symbol, pnl_pct, stop_bps, meta or {})
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             self._log.debug("[TREND] auto tuner observe failed", exc_info=True)
 
     @staticmethod
@@ -465,7 +476,7 @@ class TrendStrategyModule:
             return 0.0
         return max(0.0, (price - stop) / price * 10_000.0)
 
-    def _build_snapshot(self, base: str) -> Optional[Dict[str, float]]:
+    def _build_snapshot(self, base: str) -> dict[str, float] | None:
         primary = self._klines(base, self.cfg.primary.interval, self._params.primary_slow + 5)
         secondary = self._klines(base, self.cfg.secondary.interval, self._params.secondary_slow + 5)
         regime = self._klines(base, self.cfg.regime.interval, self._params.regime_slow + 5)
@@ -495,18 +506,18 @@ class TrendStrategyModule:
             snapshot["target"] = primary_closes[-1] + (atr_val * self._params.atr_target_mult)
         return snapshot
 
-    def _klines(self, base: str, interval: str, minimum: int) -> Optional[List[List[float]]]:
+    def _klines(self, base: str, interval: str, minimum: int) -> list[list[float]] | None:
         key = (base, interval)
         now = self._clock.time()
         cached = self._cache.get(base, {}).get(interval)
         if cached and now - self._last_fetch[key] < self.cfg.refresh_sec:
             return cached
-        data: Optional[List[List[float]]] = None
+        data: list[list[float]] | None = None
         try:
             data = self._client.klines(
                 base, interval=interval, limit=max(self.cfg.fetch_limit, minimum)
             )
-        except Exception as exc:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
             self._log.warning("[TREND] kline fetch failed for %s %s: %s", base, interval, exc)
             data = None
         if isinstance(data, list) and len(data) >= minimum:
@@ -528,7 +539,7 @@ class _SyncKlinesClient:
             self._headers["X-MBX-APIKEY"] = api_key
         self._is_futures = getattr(settings, "is_futures", False)
 
-    def klines(self, symbol: str, *, interval: str, limit: int) -> List[List[float]]:
+    def klines(self, symbol: str, *, interval: str, limit: int) -> list[list[float]]:
         path = "/fapi/v1/klines" if self._is_futures else "/api/v3/klines"
         resp = httpx.get(
             f"{self._base}{path}",

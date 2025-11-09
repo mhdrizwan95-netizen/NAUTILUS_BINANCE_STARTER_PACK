@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Sequence
+from typing import Any
+
+_PARSE_ERRORS = (TypeError, ValueError)
+_BOOK_ERRORS = (IndexError, TypeError, ValueError)
 
 
-def _freeze_mapping(payload: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
+def _freeze_mapping(payload: Mapping[str, Any] | None) -> Mapping[str, Any]:
     """Return an immutable mapping representation."""
 
     return MappingProxyType(dict(payload or {}))
@@ -22,12 +26,12 @@ class StrategySignal:
     side: str
     confidence: float
     entry_mode: str
-    suggested_stop: Optional[float]
-    suggested_tp: Optional[float]
+    suggested_stop: float | None
+    suggested_tp: float | None
     validity_ttl: int
     metadata: Mapping[str, Any] = field(default_factory=dict)
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "strategy_id": self.strategy_id,
             "symbol": self.symbol,
@@ -52,7 +56,7 @@ class StrategyCandidate:
     signal: StrategySignal
     context: Mapping[str, Any]
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "score": round(self.score, 6),
             "signal": self.signal.as_dict(),
@@ -63,7 +67,7 @@ class StrategyCandidate:
         object.__setattr__(self, "context", _freeze_mapping(self.context))
 
 
-def _sma(values: Sequence[float], length: int) -> Optional[float]:
+def _sma(values: Sequence[float], length: int) -> float | None:
     if length <= 0 or len(values) < length:
         return None
     return sum(values[-length:]) / float(length)
@@ -73,11 +77,11 @@ def _abs(value: float) -> float:
     return value if value >= 0 else -value
 
 
-def _atr(klines: Sequence[Sequence[Any]], length: int = 14) -> Optional[float]:
+def _atr(klines: Sequence[Sequence[Any]], length: int = 14) -> float | None:
     if length <= 0 or len(klines) <= length:
         return None
     prev_close = float(klines[-length - 1][4])
-    trs: List[float] = []
+    trs: list[float] = []
     for row in klines[-length:]:
         high = float(row[2])
         low = float(row[3])
@@ -90,14 +94,14 @@ def _atr(klines: Sequence[Sequence[Any]], length: int = 14) -> Optional[float]:
     return sum(trs) / len(trs)
 
 
-def _swing_low(klines: Sequence[Sequence[Any]], lookback: int = 8) -> Optional[float]:
+def _swing_low(klines: Sequence[Sequence[Any]], lookback: int = 8) -> float | None:
     if lookback <= 0 or len(klines) < lookback:
         return None
     lows = [float(row[3]) for row in klines[-lookback:]]
     return min(lows) if lows else None
 
 
-def _swing_high(klines: Sequence[Sequence[Any]], lookback: int = 8) -> Optional[float]:
+def _swing_high(klines: Sequence[Sequence[Any]], lookback: int = 8) -> float | None:
     if lookback <= 0 or len(klines) < lookback:
         return None
     highs = [float(row[2]) for row in klines[-lookback:]]
@@ -111,7 +115,7 @@ def _confidence_from_score(raw: float, scale: float) -> float:
     return max(0.0, min(1.0, normalized))
 
 
-def _listing_age(meta: Optional[Mapping[str, Any]]) -> Optional[float]:
+def _listing_age(meta: Mapping[str, Any] | None) -> float | None:
     if not meta:
         return None
     age = meta.get("listing_age_days")
@@ -120,7 +124,7 @@ def _listing_age(meta: Optional[Mapping[str, Any]]) -> Optional[float]:
         if onboard is not None:
             try:
                 return max(0.0, (meta.get("ts", 0.0) - float(onboard)) / 86_400_000.0)
-            except Exception:
+            except _PARSE_ERRORS:
                 return None
         return None
     try:
@@ -131,11 +135,11 @@ def _listing_age(meta: Optional[Mapping[str, Any]]) -> Optional[float]:
 
 def trend_follow_candidate(
     symbol: str,
-    klines: List[List[Any]],
+    klines: list[list[Any]],
     closes: Sequence[float],
     features: Mapping[str, Any],
-    meta: Optional[Mapping[str, Any]] = None,
-) -> Optional[StrategyCandidate]:
+    meta: Mapping[str, Any] | None = None,
+) -> StrategyCandidate | None:
     if len(closes) < 50:
         return None
     fast = _sma(closes, 20)
@@ -212,7 +216,7 @@ def scalping_candidate(
     symbol: str,
     features: Mapping[str, Any],
     book: Mapping[str, Any],
-) -> Optional[StrategyCandidate]:
+) -> StrategyCandidate | None:
     spread_ratio = float(features.get("spread_over_atr", 9.0) or 9.0)
     if spread_ratio > 1.25:
         return None
@@ -231,7 +235,7 @@ def scalping_candidate(
         if best_bid and best_ask:
             mid = (best_bid + best_ask) / 2.0
             imbalance = (best_bid - mid) / mid
-    except Exception:
+    except _BOOK_ERRORS:
         imbalance = 0.0
     score = (
         (0.004 - _abs(vwap_dev)) * 2_500.0
@@ -267,9 +271,9 @@ def scalping_candidate(
 
 def momentum_candidate(
     symbol: str,
-    klines: List[List[Any]],
+    klines: list[list[Any]],
     features: Mapping[str, Any],
-) -> Optional[StrategyCandidate]:
+) -> StrategyCandidate | None:
     move_15 = float(features.get("r15", 0.0))
     long_term = float(features.get("r60", 0.0))
     vol_boost = float(features.get("vol_accel_5m_over_30m", 0.0))
@@ -315,8 +319,8 @@ def momentum_candidate(
 def meme_candidate(
     symbol: str,
     features: Mapping[str, Any],
-    meta: Optional[Mapping[str, Any]] = None,
-) -> Optional[StrategyCandidate]:
+    meta: Mapping[str, Any] | None = None,
+) -> StrategyCandidate | None:
     vol_spike = float(features.get("vol_accel_1m_over_30m", 0.0))
     if vol_spike < 4.0:
         return None
@@ -365,8 +369,8 @@ def meme_candidate(
 def listing_candidate(
     symbol: str,
     features: Mapping[str, Any],
-    meta: Optional[Mapping[str, Any]] = None,
-) -> Optional[StrategyCandidate]:
+    meta: Mapping[str, Any] | None = None,
+) -> StrategyCandidate | None:
     age = _listing_age(meta)
     if age is None or age > 14.0:
         return None
@@ -399,13 +403,13 @@ def listing_candidate(
 
 def evaluate_strategies(
     symbol: str,
-    meta: Optional[Mapping[str, Any]],
-    klines: List[List[Any]],
+    meta: Mapping[str, Any] | None,
+    klines: list[list[Any]],
     book: Mapping[str, Any],
     features: Mapping[str, Any],
-) -> Dict[str, StrategyCandidate]:
-    closes: List[float] = [float(row[4]) for row in klines if len(row) > 4]
-    results: Dict[str, StrategyCandidate] = {}
+) -> dict[str, StrategyCandidate]:
+    closes: list[float] = [float(row[4]) for row in klines if len(row) > 4]
+    results: dict[str, StrategyCandidate] = {}
     trend = trend_follow_candidate(symbol, klines, closes, features, meta)
     if trend is not None:
         results["trend_follow"] = trend

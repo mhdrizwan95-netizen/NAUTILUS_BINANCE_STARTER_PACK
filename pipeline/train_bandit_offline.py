@@ -5,7 +5,6 @@ import glob
 import json
 import math
 import os
-from typing import Dict
 
 import pandas as pd
 
@@ -14,7 +13,7 @@ def train(
     pattern: str = "data/outcomes/*.parquet",
     c: float = 1.0,
     situations_path: str = "config/situations.json",
-) -> Dict[str, float]:
+) -> dict[str, float]:
     paths = sorted(glob.glob(pattern))
     if not paths:
         return {}
@@ -36,7 +35,7 @@ def train(
     # Update situations.json in place
     sits = json.loads(open(situations_path).read())
     idx = {s["name"]: i for i, s in enumerate(sits)}
-    out: Dict[str, float] = {}
+    out: dict[str, float] = {}
     for _, r in stats.iterrows():
         name = str(r["situation"])
         pr = float(r["priority"])

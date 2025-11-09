@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 from .signal_math import confidence_from_score
 
@@ -10,9 +11,9 @@ from .signal_math import confidence_from_score
 class ListingMetrics:
     score: float
     confidence: float
-    stop_price: Optional[float]
-    targets: Tuple[float, ...]
-    context: Dict[str, Any]
+    stop_price: float | None
+    targets: tuple[float, ...]
+    context: dict[str, Any]
 
 
 def generate_listing_targets(
@@ -20,7 +21,7 @@ def generate_listing_targets(
     *,
     stop_pct: float,
     target_multipliers: Iterable[float],
-) -> Tuple[Optional[float], List[float]]:
+) -> tuple[float | None, list[float]]:
     """Return a protective stop and target prices for a listing entry.
 
     - `avg_price` is the baseline entry price.
@@ -29,20 +30,20 @@ def generate_listing_targets(
     """
     try:
         px = float(avg_price)
-    except Exception:
+    except (TypeError, ValueError):
         px = 0.0
     if px <= 0:
         return None, []
     try:
         sp = float(stop_pct)
-    except Exception:
+    except (TypeError, ValueError):
         sp = 0.0
     stop = px * max(0.0, 1.0 - sp)
     ladders = []
     for m in target_multipliers:
         try:
             mm = float(m)
-        except Exception:
+        except (TypeError, ValueError):
             continue
         ladders.append(px * (1.0 + max(0.0, mm)))
     return stop, ladders
@@ -53,7 +54,7 @@ def compute_listing_metrics(
     listing_age_days: float,
     volume_multiplier: float,
     move_fraction: float,
-    last_price: Optional[float],
+    last_price: float | None,
     stop_pct: float,
     target_multipliers: Iterable[float],
 ) -> ListingMetrics:
@@ -66,15 +67,15 @@ def compute_listing_metrics(
     """
     try:
         age = max(0.0, float(listing_age_days))
-    except Exception:
+    except (TypeError, ValueError):
         age = 0.0
     try:
         vol = max(0.0, float(volume_multiplier))
-    except Exception:
+    except (TypeError, ValueError):
         vol = 0.0
     try:
         move = float(move_fraction)
-    except Exception:
+    except (TypeError, ValueError):
         move = 0.0
 
     # Heuristic score: higher on volume/move, modest age decay
@@ -83,7 +84,7 @@ def compute_listing_metrics(
     confidence = confidence_from_score(score, scale=150.0)
 
     stop = None
-    ladders: Tuple[float, ...] = ()
+    ladders: tuple[float, ...] = ()
     if last_price and last_price > 0:
         stop_val, tgt = generate_listing_targets(
             last_price, stop_pct=stop_pct, target_multipliers=target_multipliers
@@ -91,7 +92,7 @@ def compute_listing_metrics(
         stop = stop_val
         ladders = tuple(tgt)
 
-    ctx: Dict[str, Any] = {
+    ctx: dict[str, Any] = {
         "listing_age_days": round(age, 3),
         "volume_multiplier": round(vol, 3),
         "move_fraction": round(move, 6),

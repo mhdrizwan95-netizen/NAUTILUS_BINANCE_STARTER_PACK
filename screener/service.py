@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import random
 import time
@@ -28,14 +29,26 @@ RATE_LIMIT_429 = Gauge(
     "binance_429_total", "Binance HTTP 429 occurrences (best-effort)", registry=REG
 )
 
+logger = logging.getLogger("screener.service")
+_REQUEST_ERRORS = (httpx.HTTPError, asyncio.TimeoutError, ConnectionError)
+_METRIC_ERRORS = (AttributeError, ValueError)
+_SCAN_ERRORS = (RuntimeError, ValueError, TypeError, KeyError)
+
 UNIVERSE_URL = "http://universe:8009/universe"
 SITU_INGEST = "http://situations:8011/ingest/bar"
 
 
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
+
+
 def get_universe():
     try:
-        return httpx.get(UNIVERSE_URL, timeout=5).json()
-    except Exception:
+        resp = httpx.get(UNIVERSE_URL, timeout=5)
+        resp.raise_for_status()
+        return resp.json()
+    except _REQUEST_ERRORS as exc:
+        _log_suppressed("screener.fetch_universe", exc)
         return {}
 
 
@@ -83,8 +96,8 @@ def scan():
                     json={"symbol": sym, "ts": out["ts"], "features": f},
                     timeout=2,
                 )
-            except Exception:
-                pass
+            except _REQUEST_ERRORS as exc:
+                _log_suppressed("screener.ingest", exc)
             out["long"].append({"symbol": sym, "score": long})
             out["short"].append({"symbol": sym, "score": short})
             strategy_hits = evaluate_strategies(sym, meta, kl, ob, f)
@@ -92,7 +105,8 @@ def scan():
                 entry = candidate.as_dict()
                 entry["symbol"] = sym
                 out["strategies"].setdefault(strategy, []).append(entry)
-        except Exception:
+        except _SCAN_ERRORS as exc:  # safety net around per-symbol processing
+            _log_suppressed(f"screener.scan.{sym}", exc)
             errors += 1
             continue
     out["long"] = sorted(out["long"], key=lambda x: x["score"], reverse=True)[:5]
@@ -113,8 +127,8 @@ def scan():
             SCAN_ERRORS.set(errors)
         if rate_limits:
             RATE_LIMIT_429.set(rate_limits)
-    except Exception:
-        pass
+    except _METRIC_ERRORS as exc:
+        _log_suppressed("screener.scan.metrics", exc)
     return out
 
 
@@ -195,7 +209,8 @@ async def _auto_scan():
                 rl = 0
                 try:
                     rl = int(RATE_LIMIT_429._value.get())  # type: ignore[attr-defined]
-                except Exception:
+                except _METRIC_ERRORS as exc:
+                    _log_suppressed("screener.rate_limit_probe", exc)
                     rl = 0
                 if rl > 0:
                     _breaker["strike"] += 1
@@ -204,8 +219,9 @@ async def _auto_scan():
                     _breaker["strike"] = max(0, _breaker["strike"] - 1)
                     if _breaker["strike"] == 0:
                         _breaker["penalty"] = max(1.0, _breaker["penalty"] * 0.9)
-            except Exception:
+            except _SCAN_ERRORS as exc:
                 _breaker["strike"] += 1
+                _log_suppressed("screener.auto_loop", exc)
             # backoff + jitter
             elapsed = max(0.0, time.time() - before)
             sleep_base = max(5.0, interval - elapsed)

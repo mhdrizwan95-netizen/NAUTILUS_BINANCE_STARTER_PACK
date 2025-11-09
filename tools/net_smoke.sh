@@ -37,4 +37,3 @@ if [[ -f dashboard/app.py ]]; then
 fi
 
 echo "Network smoke finished"
-

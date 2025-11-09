@@ -5,11 +5,20 @@ import asyncio
 import math
 import os
 from dataclasses import dataclass
-from typing import Dict, List
+from importlib import import_module
 
 import httpx
 
 from ops.env import engine_endpoints
+
+_SUPPRESSIBLE_HTTP_ERRORS = (
+    httpx.RequestError,
+    httpx.HTTPStatusError,
+    TimeoutError,
+    ValueError,
+)
+_SUPPRESSIBLE_ATTR_ERRORS = (AttributeError, ValueError)
+_SUPPRESSIBLE_IMPORT_ERRORS = (ImportError, ModuleNotFoundError)
 
 
 @dataclass
@@ -25,11 +34,11 @@ class Position:
 
 @dataclass
 class AggregateExposure:
-    by_symbol: Dict[str, Dict]  # symbol → {qty_base, last_price_usd, exposure_usd}
-    totals: Dict[str, float]  # {"exposure_usd": x, "count": n, "venues": m}
+    by_symbol: dict[str, dict]  # symbol → {qty_base, last_price_usd, exposure_usd}
+    totals: dict[str, float]  # {"exposure_usd": x, "count": n, "venues": m}
 
 
-def _parse_endpoints(raw: str | None) -> List[str]:
+def _parse_endpoints(raw: str | None) -> list[str]:
     parsed = [p.strip().rstrip("/") for p in (raw or "").split(",") if p.strip()]
     return parsed or engine_endpoints()
 
@@ -56,7 +65,7 @@ async def _fetch_portfolio(client: httpx.AsyncClient, base_url: str) -> dict:
         r = await client.get(f"{base_url.rstrip('/')}/portfolio", timeout=5.0)
         r.raise_for_status()
         return r.json()
-    except Exception:
+    except _SUPPRESSIBLE_HTTP_ERRORS:
         return {}
 
 
@@ -75,10 +84,8 @@ def _maybe_fill_price_from_ibkr(symbol: str) -> float | None:
     module = sys.modules.get("ops.ibkr_prices")
     if module is None:
         try:
-            from importlib import import_module
-
             module = import_module("ops.ibkr_prices")
-        except Exception:
+        except _SUPPRESSIBLE_IMPORT_ERRORS:
             return None
 
     metrics = getattr(module, "PRICE_METRICS", {})
@@ -89,7 +96,7 @@ def _maybe_fill_price_from_ibkr(symbol: str) -> float | None:
     try:
         # prometheus_client Gauge keeps value in _value.get()
         return float(g._value.get())
-    except Exception:
+    except _SUPPRESSIBLE_ATTR_ERRORS:
         return None
 
 
@@ -103,7 +110,7 @@ async def aggregate_exposure(
         if s.strip()
     ]
 
-    by_symbol: Dict[str, Position] = {}
+    by_symbol: dict[str, Position] = {}
     venue_set = set()
 
     limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
@@ -148,7 +155,7 @@ async def aggregate_exposure(
             by_symbol[sym] = Position(symbol=sym, qty_base=0.0, last_price_usd=float(last))
 
     # Build output
-    out_map: Dict[str, Dict] = {}
+    out_map: dict[str, dict] = {}
     exposure_sum = 0.0
     count = 0
     for sym, pos in by_symbol.items():

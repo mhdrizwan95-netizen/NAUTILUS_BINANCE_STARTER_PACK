@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import signal
-from typing import Coroutine
+from collections.abc import Coroutine
 
 from ..core.binance import BinanceREST
 from ..core.order_router import OrderRouter
@@ -19,6 +19,7 @@ from .producers import (
 from .universe import UniverseManager, UniverseScreener
 
 log = logging.getLogger("engine.runtime.service")
+_SUPPRESSIBLE_EXCEPTIONS = (ConnectionError, OSError, RuntimeError, ValueError)
 
 
 def _register_default_strategies(registry: StrategyRegistry) -> None:
@@ -34,7 +35,7 @@ async def _run_pipeline(config: RuntimeConfig) -> None:
     router = OrderRouter(default_client=rest_client, portfolio=portfolio)
     try:
         await router.initialize_balances()
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         log.info(
             "[runtime] unable to pre-load balances; continuing with defaults",
             exc_info=True,

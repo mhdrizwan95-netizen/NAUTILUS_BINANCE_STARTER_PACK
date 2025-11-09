@@ -3,7 +3,6 @@ Dynamic Universe Scorer: compute per-symbol Opportunity Score.
 """
 
 from dataclasses import dataclass
-from typing import Dict, List
 
 
 @dataclass
@@ -22,7 +21,7 @@ def _z(x, mean, std):
     return 0.0 if std <= 1e-9 else (x - mean) / std
 
 
-def score_symbols(features: List[SymbolFeatures]) -> Dict[str, float]:
+def score_symbols(features: list[SymbolFeatures]) -> dict[str, float]:
     if not features:
         return {}
     vols = [f.quote_volume_1m_usd for f in features]

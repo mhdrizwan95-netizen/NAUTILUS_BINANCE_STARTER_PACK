@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -8,7 +9,8 @@ import math
 import threading
 import time
 import uuid
-from typing import Any, Dict, Optional, Tuple
+from collections.abc import Awaitable, Callable
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
@@ -20,6 +22,20 @@ __all__ = ["KrakenREST", "KrakenAPIError"]
 
 class KrakenAPIError(RuntimeError):
     """Raised when Kraken Futures API returns an error payload."""
+
+
+class KrakenOrderQuantityError(ValueError):
+    """Raised when a market order is requested with zero/negative size."""
+
+    def __init__(self) -> None:
+        super().__init__("QTY_TOO_SMALL")
+
+
+class KrakenUnsupportedMethodError(KrakenAPIError):
+    """Raised when a private request attempts to use an invalid HTTP method."""
+
+    def __init__(self, method: str) -> None:
+        super().__init__(f"UNSUPPORTED_METHOD: {method}")
 
 
 def _now_ms() -> int:
@@ -46,6 +62,27 @@ def _log_suppressed(context: str, exc: Exception) -> None:
     logging.getLogger("engine.kraken.rest").debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
+_BASE_URL_ERRORS: tuple[type[Exception], ...] = (httpx.InvalidURL, TypeError, ValueError)
+_CLIENT_CLOSE_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, RuntimeError)
+_PARSE_ERRORS: tuple[type[Exception], ...] = (TypeError, ValueError)
+_PRIVATE_REQUEST_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, ValueError, OSError)
+_IMPORT_ERRORS: tuple[type[Exception], ...] = (ImportError, ModuleNotFoundError)
+_PORTFOLIO_STATE_ERRORS: tuple[type[Exception], ...] = (AttributeError, ValueError, KeyError)
+_STORE_ERRORS: tuple[type[Exception], ...] = (AttributeError, OSError, RuntimeError, ValueError)
+_REFRESH_ERRORS: tuple[type[Exception], ...] = (
+    KrakenAPIError,
+    httpx.HTTPError,
+    RuntimeError,
+    asyncio.CancelledError,
+)
+_POSITION_ERRORS: tuple[type[Exception], ...] = (ValueError, TypeError, KeyError)
+_KRAKEN_FETCH_ERRORS: tuple[type[Exception], ...] = (
+    httpx.HTTPError,
+    asyncio.TimeoutError,
+    ValueError,
+)
+
+
 class KrakenREST:
     """
     Minimal async client for Kraken Futures REST API.
@@ -70,10 +107,10 @@ class KrakenREST:
         self._last_nonce = int(time.time() * 1_000_000)
 
     @staticmethod
-    def _split_base_and_prefix(raw_base: str) -> Tuple[str, str]:
+    def _split_base_and_prefix(raw_base: str) -> tuple[str, str]:
         try:
             url = httpx.URL(str(raw_base))
-        except Exception as exc:
+        except _BASE_URL_ERRORS as exc:
             _log_suppressed("kraken base url parse", exc)
             return ("https://demo-futures.kraken.com", "/derivatives/api/v3")
         base = url.copy_with(path="", query=None, fragment=None)
@@ -94,11 +131,11 @@ class KrakenREST:
     async def close(self) -> None:
         try:
             await self._client.aclose()
-        except Exception as exc:
+        except _CLIENT_CLOSE_ERRORS as exc:
             _log_suppressed("kraken client close", exc)
 
     # ------------------------------------------------------------------ Account
-    async def account_snapshot(self) -> Dict[str, Any]:
+    async def account_snapshot(self) -> dict[str, Any]:
         # Fallback for when credentials are invalid/missing (demo mode)
         if not self._api_key or not self._secret_bytes:
             self._logger.debug("[KRAKEN] No API credentials - using demo/fallback balances")
@@ -110,7 +147,7 @@ class KrakenREST:
             }
 
         try:
-            payload: Dict[str, Any] = {}
+            payload: dict[str, Any] = {}
             data = await self._private_get("/accounts", payload)
 
             accounts = data.get("accounts") or data.get("result", {}).get("accounts") or {}
@@ -131,38 +168,38 @@ class KrakenREST:
                 flex.get("balanceValue") or cash.get("balances", {}).get("usd") or equity
             )
 
-            balances: list[Dict[str, Any]] = []
+            balances: list[dict[str, Any]] = []
             for asset, amt in (cash.get("balances") or {}).items():
                 try:
                     free_amt = _to_float(amt)
-                except Exception as exc:
+                except _PARSE_ERRORS as exc:
                     _log_suppressed("kraken balance parse", exc)
                 else:
                     balances.append({"asset": asset.upper(), "free": free_amt, "locked": 0.0})
 
             positions = await self.positions()
-
-            return {
-                "totalWalletBalance": wallet,
-                "availableBalance": available,
-                "balances": balances or [{"asset": "USD", "free": available, "locked": 0.0}],
-                "positions": positions,
-            }
-        except KrakenAPIError as e:
-            self._logger.warning("[KRAKEN] Account API failed: %s - using demo balances", e)
+        except KrakenAPIError as exc:
+            self._logger.warning("[KRAKEN] Account API failed: %s - using demo balances", exc)
             return {
                 "totalWalletBalance": 1000.0,
                 "availableBalance": 1000.0,
                 "balances": [{"asset": "USD", "free": 1000.0, "locked": 0.0}],
                 "positions": [],
             }
+        else:
+            return {
+                "totalWalletBalance": wallet,
+                "availableBalance": available,
+                "balances": balances or [{"asset": "USD", "free": available, "locked": 0.0}],
+                "positions": positions,
+            }
 
-    async def positions(self) -> list[Dict[str, Any]]:
+    async def positions(self) -> list[dict[str, Any]]:
         if not self._api_key or not self._secret_bytes:
             return []
 
         try:
-            payload: Dict[str, Any] = {}
+            payload: dict[str, Any] = {}
             data = await self._private_get("/openpositions", payload)
             raw_positions = (
                 data.get("openPositions")
@@ -171,7 +208,7 @@ class KrakenREST:
                 or []
             )
 
-            formatted: list[Dict[str, Any]] = []
+            formatted: list[dict[str, Any]] = []
             for pos in raw_positions:
                 try:
                     symbol_raw = pos.get("instrument") or pos.get("symbol") or ""
@@ -210,23 +247,24 @@ class KrakenREST:
                         "markPrice": mark_price,
                         "pnl": pnl,
                     }
-                except Exception as exc:
+                except _PARSE_ERRORS as exc:
                     _log_suppressed("kraken position parse", exc)
                 else:
                     formatted.append(payload)
-            return formatted
         except KrakenAPIError:
             self._logger.debug("[KRAKEN] Positions API failed - returning empty positions")
             return []
+        else:
+            return formatted
 
     # ------------------------------------------------------------------ Pricing
-    async def get_last_price(self, symbol: str) -> Optional[float]:
+    async def get_last_price(self, symbol: str) -> float | None:
         price = await self.ticker_price(symbol)
         if price is not None:
             return price
         return self._price_cache.get(_normalize_symbol(symbol))
 
-    async def safe_price(self, symbol: str) -> Optional[float]:
+    async def safe_price(self, symbol: str) -> float | None:
         """Return cached mark if available else hit /tickers and update cache."""
         canon = _normalize_symbol(symbol).split(".")[0]
         cached = self._price_cache.get(canon)
@@ -238,7 +276,7 @@ class KrakenREST:
             return float(price)
         return None
 
-    async def ticker_price(self, symbol: str) -> Optional[float]:
+    async def ticker_price(self, symbol: str) -> float | None:
         # 1) Canonicalize symbol (strip any suffixes like .KRAKEN)
         canon = symbol.split(".")[0].strip().upper()
 
@@ -247,15 +285,11 @@ class KrakenREST:
             return self._price_cache[canon]
 
         # 2) Fetch all tickers once and filter client-side
-        try:
-            resp = await self._client.get(self._api_path("/tickers"))
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as exc:
-            self._logger.debug("[KRAKEN] ticker API failed for %s: %s", canon, exc)
+        data = await self._public_json("/tickers")
+        if not isinstance(data, dict):
             return self._price_cache.get(canon)
 
-        tickers = (data or {}).get("tickers", [])
+        tickers = data.get("tickers") or []
 
         # 3) Find the matching instrument
         t = next((t for t in tickers if t.get("symbol", "").upper() == canon), None)
@@ -281,7 +315,7 @@ class KrakenREST:
                         )
                         self._price_cache[canon] = price
                         return price
-                except Exception as exc:
+                except _PARSE_ERRORS as exc:
                     _log_suppressed(f"kraken price parse ({k})", exc)
 
         bid, ask = t.get("bid"), t.get("ask")
@@ -291,7 +325,7 @@ class KrakenREST:
                 if price > 0:
                     self._price_cache[canon] = price
                     return price
-            except Exception as exc:
+            except _PARSE_ERRORS as exc:
                 _log_suppressed("kraken bid/ask midpoint", exc)
 
         idx = t.get("index") or t.get("indexPrice")
@@ -301,7 +335,7 @@ class KrakenREST:
                 if price > 0:
                     self._price_cache[canon] = price
                     return price
-            except Exception as exc:
+            except _PARSE_ERRORS as exc:
                 _log_suppressed("kraken index price parse", exc)
 
         self._logger.debug(
@@ -314,12 +348,12 @@ class KrakenREST:
     # ------------------------------------------------------------------ Orders
     async def submit_market_order(
         self, *, symbol: str, side: str, quantity: float
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         kraken_symbol = _normalize_symbol(symbol)
         side_value = "buy" if side.upper() == "BUY" else "sell"
         size = abs(float(quantity))
         if size <= 0.0:
-            raise ValueError("QTY_TOO_SMALL: quantity must be positive")
+            raise KrakenOrderQuantityError()
 
         payload = {
             "orderType": "mkt",
@@ -381,21 +415,21 @@ class KrakenREST:
             self._last_nonce += 1
             return str(self._last_nonce)
 
-    async def _private_get(self, path: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    async def _private_get(self, path: str, params: dict[str, Any]) -> dict[str, Any]:
         return await self._private_request("GET", path, params)
 
-    async def _private_post(self, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    async def _private_post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         return await self._private_request("POST", path, payload)
 
     async def _private_request(
-        self, method: str, path: str, params: Dict[str, Any]
-    ) -> Dict[str, Any]:
+        self, method: str, path: str, params: dict[str, Any]
+    ) -> dict[str, Any]:
         if not self._api_key or not self._secret_bytes:
             raise KrakenAPIError("KRAKEN_API_KEYS_MISSING")
 
         method = method.upper()
         if method not in {"GET", "POST"}:
-            raise KrakenAPIError(f"UNSUPPORTED_METHOD: {method}")
+            raise KrakenUnsupportedMethodError(method)
 
         nonce = self._next_nonce()
         # Normalize parameter types and append nonce
@@ -439,15 +473,15 @@ class KrakenREST:
             data = resp.json()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text if exc.response is not None else str(exc)
-            self._logger.error(
+            self._logger.exception(
                 "[KRAKEN] HTTP error %s for %s: %s",
                 exc.response.status_code if exc.response else "?",
                 path,
                 detail,
             )
             raise KrakenAPIError(detail) from exc
-        except Exception as exc:
-            self._logger.error("[KRAKEN] request failed for %s: %s", path, exc)
+        except _PRIVATE_REQUEST_ERRORS as exc:
+            self._logger.exception("[KRAKEN] request failed for %s", path)
             raise KrakenAPIError(str(exc)) from exc
 
         # Futures API returns {"success": false, "error": [...]}
@@ -460,13 +494,30 @@ class KrakenREST:
 
         return data
 
+    async def _public_json(
+        self, endpoint: str, params: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        async def _fetch():
+            resp = await self._client.get(self._api_path(endpoint), params=params)
+            resp.raise_for_status()
+            return resp.json()
+
+        return await self._safely_fetch(endpoint, _fetch)
+
+    async def _safely_fetch(self, label: str, func: Callable[[], Awaitable[Any]]) -> Any | None:
+        try:
+            return await func()
+        except _KRAKEN_FETCH_ERRORS:
+            self._logger.exception("kraken fetch failed (%s)", label)
+            return None
+
     def _sign(self, path: str, body: bytes, nonce: str) -> str:
         # Deprecated - using the new _private_post signing logic above
         digest = hashlib.sha256(nonce.encode("utf-8") + body).digest()
         mac = hmac.new(self._secret_bytes, path.encode("utf-8") + digest, hashlib.sha512)
         return base64.b64encode(mac.digest()).decode("utf-8")
 
-    async def open_positions(self) -> list[Dict]:
+    async def open_positions(self) -> list[dict]:
         """
         Fetch open futures positions for the account.
         See https://docs.kraken.com/api/docs/futures-api/trading/get-open-positions/
@@ -476,14 +527,14 @@ class KrakenREST:
             return []
 
         try:
-            payload: Dict[str, Any] = {}
+            payload: dict[str, Any] = {}
             resp = await self._private_get("/openpositions", payload)
             raw_positions = resp.get("openPositions", [])
             self._logger.debug(
                 "KrakenREST.open_positions -> found %s positions", len(raw_positions)
             )
 
-            positions: list[Dict[str, Any]] = []
+            positions: list[dict[str, Any]] = []
             for pos in raw_positions:
                 try:
                     symbol = _normalize_symbol(
@@ -523,14 +574,15 @@ class KrakenREST:
                         "markPrice": mark_price,
                         "pnl": pnl,
                     }
-                except Exception as exc:
+                except _PARSE_ERRORS as exc:
                     _log_suppressed("kraken open_positions parse", exc)
                 else:
                     positions.append(payload_pos)
-            return positions
-        except Exception as exc:
+        except (KrakenAPIError, httpx.HTTPError, ValueError) as exc:
             _log_suppressed("kraken open_positions", exc)
             return []
+        else:
+            return positions
 
     async def refresh_portfolio(self):
         """
@@ -555,14 +607,14 @@ class KrakenREST:
             if store_module is None:
                 try:
                     from engine.storage import sqlite as store_module  # type: ignore[assignment]
-                except Exception as exc:
+                except _IMPORT_ERRORS as exc:
                     _log_suppressed("kraken store module import", exc)
                     store_module = None  # type: ignore[assignment]
 
             if portfolio:
                 try:
                     portfolio.state.positions.clear()
-                except Exception as exc:
+                except _PORTFOLIO_STATE_ERRORS as exc:
                     _log_suppressed("kraken portfolio clear", exc)
 
             ts_ms = _now_ms()
@@ -595,7 +647,7 @@ class KrakenREST:
                             position.avg_price = entry_price
                             position.last_price = mark_price
                             position.upl = pnl
-                        except Exception as exc:
+                        except _PORTFOLIO_STATE_ERRORS as exc:
                             self._logger.warning(
                                 "KrakenREST.refresh_portfolio: failed to update position %s: %s",
                                 symbol,
@@ -611,7 +663,7 @@ class KrakenREST:
                                 entry_price if entry_price else None,
                                 ts_ms,
                             )
-                        except Exception as exc:
+                        except _STORE_ERRORS as exc:
                             self._logger.warning(
                                 "KrakenREST.refresh_portfolio: failed to persist position %s: %s",
                                 symbol,
@@ -626,7 +678,7 @@ class KrakenREST:
                     POSITION_SIZE.labels(**labels).set(qty)
                     ENTRY_PRICE_USD.labels(**labels).set(entry_price)
                     UPNL_USD.labels(**labels).set(pnl)
-                except Exception as exc:
+                except _POSITION_ERRORS as exc:
                     self._logger.warning(
                         "KrakenREST.refresh_portfolio: error processing position %s (%s)",
                         pos,
@@ -640,7 +692,7 @@ class KrakenREST:
                     portfolio.state.equity = (
                         float(getattr(portfolio.state, "cash", 0.0) or 0.0) + unreal_total
                     )
-                except Exception as exc:
+                except _PORTFOLIO_STATE_ERRORS as exc:
                     _log_suppressed("kraken portfolio equity update", exc)
 
             if store_module is not None:
@@ -650,7 +702,7 @@ class KrakenREST:
                         cash = float(getattr(portfolio.state, "cash", 0.0) or 0.0)
                     equity = cash + unreal_total
                     store_module.insert_equity("kraken", equity, cash, unreal_total, ts_ms)
-                except Exception as exc:
+                except _STORE_ERRORS as exc:
                     self._logger.warning(
                         "KrakenREST.refresh_portfolio: failed to persist equity snapshot: %s",
                         exc,
@@ -662,12 +714,12 @@ class KrakenREST:
                     update_portfolio_gauges(
                         state.cash, state.realized, state.unrealized, state.exposure
                     )
-                except Exception as exc:
+                except _PORTFOLIO_STATE_ERRORS as exc:
                     _log_suppressed("kraken portfolio gauge update", exc)
 
             if not positions:
                 self._logger.info("KrakenREST.refresh_portfolio: no open positions returned")
-        except Exception:
+        except _REFRESH_ERRORS:
             self._logger.exception("KrakenREST.refresh_portfolio failed")
 
 

@@ -1,10 +1,16 @@
-import { useEffect, useRef, useCallback, useState, useMemo } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
 
-import { issueWebsocketSession } from './api';
-import { useAppStore, useRealTimeActions } from './store';
-import type { GlobalMetrics, StrategyPerformance, Venue } from '../types/trading';
+import { issueWebsocketSession } from "./api";
+import { useAppStore, useRealTimeActions } from "./store";
+import type { GlobalMetrics, StrategyPerformance, Venue } from "../types/trading";
 
 type OutgoingMessage = Record<string, unknown>;
+
+const wsDevLog = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.warn(...args);
+  }
+};
 
 export interface WebSocketMessage<T = unknown> {
   type: string;
@@ -38,7 +44,7 @@ class WebSocketManager {
     onMessage: (message: WebSocketMessage) => void,
     onConnect: () => void,
     onDisconnect: () => void,
-    onError: (error: Event) => void
+    onError: (error: Event) => void,
   ) {
     this.url = url;
     this.onMessage = onMessage;
@@ -54,7 +60,7 @@ class WebSocketManager {
       this.ws = new WebSocket(this.url);
 
       this.ws.onopen = () => {
-        console.log('WebSocket connected');
+        wsDevLog("WebSocket connected");
         this.reconnectAttempts = 0;
         this.reconnectDelay = 1000;
         this.startHeartbeat();
@@ -64,8 +70,8 @@ class WebSocketManager {
       this.ws.onmessage = (event) => {
         try {
           const parsed = JSON.parse(event.data) as Partial<WebSocketMessage>;
-          if (!parsed || typeof parsed.type !== 'string') {
-            throw new Error('Malformed message');
+          if (!parsed || typeof parsed.type !== "string") {
+            throw new Error("Malformed message");
           }
           const message: WebSocketMessage = {
             type: parsed.type,
@@ -73,37 +79,36 @@ class WebSocketManager {
             timestamp: parsed.timestamp ?? Date.now(),
           };
           // Clear heartbeat timeout on ack
-          if (message.type === 'heartbeat' && this.heartbeatTimeout) {
+          if (message.type === "heartbeat" && this.heartbeatTimeout) {
             clearTimeout(this.heartbeatTimeout);
             this.heartbeatTimeout = null;
           }
           this.onMessage(message);
         } catch (error) {
-          console.error('Failed to parse WebSocket message:', error);
+          console.error("Failed to parse WebSocket message:", error);
         }
       };
 
       this.ws.onclose = (event) => {
-        console.log('WebSocket disconnected:', event.code, event.reason);
+        wsDevLog("WebSocket disconnected:", event.code, event.reason);
         this.stopHeartbeat();
         this.onDisconnect();
         this.handleReconnect(event);
       };
 
       this.ws.onerror = (error) => {
-        console.error('WebSocket error:', error);
+        console.error("WebSocket error:", error);
         this.onError(error);
       };
-
     } catch (error) {
-      console.error('Failed to create WebSocket connection:', error);
+      console.error("Failed to create WebSocket connection:", error);
       this.handleReconnect();
     }
   }
 
   disconnect(): void {
     if (this.ws) {
-      this.ws.close(1000, 'Client disconnect');
+      this.ws.close(1000, "Client disconnect");
       this.ws = null;
     }
     this.stopHeartbeat();
@@ -113,18 +118,18 @@ class WebSocketManager {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
     } else {
-      console.warn('WebSocket is not connected. Message not sent:', message);
+      console.warn("WebSocket is not connected. Message not sent:", message);
     }
   }
 
   private startHeartbeat(): void {
     // Send heartbeat every 30 seconds
     this.heartbeatInterval = window.setInterval(() => {
-      this.sendMessage({ type: 'heartbeat', timestamp: Date.now() });
+      this.sendMessage({ type: "heartbeat", timestamp: Date.now() });
 
       // Set timeout for heartbeat response
       this.heartbeatTimeout = window.setTimeout(() => {
-        console.warn('Heartbeat timeout - reconnecting...');
+        console.warn("Heartbeat timeout - reconnecting...");
         this.disconnect();
         this.connect();
       }, 10000); // 10 second timeout
@@ -144,21 +149,21 @@ class WebSocketManager {
 
   private handleReconnect(event?: CloseEvent): void {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      console.error('Max reconnection attempts reached', event?.code ?? '');
+      console.error("Max reconnection attempts reached", event?.code ?? "");
       return;
     }
 
     this.reconnectAttempts++;
     const backoff = Math.min(
       this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
-      this.maxReconnectDelay
+      this.maxReconnectDelay,
     );
     const jitter = Math.floor(Math.random() * 500);
     const delay = backoff + jitter;
 
-    console.log(
+    wsDevLog(
       `Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
-      event?.code ?? ''
+      event?.code ?? "",
     );
 
     window.setTimeout(() => {
@@ -177,21 +182,20 @@ let currentUrl: string | null = null;
 let liveDisabledOverride: boolean | null = null;
 
 const isGlobalMetricsPayload = (data: unknown): data is GlobalMetrics =>
-  typeof data === 'object' && data !== null;
+  typeof data === "object" && data !== null;
 
 const isStrategyPerformanceArray = (data: unknown): data is StrategyPerformance[] =>
   Array.isArray(data);
 
-const isVenueArray = (data: unknown): data is Venue[] =>
-  Array.isArray(data);
+const isVenueArray = (data: unknown): data is Venue[] => Array.isArray(data);
 
 const buildWebSocketUrl = (base: string, session: string): string => {
   try {
-    const url = new URL(base, base.startsWith('ws') ? undefined : window.location.origin);
-    url.searchParams.set('session', session);
+    const url = new URL(base, base.startsWith("ws") ? undefined : window.location.origin);
+    url.searchParams.set("session", session);
     return url.toString();
   } catch {
-    const delimiter = base.includes('?') ? '&' : '?';
+    const delimiter = base.includes("?") ? "&" : "?";
     return `${base}${delimiter}session=${encodeURIComponent(session)}`;
   }
 };
@@ -204,7 +208,7 @@ const resolveLiveDisabled = (): boolean => {
   if (liveDisabledOverride !== null) {
     return liveDisabledOverride;
   }
-  return (import.meta.env?.VITE_LIVE_OFF ?? 'false') === 'true';
+  return (import.meta.env?.VITE_LIVE_OFF ?? "false") === "true";
 };
 
 export function initializeWebSocket(
@@ -212,10 +216,10 @@ export function initializeWebSocket(
   onConnect: () => void,
   onDisconnect: () => void,
   onError: (error: Event) => void,
-  session: string
+  session: string,
 ): WebSocketManager {
   // Use environment variable or default to localhost
-  const baseUrl = import.meta.env?.VITE_WS_URL ?? 'ws://localhost:8002/ws';
+  const baseUrl = import.meta.env?.VITE_WS_URL ?? "ws://localhost:8002/ws";
   const wsUrl = buildWebSocketUrl(baseUrl, session);
 
   if (!wsManager || currentUrl !== wsUrl) {
@@ -234,73 +238,84 @@ export function useWebSocket(): WebSocketHookResult {
       isConnected: false,
       lastMessage: null,
       sendMessage: () => {
-        console.warn('WebSocket disabled; dropping message');
+        console.warn("WebSocket disabled; dropping message");
       },
       reconnect: () => {},
     }),
-    []
+    [],
   );
 
   if (liveDisabled) {
     return disabledResult;
   }
 
-  const { updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData } = useRealTimeActions();
+  const { updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData } =
+    useRealTimeActions();
   const { token: opsToken, actor: opsActor } = useAppStore((state) => state.opsAuth);
   const lastMessageRef = useRef<WebSocketMessage | null>(null);
   const managerRef = useRef<WebSocketManager | null>(null);
-  const actionsRef = useRef({ updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData });
+  const actionsRef = useRef({
+    updateGlobalMetrics,
+    updatePerformances,
+    updateVenues,
+    updateRealTimeData,
+  });
   const [wsSession, setWsSession] = useState<string | null>(null);
   const lastCredentialsRef = useRef<string | null>(null);
   const sessionRequestInFlight = useRef(false);
   const lastSessionFailureRef = useRef<number>(0);
 
   // Update actions ref when they change
-  actionsRef.current = { updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData };
+  actionsRef.current = {
+    updateGlobalMetrics,
+    updatePerformances,
+    updateVenues,
+    updateRealTimeData,
+  };
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
     lastMessageRef.current = message;
 
     // Handle different message types using the current actions
     switch (message.type) {
-      case 'metrics':
+      case "metrics":
         if (isGlobalMetricsPayload(message.data)) {
           actionsRef.current.updateGlobalMetrics(message.data);
         }
         break;
-      case 'performances':
+      case "performances":
         if (isStrategyPerformanceArray(message.data)) {
           actionsRef.current.updatePerformances(message.data);
         }
         break;
-      case 'venues':
+      case "venues":
         if (isVenueArray(message.data)) {
           actionsRef.current.updateVenues(message.data);
         }
         break;
-      case 'heartbeat':
+      case "heartbeat":
         // Heartbeat response - connection is healthy
         break;
       default:
-        console.log('Unhandled WebSocket message:', message);
+        wsDevLog("Unhandled WebSocket message:", message);
     }
   }, []); // No dependencies - use actionsRef instead
 
   const handleConnect = useCallback(() => {
-    console.log('WebSocket connected - subscribing to real-time data');
+    wsDevLog("WebSocket connected - subscribing to real-time data");
     // Subscribe to real-time updates
     managerRef.current?.sendMessage({
-      type: 'subscribe',
-      channels: ['metrics', 'performances', 'venues']
+      type: "subscribe",
+      channels: ["metrics", "performances", "venues"],
     });
   }, []);
 
   const handleDisconnect = useCallback(() => {
-    console.log('WebSocket disconnected');
+    wsDevLog("WebSocket disconnected");
   }, []);
 
   const handleError = useCallback((error: Event) => {
-    console.error('WebSocket error:', error);
+    console.error("WebSocket error:", error);
   }, []);
 
   useEffect(() => {
@@ -316,10 +331,7 @@ export function useWebSocket(): WebSocketHookResult {
     }
 
     const credentialSignature = `${trimmedToken}:${trimmedActor}`;
-    if (
-      wsSession &&
-      lastCredentialsRef.current === credentialSignature
-    ) {
+    if (wsSession && lastCredentialsRef.current === credentialSignature) {
       return;
     }
 
@@ -350,7 +362,7 @@ export function useWebSocket(): WebSocketHookResult {
         setWsSession((prev) => (prev === response.session ? prev : response.session));
         lastSessionFailureRef.current = 0;
       } catch (error) {
-        console.error('Failed to issue WebSocket session:', error);
+        console.error("Failed to issue WebSocket session:", error);
         if (!cancelled) {
           setWsSession((prev) => (prev === null ? prev : null));
           lastSessionFailureRef.current = Date.now();
@@ -388,7 +400,7 @@ export function useWebSocket(): WebSocketHookResult {
       handleConnect,
       handleDisconnect,
       handleError,
-      wsSession
+      wsSession,
     );
 
     if (!managerRef.current.isConnected) {

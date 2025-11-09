@@ -1,12 +1,15 @@
 import json
+import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 MODEL_PATH = os.getenv("SLIP_MODEL_PATH", "data/slip_model.json")
 PARQUET_PATH = os.getenv("SLIP_TRAIN_PATH", "data/fills.parquet")
+_PARQUET_ERRORS = (OSError, ValueError, RuntimeError)
+LOGGER = logging.getLogger(__name__)
 
 FEATURES = [
     "spread_bp",
@@ -28,7 +31,7 @@ def fit_ridge(X: np.ndarray, y: np.ndarray, lam: float = 1.0) -> np.ndarray:
 
 def train_from_parquet(
     parq_path: str = PARQUET_PATH, lam: float = 1.0, min_rows: int = 200
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     if not os.path.exists(parq_path):
         return None
     df = pd.read_parquet(parq_path)
@@ -56,14 +59,14 @@ def train_from_parquet(
     return model
 
 
-def load_model() -> Optional[Dict[str, Any]]:
+def load_model() -> dict[str, Any] | None:
     if not os.path.exists(MODEL_PATH):
         return None
     with open(MODEL_PATH) as f:
         return json.load(f)
 
 
-def predict_slip_bp(model: Dict[str, Any], feat_row: Dict[str, float]) -> float:
+def predict_slip_bp(model: dict[str, Any], feat_row: dict[str, float]) -> float:
     x = np.array([float(feat_row[k]) for k in model["features"]], dtype=float)
     mu = np.array(model["mu"], dtype=float)
     sigma = np.array(model["sigma"], dtype=float)
@@ -72,7 +75,7 @@ def predict_slip_bp(model: Dict[str, Any], feat_row: Dict[str, float]) -> float:
     return float(w.dot(xz))
 
 
-def append_row_to_parquet(row: Dict[str, Any], parq_path: str = PARQUET_PATH) -> None:
+def append_row_to_parquet(row: dict[str, Any], parq_path: str = PARQUET_PATH) -> None:
     """Append a single row dict to a Parquet file (overwrite small file approach)."""
     try:
         os.makedirs(os.path.dirname(parq_path) or ".", exist_ok=True)
@@ -82,6 +85,5 @@ def append_row_to_parquet(row: Dict[str, Any], parq_path: str = PARQUET_PATH) ->
         else:
             df = pd.DataFrame([row])
         df.to_parquet(parq_path, index=False)
-    except Exception:
-        # Best-effort logging only
-        pass
+    except _PARQUET_ERRORS as exc:
+        LOGGER.warning("Failed to append slip data to %s: %s", parq_path, exc)

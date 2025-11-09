@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import time
-from typing import Iterable
+from collections.abc import Iterable
 
 from engine.runtime.pipeline import Signal
 
@@ -35,7 +35,7 @@ async def multi_strategy_burst(
 ) -> None:
     symbols = list(symbols)
     for _ in range(batches):
-        for strat, sym in zip(strategies, symbols):
+        for strat, sym in zip(strategies, symbols, strict=False):
             await burst(pipeline, strat, sym, per_batch, delay)
 
 

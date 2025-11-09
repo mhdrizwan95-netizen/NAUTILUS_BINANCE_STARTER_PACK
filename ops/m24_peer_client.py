@@ -10,16 +10,19 @@ HUB_URL = os.getenv("COLLECTIVE_HUB", "http://127.0.0.1:8090")
 LOCAL_METRICS = "data/processed/m19/metrics_snapshot.json"
 SYNC_LOG = "data/collective/sync_log.jsonl"
 os.makedirs("data/collective", exist_ok=True)
+_JSON_ERRORS = (OSError, json.JSONDecodeError)
+_HTTP_ERRORS = (httpx.HTTPError, httpx.RequestError)
 
 
 def load_local_metrics():
     try:
-        m = json.load(open(LOCAL_METRICS))
-    except Exception:
+        with open(LOCAL_METRICS) as src:
+            metrics = json.load(src)
+    except _JSON_ERRORS:
         return {}
     # Minimal share
     keys = ["m16_avg_reward", "m16_winrate", "m16_entropy", "drift_score"]
-    return {k: m.get(k, 0) for k in keys}
+    return {k: metrics.get(k, 0) for k in keys}
 
 
 def jitter(x, scale=0.02):
@@ -38,34 +41,30 @@ def share_summary():
         "drift_score": jitter(summary.get("drift_score", 0)),
     }
     try:
-        r = httpx.post(f"{HUB_URL}/submit", json=payload, timeout=10)
-        open(SYNC_LOG, "a").write(
-            json.dumps(
-                {
-                    "time": datetime.utcnow().isoformat(),
-                    "sent": payload,
-                    "status": r.status_code,
-                }
-            )
-            + "\n"
-        )
-    except Exception as e:
-        open(SYNC_LOG, "a").write(
-            json.dumps({"time": datetime.utcnow().isoformat(), "error": str(e)}) + "\n"
-        )
+        response = httpx.post(f"{HUB_URL}/submit", json=payload, timeout=10)
+        log_entry = {
+            "time": datetime.utcnow().isoformat(),
+            "sent": payload,
+            "status": response.status_code,
+        }
+    except _HTTP_ERRORS as exc:
+        log_entry = {"time": datetime.utcnow().isoformat(), "error": str(exc)}
+    with open(SYNC_LOG, "a") as log:
+        log.write(json.dumps(log_entry) + "\n")
 
 
 def pull_consensus():
     try:
-        r = httpx.get(f"{HUB_URL}/aggregate", timeout=10)
-        if r.status_code == 200:
-            data = r.json()
+        response = httpx.get(f"{HUB_URL}/aggregate", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
             path = "data/collective/consensus.json"
-            json.dump(data, open(path, "w"), indent=2)
-    except Exception as e:
-        open(SYNC_LOG, "a").write(
-            json.dumps({"time": datetime.utcnow().isoformat(), "pull_error": str(e)}) + "\n"
-        )
+            with open(path, "w") as dest:
+                json.dump(data, dest, indent=2)
+    except (_HTTP_ERRORS, _JSON_ERRORS) as exc:
+        log_entry = {"time": datetime.utcnow().isoformat(), "pull_error": str(exc)}
+        with open(SYNC_LOG, "a") as log:
+            log.write(json.dumps(log_entry) + "\n")
 
 
 if __name__ == "__main__":

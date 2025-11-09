@@ -5,11 +5,9 @@ import datetime as dt
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
-_REQUEST_ID: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
-    "request_id", default=None
-)
+_REQUEST_ID: contextvars.ContextVar[str | None] = contextvars.ContextVar("request_id", default=None)
 
 _SERVICE_NAME = os.getenv("OBS_SERVICE_NAME", "engine")
 _SENSITIVE_ENV_VARS = [
@@ -36,7 +34,7 @@ class JsonFormatter(logging.Formatter):
         self._sensitive_values = _load_sensitive_values()
 
     def format(self, record: logging.LogRecord) -> str:  # type: ignore[override]
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "ts": dt.datetime.utcfromtimestamp(record.created).isoformat() + "Z",
             "service": _SERVICE_NAME,
             "level": record.levelname,
@@ -47,13 +45,13 @@ class JsonFormatter(logging.Formatter):
         if request_id:
             payload["correlation_id"] = request_id
         if hasattr(record, "event"):
-            payload["event"] = getattr(record, "event")
+            payload["event"] = record.event
         if record.exc_info:
             payload["stack"] = self.formatException(record.exc_info)
         return json.dumps(self._redact(payload), default=str)
 
-    def _redact(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        scrubbed: Dict[str, Any] = {}
+    def _redact(self, payload: dict[str, Any]) -> dict[str, Any]:
+        scrubbed: dict[str, Any] = {}
         for key, value in payload.items():
             if isinstance(value, str):
                 lowered = key.lower()
@@ -75,11 +73,11 @@ def setup_logging(level: int = logging.INFO) -> None:
     root.setLevel(level)
 
 
-def bind_request_id(request_id: str) -> contextvars.Token[Optional[str]]:
+def bind_request_id(request_id: str) -> contextvars.Token[str | None]:
     return _REQUEST_ID.set(request_id)
 
 
-def reset_request_context(token: contextvars.Token[Optional[str]]) -> None:
+def reset_request_context(token: contextvars.Token[str | None]) -> None:
     try:
         _REQUEST_ID.reset(token)
     except LookupError:

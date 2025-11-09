@@ -5,7 +5,6 @@ import signal
 import threading
 import time
 from pathlib import Path
-from typing import Optional
 
 _LOCK = threading.Lock()
 
@@ -19,7 +18,7 @@ class IdempotencyCache:
         self.ttl = ttl_seconds
         self.cache: dict[str, tuple[float, dict]] = {}
 
-    def get(self, key: str) -> Optional[dict]:
+    def get(self, key: str) -> dict | None:
         now = time.time()
         with _LOCK:
             val = self.cache.get(key)
@@ -55,7 +54,7 @@ class IdempotencyCache:
                 ts, data = v["ts"], v["data"]
                 if now - ts < self.ttl:
                     self.cache[k] = (ts, data)
-        except Exception:
+        except _CACHE_ERRORS:
             pass  # Silent failure on load
 
     def save(self):
@@ -66,7 +65,7 @@ class IdempotencyCache:
             with open(temp, "w") as f:
                 json.dump(self.to_dict(), f)
             os.replace(temp, CACHE_PATH)
-        except Exception:
+        except _CACHE_ERRORS:
             pass  # Silent failure on save
 
 
@@ -93,3 +92,6 @@ def append_jsonl(filename: str, payload: dict):
     with _LOCK:
         with open(path, "a") as f:
             f.write(json.dumps(payload, separators=(",", ":")) + "\n")
+
+
+_CACHE_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError, json.JSONDecodeError)

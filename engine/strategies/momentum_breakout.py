@@ -6,14 +6,25 @@ import math
 import os
 import statistics
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence
 
 from engine.core.market_resolver import resolve_market_choice
 from engine.metrics import (
     momentum_breakout_candidates_total,
     momentum_breakout_cooldown_epoch,
     momentum_breakout_orders_total,
+)
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    asyncio.TimeoutError,
 )
 
 
@@ -44,11 +55,11 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
-def _env_list(name: str) -> List[str]:
+def _env_list(name: str) -> list[str]:
     raw = os.getenv(name)
     if not raw:
         return []
-    out: List[str] = []
+    out: list[str] = []
     for token in raw.split(","):
         token = token.strip().upper()
         if not token:
@@ -144,7 +155,7 @@ class MomentumBreakout:
         self,
         router,
         risk,
-        cfg: Optional[MomentumConfig] = None,
+        cfg: MomentumConfig | None = None,
         scanner=None,
         clock=time,
     ) -> None:
@@ -154,8 +165,8 @@ class MomentumBreakout:
         self.scanner = scanner
         self.clock = clock
         self.log = logging.getLogger("engine.momentum_breakout")
-        self._cooldowns: Dict[str, float] = {}
-        self._task: Optional[asyncio.Task] = None
+        self._cooldowns: dict[str, float] = {}
+        self._task: asyncio.Task | None = None
         self._running = False
 
     def start(self) -> None:
@@ -183,7 +194,7 @@ class MomentumBreakout:
                 await self._scan_once()
             except asyncio.CancelledError:
                 break
-            except Exception as exc:  # pragma: no cover - defensive
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - defensive
                 self.log.warning("[MOMO] scan loop error: %s", exc, exc_info=True)
             elapsed = self.clock.time() - started
             await asyncio.sleep(max(1.0, interval - min(interval, elapsed)))
@@ -198,7 +209,7 @@ class MomentumBreakout:
                 break
             try:
                 plan = await self._evaluate_symbol(sym)
-            except Exception as exc:
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
                 self.log.debug("[MOMO] evaluate %s failed: %s", sym, exc)
                 continue
             if plan is None:
@@ -206,23 +217,23 @@ class MomentumBreakout:
             triggers += 1
             await self._execute(plan)
 
-    async def _resolve_symbols(self) -> List[str]:
+    async def _resolve_symbols(self) -> list[str]:
         if self.cfg.use_scanner and self.scanner:
             try:
                 selected = self.scanner.get_selected()[: self.cfg.scanner_top_n]
                 if selected:
                     return [sym.split(".")[0].upper() for sym in selected]
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
         if self.cfg.symbols:
             return [s.split(".")[0].upper() for s in self.cfg.symbols]
         try:
             universe = self.router.trade_symbols()
             return [s.split(".")[0].upper() for s in universe][: self.cfg.scanner_top_n]
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return []
 
-    async def _evaluate_symbol(self, symbol: str) -> Optional[MomentumPlan]:
+    async def _evaluate_symbol(self, symbol: str) -> MomentumPlan | None:
         now = float(self.clock.time())
         if not self._cooldown_ready(symbol, now):
             return None
@@ -365,20 +376,20 @@ class MomentumBreakout:
             self._arm_cooldown(clean, now)
             if qty > 0:
                 await self._arm_managed_exits(symbol, qty, plan)
-        except Exception as exc:  # pragma: no cover - network/venue issues
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - network/venue issues
             self.log.warning("[MOMO] execution failed for %s: %s", symbol, exc)
             momentum_breakout_orders_total.labels(clean, plan.venue, "failed").inc()
 
     async def _arm_managed_exits(self, symbol: str, qty: float, plan: MomentumPlan) -> None:
         try:
             await self.router.amend_stop_reduce_only(symbol, "SELL", plan.stop_price, abs(qty))
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
         try:
             await self.router.place_reduce_only_limit(
                 symbol, "SELL", abs(qty) * 0.5, plan.take_profit
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
     def _cooldown_ready(self, symbol: str, now: float) -> bool:
@@ -402,7 +413,7 @@ class MomentumBreakout:
     ) -> float:
         if length <= 1 or len(highs) <= length:
             return 0.0
-        trs: List[float] = []
+        trs: list[float] = []
         prev_close = closes[-length - 1]
         for i in range(len(highs) - length, len(highs)):
             high = highs[i]

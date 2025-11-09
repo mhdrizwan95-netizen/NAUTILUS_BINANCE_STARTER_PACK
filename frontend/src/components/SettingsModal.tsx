@@ -1,20 +1,23 @@
-import { Settings, Shield, TrendingUp, Zap, TrendingDown, Rocket, DollarSign, Activity } from 'lucide-react';
-
-import { Button } from './ui/button';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from './ui/dialog';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { Separator } from './ui/separator';
-import { Slider } from './ui/slider';
-import { Switch } from './ui/switch';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
+  Settings,
+  Shield,
+  TrendingUp,
+  Zap,
+  TrendingDown,
+  Rocket,
+  DollarSign,
+  Activity,
+} from "lucide-react";
+
+import { Button } from "./ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "./ui/dialog";
+import { Input } from "./ui/input";
+import { Label } from "./ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./ui/select";
+import { Separator } from "./ui/separator";
+import { Slider } from "./ui/slider";
+import { Switch } from "./ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import type {
   GlobalSettings,
   TrendStrategyConfig,
@@ -23,7 +26,7 @@ import type {
   MemeStrategyConfig,
   ListingStrategyConfig,
   VolScannerConfig,
-} from '../types/settings';
+} from "../types/settings";
 
 interface SettingsModalProps {
   open: boolean;
@@ -215,9 +218,7 @@ export function SettingsModal({
                   min={20}
                   max={80}
                   step={5}
-                  onChange={(value) =>
-                    onTrendConfigChange({ ...trendConfig, rsiThreshold: value })
-                  }
+                  onChange={(value) => onTrendConfigChange({ ...trendConfig, rsiThreshold: value })}
                 />
                 <SettingInput
                   label="Cooldown Period"
@@ -272,11 +273,11 @@ export function SettingsModal({
                   label="Order Type"
                   value={scalpConfig.orderType}
                   options={[
-                    { value: 'limit', label: 'Limit' },
-                    { value: 'market', label: 'Market' },
+                    { value: "limit", label: "Limit" },
+                    { value: "market", label: "Market" },
                   ]}
                   onChange={(value) =>
-                    onScalpConfigChange({ ...scalpConfig, orderType: value as 'limit' | 'market' })
+                    onScalpConfigChange({ ...scalpConfig, orderType: value as "limit" | "market" })
                   }
                 />
                 <SettingInput
@@ -457,13 +458,13 @@ export function SettingsModal({
                   label="Action Mode"
                   value={volScannerConfig.mode}
                   options={[
-                    { value: 'alert', label: 'Alert Only' },
-                    { value: 'trade', label: 'Auto Trade' },
+                    { value: "alert", label: "Alert Only" },
+                    { value: "trade", label: "Auto Trade" },
                   ]}
                   onChange={(value) =>
                     onVolScannerConfigChange({
                       ...volScannerConfig,
-                      mode: value as 'alert' | 'trade',
+                      mode: value as "alert" | "trade",
                     })
                   }
                 />

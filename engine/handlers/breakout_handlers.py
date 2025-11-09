@@ -9,17 +9,17 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any, Dict
+from typing import Any
 
 
 def _as_float(v, d):
     try:
         return float(v)
-    except Exception:
+    except (TypeError, ValueError):
         return d
 
 
-async def _binance_metrics(router, symbol_base: str) -> Dict[str, float]:
+async def _binance_metrics(router, symbol_base: str) -> dict[str, float]:
     """Fetch minimal metrics: 30m change, spread %, 1m notional.
 
     Returns dict with keys: {chg_30m, spread_pct, notional_1m}
@@ -50,9 +50,10 @@ async def _binance_metrics(router, symbol_base: str) -> Dict[str, float]:
         ask = _as_float(bt.get("askPrice"), 0.0)
         mid = (bid + ask) / 2.0 if bid and ask else 0.0
         spread_pct = abs(ask - bid) / mid if mid else 0.0
-        return {"chg_30m": chg_30m, "spread_pct": spread_pct, "notional_1m": qvol_last}
-    except Exception:
+    except (RuntimeError, ValueError, KeyError):
         return {}
+    else:
+        return {"chg_30m": chg_30m, "spread_pct": spread_pct, "notional_1m": qvol_last}
 
 
 def on_binance_listing(router):
@@ -69,7 +70,7 @@ def on_binance_listing(router):
         "listing_sniper_bridge",
     }
 
-    async def handler(evt: Dict[str, Any]):
+    async def handler(evt: dict[str, Any]):
         if not isinstance(evt, dict):
             return
 
@@ -102,7 +103,7 @@ def on_binance_listing(router):
                 from engine import metrics as MET
 
                 MET.event_bo_skips_total.labels(reason="no_klines", symbol=sym).inc()
-            except Exception:
+            except RuntimeError:
                 pass
             return
         if metrics["chg_30m"] >= LATE_CHASE:
@@ -110,7 +111,7 @@ def on_binance_listing(router):
                 from engine import metrics as MET
 
                 MET.event_bo_skips_total.labels(reason="late_chase", symbol=sym).inc()
-            except Exception:
+            except RuntimeError:
                 pass
             return
         if metrics["spread_pct"] >= MAX_SPREAD:
@@ -118,7 +119,7 @@ def on_binance_listing(router):
                 from engine import metrics as MET
 
                 MET.event_bo_skips_total.labels(reason="spread", symbol=sym).inc()
-            except Exception:
+            except RuntimeError:
                 pass
             return
         if metrics["notional_1m"] < MIN_NOTIONAL_1M:
@@ -126,7 +127,7 @@ def on_binance_listing(router):
                 from engine import metrics as MET
 
                 MET.event_bo_skips_total.labels(reason="notional", symbol=sym).inc()
-            except Exception:
+            except RuntimeError:
                 pass
             return
 
@@ -146,7 +147,7 @@ def on_binance_listing(router):
                 now = time.time() * 1000.0
                 age_min = (float(now) - ts_val) / 60000.0
                 half = age_min <= HALF_MIN
-        except Exception:
+        except (TypeError, ValueError):
             half = False
 
         # Relay with meta sizing hint
@@ -158,7 +159,7 @@ def on_binance_listing(router):
             MET.event_bo_plans_total.labels(venue="BINANCE", symbol=sym, dry="true").inc()
             if half:
                 MET.event_bo_half_size_applied_total.labels(symbol=sym).inc()
-        except Exception:
+        except RuntimeError:
             pass
         await BUS.publish(
             "strategy.event_breakout",

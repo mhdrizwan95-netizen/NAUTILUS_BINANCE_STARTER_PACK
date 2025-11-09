@@ -24,11 +24,12 @@ import os
 
 # Import the hierarchical HMM classes
 import sys
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from pandas.errors import ParserError
 from sklearn.linear_model import SGDClassifier
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.model_selection import train_test_split
@@ -38,6 +39,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 OUT_DIR = "data/processed/m17"
 MODEL_DIR = "ml_service/model_store"
+_TRAINING_ERRORS = (OSError, ValueError, RuntimeError, KeyError, ParserError)
+
+
+class FeedbackColumnsMissingError(ValueError):
+    """Raised when required feedback columns are absent."""
+
+    def __init__(self, missing: list[str]) -> None:
+        super().__init__(f"Missing required columns in feedback: {missing}")
 
 
 def load_feedback_with_macro_regimes(feedback_path: str, macro_model_path: str) -> pd.DataFrame:
@@ -63,7 +72,7 @@ def load_feedback_with_macro_regimes(feedback_path: str, macro_model_path: str) 
     ]
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
-        raise ValueError(f"Missing required columns in feedback: {missing_cols}")
+        raise FeedbackColumnsMissingError(missing_cols)
 
     print(f"Loaded {len(df)} feedback records")
 
@@ -131,7 +140,7 @@ def create_action_labels(df: pd.DataFrame) -> np.ndarray:
 
 def train_regime_policy(
     df_regime: pd.DataFrame, regime_name: str, test_size: float = 0.2
-) -> Tuple[SGDClassifier, Dict[str, Any]]:
+) -> tuple[SGDClassifier, dict[str, Any]]:
     """
     Train a policy model for a specific regime.
 
@@ -198,7 +207,7 @@ def train_regime_policy(
     return model, stats
 
 
-def train_all_micro_policies(feedback_df: pd.DataFrame) -> Dict[str, Dict[str, Any]]:
+def train_all_micro_policies(feedback_df: pd.DataFrame) -> dict[str, dict[str, Any]]:
     """
     Train policies for all available regimes.
 
@@ -219,17 +228,17 @@ def train_all_micro_policies(feedback_df: pd.DataFrame) -> Dict[str, Dict[str, A
             training_results[regime_name] = {"model": model, "stats": stats}
             print(f"✅ Trained policy for {regime_name}")
 
-        except Exception as e:
-            print(f"❌ Failed to train policy for {regime_name}: {e}")
+        except _TRAINING_ERRORS as exc:
+            print(f"❌ Failed to train policy for {regime_name}: {exc}")
             training_results[regime_name] = {
-                "error": str(e),
+                "error": str(exc),
                 "stats": {"regime": regime_name, "train_samples": len(df_regime)},
             }
 
     return training_results
 
 
-def save_micro_policies(training_results: Dict[str, Dict[str, Any]]) -> None:
+def save_micro_policies(training_results: dict[str, dict[str, Any]]) -> None:
     """Save trained policy models to the model store."""
     os.makedirs(MODEL_DIR, exist_ok=True)
 
@@ -254,7 +263,7 @@ def save_micro_policies(training_results: Dict[str, Dict[str, Any]]) -> None:
             print(f"Saved policy for {regime_name} to {model_path}")
 
 
-def create_training_report(training_results: Dict[str, Dict[str, Any]]) -> None:
+def create_training_report(training_results: dict[str, dict[str, Any]]) -> None:
     """Generate and save training report and plots."""
     os.makedirs(OUT_DIR, exist_ok=True)
 
@@ -300,7 +309,7 @@ def create_training_report(training_results: Dict[str, Dict[str, Any]]) -> None:
     # Plot 2: Sample count per regime
     ax2 = axes[0, 1]
     sample_counts = []
-    for regime_name, result in training_results.items():
+    for _regime_name, result in training_results.items():
         if "stats" in result:
             sample_counts.append(result["stats"].get("train_samples", 0))
 
@@ -369,30 +378,21 @@ def main():
     print(f"Test size: {args.test_size}")
 
     try:
-        # Load feedback data with regime labels
         feedback_df = load_feedback_with_macro_regimes(args.feedback, args.macro_model)
-
-        # Train policies for each regime
         training_results = train_all_micro_policies(feedback_df)
-
-        # Save models
         save_micro_policies(training_results)
-
-        # Generate reports and plots
         create_training_report(training_results)
-
-        print("✅ M17 Micro policy training completed successfully")
-        print(f"Trained {len(training_results)} regime policies")
-        print(f"See {OUT_DIR}/micro_training_stats.json for details")
-
-        return 0
-
-    except Exception as e:
-        print(f"ERROR: Micro policy training failed: {e}")
+    except _TRAINING_ERRORS as exc:
+        print(f"ERROR: Micro policy training failed: {exc}")
         import traceback
 
         traceback.print_exc()
         return 1
+    else:
+        print("✅ M17 Micro policy training completed successfully")
+        print(f"Trained {len(training_results)} regime policies")
+        print(f"See {OUT_DIR}/micro_training_stats.json for details")
+        return 0
 
 
 if __name__ == "__main__":

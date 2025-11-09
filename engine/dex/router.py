@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import asyncio
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import List, Sequence
 
 from web3 import Web3
 
@@ -44,13 +44,13 @@ ROUTER_ABI = [
 class SwapQuote:
     amount_in: int
     amount_out: int
-    path: List[str]
+    path: list[str]
 
 
 class DexRouter:
     def __init__(self, *, web3: Web3, router_address: str) -> None:
         if not router_address:
-            raise ValueError("DEX_ROUTER_ADDRESS missing")
+            raise RouterAddressMissingError()
         self.w3 = web3
         self.router = self.w3.eth.contract(
             address=Web3.to_checksum_address(router_address),
@@ -90,3 +90,10 @@ class DexRouter:
                 "gasPrice": gas_price,
             }
         )
+
+
+class RouterAddressMissingError(ValueError):
+    """Raised when no router address provided."""
+
+    def __init__(self) -> None:
+        super().__init__("DEX_ROUTER_ADDRESS missing")

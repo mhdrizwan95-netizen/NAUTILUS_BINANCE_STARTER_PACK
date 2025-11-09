@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import logging
 import math
 import time
-import logging
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Any
 
 _LOGGER = logging.getLogger(__name__)
+_METRIC_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError)
 
 
 def _log_suppressed(context: str, exc: Exception) -> None:
@@ -45,10 +46,11 @@ class PortfolioState:
     realized: float = 0.0
     unrealized: float = 0.0
     fees: float = 0.0
-    positions: Dict[str, Position] = field(default_factory=dict)
+    positions: dict[str, Position] = field(default_factory=dict)
     ts: float = field(default_factory=time.time)
     margin_level: float = 0.0
     margin_liability_usd: float = 0.0
+    wallet_breakdown: dict[str, Any] = field(default_factory=dict)
 
     def snapshot(self) -> dict:
         return {
@@ -66,6 +68,7 @@ class PortfolioState:
                 "level": self.margin_level,
                 "liability_usd": self.margin_liability_usd,
             },
+            "wallet_breakdown": dict(self.wallet_breakdown),
         }
 
 
@@ -149,14 +152,12 @@ class Portfolio:
                 position.avg_price = (position.avg_price * abs(prev_qty) + price * abs(qty)) / abs(
                     new_qty
                 )
-        else:
-            # Crossing through zero or partially closing
-            if math.isclose(new_qty, 0.0, abs_tol=1e-10):
-                position.avg_price = 0.0
-                new_qty = 0.0
-            elif prev_qty > 0 > new_qty or prev_qty < 0 < new_qty:
-                # Reversed direction – remaining portion is entered at current price
-                position.avg_price = price
+        elif math.isclose(new_qty, 0.0, abs_tol=1e-10):
+            position.avg_price = 0.0
+            new_qty = 0.0
+        elif prev_qty > 0 > new_qty or prev_qty < 0 < new_qty:
+            # Reversed direction – remaining portion is entered at current price
+            position.avg_price = price
 
         position.quantity = new_qty
 
@@ -174,11 +175,11 @@ class Portfolio:
             ctr = _MET.get("orders_filled_total")
             if ctr is not None:
                 ctr.inc()
-        except Exception as exc:
+        except _METRIC_ERRORS as exc:
             _log_suppressed("portfolio.orders_filled_metric", exc)
 
     def _cleanup_positions(self) -> None:
-        to_delete: List[str] = []
+        to_delete: list[str] = []
         for sym, pos in self._state.positions.items():
             if math.isclose(pos.quantity, 0.0, abs_tol=1e-10):
                 pos.quantity = 0.0

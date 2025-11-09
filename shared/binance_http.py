@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 
@@ -15,7 +15,15 @@ _BACKOFF_BASE = 0.5
 _BACKOFF_CAP = 4.0
 
 
-def fetch_json(path: str, *, params: Optional[Dict[str, Any]] = None) -> Any:
+class BinanceHTTPError(RuntimeError):
+    """Raised when Binance REST fetches exhaust retries."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"failed to fetch Binance path {path}")
+        self.path = path
+
+
+def fetch_json(path: str, *, params: dict[str, Any] | None = None) -> Any:
     """Fetch JSON from the Binance REST API with retries and jitter."""
     target = f"{BINANCE_BASE}{path}"
     last_exc: Exception | None = None
@@ -41,8 +49,8 @@ def fetch_json(path: str, *, params: Optional[Dict[str, Any]] = None) -> Any:
                 sleep_for += random.uniform(0.0, 0.3)
                 time.sleep(sleep_for)
     if last_exc:
-        raise last_exc
-    raise RuntimeError(f"Failed to fetch Binance path {path}")
+        raise BinanceHTTPError(path) from last_exc
+    raise BinanceHTTPError(path)
 
 
-__all__ = ["fetch_json"]
+__all__ = ["fetch_json", "BinanceHTTPError"]

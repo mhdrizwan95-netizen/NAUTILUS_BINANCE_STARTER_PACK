@@ -22,8 +22,7 @@ def _max_drawdown(equity: np.ndarray) -> float:
     for v in equity:
         peak = max(peak, v)
         dd = peak - v
-        if dd > mdd:
-            mdd = dd
+        mdd = max(dd, mdd)
     return float(mdd)
 
 

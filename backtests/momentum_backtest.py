@@ -7,7 +7,6 @@ import argparse
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Dict, List
 
 from backtests.engine import BacktestEngine, FeedConfig
 from engine.strategies.momentum_realtime import (
@@ -61,7 +60,7 @@ def main() -> None:
         patch_executor=True,
     )
 
-    signals: List[Dict] = []
+    signals: list[dict] = []
     for step in engine.run():
         if not step.response:
             continue

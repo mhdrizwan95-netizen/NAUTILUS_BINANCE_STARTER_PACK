@@ -17,9 +17,10 @@ import json
 import logging
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import yaml
 from prometheus_client import Counter, Gauge
@@ -38,6 +39,14 @@ _GOVERNANCE_RULE_TRIPPED = Counter(
     ["name"],
 )
 
+_POLICY_ERRORS = (OSError, yaml.YAMLError, ValueError, TypeError)
+_RULE_EVAL_ERRORS = (SyntaxError, NameError, TypeError, ValueError)
+_COUNTER_ERRORS = (ValueError, RuntimeError)
+_ACTION_ERRORS = (RuntimeError, ValueError, OSError)
+_PUBLISH_ERRORS = (RuntimeError, ValueError)
+_AUDIT_ERRORS = (OSError, ValueError)
+_PROMOTION_ERRORS = (RuntimeError, ValueError)
+
 AUDIT_PATH = Path("ops/logs/governance_audit.jsonl")
 
 
@@ -53,14 +62,14 @@ class GovernanceRule:
     description: str = ""
     enabled: bool = True
     name: str = ""
-    params: Dict[str, Any] = None
+    params: dict[str, Any] = None
 
-    def evaluate(self, data: Dict[str, Any]) -> bool:
+    def evaluate(self, data: dict[str, Any]) -> bool:
         """Evaluate condition against event data."""
         try:
             return bool(eval(self.condition, {"__builtins__": {}}, {"data": data}))
-        except Exception as e:
-            logging.warning(f"[GOV] Rule evaluation error for '{self.action}': {e}")
+        except _RULE_EVAL_ERRORS as exc:
+            logging.warning("[GOV] Rule evaluation error for '%s': %s", self.action, exc)
             return False
 
 
@@ -89,11 +98,11 @@ class GovernanceDaemon:
     - Environment variable manipulation for runtime control
     """
 
-    def __init__(self, policy_path: Optional[str] = None):
+    def __init__(self, policy_path: str | None = None):
         self.policy_path = policy_path or os.getenv("GOVERNANCE_POLICY", "ops/policies.yaml")
-        self.rules: List[GovernanceRule] = []
-        self.last_actions: Dict[str, float] = {}  # action -> timestamp
-        self.audit_events: List[Dict[str, Any]] = []  # Last 1000 governance events
+        self.rules: list[GovernanceRule] = []
+        self.last_actions: dict[str, float] = {}  # action -> timestamp
+        self.audit_events: list[dict[str, Any]] = []  # Last 1000 governance events
         self.metrics = GovernanceMetrics()
 
         # Load governance policies
@@ -136,11 +145,11 @@ class GovernanceDaemon:
             )
             try:
                 _GOVERNANCE_RULES_ACTIVE.set(len([r for r in self.rules if r.enabled]))
-            except Exception:
-                pass
+            except _COUNTER_ERRORS:
+                logging.debug("[GOV] Unable to update governance rule active gauge", exc_info=True)
 
-        except Exception as e:
-            logging.error(f"[GOV] Failed to load governance policies: {e}")
+        except _POLICY_ERRORS:
+            logging.exception("[GOV] Failed to load governance policies")
 
     def _setup_event_subscriptions(self) -> None:
         """Subscribe to relevant event topics."""
@@ -157,7 +166,7 @@ class GovernanceDaemon:
     def _create_handler(self, topic: str) -> Callable:
         """Create event handler for a specific topic."""
 
-        async def handle_event(data: Dict[str, Any]) -> None:
+        async def handle_event(data: dict[str, Any]) -> None:
             """Process events against governance rules."""
             for rule in [r for r in self.rules if r.trigger == topic and r.enabled]:
                 self.metrics.rules_evaluated += 1
@@ -184,7 +193,7 @@ class GovernanceDaemon:
         return handle_event
 
     async def _execute_action(
-        self, action: str, data: Dict[str, Any], rule: GovernanceRule
+        self, action: str, data: dict[str, Any], rule: GovernanceRule
     ) -> None:
         """Execute the actual governance action."""
         self.metrics.actions_executed += 1
@@ -231,7 +240,7 @@ class GovernanceDaemon:
                 # Explicitly set MAX_NOTIONAL_USDT from rule params
                 try:
                     target = float((rule.params or {}).get("value"))
-                except Exception:
+                except (TypeError, ValueError):
                     target = float(
                         os.getenv(
                             "MAX_NOTIONAL_BASELINE",
@@ -262,8 +271,8 @@ class GovernanceDaemon:
                         logging.info(f"[GOV] 🚀 MODEL PROMOTED: New strategy activated - {result}")
                     else:
                         logging.warning("[GOV] 🚫 MODEL PROMOTION failed")
-                except Exception as e:
-                    logging.error(f"[GOV] Model promotion error: {e}")
+                except _PROMOTION_ERRORS:
+                    logging.exception("[GOV] Model promotion error")
 
             elif action == "conservative_shift":
                 # Adjust risk parameters to be more conservative
@@ -310,8 +319,8 @@ class GovernanceDaemon:
             else:
                 logging.warning(f"[GOV] Unknown governance action: {action}")
 
-        except Exception as e:
-            logging.error(f"[GOV] Action '{action}' failed: {e}")
+        except _ACTION_ERRORS:
+            logging.exception("[GOV] Action '%s' failed", action)
             return
 
         # Notify subscribers (e.g., engine to hot-reload risk rails)
@@ -324,8 +333,8 @@ class GovernanceDaemon:
                     "description": rule.description,
                 },
             )
-        except Exception as e:
-            logging.debug(f"[GOV] notify publish failed: {e}")
+        except _PUBLISH_ERRORS:
+            logging.debug("[GOV] notify publish failed", exc_info=True)
 
     def _is_on_cooldown(self, action: str, cooldown_seconds: int) -> bool:
         """Check if action is still on cooldown."""
@@ -335,7 +344,7 @@ class GovernanceDaemon:
         last_time = self.last_actions.get(action, 0)
         return (time.time() - last_time) < cooldown_seconds
 
-    def _audit_action(self, rule: GovernanceRule, data: Dict[str, Any]) -> None:
+    def _audit_action(self, rule: GovernanceRule, data: dict[str, Any]) -> None:
         """Record governance action for audit and transparency."""
         audit_event = {
             "timestamp": time.time(),
@@ -359,14 +368,14 @@ class GovernanceDaemon:
             AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
             with AUDIT_PATH.open("a", encoding="utf-8") as handle:
                 handle.write(json.dumps(audit_event) + "\n")
-        except Exception as exc:  # pragma: no cover - best-effort persistence
-            logging.warning("[GOV] Failed to append audit trail: %s", exc)
+        except _AUDIT_ERRORS:  # pragma: no cover - best-effort persistence
+            logging.warning("[GOV] Failed to append audit trail", exc_info=True)
         try:
             _GOVERNANCE_RULE_TRIPPED.labels(name=rule.name or f"{rule.trigger}:{rule.action}").inc()
-        except Exception:
-            pass
+        except _COUNTER_ERRORS:
+            logging.debug("[GOV] Unable to increment governance rule counter", exc_info=True)
 
-    def get_status(self) -> Dict[str, Any]:
+    def get_status(self) -> dict[str, Any]:
         """Get current governance system status."""
         return {
             "rules_loaded": len(self.rules),
@@ -390,12 +399,13 @@ class GovernanceDaemon:
             logging.info("[GOV] ✅ Policies reloaded successfully")
             try:
                 _GOVERNANCE_RULES_ACTIVE.set(len([r for r in self.rules if r.enabled]))
-            except Exception:
-                pass
-            return True
-        except Exception as e:
-            logging.error(f"[GOV] ❌ Policy reload failed: {e}")
+            except _COUNTER_ERRORS:
+                logging.debug("[GOV] Unable to update governance rule active gauge", exc_info=True)
+        except _POLICY_ERRORS:
+            logging.exception("[GOV] ❌ Policy reload failed")
             return False
+        else:
+            return True
 
     def force_action(self, action: str, reason: str = "manual") -> bool:
         """Force execute a governance action (for testing/admin purposes)."""
@@ -409,10 +419,11 @@ class GovernanceDaemon:
                 )
             )
             logging.info(f"[GOV] 🔧 Manual action executed: {action}")
-            return True
-        except Exception as e:
-            logging.error(f"[GOV] Manual action failed: {e}")
+        except _ACTION_ERRORS:
+            logging.exception("[GOV] Manual action failed")
             return False
+        else:
+            return True
 
 
 # Global instance
@@ -434,7 +445,7 @@ async def shutdown_governance() -> None:
 
 
 # Utility functions for governance integration
-def get_governance_status() -> Dict[str, Any]:
+def get_governance_status() -> dict[str, Any]:
     """Get current governance system status."""
     if _governance_daemon:
         return _governance_daemon.get_status()
@@ -455,7 +466,7 @@ def force_governance_action(action: str, reason: str = "manual") -> bool:
     return False
 
 
-def get_recent_governance_actions(limit: int = 20) -> List[Dict[str, Any]]:
+def get_recent_governance_actions(limit: int = 20) -> list[dict[str, Any]]:
     """Return the most recent governance audit events (up to `limit`)."""
     if _governance_daemon and _governance_daemon.audit_events:
         return _governance_daemon.audit_events[-max(0, int(limit)) :]

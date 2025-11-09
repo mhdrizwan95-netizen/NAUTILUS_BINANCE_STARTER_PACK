@@ -4,7 +4,6 @@ import argparse
 import json
 import os
 from datetime import datetime, timedelta
-from typing import Dict, List
 
 import pandas as pd
 
@@ -12,7 +11,7 @@ from situations.matcher import Matcher
 from situations.schema import Situation
 
 
-def daterange(start: str, end: str) -> List[str]:
+def daterange(start: str, end: str) -> list[str]:
     s = datetime.strptime(start, "%Y-%m-%d")
     e = datetime.strptime(end, "%Y-%m-%d")
     out = []
@@ -23,7 +22,7 @@ def daterange(start: str, end: str) -> List[str]:
     return out
 
 
-def _load_situations(path: str = "config/situations.json") -> Dict[str, Situation]:
+def _load_situations(path: str = "config/situations.json") -> dict[str, Situation]:
     data = json.loads(open(path).read())
     return {s["name"]: Situation(**s) for s in data}
 

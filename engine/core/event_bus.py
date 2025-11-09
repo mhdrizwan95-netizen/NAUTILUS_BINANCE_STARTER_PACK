@@ -12,21 +12,38 @@ import copy
 import inspect
 import logging
 import os
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from engine import metrics
 
 
-def _is_async_callable(obj: Callable[[Dict[str, Any]], Any]) -> bool:
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger(__name__).warning("[BUS] %s suppressed: %s", context, exc, exc_info=True)
+
+
+_QUEUE_ENV_ERRORS: tuple[type[Exception], ...] = (TypeError, ValueError)
+_PROCESS_ERRORS: tuple[type[Exception], ...] = (asyncio.CancelledError, OSError, ValueError)
+_PUBLISH_ERRORS: tuple[type[Exception], ...] = (RuntimeError, asyncio.CancelledError)
+_METRIC_ERRORS: tuple[type[Exception], ...] = (ValueError, TypeError)
+
+
+def _is_async_callable(obj: Callable[[dict[str, Any]], Any]) -> bool:
     """Return True when the callable is async, including async __call__ objects."""
     if inspect.iscoroutinefunction(obj):
         return True
-    call = getattr(obj, "__call__", None)
-    return bool(call and inspect.iscoroutinefunction(call))
+    if not callable(obj):
+        return False
+    if not callable(obj):
+        return False
+    try:
+        return inspect.iscoroutinefunction(obj.__call__)  # type: ignore[attr-defined]
+    except AttributeError:
+        return False
 
 
-def _call_sync(handler: Callable[[Dict[str, Any]], Any], payload: Dict[str, Any]) -> Any:
+def _call_sync(handler: Callable[[dict[str, Any]], Any], payload: dict[str, Any]) -> Any:
     """Execute the synchronous handler. Runs inside the thread pool."""
     return handler(payload)
 
@@ -42,19 +59,20 @@ class EventBus:
     - Fault-tolerant with error isolation
     """
 
-    def __init__(self, max_workers: Optional[int] = None):
-        self._subscribers: Dict[str, List[Callable[[Dict[str, Any]], Any]]] = {}
-        self._queue: Optional[asyncio.Queue] = None
+    def __init__(self, max_workers: int | None = None):
+        self._subscribers: dict[str, list[Callable[[dict[str, Any]], Any]]] = {}
+        self._queue: asyncio.Queue | None = None
         self._running = False
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._stats = {"published": 0, "delivered": 0, "failed": 0, "topics": set()}
         if max_workers is None:
             max_workers = int(os.getenv("EVENTBUS_MAX_WORKERS", "8"))
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
-        self._worker: Optional[asyncio.Task[Any]] = None
+        self._worker: asyncio.Task[Any] | None = None
         try:
-            self._queue_max: int = max(0, int(os.getenv("EVENTBUS_QUEUE_MAX", "2000")))
-        except Exception:
+            self._queue_max = max(0, int(os.getenv("EVENTBUS_QUEUE_MAX", "2000")))
+        except _QUEUE_ENV_ERRORS as exc:
+            _log_suppressed("queue capacity parse", exc)
             self._queue_max = 2000
 
     async def start(self) -> None:
@@ -92,7 +110,7 @@ class EventBus:
         """Tear down the executor. Useful for tests or process shutdown."""
         self._executor.shutdown(wait=wait)
 
-    def subscribe(self, topic: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
+    def subscribe(self, topic: str, handler: Callable[[dict[str, Any]], Any]) -> None:
         """Subscribe to events on a topic."""
         if topic not in self._subscribers:
             self._subscribers[topic] = []
@@ -101,7 +119,7 @@ class EventBus:
         self._subscribers[topic].append(handler)
         logging.debug(f"[BUS] Subscribed to '{topic}' - {len(self._subscribers[topic])} handlers")
 
-    def unsubscribe(self, topic: str, handler: Callable[[Dict[str, Any]], Any]) -> None:
+    def unsubscribe(self, topic: str, handler: Callable[[dict[str, Any]], Any]) -> None:
         """Unsubscribe from a topic."""
         if topic in self._subscribers:
             try:
@@ -112,7 +130,7 @@ class EventBus:
             except ValueError:
                 pass  # Handler not found
 
-    async def publish(self, topic: str, data: Dict[str, Any], urgent: bool = False) -> None:
+    async def publish(self, topic: str, data: dict[str, Any], urgent: bool = False) -> None:
         """
         Publish an event to all subscribers.
 
@@ -173,15 +191,15 @@ class EventBus:
                 # Timeout to allow shutdown
                 event = await asyncio.wait_for(queue.get(), timeout=1.0)
                 await self._deliver_event(event)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
-            except RuntimeError as e:
-                logging.error(f"[BUS] Queue processing error: {e}")
+            except RuntimeError:
+                logging.exception("[BUS] Queue processing error (runtime)")
                 break
-            except Exception as e:
-                logging.error(f"[BUS] Queue processing error: {e}")
+            except _PROCESS_ERRORS as exc:
+                _log_suppressed("process_events", exc)
 
-    async def _deliver_event(self, event: Dict[str, Any]) -> None:
+    async def _deliver_event(self, event: dict[str, Any]) -> None:
         """Deliver event to all subscribers with error isolation."""
         topic = event["topic"]
         data = event["data"]
@@ -197,7 +215,7 @@ class EventBus:
         pending = [self._dispatch_handler(handler, data, loop) for handler in handlers]
         results = await asyncio.gather(*pending, return_exceptions=True)
 
-        for handler, result in zip(handlers, results):
+        for handler, result in zip(handlers, results, strict=False):
             if isinstance(result, Exception):
                 failed += 1
                 logging.error("[BUS] Handler error on '%s': %s", topic, result)
@@ -213,10 +231,8 @@ class EventBus:
                         consumer = handler.__self__.__class__.__name__
                     consumer = consumer or handler.__class__.__name__
                     metrics.events_external_feed_consumed_total.labels(consumer=consumer).inc()
-                except Exception:  # noqa: BLE001
-                    logging.getLogger(__name__).debug(
-                        "EventBus metrics update failed", exc_info=True
-                    )
+                except _METRIC_ERRORS as exc:
+                    _log_suppressed("metrics update", exc)
 
         self._stats["delivered"] += delivered
         self._stats["failed"] += failed
@@ -226,7 +242,7 @@ class EventBus:
                 f"[BUS] {topic}: {delivered}/{len(self._subscribers[topic])} handlers succeeded"
             )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get bus statistics."""
         return {
             **self._stats,
@@ -236,7 +252,7 @@ class EventBus:
             "running": self._running,
         }
 
-    def fire(self, topic: str, data: Dict[str, Any]) -> None:
+    def fire(self, topic: str, data: dict[str, Any]) -> None:
         """Fire-and-forget publish for non-async contexts.
 
         Schedules an async publish on the running loop. If no loop is
@@ -247,8 +263,8 @@ class EventBus:
         async def _runner():
             try:
                 await self.publish(topic, data)
-            except Exception as e:
-                logging.getLogger(__name__).warning("[BUS] fire error on %s: %s", topic, e)
+            except _PUBLISH_ERRORS as exc:
+                _log_suppressed(f"fire publish {topic}", exc)
 
         try:
             loop = asyncio.get_running_loop()
@@ -263,8 +279,8 @@ class EventBus:
 
     async def _dispatch_handler(
         self,
-        handler: Callable[[Dict[str, Any]], Any],
-        payload: Dict[str, Any],
+        handler: Callable[[dict[str, Any]], Any],
+        payload: dict[str, Any],
         loop: asyncio.AbstractEventLoop,
     ) -> Any:
         """Dispatch handler execution via async/await or executor offloading."""
@@ -283,22 +299,22 @@ BUS = EventBus()
 
 
 # Convenience functions for common event publishing
-async def publish_order_event(order_type: str, data: Dict[str, Any]) -> None:
+async def publish_order_event(order_type: str, data: dict[str, Any]) -> None:
     """Publish order-related events."""
     await BUS.publish(f"order.{order_type}", data)
 
 
-async def publish_risk_event(event_type: str, data: Dict[str, Any]) -> None:
+async def publish_risk_event(event_type: str, data: dict[str, Any]) -> None:
     """Publish risk-related events."""
     await BUS.publish(f"risk.{event_type}", data)
 
 
-async def publish_strategy_event(event_type: str, data: Dict[str, Any]) -> None:
+async def publish_strategy_event(event_type: str, data: dict[str, Any]) -> None:
     """Publish strategy-related events."""
     await BUS.publish(f"strategy.{event_type}", data)
 
 
-async def publish_metrics_event(data: Dict[str, Any]) -> None:
+async def publish_metrics_event(data: dict[str, Any]) -> None:
     """Publish metrics update events."""
     await BUS.publish("metrics.update", data)
 

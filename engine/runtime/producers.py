@@ -6,9 +6,10 @@ import json
 import logging
 import time
 from collections import defaultdict, deque
-from typing import Deque, Dict, Iterable, Optional, Tuple
+from collections.abc import Iterable
 
 import websockets
+from websockets.exceptions import WebSocketException
 
 from .config import RuntimeConfig
 from .pipeline import Signal, StrategyProducer
@@ -32,7 +33,14 @@ class BaseStreamProducer(StrategyProducer):
         self._log = logging.getLogger(f"engine.runtime.{name}")
         self.stream_suffix = "@markPrice@1s"
         self.endpoint = BINANCE_FUTURES_STREAM
-        self._active_symbols: Tuple[str, ...] = ()
+        self._active_symbols: tuple[str, ...] = ()
+        self._suppressed_errors = (
+            ConnectionError,
+            OSError,
+            RuntimeError,
+            asyncio.TimeoutError,
+            WebSocketException,
+        )
 
     async def run(self, bus: asyncio.Queue[tuple[Signal, float]], config: RuntimeConfig) -> None:
         self._running = True
@@ -50,11 +58,11 @@ class BaseStreamProducer(StrategyProducer):
 
     async def _stream_until_update(
         self,
-        symbols: Tuple[str, ...],
+        symbols: tuple[str, ...],
         version: int,
         bus: asyncio.Queue[tuple[Signal, float]],
         config: RuntimeConfig,
-    ) -> Optional[int]:
+    ) -> int | None:
         self._on_universe_changed(symbols)
         stream_task = asyncio.create_task(self._stream_symbols(symbols, bus, config))
         update_task = asyncio.create_task(self.manager.wait_for_update(self.name, version))
@@ -90,10 +98,10 @@ class BaseStreamProducer(StrategyProducer):
 
     async def _stream_symbols(
         self,
-        symbols: Tuple[str, ...],
+        symbols: tuple[str, ...],
         bus: asyncio.Queue[tuple[Signal, float]],
         config: RuntimeConfig,
-    ) -> Optional[int]:
+    ) -> int | None:
         if not symbols:
             await asyncio.sleep(1.0)
             return None
@@ -112,7 +120,7 @@ class BaseStreamProducer(StrategyProducer):
                     await self._handle_raw_message(raw, symbols, bus, config)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except self._suppressed_errors as exc:
             self._log.warning("[%s] stream error: %s", self.name, exc, exc_info=True)
             await asyncio.sleep(3.0)
         return None
@@ -120,7 +128,7 @@ class BaseStreamProducer(StrategyProducer):
     async def _handle_raw_message(
         self,
         raw: str,
-        symbols: Tuple[str, ...],
+        symbols: tuple[str, ...],
         bus: asyncio.Queue[tuple[Signal, float]],
         config: RuntimeConfig,
     ) -> None:
@@ -167,9 +175,9 @@ class TrendProducer(BaseStreamProducer):
         self.slow = 120
         self.cooldown_seconds = 90.0
         self.ttl = float(config.bus.signal_ttl_seconds)
-        self.history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=self.slow + 20))
-        self.state: Dict[str, str] = defaultdict(lambda: "flat")
-        self.cooldown: Dict[str, float] = defaultdict(float)
+        self.history: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=self.slow + 20))
+        self.state: dict[str, str] = defaultdict(lambda: "flat")
+        self.cooldown: dict[str, float] = defaultdict(float)
 
     def _on_universe_changed(self, symbols: Iterable[str]) -> None:
         super()._on_universe_changed(symbols)
@@ -223,8 +231,8 @@ class MomentumProducer(BaseStreamProducer):
         self.threshold = 0.005
         self.cooldown_seconds = 75.0
         self.ttl = float(config.bus.signal_ttl_seconds)
-        self.history: Dict[str, Deque[Tuple[float, float]]] = defaultdict(lambda: deque(maxlen=600))
-        self.last_signal: Dict[str, float] = defaultdict(float)
+        self.history: dict[str, deque[tuple[float, float]]] = defaultdict(lambda: deque(maxlen=600))
+        self.last_signal: dict[str, float] = defaultdict(float)
 
     def _on_universe_changed(self, symbols: Iterable[str]) -> None:
         super()._on_universe_changed(symbols)
@@ -278,8 +286,8 @@ class ScalperProducer(BaseStreamProducer):
         self.long_window = 40
         self.cooldown_seconds = 25.0
         self.ttl = max(30.0, float(config.bus.signal_ttl_seconds))
-        self.history: Dict[str, Deque[float]] = defaultdict(lambda: deque(maxlen=self.long_window))
-        self.last_signal: Dict[str, float] = defaultdict(float)
+        self.history: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=self.long_window))
+        self.last_signal: dict[str, float] = defaultdict(float)
 
     def _on_universe_changed(self, symbols: Iterable[str]) -> None:
         # Prioritise majors if provided
@@ -336,10 +344,10 @@ class VolatilityProducer(BaseStreamProducer):
         self.threshold = 0.02
         self.cooldown_seconds = 240.0
         self.ttl = max(180.0, float(config.bus.signal_ttl_seconds))
-        self.history: Dict[str, Deque[Tuple[float, float]]] = defaultdict(
+        self.history: dict[str, deque[tuple[float, float]]] = defaultdict(
             lambda: deque(maxlen=1800)
         )
-        self.last_signal: Dict[str, float] = defaultdict(float)
+        self.last_signal: dict[str, float] = defaultdict(float)
 
     def _on_universe_changed(self, symbols: Iterable[str]) -> None:
         super()._on_universe_changed(symbols)

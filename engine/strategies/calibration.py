@@ -1,22 +1,24 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 CALIBRATION_PATH = Path(os.getenv("HMM_CALIBRATION_PATH", "engine/models/hmm_calibration.json"))
-_DEFAULT_PROFILE: Dict[str, Any] = {
+_DEFAULT_PROFILE: dict[str, Any] = {
     "confidence_gain": 1.0,
     "quote_multiplier": 1.0,
     "cooldown_scale": 1.0,
 }
 _CACHE_TTL = float(os.getenv("HMM_CALIBRATION_TTL_SEC", "60"))
-_cache: Dict[str, Any] = {"ts": 0.0, "data": {}}
+_cache: dict[str, Any] = {"ts": 0.0, "data": {}}
+_LOG = logging.getLogger("engine.strategies.calibration")
 
 
-def _load_file() -> Dict[str, Any]:
+def _load_file() -> dict[str, Any]:
     if not CALIBRATION_PATH.exists():
         return {}
     try:
@@ -24,12 +26,12 @@ def _load_file() -> Dict[str, Any]:
             data = json.load(fh)
             if isinstance(data, dict):
                 return {k.upper(): v for k, v in data.items()}
-    except Exception:
-        pass
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        _LOG.debug("calibration load failed: %s", exc, exc_info=True)
     return {}
 
 
-def _data() -> Dict[str, Any]:
+def _data() -> dict[str, Any]:
     now = time.time()
     if now - _cache["ts"] > _CACHE_TTL:
         _cache["data"] = _load_file()
@@ -37,7 +39,7 @@ def _data() -> Dict[str, Any]:
     return _cache["data"]
 
 
-def profile(symbol: str) -> Dict[str, Any]:
+def profile(symbol: str) -> dict[str, Any]:
     data = _data()
     sym = symbol.upper()
     return data.get(sym) or data.get("*") or _DEFAULT_PROFILE
@@ -60,6 +62,6 @@ def cooldown_scale(symbol: str) -> float:
     return float(info.get("cooldown_scale", 1.0))
 
 
-def snapshot() -> Dict[str, Any]:
+def snapshot() -> dict[str, Any]:
     """Expose current calibration set for introspection/testing."""
     return {"path": str(CALIBRATION_PATH), "profiles": _data()}

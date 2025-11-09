@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Iterable
 
 from engine.dex.config import DexConfig
 from engine.dex.executor import DexExecutor
@@ -13,6 +14,19 @@ from engine.dex.oracle import DexPriceOracle
 from engine.dex.state import DexPosition, DexState
 
 logger = logging.getLogger("engine.dex.watcher")
+_WATCHER_ERRORS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
 class DexWatcher:
@@ -46,12 +60,12 @@ class DexWatcher:
         while self._running:
             try:
                 await self.tick()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("Watcher tick failed: %s", exc, exc_info=True)
+            except _WATCHER_ERRORS as exc:
+                _log_suppressed("dex.watcher.tick", exc)
             await asyncio.sleep(max(self.cfg.watcher_poll_sec, 1.0))
 
     async def tick(self) -> None:
-        positions = list(self.state.open_positions())
+        positions: Iterable[DexPosition] = list(self.state.open_positions())
         for pos in positions:
             await self._evaluate(pos)
 
@@ -114,8 +128,8 @@ class DexWatcher:
             self.state.register_fill(
                 pos.pos_id, qty_to_sell, target_index=target_index, reason="take_profit"
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[DEX] partial fill failed %s: %s", pos.symbol, exc, exc_info=True)
+        except _WATCHER_ERRORS as exc:
+            _log_suppressed("dex.watcher.take_partial", exc)
 
     async def _flatten(self, pos: DexPosition, price: float, *, reason: str) -> None:
         qty = pos.qty
@@ -132,7 +146,7 @@ class DexWatcher:
                 result.tx_hash,
                 reason,
             )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("[DEX] failed to flatten %s: %s", pos.symbol, exc, exc_info=True)
+        except _WATCHER_ERRORS as exc:
+            _log_suppressed("dex.watcher.flatten", exc)
         finally:
             self.state.close_position(pos.pos_id, reason=reason)

@@ -27,4 +27,3 @@ echo "[4/4] Dry-run training endpoint contract (if live)..."
 curl -fsS -X POST http://localhost:8015/train -H 'Content-Type: application/json' -d '{"n_states":4, "tag":"smoke","promote":false}' || echo "  Skipped; ensure ml_service is running"
 
 echo "ML smoke finished"
-

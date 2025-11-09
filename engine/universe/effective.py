@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional
 
 import yaml
 
@@ -11,17 +10,23 @@ from engine.config.env import _get, split_symbols
 
 try:  # Optional import when the scanner package is not available in minimal envs
     from engine.strategies.symbol_scanner import SymbolScanner  # type: ignore
-except Exception:  # pragma: no cover - scanner is optional
+except ImportError:  # pragma: no cover - scanner is optional
     SymbolScanner = None  # type: ignore
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    OSError,
+    ValueError,
+    yaml.YAMLError,
+)
 
 
 _RUNTIME_PATH = Path("config/runtime.yaml")
 
 
-def _load_runtime_core() -> List[str]:
+def _load_runtime_core() -> list[str]:
     try:
         raw = yaml.safe_load(_RUNTIME_PATH.read_text()) if _RUNTIME_PATH.exists() else None
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         return []
     symbols = (raw or {}).get("symbols", {})
     core = symbols.get("core") if isinstance(symbols, dict) else None
@@ -44,7 +49,7 @@ class StrategyUniverse:
     def __init__(self, scanner: SymbolScanner | None) -> None:
         self._scanner = scanner
 
-    def get(self, strategy_name: str) -> Optional[List[str]]:
+    def get(self, strategy_name: str) -> list[str] | None:
         """Return the effective symbol universe for *strategy_name*.
 
         If the dynamic symbol scanner is enabled and provided, its selection is used.
@@ -72,10 +77,10 @@ class StrategyUniverse:
         return runtime_core or None
 
 
-def _normalise_symbols(symbols: Optional[List[str]]) -> List[str]:
+def _normalise_symbols(symbols: list[str] | None) -> list[str]:
     if not symbols:
         return []
-    normalised: List[str] = []
+    normalised: list[str] = []
     for token in symbols:
         if not token:
             continue

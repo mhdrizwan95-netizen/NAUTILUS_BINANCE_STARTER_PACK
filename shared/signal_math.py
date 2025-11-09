@@ -12,7 +12,7 @@ def confidence_from_score(score: float, *, scale: float = 100.0) -> float:
     """
     try:
         s = float(score)
-    except Exception:
+    except (TypeError, ValueError):
         s = 0.0
     if not math.isfinite(s):
         s = 0.0

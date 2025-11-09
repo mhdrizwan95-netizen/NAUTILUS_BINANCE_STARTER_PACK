@@ -2,9 +2,10 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+import httpx
 import yaml
 
 from ops import m25_governor
@@ -17,16 +18,20 @@ POLICY_PATH = Path("ops/m25_policy.yaml")
 RISK_SNAPSHOT_PATH = Path("data/processed/m19/metrics_snapshot.json")
 PROMOTION_AUDIT_PATH = Path("ops/logs/promotion_audit.jsonl")
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
+_JSON_ERRORS = (OSError, json.JSONDecodeError)
+_YAML_ERRORS = (OSError, yaml.YAMLError, ValueError)
+_POLICY_ERRORS = (RuntimeError, ValueError, OSError)
+_HTTP_ERRORS = (httpx.HTTPError, httpx.RequestError, asyncio.TimeoutError, ValueError)
 
 
 def utc_now():
-    return datetime.now(tz=timezone.utc).isoformat()
+    return datetime.now(tz=UTC).isoformat()
 
 
 def load_registry():
     try:
         return json.loads(REGISTRY_PATH.read_text())
-    except Exception:
+    except _JSON_ERRORS:
         return {"current_model": None, "promotion_log": []}
 
 
@@ -42,8 +47,8 @@ def _append_promotion_audit(entry: dict) -> None:
         PROMOTION_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
         with PROMOTION_AUDIT_PATH.open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(entry) + "\n")
-    except Exception as exc:  # noqa: BLE001
-        logging.error("[Governance] Failed to append promotion audit log: %s", exc)
+    except OSError:  # noqa: BLE001
+        logging.exception("[Governance] Failed to append promotion audit log")
 
 
 def _as_float(x, default: float = 0.0) -> float:
@@ -54,7 +59,7 @@ def _as_float(x, default: float = 0.0) -> float:
         if isinstance(x, (int, float)):
             return float(x)
         return float(x)
-    except Exception:
+    except (TypeError, ValueError):
         return float(default)
 
 
@@ -65,7 +70,7 @@ def _as_count(x, default: int = 0) -> int:
         if isinstance(x, (int, float)):
             return int(x)
         return int(x)
-    except Exception:
+    except (TypeError, ValueError):
         return int(default)
 
 
@@ -107,7 +112,7 @@ def _load_promotion_policy() -> dict:
         return {}
     try:
         return yaml.safe_load(POLICY_PATH.read_text()) or {}
-    except Exception as exc:  # noqa: BLE001
+    except _YAML_ERRORS as exc:  # noqa: BLE001
         logging.warning("[Governance] Failed to parse %s: %s", POLICY_PATH, exc)
         return {}
 
@@ -118,7 +123,7 @@ def _load_risk_snapshot() -> dict:
         return {}
     try:
         return json.loads(RISK_SNAPSHOT_PATH.read_text())
-    except Exception as exc:  # noqa: BLE001
+    except _JSON_ERRORS as exc:  # noqa: BLE001
         logging.warning(
             "[Governance] Failed to load risk snapshot %s: %s",
             RISK_SNAPSHOT_PATH,
@@ -131,7 +136,7 @@ def _compliance_allows_promotion() -> tuple[bool, list[str]]:
     """Evaluate risk policy before promoting a new strategy."""
     try:
         policy = m25_governor.load_policy()
-    except Exception as exc:  # noqa: BLE001
+    except _POLICY_ERRORS as exc:  # noqa: BLE001
         logging.warning("[Governance] Could not load risk policy: %s", exc)
         return True, []
 
@@ -288,8 +293,8 @@ def _sync_router_weights(current_model: str) -> None:
             config = json.loads(WEIGHTS_PATH.read_text())
         else:
             config = {}
-    except Exception as exc:  # noqa: BLE001
-        logging.error("[Governance] Failed to read strategy_weights.json: %s", exc)
+    except _JSON_ERRORS:  # noqa: BLE001
+        logging.exception("[Governance] Failed to read strategy_weights.json")
         config = {}
 
     weights = config.get("weights") or {}
@@ -301,8 +306,8 @@ def _sync_router_weights(current_model: str) -> None:
     try:
         WEIGHTS_PATH.write_text(json.dumps(config, indent=2))
         logging.info("[Governance] Router weights updated for %s", current_model)
-    except Exception as exc:  # noqa: BLE001
-        logging.error("[Governance] Failed to update strategy_weights.json: %s", exc)
+    except _JSON_ERRORS:  # noqa: BLE001
+        logging.exception("[Governance] Failed to update strategy_weights.json")
 
 
 async def push_model_update(model_tag: str):
@@ -323,12 +328,8 @@ async def push_model_update(model_tag: str):
                 )
                 response.raise_for_status()
                 logging.debug("[Governance] Updated %s to %s", endpoint, model_tag)
-            except Exception as exc:  # noqa: BLE001
-                logging.error(
-                    "[Governance] failed to update %s after retries: %s",
-                    endpoint,
-                    exc,
-                )
+            except _HTTP_ERRORS:  # noqa: BLE001
+                logging.exception("[Governance] failed to update %s after retries", endpoint)
 
 
 def get_leaderboard() -> list:

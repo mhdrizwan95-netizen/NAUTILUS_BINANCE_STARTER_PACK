@@ -32,9 +32,9 @@ def _cleanup_multiproc_dir(path: str) -> None:
         for child in directory.iterdir():
             if child.suffix == ".db":
                 child.unlink(missing_ok=True)
-    except Exception:
+    except OSError:
         # Best-effort cleanup; failures should not block service startup.
-        pass
+        return
 
 
 REGISTRY = CollectorRegistry()
@@ -46,10 +46,8 @@ if _MULTIPROC_DIR:
 
 def _get_existing_metric(name: str):
     """Return an already-registered metric if it exists in the shared registry."""
-    try:
-        return REGISTRY._names_to_collectors.get(name)  # type: ignore[attr-defined]
-    except Exception:
-        return None
+    collectors = getattr(REGISTRY, "_names_to_collectors", {})  # type: ignore[attr-defined]
+    return collectors.get(name)
 
 
 def get_or_create_counter(name: str, documentation: str, **kwargs) -> Counter:

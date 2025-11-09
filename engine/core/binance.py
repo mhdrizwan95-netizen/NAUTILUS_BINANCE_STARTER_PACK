@@ -8,7 +8,7 @@ import os
 import time
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any, Literal, Optional, Tuple
+from typing import Any, Literal
 from urllib.parse import urlencode
 
 import httpx
@@ -16,7 +16,7 @@ import httpx
 from engine.config import get_settings
 
 
-def _truthy(value: Optional[str], default: bool = False) -> bool:
+def _truthy(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -40,6 +40,71 @@ TRANSFER_TYPES: set[str] = {
     "FUNDING_UMFUTURE",
     "UMFUTURE_FUNDING",
 }
+
+BINANCE_DATA_ERRORS: tuple[type[Exception], ...] = (
+    httpx.HTTPError,
+    ValueError,
+    KeyError,
+    TypeError,
+)
+BINANCE_BODY_ERRORS: tuple[type[Exception], ...] = (AttributeError, ValueError, TypeError)
+
+
+class BinanceFuturesUnavailableError(RuntimeError):
+    """Raised when a futures-only operation is invoked on non-futures markets."""
+
+    def __init__(self, *, operation: str) -> None:
+        super().__init__(f"Futures market not available for {operation}")
+
+
+class BinanceAPIResponseError(RuntimeError):
+    """Raised when Binance returns a non-success HTTP response."""
+
+    def __init__(self, *, operation: str, status: int | None, body: str | None) -> None:
+        details: list[str] = []
+        if status is not None:
+            details.append(f"status={status}")
+        if body:
+            details.append(f"body={body}")
+        suffix = " ".join(details) if details else "no additional details"
+        super().__init__(f"Binance error ({operation}) {suffix}")
+
+
+class BinanceOrderInputError(ValueError):
+    """Raised when an order operation is missing required identifiers."""
+
+    def __init__(self, *, context: str) -> None:
+        super().__init__(f"{context} requires order_id or client_order_id")
+
+
+class BinanceTransferTypeError(ValueError):
+    """Raised when an unsupported universal transfer type is requested."""
+
+    def __init__(self, transfer_type: str) -> None:
+        super().__init__(f"unsupported transfer type: {transfer_type}")
+
+
+class BinanceQuoteTooSmallError(RuntimeError):
+    """Raised when a quote-based order cannot reach minimum size."""
+
+    def __init__(self, *, symbol: str, required: float, provided: float) -> None:
+        super().__init__(
+            f"quote too small for {symbol}: provided={provided:.8f} required≈{required:.4f}"
+        )
+
+
+class BinanceSymbolNotFoundError(RuntimeError):
+    """Raised when exchange metadata does not include the requested symbol."""
+
+    def __init__(self, symbol: str) -> None:
+        super().__init__(f"Symbol {symbol} not found in exchangeInfo response.")
+
+
+class BinanceMarginSymbolRequiredError(ValueError):
+    """Raised when isolated margin operations omit the symbol."""
+
+    def __init__(self, *, operation: str) -> None:
+        super().__init__(f"{operation} requires symbol for isolated margin")
 
 
 def _margin_isolated_default() -> bool:
@@ -97,10 +162,13 @@ class BinanceREST:
     def _clean_symbol(self, symbol: str) -> str:
         return symbol.split(".")[0].upper()
 
+    def _log_suppressed(self, context: str, exc: Exception) -> None:
+        self._logger.warning("[BINANCE] %s suppressed: %s", context, exc, exc_info=True)
+
     def available_markets(self) -> tuple[str, ...]:
         return tuple(sorted(self._available_markets))
 
-    def _resolve_market(self, market: Optional[str]) -> Tuple[str, str, bool]:
+    def _resolve_market(self, market: str | None) -> tuple[str, str, bool]:
         mk = (market or self._default_market or "spot").lower()
         if mk not in self._available_markets:
             # Prefer default if still valid, otherwise first available
@@ -119,7 +187,7 @@ class BinanceREST:
             return mk, base, False
         return "spot", self._spot_base, False
 
-    def _default_resp_type(self, market: Optional[str] = None) -> str:
+    def _default_resp_type(self, market: str | None = None) -> str:
         market_key, _, is_futures = self._resolve_market(market)
         if market_key == "options":
             return "FULL"
@@ -131,11 +199,11 @@ class BinanceREST:
             return payload
         try:
             masked = dict(payload)
-            if "signature" in masked:
-                masked["signature"] = "<redacted>"
-            return masked
-        except Exception:
+        except (TypeError, ValueError):
             return payload
+        if "signature" in masked:
+            masked["signature"] = "<redacted>"
+        return masked
 
     def _log_request(
         self,
@@ -147,14 +215,98 @@ class BinanceREST:
     ) -> None:
         url = f"{self._base}{path}"
         # Log URL at INFO for visibility; payloads at DEBUG
+        self._logger.info("[BINANCE] %s %s", method.upper(), url)
+        m_params = self._mask_payload(params)
+        m_data = self._mask_payload(data)
+        self._logger.debug("[BINANCE] payload params=%s data=%s", m_params, m_data)
+
+    async def _fetch_primary_price(
+        self,
+        *,
+        market_key: str,
+        base_url: str,
+        payload: dict[str, str],
+        is_futures: bool,
+        clean: str,
+    ) -> float:
+        headers = {"X-MBX-APIKEY": self._settings.api_key}
+        timeout = self._settings.timeout
+        if market_key == "options":
+            path = "/vapi/v1/mark"
+            async with httpx.AsyncClient(
+                base_url=base_url, timeout=timeout, headers=headers
+            ) as client:
+                self._log_request("GET", path, params=payload)
+                response = await client.get(path, params=payload)
+            response.raise_for_status()
+            raw = response.json()
+            price = 0.0
+            if isinstance(raw, list):
+                for item in raw:
+                    if str(item.get("symbol", "")).upper() == clean:
+                        price = float(item.get("markPrice") or item.get("price") or 0.0)
+                        break
+            elif isinstance(raw, dict):
+                price = float(raw.get("markPrice") or raw.get("price") or 0.0)
+            return price
+        if is_futures:
+            path = "/fapi/v1/premiumIndex"
+        else:
+            path = "/api/v3/ticker/price"
+        async with httpx.AsyncClient(base_url=base_url, timeout=timeout, headers=headers) as client:
+            self._log_request("GET", path, params=payload)
+            response = await client.get(path, params=payload)
+        response.raise_for_status()
+        data = response.json()
+        key = "markPrice" if is_futures else "price"
+        return float(data[key])
+
+    async def _fetch_fallback_price(
+        self,
+        *,
+        payload: dict[str, str],
+        market_key: str,
+        clean: str,
+        is_futures: bool,
+    ) -> float | None:
+        if market_key == "options":
+            fallback_path = "/api/v3/ticker/price"
+            fallback_base = self._spot_base
+        elif is_futures:
+            fallback_path = "/api/v3/ticker/price"
+            fallback_base = self._spot_base
+        else:
+            fallback_path = "/fapi/v1/premiumIndex"
+            fallback_base = self._futures_base
+        if not fallback_base:
+            return None
+        headers = {"X-MBX-APIKEY": self._settings.api_key}
+        timeout = self._settings.timeout
         try:
-            self._logger.info("[BINANCE] %s %s", method.upper(), url)
-            m_params = self._mask_payload(params)
-            m_data = self._mask_payload(data)
-            self._logger.debug("[BINANCE] payload params=%s data=%s", m_params, m_data)
-        except Exception as exc:
-            # Never let logging break request flow
-            self._logger.debug("Binance request logging failed: %s", exc, exc_info=True)
+            async with httpx.AsyncClient(
+                base_url=fallback_base,
+                timeout=timeout,
+                headers=headers,
+            ) as client:
+                self._log_request("GET", fallback_path, params=payload)
+                response = await client.get(fallback_path, params=payload)
+            response.raise_for_status()
+            data = response.json()
+            value = data.get("price", data.get("markPrice"))
+            return float(value or 0.0)
+        except BINANCE_DATA_ERRORS as exc:
+            self._log_suppressed("ticker_price.fallback", exc)
+            return None
+
+    def _error_details(self, exc: httpx.HTTPStatusError) -> tuple[int, str]:
+        status = exc.response.status_code if exc.response is not None else 0
+        body = ""
+        if exc.response is not None:
+            try:
+                body = exc.response.text
+            except BINANCE_BODY_ERRORS as body_exc:
+                self._log_suppressed("binance.body", body_exc)
+        return status, body
 
     def _sign(self, params: dict[str, Any]) -> str:
         """
@@ -177,91 +329,34 @@ class BinanceREST:
         # Clients are created per-call; nothing persistent to close
         return None
 
-    async def ticker_price(self, symbol: str, *, market: Optional[str] = None) -> float:
+    async def ticker_price(self, symbol: str, *, market: str | None = None) -> float:
         clean = self._clean_symbol(symbol)
         market_key, base_url, is_futures = self._resolve_market(market)
         payload = {"symbol": clean}
-        # First attempt: use mark price for futures/options, last price for spot
+        cache_key = (market_key, clean)
         try:
-            if market_key == "options":
-                path = "/vapi/v1/mark"
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
-                    headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    self._log_request("GET", path, params=payload)
-                    r = await client.get(path, params=payload)
-                r.raise_for_status()
-                raw = r.json()
-                if isinstance(raw, list):
-                    price = 0.0
-                    for item in raw:
-                        if str(item.get("symbol", "")).upper() == clean:
-                            price = float(item.get("markPrice") or item.get("price") or 0.0)
-                            break
-                elif isinstance(raw, dict):
-                    price = float(raw.get("markPrice") or raw.get("price") or 0.0)
-                else:
-                    price = 0.0
-            elif is_futures:
-                path = "/fapi/v1/premiumIndex"
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
-                    headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    self._log_request("GET", path, params=payload)
-                    r = await client.get(path, params=payload)
-                r.raise_for_status()
-                data = r.json()
-                price = float(data["markPrice"])
-            else:
-                path = "/api/v3/ticker/price"
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
-                    headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    self._log_request("GET", path, params=payload)
-                    r = await client.get(path, params=payload)
-                r.raise_for_status()
-                data = r.json()
-                price = float(data["price"])
-            self._price_cache[(market_key, clean)] = price
+            price = await self._fetch_primary_price(
+                market_key=market_key,
+                base_url=base_url,
+                payload=payload,
+                is_futures=is_futures,
+                clean=clean,
+            )
+        except BINANCE_DATA_ERRORS as exc:
+            self._log_suppressed("ticker_price.primary", exc)
+        else:
+            self._price_cache[cache_key] = price
             return price
-        except Exception:
-            # Fallback: try the opposite endpoint or return cached value
-            try:
-                # Try opposite endpoint as fallback
-                if market_key == "options":
-                    fallback_path = "/api/v3/ticker/price"
-                    fallback_base = self._spot_base
-                elif is_futures:
-                    fallback_path = "/api/v3/ticker/price"
-                    fallback_base = self._spot_base
-                else:
-                    fallback_path = "/fapi/v1/premiumIndex"
-                    fallback_base = self._futures_base
-                async with httpx.AsyncClient(
-                    base_url=fallback_base,
-                    timeout=self._settings.timeout,
-                    headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    self._log_request("GET", fallback_path, params=payload)
-                    r = await client.get(fallback_path, params=payload)
-                r.raise_for_status()
-                data = r.json()
-                price = float(data.get("price", data.get("markPrice", 0)))
-                self._price_cache[(market_key, clean)] = price
-                return price
-            except Exception:
-                # Final fallback: return cached value or raise
-                return self._price_cache.get((market_key, clean), 0.0) or 0.0
 
-    async def bulk_premium_index(
-        self, *, market: Optional[str] = None
-    ) -> dict[str, dict[str, Any]]:
+        fallback_price = await self._fetch_fallback_price(
+            payload=payload, market_key=market_key, clean=clean, is_futures=is_futures
+        )
+        if fallback_price is not None:
+            self._price_cache[cache_key] = fallback_price
+            return fallback_price
+        return self._price_cache.get(cache_key, 0.0) or 0.0
+
+    async def bulk_premium_index(self, *, market: str | None = None) -> dict[str, dict[str, Any]]:
         """Fetch mark prices for all futures symbols."""
         market_key, base_url, is_futures = self._resolve_market(market)
         if not is_futures:
@@ -273,10 +368,10 @@ class BinanceREST:
                 headers={"X-MBX-APIKEY": self._settings.api_key},
             ) as client:
                 self._log_request("GET", "/fapi/v1/premiumIndex")
-                r = await client.get("/fapi/v1/premiumIndex")
-            r.raise_for_status()
-            data = r.json()
-            price_map = {}
+                response = await client.get("/fapi/v1/premiumIndex")
+            response.raise_for_status()
+            data = response.json()
+            price_map: dict[str, dict[str, Any]] = {}
             for item in data:
                 symbol = item.get("symbol", "")
                 if not symbol:
@@ -291,11 +386,13 @@ class BinanceREST:
                     "time": item.get("time"),
                 }
                 price_map[str(symbol).upper()] = payload
-            return price_map
-        except Exception:
+        except BINANCE_DATA_ERRORS as exc:
+            self._log_suppressed("bulk_premium_index", exc)
             return {}
+        else:
+            return price_map
 
-    async def position_risk(self, *, market: Optional[str] = None) -> list[dict[str, Any]]:
+    async def position_risk(self, *, market: str | None = None) -> list[dict[str, Any]]:
         """Fetch venue positionRisk data (basis, PnL, amt)."""
         market_key, base_url, is_futures = self._resolve_market(market)
         if not is_futures:
@@ -328,14 +425,15 @@ class BinanceREST:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
                 raise
-            except Exception:
+            except (httpx.TransportError, ValueError, KeyError, TypeError) as exc:
+                self._log_suppressed("position_risk", exc)
                 if attempt < 2:
                     await asyncio.sleep(0.25 * (attempt + 1))
                     continue
                 return []
         return []
 
-    async def hedge_mode(self, *, market: Optional[str] = None) -> bool:
+    async def hedge_mode(self, *, market: str | None = None) -> bool:
         """Check if dual Futures hedge mode is enabled."""
         market_key, base_url, is_futures = self._resolve_market(market)
         if not is_futures:
@@ -351,7 +449,7 @@ class BinanceREST:
                 }
             ),
         }
-        for attempt in range(3):
+        for _attempt in range(3):
             async with httpx.AsyncClient(
                 base_url=base_url,
                 timeout=self._settings.timeout,
@@ -365,7 +463,7 @@ class BinanceREST:
             return is_hedge
         return False
 
-    async def account(self, *, market: Optional[str] = None) -> dict[str, Any]:
+    async def account(self, *, market: str | None = None) -> dict[str, Any]:
         """Fetch account totals for USDT futures."""
         market_key, base_url, is_futures = self._resolve_market(market)
         if not is_futures:
@@ -375,7 +473,7 @@ class BinanceREST:
             "timestamp": _now_ms(),
             "recvWindow": settings.recv_window,
         }
-        for attempt in range(3):
+        for _attempt in range(3):
             params = dict(base_params)
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
@@ -395,7 +493,7 @@ class BinanceREST:
         """Set leverage for a futures symbol."""
         market_key, base_url, is_futures = self._resolve_market("futures")
         if not is_futures:
-            raise RuntimeError("Futures market not available for leverage change")
+            raise BinanceFuturesUnavailableError(operation="leverage change")
         clean_symbol = self._clean_symbol(symbol)
         settings = self._settings
         base_params = {
@@ -419,19 +517,15 @@ class BinanceREST:
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
-                status = e.response.status_code if e.response is not None else 0
+                status, body = self._error_details(e)
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                body = ""
-                try:
-                    body = e.response.text  # type: ignore[assignment]
-                except Exception:
-                    body = ""
-                raise RuntimeError(
-                    f"Binance leverage change failed status={status} body={body}"
+                raise BinanceAPIResponseError(
+                    operation="futures_change_leverage", status=status, body=body
                 ) from e
-            except Exception:
+            except (httpx.TransportError, ValueError, KeyError, TypeError) as exc:
+                self._log_suppressed("futures_change_leverage", exc)
                 if attempt < 2:
                     await asyncio.sleep(0.25 * (attempt + 1))
                     continue
@@ -444,7 +538,7 @@ class BinanceREST:
         *,
         order_id: int | str | None = None,
         client_order_id: str | None = None,
-        market: Optional[str] = None,
+        market: str | None = None,
     ) -> dict[str, Any]:
         """
         Fetch order status (GET /fapi/v1/order or /api/v3/order).
@@ -453,7 +547,7 @@ class BinanceREST:
         lets callers immediately re-query to obtain the final qty/price.
         """
         if not order_id and not client_order_id:
-            raise ValueError("order_status requires order_id or client_order_id")
+            raise BinanceOrderInputError(context="order_status")
         settings = get_settings()
         base_params: dict[str, Any] = {
             "symbol": self._clean_symbol(symbol),
@@ -489,24 +583,16 @@ class BinanceREST:
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
-                body = ""
-                status = 0
-                try:
-                    status = e.response.status_code
-                    body = e.response.text
-                except Exception as body_exc:
-                    self._logger.debug(
-                        "Failed to read Binance error body: %s", body_exc, exc_info=True
-                    )
+                status, body = self._error_details(e)
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(
-                    f"Binance error (order_status) status={status} body={body}"
+                raise BinanceAPIResponseError(
+                    operation="order_status", status=status, body=body
                 ) from e
         return {}
 
-    async def exchange_filter(self, symbol: str, *, market: Optional[str] = None) -> SymbolFilter:
+    async def exchange_filter(self, symbol: str, *, market: str | None = None) -> SymbolFilter:
         async with self._lock:
             clean = self._clean_symbol(symbol)
             market_key, base_url, is_futures = self._resolve_market(market)
@@ -539,7 +625,7 @@ class BinanceREST:
             info = r.json()
             symbols = info.get("symbols", [])
             if not symbols:
-                raise RuntimeError(f"Symbol {symbol} not found in exchangeInfo response.")
+                raise BinanceSymbolNotFoundError(symbol)
             filters = symbols[0].get("filters", [])
             step_size = 0.000001
             min_qty = 0.0
@@ -558,12 +644,12 @@ class BinanceREST:
                     mx = f.get("maxNotional", None)
                     try:
                         min_notional = float(mn) if mn is not None else min_notional
-                    except Exception as exc:
+                    except (TypeError, ValueError) as exc:
                         # If venue sends something strange, keep previous/default
                         self._logger.debug("Min notional parse failed for %s: %s", clean, exc)
                     try:
                         max_notional = float(mx) if mx is not None else max_notional
-                    except Exception as exc:
+                    except (TypeError, ValueError) as exc:
                         self._logger.debug("Max notional parse failed for %s: %s", clean, exc)
                 elif ftype == "PRICE_FILTER":
                     tick_size = float(f.get("tickSize", tick_size or 0.0))
@@ -588,7 +674,7 @@ class BinanceREST:
             self._symbol_filters[cache_key] = filt
             return filt
 
-    async def account_snapshot(self, *, market: Optional[str] = None) -> dict[str, Any]:
+    async def account_snapshot(self, *, market: str | None = None) -> dict[str, Any]:
         market_key, base_url, is_futures = self._resolve_market(market)
         if market_key == "margin":
             return await self.margin_account()
@@ -653,7 +739,8 @@ class BinanceREST:
                 r = await client.get(path, params=params)
             r.raise_for_status()
             return r.json()
-        except Exception:
+        except BINANCE_DATA_ERRORS as exc:
+            self._log_suppressed("margin_account", exc)
             return {}
 
     async def margin_borrow(
@@ -662,7 +749,7 @@ class BinanceREST:
         amount: float,
         *,
         symbol: str | None = None,
-        isolated: Optional[bool] = None,
+        isolated: bool | None = None,
     ) -> dict[str, Any]:
         """Borrow asset on cross or isolated margin."""
         mode_isolated = _margin_isolated_default() if isolated is None else bool(isolated)
@@ -675,7 +762,7 @@ class BinanceREST:
         }
         if mode_isolated:
             if not symbol:
-                raise ValueError("margin_borrow requires symbol for isolated margin")
+                raise BinanceMarginSymbolRequiredError(operation="margin_borrow")
             params["isIsolated"] = "TRUE"
             params["symbol"] = self._clean_symbol(symbol)
         params["signature"] = self._sign(params)
@@ -697,7 +784,7 @@ class BinanceREST:
         amount: float,
         *,
         symbol: str | None = None,
-        isolated: Optional[bool] = None,
+        isolated: bool | None = None,
     ) -> dict[str, Any]:
         """Repay borrowed asset on cross or isolated margin."""
         mode_isolated = _margin_isolated_default() if isolated is None else bool(isolated)
@@ -710,7 +797,7 @@ class BinanceREST:
         }
         if mode_isolated:
             if not symbol:
-                raise ValueError("margin_repay requires symbol for isolated margin")
+                raise BinanceMarginSymbolRequiredError(operation="margin_repay")
             params["isIsolated"] = "TRUE"
             params["symbol"] = self._clean_symbol(symbol)
         params["signature"] = self._sign(params)
@@ -739,10 +826,11 @@ class BinanceREST:
                 r = await client.get(path, params=params)
             r.raise_for_status()
             return r.json()
-        except Exception:
+        except BINANCE_DATA_ERRORS as exc:
+            self._log_suppressed("klines", exc)
             return []
 
-    async def book_ticker(self, symbol: str, *, market: Optional[str] = None) -> dict[str, Any]:
+    async def book_ticker(self, symbol: str, *, market: str | None = None) -> dict[str, Any]:
         try:
             clean = self._clean_symbol(symbol)
             market_key, base_url, is_futures = self._resolve_market(market)
@@ -757,11 +845,12 @@ class BinanceREST:
                 r = await client.get(path, params=params)
             r.raise_for_status()
             return r.json()
-        except Exception:
+        except BINANCE_DATA_ERRORS as exc:
+            self._log_suppressed("book_ticker", exc)
             return {}
 
     async def my_trades_since(
-        self, symbol: str, start_ms: int, *, market: Optional[str] = None
+        self, symbol: str, start_ms: int, *, market: str | None = None
     ) -> list[dict[str, Any]]:
         """
         Fetch account trades for a symbol since a given timestamp (ms).
@@ -798,17 +887,17 @@ class BinanceREST:
                     r = await client.get(path, params=params)
                 r.raise_for_status()
                 data = r.json()
-                if isinstance(data, list):
-                    return data
-                # Defensive: sometimes returns object with 'rows'
-                rows = data.get("rows") if isinstance(data, dict) else None
-                return rows or []
             except httpx.HTTPStatusError as e:
                 code = e.response.status_code if e.response is not None else 0
                 if code in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
                 raise
+            else:
+                if isinstance(data, list):
+                    return data
+                rows = data.get("rows") if isinstance(data, dict) else None
+                return rows or []
 
     async def submit_market_order(
         self,
@@ -817,7 +906,7 @@ class BinanceREST:
         quantity: float,
         *,
         reduce_only: bool = False,
-        market: Optional[str] = None,
+        market: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         clean = self._clean_symbol(symbol)
@@ -869,20 +958,12 @@ class BinanceREST:
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
-                body = ""
-                status = 0
-                try:
-                    status = e.response.status_code
-                    body = e.response.text
-                except Exception as body_exc:
-                    self._logger.debug(
-                        "Failed to read Binance error body: %s", body_exc, exc_info=True
-                    )
+                status, body = self._error_details(e)
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(
-                    f"Binance error (submit_market_order) status={status} body={body}"
+                raise BinanceAPIResponseError(
+                    operation="submit_market_order", status=status, body=body
                 ) from e
 
     async def submit_market_quote(
@@ -891,14 +972,16 @@ class BinanceREST:
         side: Literal["BUY", "SELL"],
         quote: float,
         *,
-        market: Optional[str] = None,
+        market: str | None = None,
     ) -> dict[str, Any]:
         market_key, base_url, is_futures = self._resolve_market(market)
         clean = self._clean_symbol(symbol)
         if market_key == "options":
             px = await self.ticker_price(clean, market=market_key)
             if px <= 0:
-                raise RuntimeError(f"quote too small for options: quote={quote:.8f} {clean}")
+                raise BinanceQuoteTooSmallError(
+                    symbol=f"{clean} options", required=px, provided=quote
+                )
             qty = max(math.floor((float(quote) / float(px)) + 1e-8), 1)
             return await self.submit_market_order(clean, side, float(qty), market=market_key)
         if is_futures:
@@ -907,8 +990,8 @@ class BinanceREST:
                 filt = await self.exchange_filter(clean, market=market_key)
                 step = getattr(filt, "step_size", 0.000001) or 0.000001
                 min_qty = getattr(filt, "min_qty", 0.0) or 0.0
-            except Exception as exc:
-                self._logger.debug("Futures filter unavailable for %s: %s", clean, exc)
+            except BINANCE_DATA_ERRORS as exc:
+                self._log_suppressed("submit_market_quote.filter", exc)
                 step = 0.000001
                 min_qty = 0.0
             qty_raw = max(float(quote) / float(px or 1.0), 0.0)
@@ -916,8 +999,8 @@ class BinanceREST:
             qty = math.floor(qty_raw * factor) / factor
             min_quote_req = max(min_qty or step, step) * float(px or 1.0)
             if quote < min_quote_req or qty <= 0:
-                raise RuntimeError(
-                    f"quote too small for futures: quote={quote:.8f} {clean}, required≈{min_quote_req:.4f}"
+                raise BinanceQuoteTooSmallError(
+                    symbol=f"{clean} futures", required=min_quote_req, provided=quote
                 )
             return await self.submit_market_order(clean, side, qty, market=market_key)
 
@@ -956,20 +1039,12 @@ class BinanceREST:
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
-                body = ""
-                status = 0
-                try:
-                    status = e.response.status_code
-                    body = e.response.text
-                except Exception as body_exc:
-                    self._logger.debug(
-                        "Failed to read Binance error body: %s", body_exc, exc_info=True
-                    )
+                status, body = self._error_details(e)
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(
-                    f"Binance error (submit_market_quote) status={status} body={body}"
+                raise BinanceAPIResponseError(
+                    operation="submit_market_quote", status=status, body=body
                 ) from e
 
     async def submit_limit_order(
@@ -981,7 +1056,7 @@ class BinanceREST:
         time_in_force: str = "IOC",
         *,
         reduce_only: bool = False,
-        market: Optional[str] = None,
+        market: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         clean = self._clean_symbol(symbol)
@@ -990,7 +1065,8 @@ class BinanceREST:
         try:
             filt = await self.exchange_filter(clean, market=market_key)
             tick = float(getattr(filt, "tick_size", 0.0) or 0.0)
-        except Exception:
+        except BINANCE_DATA_ERRORS as exc:
+            self._log_suppressed("submit_limit_order.filter", exc)
             tick = 0.0
         safe_price = float(price)
         if tick and tick > 0.0:
@@ -1037,20 +1113,12 @@ class BinanceREST:
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
-                body = ""
-                status = 0
-                try:
-                    status = e.response.status_code
-                    body = e.response.text
-                except Exception as body_exc:
-                    self._logger.debug(
-                        "Failed to read Binance error body: %s", body_exc, exc_info=True
-                    )
+                status, body = self._error_details(e)
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(
-                    f"Binance error (submit_limit_order) status={status} body={body}"
+                raise BinanceAPIResponseError(
+                    operation="submit_limit_order", status=status, body=body
                 ) from e
 
     async def cancel_order(
@@ -1059,10 +1127,10 @@ class BinanceREST:
         *,
         order_id: int | str | None = None,
         client_order_id: str | None = None,
-        market: Optional[str] = None,
+        market: str | None = None,
     ) -> dict[str, Any] | None:
         if order_id is None and not client_order_id:
-            raise ValueError("cancel_order requires order_id or client_order_id")
+            raise BinanceOrderInputError(context="cancel_order")
 
         market_key, base_url, is_futures = self._resolve_market(market)
         clean_symbol = self._clean_symbol(symbol)
@@ -1101,15 +1169,15 @@ class BinanceREST:
                 resp.raise_for_status()
                 try:
                     return resp.json()
-                except Exception:
+                except ValueError:
                     return None
             except httpx.HTTPStatusError as exc:
-                status = exc.response.status_code if exc.response is not None else 0
+                status, body_text = self._error_details(exc)
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(
-                    f"Binance error (cancel_order) status={status} body={exc.response.text if exc.response else ''}"
+                raise BinanceAPIResponseError(
+                    operation="cancel_order", status=status, body=body_text
                 ) from exc
 
         return None
@@ -1120,7 +1188,7 @@ class BinanceREST:
         side: Literal["BUY", "SELL"],
         quantity: float,
         *,
-        market: Optional[str] = None,
+        market: str | None = None,
     ) -> dict[str, Any] | None:
         """
         Convenience wrapper to ensure reduceOnly exits for market trims.
@@ -1142,7 +1210,7 @@ class BinanceREST:
         quantity: float,
         *,
         close_position: bool = True,
-        market: Optional[str] = None,
+        market: str | None = None,
     ) -> dict[str, Any] | None:
         """Place a reduce-only STOP_MARKET that defaults to closePosition=true."""
         market_key, base_url, is_futures = self._resolve_market(market)
@@ -1180,20 +1248,12 @@ class BinanceREST:
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
-                body = ""
-                status = 0
-                try:
-                    status = e.response.status_code
-                    body = e.response.text
-                except Exception as body_exc:
-                    self._logger.debug(
-                        "Failed to read Binance error body: %s", body_exc, exc_info=True
-                    )
+                status, body = self._error_details(e)
                 if status in (418, 429) and attempt < 2:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                raise RuntimeError(
-                    f"Binance error (amend_reduce_only_stop) status={status} body={body}"
+                raise BinanceAPIResponseError(
+                    operation="amend_reduce_only_stop", status=status, body=body
                 ) from e
         return None
 
@@ -1247,7 +1307,7 @@ class BinanceREST:
         """Universal transfer across Binance wallets (SAPI)."""
         transfer_key = transfer_type.upper()
         if transfer_key not in TRANSFER_TYPES:
-            raise ValueError(f"unsupported transfer type: {transfer_type}")
+            raise BinanceTransferTypeError(transfer_type)
         formatted_amount = f"{float(amount):.8f}".rstrip("0").rstrip(".")
         if not formatted_amount:
             formatted_amount = "0"
@@ -1299,15 +1359,24 @@ class BinanceREST:
             return result
 
         transfer_amount = min(float(topup_chunk_usdt), float(funding_free))
+        transfer_errors: tuple[type[Exception], ...] = (
+            httpx.HTTPError,
+            ValueError,
+            KeyError,
+            TypeError,
+            BinanceAPIResponseError,
+        )
         try:
             await self.universal_transfer("FUNDING_UMFUTURE", asset, transfer_amount)
             path = ["FUNDING_UMFUTURE"]
-        except Exception as direct_err:
+        except transfer_errors as direct_err:
+            self._log_suppressed("ensure_futures_balance.direct_transfer", direct_err)
             try:
                 await self.universal_transfer("FUNDING_MAIN", asset, transfer_amount)
                 await self.universal_transfer("MAIN_UMFUTURE", asset, transfer_amount)
                 path = ["FUNDING_MAIN", "MAIN_UMFUTURE"]
-            except Exception as fallback_err:
+            except transfer_errors as fallback_err:
+                self._log_suppressed("ensure_futures_balance.fallback_transfer", fallback_err)
                 result.update(
                     {
                         "ok": False,

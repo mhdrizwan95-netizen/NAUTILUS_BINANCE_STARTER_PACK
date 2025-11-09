@@ -20,7 +20,6 @@ def on_cross_health_soft(router, cfg):
     async def handler(payload: dict):
         logging.getLogger(__name__).info("[RISK] soft health breach: %s", payload)
         await guard.on_cross_health_soft(payload or {})
-        return None
 
     return handler
 
@@ -33,8 +32,7 @@ def on_cross_health_critical(router, cfg):
             from engine.risk_guardian import _write_trading_flag
 
             _write_trading_flag(False)
-        except Exception:
+        except (ImportError, OSError, RuntimeError):
             pass
-        return None
 
     return handler

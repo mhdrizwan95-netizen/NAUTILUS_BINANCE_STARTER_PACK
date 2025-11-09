@@ -14,12 +14,13 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
 DEX_API = os.getenv("DEXSCREENER_API", "https://api.dexscreener.com/latest/dex/tokens")
 logger = logging.getLogger("engine.feeds.dexscreener")
+_DEX_ERRORS = (httpx.HTTPError, ValueError, KeyError, RuntimeError)
 
 
 def _log_suppressed(context: str, exc: Exception) -> None:
@@ -46,12 +47,12 @@ class DexCandidate:
 def _as_float(v, default=0.0) -> float:
     try:
         return float(v)
-    except Exception as exc:
+    except (TypeError, ValueError) as exc:
         _log_suppressed("dexscreener.as_float", exc)
         return default
 
 
-def _tier_for(item: Dict[str, Any]) -> Optional[DexCandidate]:
+def _tier_for(item: dict[str, Any]) -> DexCandidate | None:
     # Extract required fields with defaults
     chain = str(item.get("chainId") or item.get("chain") or "?")
     base = item.get("baseToken") or {}
@@ -114,7 +115,7 @@ def _tier_for(item: Dict[str, Any]) -> Optional[DexCandidate]:
     )
 
 
-async def fetch_top_gainers(chains: list[str] | None = None) -> List[DexCandidate]:
+async def fetch_top_gainers(chains: list[str] | None = None) -> list[DexCandidate]:
     chains = chains or ["bsc", "eth", "base"]
     params = {"chains": ",".join(chains)}
     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -126,15 +127,16 @@ async def fetch_top_gainers(chains: list[str] | None = None) -> List[DexCandidat
             r.raise_for_status()
             js = r.json() or {}
             pairs = js.get("pairs") or []
-            out: List[DexCandidate] = []
+            out: list[DexCandidate] = []
             for item in pairs:
                 c = _tier_for(item)
                 if c:
                     out.append(c)
-            return out
-        except Exception as exc:
+        except _DEX_ERRORS as exc:
             logger.warning("Dexscreener fetch failed: %s", exc)
             return []
+        else:
+            return out
 
 
 async def dexscreener_loop(poll_sec: float = 10.0) -> None:
@@ -145,10 +147,10 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
     # Optional social ROC tiering
     try:
         from engine.feeds.social import roc as social_roc
-    except Exception as exc:
+    except ImportError as import_exc:
 
-        def social_roc(_: str) -> float:
-            _log_suppressed("dexscreener.social_roc_import", exc)
+        def social_roc(_: str, _err=import_exc) -> float:
+            _log_suppressed("dexscreener.social_roc_import", _err)
             return 0.0
 
     while True:
@@ -178,6 +180,6 @@ async def dexscreener_loop(poll_sec: float = 10.0) -> None:
                         },
                     },
                 )
-        except Exception as exc:
+        except _DEX_ERRORS as exc:
             _log_suppressed("dexscreener.loop", exc)
         await asyncio.sleep(poll_sec)

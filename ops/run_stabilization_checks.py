@@ -8,7 +8,6 @@ from collections import defaultdict
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Tuple
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -24,6 +23,10 @@ try:
     import yaml
 except ImportError:
     yaml = None
+
+_YAML_ERRORS = (OSError, ValueError)
+if yaml is not None:  # pragma: no branch - ensures tuple includes yaml error type
+    _YAML_ERRORS = (OSError, ValueError, yaml.YAMLError)  # type: ignore[attr-defined]
 
 
 def _build_harness_namespace(args: argparse.Namespace) -> argparse.Namespace:
@@ -44,21 +47,21 @@ async def _run_harness(args: argparse.Namespace) -> None:
     task = asyncio.create_task(run_synthetic_runtime(harness_args))
     try:
         await asyncio.wait_for(task, timeout=args.duration_seconds)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
 
 
-def _collect_metrics() -> Dict[str, Tuple]:
+def _collect_metrics() -> dict[str, tuple]:
     raw = generate_latest().decode()
-    families: Dict[str, Tuple] = {}
+    families: dict[str, tuple] = {}
     for fam in text_string_to_metric_families(raw):
         families[fam.name] = fam
     return families
 
 
-def _sum_counter(families: Dict[str, Tuple], name: str) -> float:
+def _sum_counter(families: dict[str, tuple], name: str) -> float:
     family = families.get(name)
     if not family:
         return 0.0
@@ -66,14 +69,14 @@ def _sum_counter(families: Dict[str, Tuple], name: str) -> float:
 
 
 def _histogram_quantiles(
-    families: Dict[str, Tuple], name: str, quantiles: Tuple[float, ...]
-) -> Dict[str, Dict[float, float]]:
+    families: dict[str, tuple], name: str, quantiles: tuple[float, ...]
+) -> dict[str, dict[float, float]]:
     family = families.get(name)
-    results: Dict[str, Dict[float, float]] = defaultdict(dict)
+    results: dict[str, dict[float, float]] = defaultdict(dict)
     if not family:
         return results
-    buckets: Dict[str, Dict[float, float]] = defaultdict(dict)
-    totals: Dict[str, float] = {}
+    buckets: dict[str, dict[float, float]] = defaultdict(dict)
+    totals: dict[str, float] = {}
     for sample in family.samples:
         if sample.name.endswith("_bucket"):
             strategy = sample.labels.get("strategy", "all")
@@ -100,9 +103,9 @@ def _histogram_quantiles(
     return results
 
 
-def _gauge_values(families: Dict[str, Tuple], name: str, label_key: str) -> Dict[str, float]:
+def _gauge_values(families: dict[str, tuple], name: str, label_key: str) -> dict[str, float]:
     family = families.get(name)
-    values: Dict[str, float] = {}
+    values: dict[str, float] = {}
     if not family:
         return values
     for sample in family.samples:
@@ -113,7 +116,7 @@ def _gauge_values(families: Dict[str, Tuple], name: str, label_key: str) -> Dict
 
 
 def _evaluate_metrics(
-    args: argparse.Namespace, cfg: RuntimeConfig, families: Dict[str, Tuple]
+    args: argparse.Namespace, cfg: RuntimeConfig, families: dict[str, tuple]
 ) -> int:
     failures = 0
     mismatch_total = _sum_counter(families, "strategy_leverage_mismatch_total")
@@ -174,13 +177,14 @@ def _load_thresholds_file(thresholds_file: str) -> dict:
         print("[WARN] PyYAML not available, cannot load thresholds file")
         return {}
     try:
-        with open(thresholds_file, "r") as f:
+        with open(thresholds_file) as f:
             thresholds = yaml.safe_load(f)
-            print(f"[INFO] Loaded thresholds from {thresholds_file}: {thresholds}")
-            return thresholds or {}
-    except Exception as e:
-        print(f"[WARN] Failed to load thresholds from {thresholds_file}: {e}")
+    except _YAML_ERRORS as exc:
+        print(f"[WARN] Failed to load thresholds from {thresholds_file}: {exc}")
         return {}
+    else:
+        print(f"[INFO] Loaded thresholds from {thresholds_file}: {thresholds}")
+        return thresholds or {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -229,7 +233,7 @@ def _apply_threshold_defaults(args: argparse.Namespace) -> argparse.Namespace:
 def _generate_report(
     args: argparse.Namespace,
     cfg: RuntimeConfig,
-    families: Dict[str, Tuple],
+    families: dict[str, tuple],
     failures: int,
 ) -> dict:
     """Generate JSON report with stabilization results."""

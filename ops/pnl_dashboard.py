@@ -120,7 +120,7 @@ def load_registry_data() -> dict:
 
     try:
         return json.loads(REGISTRY_PATH.read_text())
-    except Exception:
+    except json.JSONDecodeError:
         return {}
 
 
@@ -201,9 +201,9 @@ async def pnl_dashboard():
             },
         }
 
-    except Exception as e:
+    except (httpx.HTTPError, ValueError, json.JSONDecodeError) as exc:
         return {
-            "error": f"Dashboard generation failed: {str(e)}",
+            "error": f"Dashboard generation failed: {str(exc)}",
             "timestamp": time.time(),
         }
 

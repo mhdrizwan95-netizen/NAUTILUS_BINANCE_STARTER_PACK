@@ -20,4 +20,3 @@ echo "[Deps Smoke] Node + npm (if present):"
 command -v node >/dev/null 2>&1 && node -v || echo "node not installed"
 command -v npm  >/dev/null 2>&1 && npm -v  || echo "npm not installed"
 echo "Done"
-

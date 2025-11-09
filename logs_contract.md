@@ -17,4 +17,3 @@ Usage
 
 Future (optional)
 - Add OpenTelemetry FastAPI instrumentation and OTLP exporter to enrich traces, using `X-Request-ID` as a span link for compatibility with existing logs.
-

@@ -8,7 +8,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 __all__ = [
     "STATE_DIR",
@@ -35,7 +35,7 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
         try:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
-        except Exception:
+        except OSError:
             pass
 
 
@@ -61,7 +61,7 @@ class SnapshotStore:
     def __init__(self, path: Path = SNAP_PATH):
         self.path = path
 
-    def load(self) -> Optional[dict[str, Any]]:
+    def load(self) -> dict[str, Any] | None:
         if not self.path.exists():
             return None
         with _LOCK:

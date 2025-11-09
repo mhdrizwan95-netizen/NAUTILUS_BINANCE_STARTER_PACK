@@ -1,5 +1,11 @@
-import { QueryClient } from '@tanstack/react-query';
-import type { ErrorInfo } from 'react';
+import type { QueryClient } from "@tanstack/react-query";
+import type { ErrorInfo } from "react";
+
+const devLog = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.warn(...args);
+  }
+};
 
 type ApiPerformanceReport = {
   averageResponseTime: number;
@@ -26,6 +32,11 @@ type UserInteraction = {
 type ReactErrorDetail = {
   error: Error;
   errorInfo: ErrorInfo;
+};
+
+type LayoutShiftEntry = PerformanceEntry & {
+  value: number;
+  hadRecentInput?: boolean;
 };
 
 // Performance monitoring utilities
@@ -76,8 +87,8 @@ export class PerformanceMonitor {
   }
 
   // Track WebSocket connection health
-  trackWebSocketEvent(event: 'connect' | 'disconnect' | 'error' | 'reconnect'): void {
-    console.log(`WebSocket ${event} at ${new Date().toISOString()}`);
+  trackWebSocketEvent(event: "connect" | "disconnect" | "error" | "reconnect"): void {
+    devLog(`WebSocket ${event} at ${new Date().toISOString()}`);
   }
 
   // Get performance report
@@ -126,8 +137,8 @@ export class ErrorTracker {
     }
 
     // Log to console in development
-    if (process.env.NODE_ENV === 'development') {
-      console.error('Error tracked:', errorInfo);
+    if (process.env.NODE_ENV === "development") {
+      console.error("Error tracked:", errorInfo);
     }
 
     // Send to error tracking service (Sentry, etc.)
@@ -147,7 +158,7 @@ export class ErrorTracker {
     this.trackError(error, {
       endpoint,
       statusCode,
-      type: 'api',
+      type: "api",
     });
   }
 
@@ -159,17 +170,15 @@ export class ErrorTracker {
 
     // For now, just store locally
     try {
-      const existingErrors: TrackedError[] = JSON.parse(
-        localStorage.getItem('app-errors') || '[]'
-      );
+      const existingErrors: TrackedError[] = JSON.parse(localStorage.getItem("app-errors") || "[]");
       existingErrors.push(errorInfo);
       // Keep only last 20 errors in localStorage
       if (existingErrors.length > 20) {
         existingErrors.splice(0, existingErrors.length - 20);
       }
-      localStorage.setItem('app-errors', JSON.stringify(existingErrors));
+      localStorage.setItem("app-errors", JSON.stringify(existingErrors));
     } catch (storageError) {
-      console.warn('Failed to persist error log', storageError);
+      console.warn("Failed to persist error log", storageError);
     }
   }
 
@@ -181,34 +190,34 @@ export class ErrorTracker {
   // Clear error history
   clearErrors(): void {
     this.errors = [];
-    localStorage.removeItem('app-errors');
+    localStorage.removeItem("app-errors");
   }
 }
 
 // Web Vitals tracking (placeholder - install web-vitals package for full implementation)
 export function trackWebVitals(): void {
   // Track Core Web Vitals using Performance API
-  if ('PerformanceObserver' in window) {
-    console.log('Web Vitals tracking initialized (basic implementation)');
+  if ("PerformanceObserver" in window) {
+    devLog("Web Vitals tracking initialized (basic implementation)");
 
     // Basic LCP tracking
     const lcpObserver = new PerformanceObserver((list) => {
       const entries = list.getEntries();
       const lastEntry = entries[entries.length - 1];
-      console.log('LCP:', lastEntry.startTime);
+      devLog("LCP:", lastEntry.startTime);
     });
-    lcpObserver.observe({ entryTypes: ['largest-contentful-paint'] });
+    lcpObserver.observe({ entryTypes: ["largest-contentful-paint"] });
 
     // Basic FID tracking
     const fidObserver = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
         const firstInput = entry as PerformanceEventTiming;
-        if (typeof firstInput.processingStart === 'number') {
-          console.log('FID:', firstInput.processingStart - firstInput.startTime);
+        if (typeof firstInput.processingStart === "number") {
+          devLog("FID:", firstInput.processingStart - firstInput.startTime);
         }
       }
     });
-    fidObserver.observe({ entryTypes: ['first-input'] });
+    fidObserver.observe({ entryTypes: ["first-input"] });
   }
 }
 
@@ -220,11 +229,11 @@ export function setupQueryMonitoring(queryClient: QueryClient): void {
     const startTime = Date.now();
     const [resource] = args;
     const endpoint =
-      typeof resource === 'string'
+      typeof resource === "string"
         ? resource
         : resource instanceof URL
-        ? resource.toString()
-        : resource.url;
+          ? resource.toString()
+          : resource.url;
 
     try {
       const response = await originalFetch(...args);
@@ -244,10 +253,10 @@ export function setupQueryMonitoring(queryClient: QueryClient): void {
 
   // Track query cache hits/misses
   queryClient.getQueryCache().subscribe((event) => {
-    if (event.type === 'added') {
-      console.log('Query added to cache:', JSON.stringify(event.query.queryKey));
-    } else if (event.type === 'removed') {
-      console.log('Query removed from cache:', JSON.stringify(event.query.queryKey));
+    if (event.type === "added") {
+      devLog("Query added to cache:", JSON.stringify(event.query.queryKey));
+    } else if (event.type === "removed") {
+      devLog("Query removed from cache:", JSON.stringify(event.query.queryKey));
     }
   });
 }
@@ -287,28 +296,25 @@ export class UserTracker {
 // Global error handler
 export function setupGlobalErrorHandling(): void {
   // Handle unhandled promise rejections
-  window.addEventListener('unhandledrejection', (event) => {
+  window.addEventListener("unhandledrejection", (event) => {
     ErrorTracker.getInstance().trackError(
       new Error(`Unhandled promise rejection: ${event.reason}`),
-      { type: 'unhandledrejection' }
+      { type: "unhandledrejection" },
     );
   });
 
   // Handle uncaught errors
-  window.addEventListener('error', (event) => {
-    ErrorTracker.getInstance().trackError(
-      event.error || new Error(event.message),
-      {
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-        type: 'uncaughterror',
-      }
-    );
+  window.addEventListener("error", (event) => {
+    ErrorTracker.getInstance().trackError(event.error || new Error(event.message), {
+      filename: event.filename,
+      lineno: event.lineno,
+      colno: event.colno,
+      type: "uncaughterror",
+    });
   });
 
   // Handle React Error Boundaries
-  window.addEventListener('reactError', (event: Event) => {
+  window.addEventListener("reactError", (event: Event) => {
     const detail = (event as CustomEvent<ReactErrorDetail>).detail;
     if (!detail) return;
     ErrorTracker.getInstance().trackReactError(detail.error, detail.errorInfo);
@@ -317,12 +323,12 @@ export function setupGlobalErrorHandling(): void {
 
 // Performance observer for long tasks
 export function setupPerformanceObserver(): void {
-  if ('PerformanceObserver' in window) {
+  if ("PerformanceObserver" in window) {
     // Observe long tasks (> 50ms)
     const observer = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
         if (entry.duration > 50) {
-          console.warn('Long task detected:', {
+          console.warn("Long task detected:", {
             duration: entry.duration,
             startTime: entry.startTime,
           });
@@ -330,14 +336,14 @@ export function setupPerformanceObserver(): void {
       }
     });
 
-    observer.observe({ entryTypes: ['longtask'] });
+    observer.observe({ entryTypes: ["longtask"] });
 
     // Observe layout shifts (CLS)
     const layoutObserver = new PerformanceObserver((list) => {
       for (const entry of list.getEntries()) {
-        const shift = entry as LayoutShift;
+        const shift = entry as LayoutShiftEntry;
         if (shift.value > 0.1 && !shift.hadRecentInput) {
-          console.warn('Layout shift detected:', {
+          console.warn("Layout shift detected:", {
             value: shift.value,
             startTime: entry.startTime,
           });
@@ -345,6 +351,6 @@ export function setupPerformanceObserver(): void {
       }
     });
 
-    layoutObserver.observe({ entryTypes: ['layout-shift'] });
+    layoutObserver.observe({ entryTypes: ["layout-shift"] });
   }
 }

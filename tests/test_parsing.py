@@ -3,6 +3,7 @@
 T5: Unit tests for parsing parse_prometheus_text and key extraction helpers.
 Tests sample payloads from all four fallback chain shapes.
 """
+
 import unittest
 
 from ops.metrics_utils import from_json, parse_prometheus_text

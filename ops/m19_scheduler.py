@@ -14,13 +14,15 @@ Design Principles:
 - Configurable rules: Human-tunable thresholds without code changes
 """
 
+import asyncio
 import json
+import logging
 import os
 import shlex
 import subprocess
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import yaml
 
@@ -30,6 +32,10 @@ CFG_PATH = os.path.join("ops", "m19_scheduler.yaml")
 STATE_PATH = os.path.join("data", "processed", "m19", "scheduler_state.json")
 OUT_DIR = os.path.join("data", "processed", "m19")
 PROM_SNAPSHOT = os.path.join("data", "processed", "m19", "metrics_snapshot.json")
+_FILE_ERRORS = (OSError, json.JSONDecodeError)
+_EXEC_ERRORS = (OSError, subprocess.SubprocessError, ValueError)
+_ACTION_ERRORS = (RuntimeError, ValueError, OSError, subprocess.SubprocessError)
+_MAIN_ERRORS = (OSError, ValueError, RuntimeError, yaml.YAMLError, json.JSONDecodeError)
 
 # Ensure output directory exists
 os.makedirs(OUT_DIR, exist_ok=True)
@@ -48,10 +54,10 @@ def minutes_since(ts_iso: str) -> float:
     return (datetime.utcnow() - dt).total_seconds() / 60.0
 
 
-def load_cfg() -> Dict[str, Any]:
+def load_cfg() -> dict[str, Any]:
     """Load scheduler configuration from YAML."""
     try:
-        with open(CFG_PATH, "r") as f:
+        with open(CFG_PATH) as f:
             return yaml.safe_load(f)
     except FileNotFoundError:
         print(f"Warning: Config file {CFG_PATH} not found, using defaults")
@@ -79,7 +85,7 @@ def load_cfg() -> Dict[str, Any]:
         }
 
 
-def read_prom_snapshot() -> Dict[str, Any]:
+def read_prom_snapshot() -> dict[str, Any]:
     """
     Read current metrics snapshot.
 
@@ -88,10 +94,10 @@ def read_prom_snapshot() -> Dict[str, Any]:
     """
     try:
         if os.path.exists(PROM_SNAPSHOT):
-            with open(PROM_SNAPSHOT, "r") as f:
+            with open(PROM_SNAPSHOT) as f:
                 return json.load(f)
-    except Exception as e:
-        print(f"Warning: Could not read metrics snapshot: {e}")
+    except _FILE_ERRORS as exc:
+        print(f"Warning: Could not read metrics snapshot: {exc}")
 
     # Safe defaults when no metrics available
     return {
@@ -109,14 +115,14 @@ def read_prom_snapshot() -> Dict[str, Any]:
     }
 
 
-def load_state() -> Dict[str, Any]:
+def load_state() -> dict[str, Any]:
     """Load scheduler state including last run times and action counts."""
     if os.path.exists(STATE_PATH):
         try:
-            with open(STATE_PATH, "r") as f:
+            with open(STATE_PATH) as f:
                 return json.load(f)
-        except Exception as e:
-            print(f"Warning: Could not load state: {e}")
+        except _FILE_ERRORS as exc:
+            print(f"Warning: Could not load state: {exc}")
 
     # Initialize fresh state
     return {
@@ -128,22 +134,22 @@ def load_state() -> Dict[str, Any]:
     }
 
 
-def save_state(state: Dict[str, Any]) -> None:
+def save_state(state: dict[str, Any]) -> None:
     """Save scheduler state to disk."""
     try:
         with open(STATE_PATH, "w") as f:
             json.dump(state, f, indent=2, default=str)
-    except Exception as e:
-        print(f"Error saving state: {e}")
+    except _FILE_ERRORS as exc:
+        print(f"Error saving state: {exc}")
 
 
-def cool_ok(state: Dict[str, Any], action_key: str, min_minutes: int) -> bool:
+def cool_ok(state: dict[str, Any], action_key: str, min_minutes: int) -> bool:
     """Check if enough time has passed since last run of this action."""
     last = state["last_run"].get(action_key, "")
     return minutes_since(last) >= min_minutes
 
 
-def mark_run(state: Dict[str, Any], action_key: str) -> None:
+def mark_run(state: dict[str, Any], action_key: str) -> None:
     """Mark that an action was executed."""
     state["last_run"][action_key] = now()
 
@@ -170,12 +176,12 @@ def exec_shell(cmd: str) -> bool:
     except subprocess.TimeoutExpired:
         print("⏰ Execution timed out")
         return False
-    except Exception as e:
-        print(f"⚠️  Execution error: {e}")
+    except _EXEC_ERRORS as exc:
+        print(f"⚠️  Execution error: {exc}")
         return False
 
 
-def assess_system_health(metrics: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[str, Any]:
+def assess_system_health(metrics: dict[str, Any], cfg: dict[str, Any]) -> dict[str, Any]:
     """
     Assess overall system health based on KPIs and determine if action is needed.
 
@@ -256,8 +262,8 @@ def assess_system_health(metrics: Dict[str, Any], cfg: Dict[str, Any]) -> Dict[s
 
 
 def decide_and_act(
-    cfg: Dict[str, Any], state: Dict[str, Any], metrics: Dict[str, Any]
-) -> Dict[str, Any]:
+    cfg: dict[str, Any], state: dict[str, Any], metrics: dict[str, Any]
+) -> dict[str, Any]:
     """
     Core decision logic: evaluate conditions and choose lowest-risk effective action.
 
@@ -295,7 +301,7 @@ def decide_and_act(
         return decision
 
     # Collect candidate actions with priorities
-    candidates: List[Tuple[str, int, str]] = []
+    candidates: list[tuple[str, int, str]] = []
 
     # Critical conditions (highest priority)
     if metrics.get("m16_winrate", 0.5) <= th["winrate_crit"]:
@@ -389,24 +395,21 @@ def decide_and_act(
                 "reason": reason,
             }
             try:
-                import asyncio
-
                 import aiohttp
+            except ImportError:
+                logging.debug("aiohttp not available for scheduler telemetry push")
+            else:
 
-                DASH = os.environ.get("DASH_BASE", "http://127.0.0.1:8002")
-
-                async def push_to_dash():
+                async def push_to_dash() -> None:
                     try:
                         async with aiohttp.ClientSession() as sess:
-                            url = f"{DASH}/ws/scheduler"
+                            url = f"{os.environ.get('DASH_BASE', 'http://127.0.0.1:8002')}/ws/scheduler"
                             async with sess.ws_connect(url) as ws:
                                 await ws.send_json(payload)
-                    except Exception:
-                        pass
+                    except (TimeoutError, aiohttp.ClientError, OSError) as exc:
+                        logging.debug("Scheduler WS push failed: %s", exc)
 
                 asyncio.create_task(push_to_dash())
-            except Exception:
-                pass
 
         if success:
             state["actions_in_last_hour"] += 1
@@ -415,9 +418,9 @@ def decide_and_act(
         else:
             decision.update({"ok": False, "error": "execution_failed"})
 
-    except Exception as e:
-        print(f"Error executing action {action}: {e}")
-        decision.update({"ok": False, "error": str(e)})
+    except _ACTION_ERRORS as exc:
+        print(f"Error executing action {action}: {exc}")
+        decision.update({"ok": False, "error": str(exc)})
 
     return decision
 
@@ -432,8 +435,8 @@ async def telemetry_ws_push(topic: str, payload: dict):
         async with aiohttp.ClientSession() as sess:
             async with sess.ws_connect(f"{DASH}/ws/{topic}") as ws:
                 await ws.send_json(payload)
-    except Exception:
-        pass
+    except (TimeoutError, aiohttp.ClientError, OSError) as exc:
+        logging.debug("Telemetry WS push failed: %s", exc)
 
 
 def main():
@@ -442,18 +445,15 @@ def main():
     print("=" * 50)
 
     try:
-        # Load configuration and state
         cfg = load_cfg()
         state = load_state()
 
         print(f"Config loaded from {CFG_PATH}")
         print(f"State loaded from {STATE_PATH}")
 
-        # Get current metrics
         metrics = read_prom_snapshot()
         print(f"Metrics snapshot: {len(metrics)} keys at {metrics.get('timestamp', 'unknown')}")
 
-        # Assess system health
         health = assess_system_health(metrics, cfg)
         print(
             f"System health: {health['overall_status']} "
@@ -463,18 +463,11 @@ def main():
         if health["issues_found"]:
             print(f"Issues found: {', '.join(health['issues_found'])}")
 
-        # Make decision and act
         result = decide_and_act(cfg, state, metrics)
-
-        # Update state with result
         state["decision_log"].append(result)
-        # Keep only recent decisions (last 100)
         state["decision_log"] = state["decision_log"][-100:]
-
-        # Save updated state
         save_state(state)
 
-        # Print final result
         print(f"\n🎯 Decision: {result['decision']}")
         if result["decision"] == "run":
             print(f"   Action: {result['action']}")
@@ -482,16 +475,15 @@ def main():
             print(f"   Priority: {result['priority']}")
             print(f"   Success: {result.get('ok', 'unknown')}")
 
-        # Return JSON for logging/cron monitoring
         print(f"\n{json.dumps(result, indent=2, default=str)}")
-        return 0
-
-    except Exception as e:
-        print(f"❌ Scheduler error: {e}")
+    except _MAIN_ERRORS as exc:
+        print(f"❌ Scheduler error: {exc}")
         import traceback
 
         traceback.print_exc()
         return 1
+    else:
+        return 0
 
 
 if __name__ == "__main__":

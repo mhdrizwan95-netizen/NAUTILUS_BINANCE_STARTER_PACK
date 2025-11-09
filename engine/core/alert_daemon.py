@@ -19,12 +19,77 @@ import os
 import statistics
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import yaml
 
 from .event_bus import BUS
+
+LOGGER = logging.getLogger(__name__)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    LOGGER.warning("[ALERT] %s suppressed: %s", context, exc, exc_info=True)
+
+
+class AlertDispatchError(RuntimeError):
+    """Raised when a notification channel fails to deliver."""
+
+
+class TelegramDispatchError(AlertDispatchError):
+    """Raised when the Telegram channel encounters an error."""
+
+    def __init__(
+        self, *, status: int | None = None, body: str | None = None, detail: str | None = None
+    ) -> None:
+        message = "Telegram dispatch failed"
+        parts: list[str] = []
+        if status is not None:
+            parts.append(f"status={status}")
+        if body:
+            parts.append(f"body={body}")
+        if detail:
+            parts.append(detail)
+        if parts:
+            message = f"{message} ({', '.join(parts)})"
+        super().__init__(message)
+
+
+class EmailDispatchError(AlertDispatchError):
+    """Raised when the email channel cannot deliver."""
+
+    def __init__(self, detail: str | None = None) -> None:
+        message = "Email dispatch failed"
+        if detail:
+            message = f"{message} ({detail})"
+        super().__init__(message)
+
+
+class AlertConditionError(TypeError):
+    """Base exception for invalid alert rule conditions."""
+
+
+class AlertConditionCallError(AlertConditionError):
+    """Raised when a condition attempts to call a function."""
+
+    def __init__(self) -> None:
+        super().__init__("Function calls are not allowed in alert conditions.")
+
+
+class AlertConditionNameError(AlertConditionError):
+    """Raised when a condition references a forbidden name."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__(f"Name '{name}' is not allowed in alert conditions.")
+
+
+class AlertConditionSyntaxError(AlertConditionError):
+    """Raised when a condition uses disallowed syntax."""
+
+    def __init__(self, node_repr: str) -> None:
+        super().__init__(f"Disallowed syntax: {node_repr}")
 
 
 @dataclass
@@ -34,20 +99,20 @@ class AlertRule:
     topic: str
     condition: str
     message: str
-    channels: List[str]
+    channels: list[str]
     priority: str = "medium"
     cooldown: int = 0  # Minimum seconds between alerts of same type
 
-    def evaluate(self, data: Dict[str, Any]) -> bool:
+    def evaluate(self, data: dict[str, Any]) -> bool:
         """Evaluate condition against event data."""
         try:
             result = _safe_eval_condition(self.condition, {"data": data})
             return bool(result)
-        except Exception as e:
-            logging.warning(f"[ALERT] Rule evaluation error: {e}")
+        except (ValueError, SyntaxError) as exc:
+            _log_suppressed("rule evaluation", exc)
             return False
 
-    def format_message(self, data: Dict[str, Any]) -> str:
+    def format_message(self, data: dict[str, Any]) -> str:
         """Format alert message with event data."""
         try:
             # Add common data fields for formatting
@@ -58,7 +123,7 @@ class AlertRule:
             }
             return self.message.format(**context)
         except (KeyError, ValueError) as e:
-            logging.warning(f"[ALERT] Message formatting error: {e}")
+            LOGGER.warning("[ALERT] Message formatting error: %s", e)
             return f"[ALERT] {self.topic}: {str(e)}"
 
 
@@ -76,14 +141,14 @@ class AlertChannel:
     """Notification channel configuration."""
 
     enabled: bool = True
-    token_env: Optional[str] = None
-    chat_id_env: Optional[str] = None
-    urls: Optional[List[str]] = None
+    token_env: str | None = None
+    chat_id_env: str | None = None
+    urls: list[str] | None = None
     level: str = "WARNING"
-    smtp_server: Optional[str] = None
-    smtp_port: Optional[int] = None
-    sender_env: Optional[str] = None
-    recipients: Optional[List[str]] = None
+    smtp_server: str | None = None
+    smtp_port: int | None = None
+    sender_env: str | None = None
+    recipients: list[str] | None = None
 
 
 _ALLOWED_AST_NODES = (
@@ -118,16 +183,16 @@ _ALLOWED_AST_NODES = (
 _ALLOWED_NAMES = {"data", "True", "False", "None"}
 
 
-def _safe_eval_condition(expression: str, context: Dict[str, Any]) -> bool:
+def _safe_eval_condition(expression: str, context: dict[str, Any]) -> bool:
     """Parse and evaluate a rule condition using a constrained AST."""
     tree = ast.parse(expression, mode="eval")
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
-            raise ValueError("Function calls are not allowed in alert conditions.")
+            raise AlertConditionCallError()
         if isinstance(node, ast.Name) and node.id not in _ALLOWED_NAMES:
-            raise ValueError(f"Name '{node.id}' is not allowed in alert conditions.")
+            raise AlertConditionNameError(node.id)
         if not isinstance(node, _ALLOWED_AST_NODES):
-            raise ValueError(f"Disallowed syntax: {ast.dump(node, include_attributes=False)}")
+            raise AlertConditionSyntaxError(ast.dump(node, include_attributes=False))
     compiled = compile(tree, "<alert_condition>", "eval")
     return bool(eval(compiled, {"__builtins__": {}}, context))  # nosec B307 - AST validated
 
@@ -144,10 +209,10 @@ class AlertDaemon:
     - Statistical anomaly detection
     """
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: str | None = None):
         self.config_path = config_path or os.getenv("ALERT_CONFIG", "engine/config/alerts.yaml")
-        self.rules: List[AlertRule] = []
-        self.channels: Dict[str, AlertChannel] = {}
+        self.rules: list[AlertRule] = []
+        self.channels: dict[str, AlertChannel] = {}
         self.throttling = ThrottleConfig()
         self._alert_history = deque(maxlen=1000)  # Recent alerts for throttling
         self._running = False
@@ -158,7 +223,7 @@ class AlertDaemon:
     def _load_config(self) -> None:
         """Load alert rules and channel configuration."""
         if not os.path.exists(self.config_path):
-            logging.warning(f"[ALERT] Config file not found: {self.config_path}")
+            LOGGER.warning("[ALERT] Config file not found: %s", self.config_path)
             return
 
         try:
@@ -200,12 +265,14 @@ class AlertDaemon:
                 )
                 self.channels[chan_name] = channel
 
-            logging.info(
-                f"[ALERT] Loaded {len(self.rules)} rules for {len(self.channels)} channels"
+            LOGGER.info(
+                "[ALERT] Loaded %s rules for %s channels",
+                len(self.rules),
+                len(self.channels),
             )
 
-        except Exception as e:
-            logging.error(f"[ALERT] Failed to load config: {e}")
+        except (OSError, yaml.YAMLError, AttributeError, TypeError, ValueError):
+            LOGGER.exception("[ALERT] Failed to load config at %s", self.config_path)
 
     def _setup_subscriptions(self) -> None:
         """Subscribe to event bus topics."""
@@ -219,7 +286,7 @@ class AlertDaemon:
     def _create_handler(self, topic: str) -> Callable:
         """Create event handler for a specific topic."""
 
-        async def handle_event(data: Dict[str, Any]) -> None:
+        async def handle_event(data: dict[str, Any]) -> None:
             """Process events for this topic against all matching rules."""
             for rule in self.rules:
                 if rule.topic != topic:
@@ -231,7 +298,7 @@ class AlertDaemon:
 
                 # Check throttling
                 if self._should_throttle():
-                    logging.debug(f"[ALERT] Throttling alert: {rule.message}")
+                    LOGGER.debug("[ALERT] Throttling alert: %s", rule.message)
                     continue
 
                 # Check rule cooldown
@@ -260,7 +327,7 @@ class AlertDaemon:
         try:
             if channel_name == "log":
                 level = getattr(logging, channel.level.upper(), logging.WARNING)
-                logging.log(level, message)
+                LOGGER.log(level, message)
 
             elif channel_name == "telegram":
                 await self._send_telegram(channel, message)
@@ -271,8 +338,8 @@ class AlertDaemon:
             elif channel_name == "email":
                 await self._send_email(channel, message, priority)
 
-        except Exception as e:
-            logging.error(f"[ALERT] Failed to send {channel_name} notification: {e}")
+        except AlertDispatchError as exc:
+            _log_suppressed(f"{channel_name} notification", exc)
 
     async def _send_telegram(self, channel: AlertChannel, message: str) -> None:
         """Send Telegram notification."""
@@ -282,17 +349,23 @@ class AlertDaemon:
         chat_id = os.getenv(channel.chat_id_env or "TELEGRAM_CHAT_ID")
 
         if not token or not chat_id:
-            logging.warning("[ALERT] Telegram credentials not configured")
+            LOGGER.warning("[ALERT] Telegram credentials not configured")
             return
 
         url = f"https://api.telegram.org/bot{token}/sendMessage"
 
         async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}
-            ) as response:
-                if response.status != 200:
-                    logging.error(f"[ALERT] Telegram send failed: {await response.text()}")
+            try:
+                async with session.post(
+                    url,
+                    json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+                    timeout=5,
+                ) as response:
+                    if response.status != 200:
+                        body = await response.text()
+                        raise TelegramDispatchError(status=response.status, body=body)
+            except (TimeoutError, aiohttp.ClientError) as exc:
+                raise TelegramDispatchError(detail=str(exc)) from exc
 
     async def _send_webhook(self, channel: AlertChannel, message: str, priority: str) -> None:
         """Send webhook notification."""
@@ -313,8 +386,8 @@ class AlertDaemon:
                 try:
                     async with session.post(url, json=payload, timeout=5) as response:
                         response.raise_for_status()
-                except Exception as e:
-                    logging.warning(f"[ALERT] Webhook failed for {url}: {e}")
+                except (TimeoutError, aiohttp.ClientError, ValueError) as exc:
+                    _log_suppressed(f"webhook send {url}", exc)
 
     async def _send_email(self, channel: AlertChannel, message: str, priority: str) -> None:
         """Send email notification."""
@@ -330,20 +403,18 @@ class AlertDaemon:
         msg["From"] = os.getenv(channel.sender_env or "ALERT_SENDER_EMAIL", "alerts@trading-system")
         msg["To"] = ", ".join(channel.recipients)
 
+        context = ssl.create_default_context()
+
         try:
-            context = ssl.create_default_context()
+            with smtplib.SMTP(channel.smtp_server, channel.smtp_port or 587) as server:
+                server.ehlo()
+                server.starttls(context=context)
+                server.ehlo()
 
-            server = smtplib.SMTP(channel.smtp_server, channel.smtp_port or 587)
-            server.ehlo()
-            server.starttls(context=context)
-            server.ehlo()
-
-            # You'll want to configure proper authentication
-            server.sendmail(msg["From"], channel.recipients, msg.as_string())
-            server.quit()
-
-        except Exception as e:
-            logging.error(f"[ALERT] Email send failed: {e}")
+                # You'll want to configure proper authentication
+                server.sendmail(msg["From"], channel.recipients, msg.as_string())
+        except (smtplib.SMTPException, OSError, ssl.SSLError) as exc:
+            raise EmailDispatchError(detail=str(exc)) from exc
 
     def _should_throttle(self) -> bool:
         """Check if alerts should be throttled."""
@@ -376,7 +447,7 @@ class AlertDaemon:
             {"timestamp": time.time(), "rule_topic": topic, "message": message}
         )
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get alerting statistics."""
         return {
             "total_alerts": len(self._alert_history),
@@ -397,12 +468,12 @@ class AnomalyWatcher:
     def __init__(self, window_size: int = 20, sigma_threshold: float = 3.0):
         self.window_size = window_size
         self.sigma_threshold = sigma_threshold
-        self.metric_history: Dict[str, deque] = {}
+        self.metric_history: dict[str, deque] = {}
         self.anomaly_alert = AlertDaemon()
 
         BUS.subscribe("metrics.update", lambda d: asyncio.create_task(self.on_metrics_update(d)))
 
-    async def on_metrics_update(self, data: Dict[str, Any]) -> None:
+    async def on_metrics_update(self, data: dict[str, Any]) -> None:
         """Process metrics update and check for anomalies."""
         for metric_name in ["pnl_unrealized", "equity_usd", "exposure_usd"]:
             value = data.get(metric_name)
@@ -457,7 +528,7 @@ class AnomalyWatcher:
         ):
             await self.anomaly_alert._send_notification("telegram", message, "high")
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """Get anomaly detection statistics."""
         return {
             "metrics_tracked": list(self.metric_history.keys()),
@@ -479,7 +550,7 @@ async def initialize_alerting() -> None:
     _alert_daemon = AlertDaemon()
     _anomaly_watcher = AnomalyWatcher()
 
-    logging.info("[ALERT] Alert system initialized with real-time monitoring")
+    LOGGER.info("[ALERT] Alert system initialized with real-time monitoring")
 
 
 async def shutdown_alerting() -> None:
@@ -489,4 +560,4 @@ async def shutdown_alerting() -> None:
     _alert_daemon = None
     _anomaly_watcher = None
 
-    logging.info("[ALERT] Alert system shutdown")
+    LOGGER.info("[ALERT] Alert system shutdown")

@@ -9,6 +9,24 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import httpx
+
+try:
+    from binance.error import BinanceAPIException, BinanceRequestException
+except ModuleNotFoundError:  # pragma: no cover - optional dependency
+    BinanceAPIException = None  # type: ignore[assignment]
+    BinanceRequestException = None  # type: ignore[assignment]
+
+BINANCE_ERRORS: tuple[type[Exception], ...] = tuple(
+    err for err in (BinanceAPIException, BinanceRequestException) if err is not None
+)
+
+logger = logging.getLogger(__name__)
+
+
+def _log_suppressed(context: str, err: Exception) -> None:
+    logger.warning("[Binance Venue] %s: %s", context, err, exc_info=True)
+
 
 class BinanceVenue:
     """Binance venue adapter implementing VenueClient protocol."""
@@ -43,42 +61,42 @@ class BinanceVenue:
         """Binance account snapshot."""
         try:
             return self._c.account_snapshot()
-        except Exception as e:
-            logging.warning(f"[Binance Venue] Account snapshot failed: {e}")
-            return {
-                "venue": self.VENUE,
-                "equity_usd": None,
-                "cash_usd": None,
-                "pnl": {"realized": None, "unrealized": None},
-            }
+        except (*BINANCE_ERRORS, httpx.HTTPError, ValueError, KeyError) as exc:
+            _log_suppressed("account snapshot failed", exc)
+        return {
+            "venue": self.VENUE,
+            "equity_usd": None,
+            "cash_usd": None,
+            "pnl": {"realized": None, "unrealized": None},
+        }
 
     def positions(self) -> list[dict[str, Any]]:
         """Binance positions."""
         try:
             return self._c.positions()
-        except Exception as e:
-            logging.warning(f"[Binance Venue] Positions fetch failed: {e}")
-            return []
+        except (*BINANCE_ERRORS, httpx.HTTPError, ValueError, KeyError) as exc:
+            _log_suppressed("positions fetch failed", exc)
+        return []
 
     def list_open_orders(self) -> list[dict[str, Any]]:
         """List open orders for Binance reconciliation."""
         try:
             orders = self._c.get_open_orders()
-            return [
-                {
-                    "order_id": str(o["orderId"]),
-                    "symbol": o["symbol"],
-                    "side": o["side"],
-                    "type": o["type"],
-                    "price": float(o.get("price", 0.0)),
-                    "stop_price": float(o.get("stopPrice", 0.0)),
-                    "origQty": float(o.get("origQty", 0.0)),
-                    "executedQty": float(o.get("executedQty", 0.0)),
-                    "status": o.get("status"),
-                    "timeInForce": o.get("timeInForce", "GTC"),
-                }
-                for o in orders
-            ]
-        except Exception as e:
-            logging.warning(f"[Binance Venue] Failed to list open orders: {e}")
+        except (*BINANCE_ERRORS, httpx.HTTPError, ValueError, KeyError) as exc:
+            _log_suppressed("list open orders failed", exc)
             return []
+        return [
+            {
+                "order_id": str(o["orderId"]),
+                "symbol": o["symbol"],
+                "side": o["side"],
+                "type": o["type"],
+                "price": float(o.get("price", 0.0)),
+                "stop_price": float(o.get("stopPrice", 0.0)),
+                "origQty": float(o.get("origQty", 0.0)),
+                "executedQty": float(o.get("executedQty", 0.0)),
+                "status": o.get("status"),
+                "timeInForce": o.get("timeInForce", "GTC"),
+            }
+            for o in orders
+        ]

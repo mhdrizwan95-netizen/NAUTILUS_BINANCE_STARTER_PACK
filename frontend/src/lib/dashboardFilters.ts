@@ -1,4 +1,4 @@
-import type { DateRange } from 'react-day-picker';
+import type { DateRange } from "react-day-picker";
 
 export type DashboardFiltersState = {
   from: string | null;
@@ -29,15 +29,15 @@ export const buildSummarySearchParams = (filters: DashboardFiltersState): URLSea
   const params = new URLSearchParams();
 
   if (filters.from) {
-    params.set('from', filters.from);
+    params.set("from", filters.from);
   }
 
   if (filters.to) {
-    params.set('to', filters.to);
+    params.set("to", filters.to);
   }
 
-  filters.strategies.forEach((strategyId) => params.append('strategies[]', strategyId));
-  filters.symbols.forEach((symbol) => params.append('symbols[]', symbol));
+  filters.strategies.forEach((strategyId) => params.append("strategies[]", strategyId));
+  filters.symbols.forEach((symbol) => params.append("symbols[]", symbol));
 
   return params;
 };

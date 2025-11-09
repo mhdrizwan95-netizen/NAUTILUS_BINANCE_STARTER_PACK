@@ -12,11 +12,14 @@ Usage:
 
 Output: ops/exports/pnl_YYYY-MM-DD.csv
 """
+
 import asyncio
 import csv
 import os
 from datetime import datetime
 from pathlib import Path
+
+import httpx
 
 from ops.net import create_async_client, request_with_retry
 
@@ -28,27 +31,30 @@ def format_currency(value):
     """Format numeric values as currency strings."""
     try:
         num = float(value) if value is not None else 0.0
-        return f"${num:,.2f}"
     except (TypeError, ValueError):
         return "$0.00"
+    else:
+        return f"${num:,.2f}"
 
 
 def format_percentage(value):
     """Format numeric values as percentage strings."""
     try:
         num = float(value) if value is not None else 0.0
-        return f"{num:.2f}%"
     except (TypeError, ValueError):
         return "0.00%"
+    else:
+        return f"{num:.2f}%"
 
 
 def format_number(value):
     """Format numeric values with appropriate precision."""
     try:
         num = float(value) if value is not None else 0.0
-        return f"{num:.2f}"
     except (TypeError, ValueError):
         return "0.00"
+    else:
+        return f"{num:.2f}"
 
 
 async def fetch_pnl_data(ops_url="http://localhost:8002"):
@@ -68,8 +74,8 @@ async def fetch_pnl_data(ops_url="http://localhost:8002"):
             )
             response.raise_for_status()
             return response.json()
-    except Exception as e:  # noqa: BLE001
-        print(f"Failed to fetch PnL data: {e}")
+    except (httpx.HTTPError, ValueError, RuntimeError, OSError) as exc:  # noqa: BLE001
+        print(f"Failed to fetch PnL data: {exc}")
         return None
 
 
@@ -267,14 +273,13 @@ def export_to_csv(models_data, portfolio_summary, timestamp=None):
                     f"({totals['trades']} trades, {len(totals['venues'])} venues)\n"
                 )
 
+    except (OSError, ValueError, csv.Error) as exc:
+        print(f"Failed to export CSV: {exc}")
+        return None
+    else:
         print(f"✅ PnL data exported to: {filename}")
         print(f"📄 Summary: {summary_filename}")
-
         return filename
-
-    except Exception as e:
-        print(f"Failed to export CSV: {e}")
-        return None
 
 
 async def export_daily_pnl_snapshot(ops_url="http://localhost:8002"):

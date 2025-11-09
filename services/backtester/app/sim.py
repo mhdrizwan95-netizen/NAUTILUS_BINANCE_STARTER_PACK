@@ -1,4 +1,5 @@
-from typing import Any, Callable, Dict, List
+from collections.abc import Callable
+from typing import Any
 
 import pandas as pd
 
@@ -46,10 +47,10 @@ class PrequentialSim:
         self.retrain_every_min = retrain_every_min
         self.exactly_once = exactly_once
         self.cost_fn = cost_fn
-        self.strategies: List[Any] = []
+        self.strategies: list[Any] = []
         self.model = HMMModel()  # embedded copy; in prod, call ml_service
         self.last_train_ts = None
-        self.trades: List[Trade] = []
+        self.trades: list[Trade] = []
 
     def add_strategy(self, strat):
         strat.bind_model(self.model)
@@ -93,7 +94,7 @@ class PrequentialSim:
         # Final train to include tail (optional)
         return {"n_bars": len(df)}, self.trades
 
-    def _execute(self, order: Dict[str, Any], now, row) -> Trade:
+    def _execute(self, order: dict[str, Any], now, row) -> Trade:
         # Toy execution: enter at 'close' and exit next bar at 'close'
         # Qty proportional to edge (bounded).
         edge = float(order.get("edge", 0.0))

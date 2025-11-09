@@ -5,6 +5,26 @@ import logging
 import os
 import time
 
+import httpx
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger("engine.digest").debug("%s suppressed: %s", context, exc, exc_info=True)
+
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+    httpx.HTTPError,
+)
+
 
 class DigestJob:
     def __init__(self, rollups, tg, clock=time, log=None):
@@ -70,8 +90,8 @@ class DigestJob:
                     lines.append(
                         f"{label}: trades *{trades_b}*, live *{live_b}*, eff *{eff_b:.2f}*, half *{half_b}*, skips *{skips_b}*"
                     )
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("digest bucket snapshot", exc)
         return "\n".join(lines)
 
     async def run(self) -> None:
@@ -89,6 +109,6 @@ class DigestJob:
                     self.rollups.cnt.get("plans_live", 0),
                     self.rollups.cnt.get("trades", 0),
                 )
-            except Exception as e:
-                self.log.warning("[DIGEST] send failed: %s", e)
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                self.log.exception("[DIGEST] send failed")
             await asyncio.sleep(interval)

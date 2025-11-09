@@ -27,7 +27,7 @@ class LinTS:
             Ainv = np.linalg.inv(self.A[k])
             mu = Ainv @ self.b[k]
             w = np.random.multivariate_normal(mu, Ainv)
-            idx.append((w @ X[k]))
+            idx.append(w @ X[k])
         return int(np.argmax(idx))
 
     def update(self, k: int, x: np.ndarray, reward: float):

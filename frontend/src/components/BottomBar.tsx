@@ -1,10 +1,9 @@
-import { Bell, Activity, Info, AlertTriangle, XCircle } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
+import { Bell, Activity, Info, AlertTriangle, XCircle } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 
-import { Badge } from './ui/badge';
-import { ScrollArea } from './ui/scroll-area';
-import type { Alert, Trade } from '../types/trading';
-
+import { Badge } from "./ui/badge";
+import { ScrollArea } from "./ui/scroll-area";
+import type { Alert, Trade } from "../types/trading";
 
 interface BottomBarProps {
   alerts: Alert[];
@@ -13,17 +12,17 @@ interface BottomBarProps {
 
 export function BottomBar({ alerts, recentTrades }: BottomBarProps) {
   const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
+    return new Date(timestamp).toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
     });
   };
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(value);
@@ -68,7 +67,12 @@ export function BottomBar({ alerts, recentTrades }: BottomBarProps) {
         <ScrollArea className="h-[156px]">
           <div className="px-6 py-2 space-y-1">
             {recentTrades.slice(0, 10).map((trade) => (
-              <TradeItem key={trade.id} trade={trade} formatTime={formatTime} formatCurrency={formatCurrency} />
+              <TradeItem
+                key={trade.id}
+                trade={trade}
+                formatTime={formatTime}
+                formatCurrency={formatCurrency}
+              />
             ))}
           </div>
         </ScrollArea>
@@ -80,23 +84,23 @@ export function BottomBar({ alerts, recentTrades }: BottomBarProps) {
 function AlertItem({ alert, formatTime }: { alert: Alert; formatTime: (ts: number) => string }) {
   const getIcon = () => {
     switch (alert.type) {
-      case 'info':
+      case "info":
         return <Info className="w-3.5 h-3.5 text-cyan-400" />;
-      case 'warning':
+      case "warning":
         return <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />;
-      case 'error':
+      case "error":
         return <XCircle className="w-3.5 h-3.5 text-red-400" />;
     }
   };
 
   const getColor = () => {
     switch (alert.type) {
-      case 'info':
-        return 'border-cyan-400/10 bg-cyan-400/5';
-      case 'warning':
-        return 'border-amber-400/10 bg-amber-400/5';
-      case 'error':
-        return 'border-red-400/10 bg-red-400/5';
+      case "info":
+        return "border-cyan-400/10 bg-cyan-400/5";
+      case "warning":
+        return "border-amber-400/10 bg-amber-400/5";
+      case "error":
+        return "border-red-400/10 bg-red-400/5";
     }
   };
 
@@ -131,9 +135,9 @@ function TradeItem({
         <Badge
           variant="outline"
           className={`text-xs px-2 py-0 ${
-            trade.side === 'buy'
-              ? 'border-emerald-400/30 text-emerald-400 bg-emerald-400/10'
-              : 'border-red-400/30 text-red-400 bg-red-400/10'
+            trade.side === "buy"
+              ? "border-emerald-400/30 text-emerald-400 bg-emerald-400/10"
+              : "border-red-400/30 text-red-400 bg-red-400/10"
           }`}
         >
           {trade.side.toUpperCase()}
@@ -148,9 +152,7 @@ function TradeItem({
       <div className="flex items-center gap-4">
         {trade.pnl !== undefined && (
           <span
-            className={`text-xs font-mono ${
-              trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
-            }`}
+            className={`text-xs font-mono ${trade.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
           >
             {formatCurrency(trade.pnl)}
           </span>

@@ -7,14 +7,27 @@ Provides automatic management of linked orders and dynamic stop adjustments.
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 from uuid import uuid4
+
+import httpx
 
 from .oms_store import OMSStore
 from .order_router import place_order
 from .venues import get_venue
 
 _oms = OMSStore()
+_CANCEL_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, RuntimeError, ValueError)
+_WATCHER_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, RuntimeError, ValueError)
+_TRAIL_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, RuntimeError, ValueError)
+_PLACE_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, RuntimeError, ValueError)
+
+
+class TrailingConfigurationError(ValueError):
+    """Raised when a trailing stop is created without thresholds."""
+
+    def __init__(self) -> None:
+        super().__init__("trail_pct or trail_usd required")
 
 
 async def oco_watcher(interval: int = 3) -> None:
@@ -65,12 +78,8 @@ async def oco_watcher(interval: int = 3) -> None:
                                     order.symbol,
                                     sibling.symbol,
                                 )
-                            except Exception as e:
-                                logging.error(
-                                    "[OCO] Failed to cancel sibling %s: %s",
-                                    sibling.id,
-                                    e,
-                                )
+                            except _CANCEL_ERRORS:
+                                logging.exception("[OCO] Failed to cancel sibling %s", sibling.id)
                         else:
                             logging.warning(
                                 "[OCO] Venue client missing cancel method for %s",
@@ -81,13 +90,13 @@ async def oco_watcher(interval: int = 3) -> None:
                         _oms.close(order.id, "FILLED")
                         break
 
-        except Exception as e:
-            logging.warning(f"[OCO] Watcher loop error: {e}")
+        except _WATCHER_ERRORS as exc:
+            logging.warning("[OCO] Watcher loop error: %s", exc)
 
         await asyncio.sleep(interval)
 
 
-def create_oco_pair(order1_data: Dict[str, Any], order2_data: Dict[str, Any]) -> Dict[str, Any]:
+def create_oco_pair(order1_data: dict[str, Any], order2_data: dict[str, Any]) -> dict[str, Any]:
     """
     Create an OCO (One Cancels Other) pair of orders.
 
@@ -114,9 +123,9 @@ def create_oco_pair(order1_data: Dict[str, Any], order2_data: Dict[str, Any]) ->
 
             orders.append({"order_id": result.get("order_id_local"), "result": result})
 
-        except Exception as e:
-            logging.error(f"[OCO] Failed to place order {idx}: {e}")
-            return {"error": f"Failed to place order {idx}: {str(e)}"}
+        except _PLACE_ERRORS as exc:
+            logging.exception("[OCO] Failed to place order %s", idx)
+            return {"error": f"Failed to place order {idx}: {exc}"}
 
     return {
         "oco_group_id": group_id,
@@ -132,17 +141,17 @@ class TrailingDaemon:
 
     def __init__(self, interval: int = 5):
         self.interval = interval
-        self.active_trails: Dict[str, Dict[str, Any]] = {}
+        self.active_trails: dict[str, dict[str, Any]] = {}
         self._oms = OMSStore()
 
     def add_trailing_stop(
         self,
         symbol: str,
         side: str,
-        trail_pct: Optional[float] = None,
-        trail_usd: Optional[float] = None,
+        trail_pct: float | None = None,
+        trail_usd: float | None = None,
         quantity: float = 0.0,
-        order_id: Optional[str] = None,
+        order_id: str | None = None,
     ) -> str:
         """
         Add a trailing stop order.
@@ -159,7 +168,7 @@ class TrailingDaemon:
             Trail identifier
         """
         if not trail_pct and not trail_usd:
-            raise ValueError("Must specify trail_pct or trail_usd")
+            raise TrailingConfigurationError()
 
         trail_id = f"trail_{symbol}_{side}_{int(time.time())}_{trail_pct or trail_usd}"
 
@@ -187,15 +196,15 @@ class TrailingDaemon:
                 for trail_id, trail in list(self.active_trails.items()):
                     try:
                         await self._process_trailing_stop(trail_id, trail)
-                    except Exception as e:
-                        logging.error(f"[TRAIL] Error processing {trail_id}: {e}")
+                    except _TRAIL_ERRORS:
+                        logging.exception("[TRAIL] Error processing %s", trail_id)
 
-            except Exception as e:
-                logging.warning(f"[TRAIL] Main loop error: {e}")
+            except _TRAIL_ERRORS as exc:
+                logging.warning("[TRAIL] Main loop error: %s", exc)
 
             await asyncio.sleep(self.interval)
 
-    async def _process_trailing_stop(self, trail_id: str, trail: Dict[str, Any]) -> None:
+    async def _process_trailing_stop(self, trail_id: str, trail: dict[str, Any]) -> None:
         """Process a single trailing stop."""
         symbol = trail["symbol"]
         side = trail["side"]
@@ -264,7 +273,7 @@ class TrailingDaemon:
                 # Remove trail (could keep for new stops but keeps simple)
                 del self.active_trails[trail_id]
 
-    def _calculate_stop_price(self, trail: Dict[str, Any], current_price: float) -> float:
+    def _calculate_stop_price(self, trail: dict[str, Any], current_price: float) -> float:
         """Calculate where the stop should be placed."""
         if trail["side"] == "BUY":
             # For long positions, stop below current price
@@ -272,15 +281,14 @@ class TrailingDaemon:
                 return current_price * (1 - trail["trail_pct"] / 100)
             else:
                 return current_price - trail["trail_usd"]
+        # For short positions, stop above current price
+        elif trail["trail_pct"]:
+            return current_price * (1 + trail["trail_pct"] / 100)
         else:
-            # For short positions, stop above current price
-            if trail["trail_pct"]:
-                return current_price * (1 + trail["trail_pct"] / 100)
-            else:
-                return current_price + trail["trail_usd"]
+            return current_price + trail["trail_usd"]
 
     def _should_trigger_stop(
-        self, trail: Dict[str, Any], current_price: float, stop_price: float
+        self, trail: dict[str, Any], current_price: float, stop_price: float
     ) -> bool:
         """Determine if stop should trigger based on current conditions."""
         if trail["side"] == "BUY":
@@ -298,7 +306,7 @@ class TrailingDaemon:
             return True
         return False
 
-    def list_active_trails(self) -> Dict[str, Dict[str, Any]]:
+    def list_active_trails(self) -> dict[str, dict[str, Any]]:
         """List all active trailing stops."""
         return self.active_trails.copy()
 

@@ -12,27 +12,44 @@ Defaults are disabled; enable with env vars to avoid impacting tests.
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import os
 import time
 import zoneinfo
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Optional, Tuple
 
 from engine.runtime.config import load_runtime_config
 
 from .metrics import REGISTRY as MET
 
+logger = logging.getLogger(__name__)
 
-def _as_float(v: Optional[str], default: float) -> float:
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    asyncio.TimeoutError,
+)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
+
+
+def _as_float(v: str | None, default: float) -> float:
     try:
         return float(v) if v is not None else default
-    except Exception:
+    except (TypeError, ValueError):
         return default
 
 
-def _as_bool(v: Optional[str], default: bool) -> bool:
+def _as_bool(v: str | None, default: bool) -> bool:
     if v is None:
         return default
     return str(v).lower() not in {"0", "false", "no"}
@@ -78,8 +95,8 @@ class RiskGuardian:
     def __init__(self, cfg: GuardianConfig | None = None) -> None:
         self.cfg = cfg or load_guardian_config()
         self._running = False
-        self._task: Optional[asyncio.Task] = None
-        self._day_anchor: Optional[Tuple[int, float]] = None  # (YYYYMMDD, realized_at_anchor)
+        self._task: asyncio.Task | None = None
+        self._day_anchor: tuple[int, float] | None = None  # (YYYYMMDD, realized_at_anchor)
         self._paused_until_utc_reset = False
         self._tz = None
         self._max_loss_env_override = os.getenv("MAX_DAILY_LOSS_USD")
@@ -87,11 +104,13 @@ class RiskGuardian:
             self._daily_loss_pct = float(
                 load_runtime_config().risk.daily_stop_pct  # type: ignore[attr-defined]
             )
-        except Exception:
+        except (AttributeError, TypeError, ValueError) as exc:
+            _log_suppressed("guardian.daily_stop_pct", exc)
             self._daily_loss_pct = None
         try:
             self._tz = zoneinfo.ZoneInfo(self.cfg.daily_reset_tz)
-        except Exception:
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError) as exc:
+            _log_suppressed("guardian.reset_tz", exc)
             self._tz = zoneinfo.ZoneInfo("UTC")
 
     async def start(self) -> None:
@@ -105,7 +124,10 @@ class RiskGuardian:
         if self._task:
             try:
                 await asyncio.wait_for(self._task, timeout=1.0)
-            except Exception:
+            except TimeoutError:
+                self._task.cancel()
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("guardian.stop", exc)
                 self._task.cancel()
 
     async def _loop(self) -> None:
@@ -123,16 +145,17 @@ class RiskGuardian:
                 # Keep portfolio gauges fresh via rails snapshot ingestion
                 try:
                     rails.refresh_snapshot_metrics(snap)
-                except Exception:
-                    pass
-            except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    _log_suppressed("guardian.refresh_snapshot_metrics", exc)
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
                 # Soft-fail to avoid killing the loop
+                _log_suppressed("guardian.loop", exc)
                 try:
-                    MET.get("engine_venue_errors_total").labels(
-                        venue="guard", error="LOOP_ERROR"
-                    ).inc()
-                except Exception:
-                    pass
+                    ctr = MET.get("engine_venue_errors_total")
+                    if ctr is not None:
+                        ctr.labels(venue="guard", error="LOOP_ERROR").inc()
+                except _SUPPRESSIBLE_EXCEPTIONS as metric_exc:
+                    _log_suppressed("guardian.loop.metric", metric_exc)
             dt = max(0.0, self.cfg.poll_sec - (time.time() - t0))
             await asyncio.sleep(dt)
 
@@ -169,22 +192,26 @@ class RiskGuardian:
                 from engine.core.event_bus import BUS as _BUS
 
                 _BUS.fire("health.state", {"state": 0, "reason": "daily_reset"})
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("guardian.daily_reset_signal", exc)
             return
         pnl_day = realized - (self._day_anchor[1] or 0.0)
         try:
-            MET.get("pnl_realized_total").set(realized)
-        except Exception:
-            pass
+            pnl_metric = MET.get("pnl_realized_total")
+            if pnl_metric is not None:
+                pnl_metric.set(realized)
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("guardian.pnl_metric", exc)
         if pnl_day <= -abs(loss_limit_usd) and not self._paused_until_utc_reset:
             # Pause trading via RiskRails config gate
             # Write a single-source-of-truth flag file; RiskRails will consult it on each order
             _write_trading_flag(False)
             try:
-                MET.get("trading_enabled").set(0)
-            except Exception:
-                pass
+                trading_metric = MET.get("trading_enabled")
+                if trading_metric is not None:
+                    trading_metric.set(0)
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("guardian.trading_metric", exc)
             self._paused_until_utc_reset = True
             try:
                 from .core.event_bus import publish_risk_event
@@ -193,8 +220,8 @@ class RiskGuardian:
                     "daily_stop",
                     {"pnl_day": pnl_day, "limit": self.cfg.max_daily_loss_usd},
                 )
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("guardian.publish_daily_stop", exc)
 
     async def _enforce_cross_health(self, order_router, snap: dict | None) -> None:
         """Evaluate cross-margin level and futures MMR; act on worst breach.
@@ -208,16 +235,13 @@ class RiskGuardian:
         cross_level = _safe_float(_dig(snap, ["marginLevel"]))
         # Pull futures fields if available
         fut_mmr = None
-        try:
-            maint_total = _safe_float(_dig(snap, ["totalMaintMargin"]))
-            wallet = _safe_float(_dig(snap, ["totalWalletBalance"]))
-            upl = _safe_float(_dig(snap, ["totalUnrealizedProfit"]))
-            if maint_total is not None and wallet is not None and upl is not None:
-                denom = wallet + upl
-                if denom > 0:
-                    fut_mmr = float(maint_total) / float(denom)
-        except Exception:
-            fut_mmr = None
+        maint_total = _safe_float(_dig(snap, ["totalMaintMargin"]))
+        wallet = _safe_float(_dig(snap, ["totalWalletBalance"]))
+        upl = _safe_float(_dig(snap, ["totalUnrealizedProfit"]))
+        if maint_total is not None and wallet is not None and upl is not None:
+            denom = wallet + upl
+            if denom > 0:
+                fut_mmr = float(maint_total) / float(denom)
 
         # Normalized worst-score
         worst = 0.0
@@ -246,14 +270,15 @@ class RiskGuardian:
                     },
                 },
             )
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("guardian.derisk_soft", exc)
 
     async def _derisk_hard(self, order_router, score: float) -> None:
         # Reduce largest-VAR position by 30% until health recovers (best-effort)
         try:
             from .core.event_bus import publish_risk_event
-        except Exception:
+        except ImportError as exc:
+            _log_suppressed("guardian.import_publish_risk_event", exc)
             publish_risk_event = None
         positions = list(order_router.portfolio_service().state.positions.values())
         if not positions:
@@ -261,7 +286,8 @@ class RiskGuardian:
         # Compute VAR ranking (stop-aware, ATR fallback)
         try:
             from engine.risk_var import sort_positions_by_var_desc
-        except Exception:
+        except ImportError as exc:
+            _log_suppressed("guardian.import_risk_var", exc)
             sort_positions_by_var_desc = None  # type: ignore
         if sort_positions_by_var_desc is not None:
             ranked = sort_positions_by_var_desc(
@@ -300,22 +326,21 @@ class RiskGuardian:
                         "side": side,
                     },
                 )
-        except Exception:
-            # best-effort only
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("guardian.derisk_hard", exc)
 
 
-def _safe_float(v) -> Optional[float]:
+def _safe_float(v) -> float | None:
     try:
         if v is None:
             return None
         f = float(v)
         return f if math.isfinite(f) else None
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 
-def _dig(d: Optional[dict], path: list[str]):
+def _dig(d: dict | None, path: list[str]):
     cur = d or {}
     for k in path:
         if not isinstance(cur, dict):
@@ -331,5 +356,5 @@ def _write_trading_flag(enabled: bool) -> None:
         os.makedirs("state", exist_ok=True)
         with open("state/trading_enabled.flag", "w", encoding="utf-8") as fh:
             fh.write("true" if enabled else "false")
-    except Exception:
-        pass
+    except OSError as exc:
+        _log_suppressed("guardian.write_trading_flag", exc)

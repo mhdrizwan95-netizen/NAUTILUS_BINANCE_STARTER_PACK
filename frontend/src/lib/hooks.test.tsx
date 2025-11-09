@@ -1,9 +1,9 @@
-import { act, renderHook } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { act, renderHook } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-import { usePolling } from './hooks';
+import { usePolling } from "./hooks";
 
-describe('usePolling', () => {
+describe("usePolling", () => {
   beforeEach(() => {
     vi.useFakeTimers();
   });
@@ -13,15 +13,17 @@ describe('usePolling', () => {
     vi.useRealTimers();
   });
 
-  it('skips updates when comparator deems payload unchanged', async () => {
+  it("skips updates when comparator deems payload unchanged", async () => {
     const responses = [
-      { status: 'running', progress: 0 },
-      { status: 'running', progress: 0 },
-      { status: 'done', progress: 1 },
+      { status: "running", progress: 0 },
+      { status: "running", progress: 0 },
+      { status: "done", progress: 1 },
     ];
     const poller = vi
       .fn()
-      .mockImplementation(() => Promise.resolve(responses.shift() ?? responses[responses.length - 1]));
+      .mockImplementation(() =>
+        Promise.resolve(responses.shift() ?? responses[responses.length - 1]),
+      );
 
     const comparator = vi.fn((prev, next) => {
       if (!prev || !next) return Object.is(prev, next);
@@ -36,7 +38,7 @@ describe('usePolling', () => {
     });
 
     const firstRef = result.current.data;
-    expect(firstRef).toMatchObject({ status: 'running', progress: 0 });
+    expect(firstRef).toMatchObject({ status: "running", progress: 0 });
 
     await act(async () => {
       vi.advanceTimersByTime(100);
@@ -51,17 +53,17 @@ describe('usePolling', () => {
       await Promise.resolve();
     });
 
-    expect(result.current.data).toMatchObject({ status: 'done', progress: 1 });
+    expect(result.current.data).toMatchObject({ status: "done", progress: 1 });
     expect(result.current.data).not.toBe(firstRef);
     expect(comparator).toHaveBeenCalled();
   });
 
-  it('avoids duplicate updates for structurally identical payloads by default', async () => {
+  it("avoids duplicate updates for structurally identical payloads by default", async () => {
     vi.unstubAllEnvs();
     const frames = [
-      { status: 'running', progress: 0 },
-      { status: 'running', progress: 0 },
-      { status: 'done', progress: 1 },
+      { status: "running", progress: 0 },
+      { status: "running", progress: 0 },
+      { status: "done", progress: 1 },
     ];
     let index = 0;
     const poller = vi.fn(() => {
@@ -77,7 +79,7 @@ describe('usePolling', () => {
       await Promise.resolve();
     });
     const firstValue = result.current.data;
-    expect(firstValue).toMatchObject({ status: 'running', progress: 0 });
+    expect(firstValue).toMatchObject({ status: "running", progress: 0 });
 
     await act(async () => {
       vi.advanceTimersByTime(100);
@@ -89,11 +91,11 @@ describe('usePolling', () => {
       vi.advanceTimersByTime(100);
       await Promise.resolve();
     });
-    expect(result.current.data).toMatchObject({ status: 'done', progress: 1 });
+    expect(result.current.data).toMatchObject({ status: "done", progress: 1 });
   });
 
-  it('disables polling when VITE_LIVE_OFF flag is true', async () => {
-    vi.stubEnv('VITE_LIVE_OFF', 'true');
+  it("disables polling when VITE_LIVE_OFF flag is true", async () => {
+    vi.stubEnv("VITE_LIVE_OFF", "true");
     const poller = vi.fn();
     renderHook(() => usePolling(poller, 100));
 

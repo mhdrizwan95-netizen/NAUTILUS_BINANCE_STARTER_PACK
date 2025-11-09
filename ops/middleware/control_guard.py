@@ -8,14 +8,36 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from threading import RLock
-from typing import Optional, Set
 
 from fastapi import Header, HTTPException, Request, status
 
 _TOKEN_LOCK = RLock()
-_OPS_TOKEN_VALUE: Optional[str] = None
-_OPS_TOKEN_PATH: Optional[Path] = None
-_OPS_TOKEN_MTIME: Optional[float] = None
+_OPS_TOKEN_VALUE: str | None = None
+_OPS_TOKEN_PATH: Path | None = None
+_OPS_TOKEN_MTIME: float | None = None
+
+
+class OpsTokenFileEmptyError(RuntimeError):
+    """Raised when the OPS token file exists but contains no secret."""
+
+    def __init__(self) -> None:
+        super().__init__("OPS_API_TOKEN_FILE is empty")
+
+
+class OpsTokenFileReadError(RuntimeError):
+    """Raised when the OPS token file cannot be read."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Failed to read OPS_API_TOKEN_FILE: {path}")
+
+
+class OpsTokenMissingError(RuntimeError):
+    """Raised when no control token is configured."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "OPS_API_TOKEN or OPS_API_TOKEN_FILE must be configured for control endpoints"
+        )
 
 
 def _load_ops_token() -> str:
@@ -31,13 +53,13 @@ def _load_ops_token() -> str:
                     return _OPS_TOKEN_VALUE
                 token = path.read_text(encoding="utf-8").strip()
                 if not token:
-                    raise RuntimeError("OPS_API_TOKEN_FILE is empty")
+                    raise OpsTokenFileEmptyError()
                 _OPS_TOKEN_VALUE = token
                 _OPS_TOKEN_PATH = path
                 _OPS_TOKEN_MTIME = mtime
                 return token
         except OSError as exc:  # pragma: no cover - defensive
-            raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE: {token_file}") from exc
+            raise OpsTokenFileReadError(token_file) from exc
 
     token = os.getenv("OPS_API_TOKEN")
     if token:
@@ -49,12 +71,10 @@ def _load_ops_token() -> str:
     with _TOKEN_LOCK:
         if _OPS_TOKEN_VALUE:
             return _OPS_TOKEN_VALUE
-    raise RuntimeError(
-        "OPS_API_TOKEN or OPS_API_TOKEN_FILE must be configured for control endpoints"
-    )
+    raise OpsTokenMissingError()
 
 
-def _load_approver_tokens() -> Set[str]:
+def _load_approver_tokens() -> set[str]:
     """Return the configured secondary approval secrets, if any."""
     raw = os.getenv("OPS_APPROVER_TOKENS") or os.getenv("OPS_APPROVER_TOKEN", "")
     if not raw:
@@ -66,9 +86,9 @@ def _load_approver_tokens() -> Set[str]:
 class ControlContext:
     """Metadata captured from request headers for downstream use."""
 
-    actor: Optional[str]
-    approver: Optional[str]
-    idempotency_key: Optional[str]
+    actor: str | None
+    approver: str | None
+    idempotency_key: str | None
 
 
 class ControlGuard:
@@ -81,12 +101,12 @@ class ControlGuard:
     async def __call__(
         self,
         request: Request,
-        x_ops_token: Optional[str] = Header(None, alias="X-Ops-Token", convert_underscores=False),
-        x_ops_actor: Optional[str] = Header(None, alias="X-Ops-Actor", convert_underscores=False),
-        x_ops_approver: Optional[str] = Header(
+        x_ops_token: str | None = Header(None, alias="X-Ops-Token", convert_underscores=False),
+        x_ops_actor: str | None = Header(None, alias="X-Ops-Actor", convert_underscores=False),
+        x_ops_approver: str | None = Header(
             None, alias="X-Ops-Approver", convert_underscores=False
         ),
-        idempotency_key: Optional[str] = Header(
+        idempotency_key: str | None = Header(
             None, alias="Idempotency-Key", convert_underscores=False
         ),
     ) -> ControlContext:
@@ -100,7 +120,7 @@ class ControlGuard:
                 },
             )
 
-        approver_token: Optional[str] = None
+        approver_token: str | None = None
         if self.require_two_man:
             allowed = _load_approver_tokens()
             if allowed:
@@ -123,10 +143,9 @@ class ControlGuard:
                         "message": "Missing Idempotency-Key header",
                     },
                 )
-        else:
-            if idempotency_key:
-                # downstream handlers may still leverage the key when present
-                pass
+        elif idempotency_key:
+            # downstream handlers may still leverage the key when present
+            pass
 
         return ControlContext(
             actor=x_ops_actor,

@@ -1,13 +1,12 @@
-import { X, TrendingUp } from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { LineChart, Line, AreaChart, Area, ResponsiveContainer, YAxis } from 'recharts';
+import { X, TrendingUp } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { LineChart, Line, AreaChart, Area, ResponsiveContainer, YAxis } from "recharts";
 
-import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { ScrollArea } from './ui/scroll-area';
-import { getVenueColor } from '../lib/mockData';
-import type { StrategyPerformance, Strategy, Venue, Trade } from '../types/trading';
-
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { ScrollArea } from "./ui/scroll-area";
+import { getVenueColor } from "../lib/mockData";
+import type { StrategyPerformance, Strategy, Venue, Trade } from "../types/trading";
 
 interface RightPanelProps {
   performance: StrategyPerformance | null;
@@ -34,23 +33,23 @@ export function RightPanel({ performance, strategy, venue, trades, onClose }: Ri
   }));
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(value);
   };
 
   const formatTime = (timestamp: number) => {
-    return new Date(timestamp).toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
+    return new Date(timestamp).toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
   };
 
   const strategyTrades = trades.filter(
-    (t) => t.strategyId === strategy.id && t.venueId === venue.id
+    (t) => t.strategyId === strategy.id && t.venueId === venue.id,
   );
 
   return (
@@ -88,8 +87,8 @@ export function RightPanel({ performance, strategy, venue, trades, onClose }: Ri
                 <MetricCard
                   label="PnL"
                   value={formatCurrency(performance.metrics.pnl)}
-                  subtitle={`${performance.metrics.pnlPercent >= 0 ? '+' : ''}${performance.metrics.pnlPercent.toFixed(2)}%`}
-                  color={performance.metrics.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}
+                  subtitle={`${performance.metrics.pnlPercent >= 0 ? "+" : ""}${performance.metrics.pnlPercent.toFixed(2)}%`}
+                  color={performance.metrics.pnl >= 0 ? "text-emerald-400" : "text-red-400"}
                 />
                 <MetricCard
                   label="Win Rate"
@@ -151,7 +150,8 @@ export function RightPanel({ performance, strategy, venue, trades, onClose }: Ri
                 </ResponsiveContainer>
               </div>
               <p className="text-xs text-zinc-600">
-                Current model confidence: {(confidenceData[confidenceData.length - 1].confidence * 100).toFixed(1)}%
+                Current model confidence:{" "}
+                {(confidenceData[confidenceData.length - 1].confidence * 100).toFixed(1)}%
               </p>
             </div>
 
@@ -172,7 +172,7 @@ export function RightPanel({ performance, strategy, venue, trades, onClose }: Ri
                     </div>
                     <span
                       className={`text-xs font-mono ${
-                        symbol.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
+                        symbol.pnl >= 0 ? "text-emerald-400" : "text-red-400"
                       }`}
                     >
                       {formatCurrency(symbol.pnl)}
@@ -201,9 +201,9 @@ export function RightPanel({ performance, strategy, venue, trades, onClose }: Ri
                         <Badge
                           variant="outline"
                           className={`text-xs px-2 py-0 ${
-                            trade.side === 'buy'
-                              ? 'border-emerald-400/30 text-emerald-400'
-                              : 'border-red-400/30 text-red-400'
+                            trade.side === "buy"
+                              ? "border-emerald-400/30 text-emerald-400"
+                              : "border-red-400/30 text-red-400"
                           }`}
                         >
                           {trade.side.toUpperCase()}
@@ -217,7 +217,7 @@ export function RightPanel({ performance, strategy, venue, trades, onClose }: Ri
                     {trade.pnl !== undefined && (
                       <span
                         className={`text-xs font-mono ${
-                          trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'
+                          trade.pnl >= 0 ? "text-emerald-400" : "text-red-400"
                         }`}
                       >
                         {formatCurrency(trade.pnl)}
@@ -234,12 +234,12 @@ export function RightPanel({ performance, strategy, venue, trades, onClose }: Ri
               <div className="space-y-2">
                 <HealthItem
                   label="Connection"
-                  status={venue.status === 'connected' ? 'optimal' : 'warning'}
+                  status={venue.status === "connected" ? "optimal" : "warning"}
                   value={`${venue.latency}ms`}
                 />
                 <HealthItem
                   label="Risk Exposure"
-                  status={performance.metrics.var < 0.02 ? 'optimal' : 'warning'}
+                  status={performance.metrics.var < 0.02 ? "optimal" : "warning"}
                   value={`${(performance.metrics.var * 100).toFixed(1)}%`}
                 />
                 <HealthItem
@@ -282,13 +282,13 @@ function HealthItem({
   value,
 }: {
   label: string;
-  status: 'optimal' | 'warning' | 'critical';
+  status: "optimal" | "warning" | "critical";
   value: string;
 }) {
   const statusColor = {
-    optimal: 'bg-emerald-400',
-    warning: 'bg-amber-400',
-    critical: 'bg-red-400',
+    optimal: "bg-emerald-400",
+    warning: "bg-amber-400",
+    critical: "bg-red-400",
   }[status];
 
   return (

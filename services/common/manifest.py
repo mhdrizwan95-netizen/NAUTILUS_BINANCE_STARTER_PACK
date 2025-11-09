@@ -4,7 +4,6 @@ import os
 import sqlite3
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 DEFAULT_DB = os.environ.get("LEDGER_DB", "/shared/manifest.sqlite")
@@ -77,7 +76,7 @@ def register_file(
     t_start: int,
     t_end: int,
     db_path: str = DEFAULT_DB,
-) -> Tuple[str, bool]:
+) -> tuple[str, bool]:
     """
     Register a downloaded file. Returns (file_id, inserted_new: bool).
     If a file with same content (sha256) already exists, we don't duplicate entries.
@@ -132,14 +131,17 @@ def claim_unprocessed(limit: int = 50, db_path: str = DEFAULT_DB) -> list:
         if not ids:
             conn.commit()
             return []
-        cur.execute(
-            f"UPDATE files SET status='processing' WHERE file_id IN ({','.join(['?']*len(ids))})",
-            ids,
+        cur.executemany(
+            "UPDATE files SET status='processing' WHERE file_id=?", [(fid,) for fid in ids]
         )
         conn.commit()
         # fetch details
-        cur.execute(f"SELECT * FROM files WHERE file_id IN ({','.join(['?']*len(ids))})", ids)
-        rows = [dict(r) for r in cur.fetchall()]
+        rows: list[dict] = []
+        for fid in ids:
+            cur.execute("SELECT * FROM files WHERE file_id=?", (fid,))
+            rec = cur.fetchone()
+            if rec:
+                rows.append(dict(rec))
         return rows
     finally:
         conn.close()
@@ -161,16 +163,15 @@ def mark_processed(file_id: str, delete_file: bool = True, db_path: str = DEFAUL
         _delete_file_by_id(file_id, db_path)
 
 
-def requeue(file_ids: List[str], db_path: str = DEFAULT_DB):
+def requeue(file_ids: list[str], db_path: str = DEFAULT_DB):
     if not file_ids:
         return
     conn = _connect(db_path)
     try:
         cur = conn.cursor()
-        placeholders = ",".join(["?"] * len(file_ids))
-        cur.execute(
-            f"UPDATE files SET status='downloaded', processed_at=NULL, deleted_at=NULL WHERE file_id IN ({placeholders}) AND status='processing'",
-            file_ids,
+        cur.executemany(
+            "UPDATE files SET status='downloaded', processed_at=NULL, deleted_at=NULL WHERE file_id=? AND status='processing'",
+            [(fid,) for fid in file_ids],
         )
         conn.commit()
     finally:
@@ -214,9 +215,7 @@ def set_watermark(name: str, value: int, db_path: str = DEFAULT_DB):
         conn.close()
 
 
-def get_watermark(
-    name: str, default: Optional[int] = None, db_path: str = DEFAULT_DB
-) -> Optional[int]:
+def get_watermark(name: str, default: int | None = None, db_path: str = DEFAULT_DB) -> int | None:
     conn = _connect(db_path)
     try:
         cur = conn.cursor()

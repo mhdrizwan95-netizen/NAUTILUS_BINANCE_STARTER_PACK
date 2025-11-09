@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from prometheus_client import Gauge
 
@@ -21,12 +20,12 @@ SITUATION_PRIORITY = Gauge(
 
 
 class SituationStore:
-    def __init__(self, path: Optional[Path] = None) -> None:
+    def __init__(self, path: Path | None = None) -> None:
         env_dir = os.getenv("OPS_DATA_DIR")
         data_dir = Path(env_dir).expanduser() if env_dir else Path.cwd() / "data"
         data_dir.mkdir(parents=True, exist_ok=True)
         self._path = path or (data_dir / "situations.json")
-        self._items: Dict[str, Situation] = {}
+        self._items: dict[str, Situation] = {}
         self._lock = asyncio.Lock()
 
     async def load(self) -> None:
@@ -38,8 +37,7 @@ class SituationStore:
                         s = Situation(**item)
                         self._items[s.name] = s
                         SITUATION_PRIORITY.labels(name=s.name).set(float(s.priority))
-                except Exception:
-                    # Start fresh on parse error
+                except (json.JSONDecodeError, ValueError):
                     self._items = {}
 
     async def save(self) -> None:
@@ -49,10 +47,10 @@ class SituationStore:
             tmp.write_text(json.dumps(payload, indent=2))
             tmp.replace(self._path)
 
-    def list(self) -> List[Situation]:
+    def list(self) -> list[Situation]:
         return list(self._items.values())
 
-    def active(self) -> List[Situation]:
+    def active(self) -> list[Situation]:
         return [s for s in self._items.values() if s.enabled]
 
     async def add_or_update(self, s: Situation) -> Situation:
@@ -72,7 +70,7 @@ class SituationStore:
         await self.save()
         return True
 
-    async def patch(self, name: str, patch: dict) -> Optional[Situation]:
+    async def patch(self, name: str, patch: dict) -> Situation | None:
         async with self._lock:
             s = self._items.get(name)
             if not s:

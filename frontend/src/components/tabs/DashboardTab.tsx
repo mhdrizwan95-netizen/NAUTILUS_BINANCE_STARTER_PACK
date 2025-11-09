@@ -1,7 +1,7 @@
-import { useQuery, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
-import { Calendar as CalendarIcon, Filter, RefreshCcw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, useId } from 'react';
-import { DateRange } from 'react-day-picker';
+import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
+import { Calendar as CalendarIcon, Filter, RefreshCcw } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, useId } from "react";
+import type { DateRange } from "react-day-picker";
 
 import {
   getAlerts,
@@ -11,20 +11,20 @@ import {
   getRecentTrades,
   getStrategies,
   type PageMetadata,
-} from '../../lib/api';
+} from "../../lib/api";
 import {
   buildSummarySearchParams,
   createDefaultDashboardFilters,
   fromDateRange,
   toDateRange,
-} from '../../lib/dashboardFilters';
-import { queryKeys } from '../../lib/queryClient';
+} from "../../lib/dashboardFilters";
+import { queryKeys } from "../../lib/queryClient";
 import {
   useDashboardFilterActions,
   useDashboardFilters,
   usePagination,
   usePaginationActions,
-} from '../../lib/store';
+} from "../../lib/store";
 import {
   validateApiResponse,
   dashboardSummarySchema,
@@ -33,20 +33,20 @@ import {
   tradesListResponseSchema,
   alertsListResponseSchema,
   healthCheckSchema,
-} from '../../lib/validation';
-import { EquityCurves } from '../charts/EquityCurves';
-import { PnlBySymbol } from '../charts/PnlBySymbol';
-import { ReturnsHistogram } from '../charts/ReturnsHistogram';
-import { Badge } from '../ui/badge';
-import { Button } from '../ui/button';
-import { Calendar } from '../ui/calendar';
-import { Card } from '../ui/card';
-import { Checkbox } from '../ui/checkbox';
-import { Label } from '../ui/label';
-import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
-import { ScrollArea } from '../ui/scroll-area';
-import { Separator } from '../ui/separator';
-import { Skeleton } from '../ui/skeleton';
+} from "../../lib/validation";
+import { EquityCurves } from "../charts/EquityCurves";
+import { PnlBySymbol } from "../charts/PnlBySymbol";
+import { ReturnsHistogram } from "../charts/ReturnsHistogram";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Calendar } from "../ui/calendar";
+import { Card } from "../ui/card";
+import { Checkbox } from "../ui/checkbox";
+import { Label } from "../ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
+import { ScrollArea } from "../ui/scroll-area";
+import { Separator } from "../ui/separator";
+import { Skeleton } from "../ui/skeleton";
 import {
   Table,
   TableBody,
@@ -55,12 +55,12 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '../ui/table';
+} from "../ui/table";
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
     maximumFractionDigits: 2,
   }).format(value);
 }
@@ -69,19 +69,23 @@ function formatPercent(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
-type EquityPoint = { t: string; [strategyId: string]: number };
+type EquityPoint = { t: string } & Record<string, number | string>;
 
 export function DashboardTab() {
   const dashboardFilters = useDashboardFilters();
   const { setDashboardFilters } = useDashboardFilterActions();
   const { setPagination, clearPagination } = usePaginationActions();
-  const positionsPageInfo = usePagination('positions');
-  const tradesPageInfo = usePagination('trades');
-  const alertsPageInfo = usePagination('alerts');
+  const positionsPageInfo = usePagination("positions");
+  const tradesPageInfo = usePagination("trades");
+  const alertsPageInfo = usePagination("alerts");
   const queryClient = useQueryClient();
 
-  const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() => toDateRange(dashboardFilters));
-  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(dashboardFilters.strategies);
+  const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() =>
+    toDateRange(dashboardFilters),
+  );
+  const [selectedStrategies, setSelectedStrategies] = useState<string[]>(
+    dashboardFilters.strategies,
+  );
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(dashboardFilters.symbols);
 
   useEffect(() => {
@@ -96,17 +100,17 @@ export function DashboardTab() {
   const describePage = (page: PageMetadata | null, count: number) => {
     if (!page) return null;
     const segments = [`Showing ${count}`];
-    if (typeof page.totalHint === 'number') {
+    if (typeof page.totalHint === "number") {
       segments.push(`of ${page.totalHint}`);
     }
     if (page.hasMore) {
-      segments.push('• more available');
+      segments.push("• more available");
     }
-    return segments.join(' ');
+    return segments.join(" ");
   };
 
   const resetPagedFeeds = useCallback(() => {
-    clearPagination('positions', 'trades', 'alerts');
+    clearPagination("positions", "trades", "alerts");
     queryClient.removeQueries({ queryKey: queryKeys.dashboard.positions() });
     queryClient.removeQueries({ queryKey: queryKeys.dashboard.trades() });
     queryClient.removeQueries({ queryKey: queryKeys.dashboard.alerts() });
@@ -132,7 +136,10 @@ export function DashboardTab() {
 
   const summaryQuery = useQuery({
     queryKey: queryKeys.dashboard.summary({ params: summaryParamsKey }),
-    queryFn: () => getDashboardSummary(summaryParams).then(data => validateApiResponse(dashboardSummarySchema, data)),
+    queryFn: () =>
+      getDashboardSummary(summaryParams).then((data) =>
+        validateApiResponse(dashboardSummarySchema, data),
+      ),
     staleTime: 30 * 1000, // 30 seconds for real-time data
   });
 
@@ -144,7 +151,7 @@ export function DashboardTab() {
       ),
     getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
     staleTime: 10 * 1000,
-    initialPageParam: undefined,
+    initialPageParam: undefined as string | undefined,
   });
 
   useEffect(() => {
@@ -152,7 +159,7 @@ export function DashboardTab() {
     if (!pages?.length) return;
     const last = pages[pages.length - 1];
     if (last?.page) {
-      setPagination('positions', last.page);
+      setPagination("positions", last.page);
     }
   }, [positionsQuery.data, setPagination]);
 
@@ -164,7 +171,7 @@ export function DashboardTab() {
       ),
     getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
     staleTime: 10 * 1000,
-    initialPageParam: undefined,
+    initialPageParam: undefined as string | undefined,
   });
 
   useEffect(() => {
@@ -172,7 +179,7 @@ export function DashboardTab() {
     if (!pages?.length) return;
     const last = pages[pages.length - 1];
     if (last?.page) {
-      setPagination('trades', last.page);
+      setPagination("trades", last.page);
     }
   }, [setPagination, tradesQuery.data]);
 
@@ -184,7 +191,7 @@ export function DashboardTab() {
       ),
     getNextPageParam: (lastPage) => lastPage.page.nextCursor ?? undefined,
     staleTime: 10 * 1000,
-    initialPageParam: undefined,
+    initialPageParam: undefined as string | undefined,
   });
 
   useEffect(() => {
@@ -192,7 +199,7 @@ export function DashboardTab() {
     if (!pages?.length) return;
     const last = pages[pages.length - 1];
     if (last?.page) {
-      setPagination('alerts', last.page);
+      setPagination("alerts", last.page);
     }
   }, [alertsQuery.data, setPagination]);
 
@@ -233,13 +240,15 @@ export function DashboardTab() {
 
   const healthQuery = useQuery({
     queryKey: queryKeys.dashboard.health(),
-    queryFn: () => getHealth().then(data => validateApiResponse(healthCheckSchema, data)),
+    queryFn: () => getHealth().then((data) => validateApiResponse(healthCheckSchema, data)),
     staleTime: 10 * 1000, // 10 seconds
   });
 
   const symbolOptions = useMemo(() => {
     const symbols = new Set<string>();
-    strategiesQuery.data?.forEach((strategy) => strategy.symbols.forEach((symbol) => symbols.add(symbol)));
+    strategiesQuery.data?.forEach((strategy) =>
+      strategy.symbols.forEach((symbol) => symbols.add(symbol)),
+    );
     summaryQuery.data?.pnlBySymbol.forEach((row) => symbols.add(row.symbol));
     return Array.from(symbols).sort();
   }, [strategiesQuery.data, summaryQuery.data]);
@@ -248,7 +257,7 @@ export function DashboardTab() {
     if (!summaryQuery.data?.equityByStrategy?.length) return [];
     const first = summaryQuery.data.equityByStrategy[0];
     return Object.keys(first)
-      .filter((key) => key !== 't')
+      .filter((key) => key !== "t")
       .map((key) => ({ key, label: key }));
   }, [summaryQuery.data]);
 
@@ -305,11 +314,15 @@ export function DashboardTab() {
             <Label className="text-xs">Date Range</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="flex w-48 items-center justify-start gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex w-48 items-center justify-start gap-2"
+                >
                   <CalendarIcon className="h-4 w-4" />
                   {pendingRange?.from && pendingRange?.to
                     ? `${pendingRange.from.toLocaleDateString()} – ${pendingRange.to.toLocaleDateString()}`
-                    : 'Select range'}
+                    : "Select range"}
                 </Button>
               </PopoverTrigger>
               <PopoverContent align="start" className="p-0">
@@ -328,11 +341,15 @@ export function DashboardTab() {
             <Label className="text-xs">Strategies</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="flex w-56 items-center justify-start gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex w-56 items-center justify-start gap-2"
+                >
                   <Filter className="h-4 w-4" />
                   {selectedStrategies.length > 0
                     ? `${selectedStrategies.length} selected`
-                    : 'All strategies'}
+                    : "All strategies"}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-64 p-0" align="start">
@@ -362,11 +379,15 @@ export function DashboardTab() {
             <Label className="text-xs">Symbols</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" size="sm" className="flex w-56 items-center justify-start gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="flex w-56 items-center justify-start gap-2"
+                >
                   <Filter className="h-4 w-4" />
                   {selectedSymbols.length > 0
                     ? `${selectedSymbols.length} selected`
-                    : 'All symbols'}
+                    : "All symbols"}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-64 p-0" align="start">
@@ -393,14 +414,30 @@ export function DashboardTab() {
           </div>
 
           <div className="flex gap-2">
-            <Button size="sm" onClick={handleApplyFilters} disabled={strategiesQuery.isLoading || summaryQuery.isLoading}>
+            <Button
+              size="sm"
+              onClick={handleApplyFilters}
+              disabled={strategiesQuery.isLoading || summaryQuery.isLoading}
+            >
               Apply Filters
             </Button>
-            <Button size="sm" variant="ghost" onClick={handleResetFilters} disabled={strategiesQuery.isLoading || summaryQuery.isLoading}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleResetFilters}
+              disabled={strategiesQuery.isLoading || summaryQuery.isLoading}
+            >
               Reset
             </Button>
-            <Button size="icon" variant="outline" onClick={handleRefresh} disabled={strategiesQuery.isLoading || summaryQuery.isLoading}>
-              <RefreshCcw className={`h-4 w-4 ${strategiesQuery.isLoading || summaryQuery.isLoading ? 'animate-spin' : ''}`} />
+            <Button
+              size="icon"
+              variant="outline"
+              onClick={handleRefresh}
+              disabled={strategiesQuery.isLoading || summaryQuery.isLoading}
+            >
+              <RefreshCcw
+                className={`h-4 w-4 ${strategiesQuery.isLoading || summaryQuery.isLoading ? "animate-spin" : ""}`}
+              />
             </Button>
           </div>
         </div>
@@ -428,31 +465,51 @@ export function DashboardTab() {
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Total PnL</div>
           <div className="text-lg font-semibold">
-            {summaryQuery.data ? formatCurrency(summaryQuery.data.kpis.totalPnl) : <Skeleton className="h-6 w-32" />}
+            {summaryQuery.data ? (
+              formatCurrency(summaryQuery.data.kpis.totalPnl)
+            ) : (
+              <Skeleton className="h-6 w-32" />
+            )}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Win Rate</div>
           <div className="text-lg font-semibold">
-            {summaryQuery.data ? formatPercent(summaryQuery.data.kpis.winRate) : <Skeleton className="h-6 w-24" />}
+            {summaryQuery.data ? (
+              formatPercent(summaryQuery.data.kpis.winRate)
+            ) : (
+              <Skeleton className="h-6 w-24" />
+            )}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Sharpe</div>
           <div className="text-lg font-semibold">
-            {summaryQuery.data ? summaryQuery.data.kpis.sharpe.toFixed(2) : <Skeleton className="h-6 w-16" />}
+            {summaryQuery.data ? (
+              summaryQuery.data.kpis.sharpe.toFixed(2)
+            ) : (
+              <Skeleton className="h-6 w-16" />
+            )}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Max Drawdown</div>
           <div className="text-lg font-semibold">
-            {summaryQuery.data ? formatPercent(summaryQuery.data.kpis.maxDrawdown) : <Skeleton className="h-6 w-24" />}
+            {summaryQuery.data ? (
+              formatPercent(summaryQuery.data.kpis.maxDrawdown)
+            ) : (
+              <Skeleton className="h-6 w-24" />
+            )}
           </div>
         </Card>
         <Card className="p-4">
           <div className="text-xs text-muted-foreground">Positions</div>
           <div className="text-lg font-semibold">
-            {summaryQuery.data ? summaryQuery.data.kpis.openPositions : <Skeleton className="h-6 w-12" />}
+            {summaryQuery.data ? (
+              summaryQuery.data.kpis.openPositions
+            ) : (
+              <Skeleton className="h-6 w-12" />
+            )}
           </div>
         </Card>
       </div>
@@ -481,7 +538,9 @@ export function DashboardTab() {
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
         <Card className="p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 id={positionsHeadingId} className="font-medium">Open Positions</h3>
+            <h3 id={positionsHeadingId} className="font-medium">
+              Open Positions
+            </h3>
             {positionsSummary ? (
               <span className="text-xs text-muted-foreground text-right">{positionsSummary}</span>
             ) : null}
@@ -503,13 +562,15 @@ export function DashboardTab() {
                   <TableCell>{position.qty}</TableCell>
                   <TableCell>{formatCurrency(position.entry)}</TableCell>
                   <TableCell>{formatCurrency(position.mark)}</TableCell>
-                  <TableCell className={`text-right ${position.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  <TableCell
+                    className={`text-right ${position.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                  >
                     {formatCurrency(position.pnl)}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
-            <TableCaption>{positions.length === 0 ? 'No open positions' : undefined}</TableCaption>
+            <TableCaption>{positions.length === 0 ? "No open positions" : undefined}</TableCaption>
           </Table>
           {hasMorePositions ? (
             <div className="mt-3 flex justify-center">
@@ -519,7 +580,7 @@ export function DashboardTab() {
                 onClick={loadMorePositions}
                 disabled={positionsQuery.isFetchingNextPage || !hasMorePositions}
               >
-                {positionsQuery.isFetchingNextPage ? 'Loading…' : 'Load older positions'}
+                {positionsQuery.isFetchingNextPage ? "Loading…" : "Load older positions"}
               </Button>
             </div>
           ) : null}
@@ -527,7 +588,9 @@ export function DashboardTab() {
 
         <Card className="p-4">
           <div className="mb-3 flex items-center justify-between gap-2">
-            <h3 id={tradesHeadingId} className="font-medium">Recent Trades</h3>
+            <h3 id={tradesHeadingId} className="font-medium">
+              Recent Trades
+            </h3>
             {tradesSummary ? (
               <span className="text-xs text-muted-foreground text-right">{tradesSummary}</span>
             ) : null}
@@ -548,18 +611,18 @@ export function DashboardTab() {
                 <TableRow key={trade.id}>
                   <TableCell>{new Date(trade.timestamp).toLocaleTimeString()}</TableCell>
                   <TableCell>{trade.symbol}</TableCell>
-                  <TableCell className={trade.side === 'buy' ? 'text-emerald-400' : 'text-red-400'}>
+                  <TableCell className={trade.side === "buy" ? "text-emerald-400" : "text-red-400"}>
                     {trade.side.toUpperCase()}
                   </TableCell>
                   <TableCell>{trade.quantity}</TableCell>
                   <TableCell>{formatCurrency(trade.price)}</TableCell>
                   <TableCell className="text-right">
-                    {trade.pnl !== undefined ? formatCurrency(trade.pnl) : '—'}
+                    {trade.pnl !== undefined ? formatCurrency(trade.pnl) : "—"}
                   </TableCell>
                 </TableRow>
               ))}
             </TableBody>
-            <TableCaption>{trades.length === 0 ? 'No recent trades' : undefined}</TableCaption>
+            <TableCaption>{trades.length === 0 ? "No recent trades" : undefined}</TableCaption>
           </Table>
           {hasMoreTrades ? (
             <div className="mt-3 flex justify-center">
@@ -569,7 +632,7 @@ export function DashboardTab() {
                 onClick={loadMoreTrades}
                 disabled={tradesQuery.isFetchingNextPage || !hasMoreTrades}
               >
-                {tradesQuery.isFetchingNextPage ? 'Loading…' : 'Load older trades'}
+                {tradesQuery.isFetchingNextPage ? "Loading…" : "Load older trades"}
               </Button>
             </div>
           ) : null}
@@ -590,11 +653,11 @@ export function DashboardTab() {
                     <span>{new Date(alert.timestamp).toLocaleTimeString()}</span>
                     <Badge
                       variant={
-                        alert.type === 'error'
-                          ? 'destructive'
-                          : alert.type === 'warning'
-                          ? 'secondary'
-                          : 'outline'
+                        alert.type === "error"
+                          ? "destructive"
+                          : alert.type === "warning"
+                            ? "secondary"
+                            : "outline"
                       }
                     >
                       {alert.type.toUpperCase()}
@@ -615,7 +678,7 @@ export function DashboardTab() {
                 onClick={loadMoreAlerts}
                 disabled={alertsQuery.isFetchingNextPage || !hasMoreAlerts}
               >
-                {alertsQuery.isFetchingNextPage ? 'Loading…' : 'Load older alerts'}
+                {alertsQuery.isFetchingNextPage ? "Loading…" : "Load older alerts"}
               </Button>
             </div>
           ) : null}
@@ -630,11 +693,11 @@ export function DashboardTab() {
                   <span className="font-medium">{venue.name}</span>
                   <Badge
                     variant={
-                      venue.status === 'ok'
-                        ? 'outline'
-                        : venue.status === 'warn'
-                        ? 'secondary'
-                        : 'destructive'
+                      venue.status === "ok"
+                        ? "outline"
+                        : venue.status === "warn"
+                          ? "secondary"
+                          : "destructive"
                     }
                   >
                     {venue.status.toUpperCase()}
@@ -646,7 +709,9 @@ export function DashboardTab() {
                 </div>
               </div>
             ))}
-            {!healthQuery.data?.venues?.length && <p className="text-xs text-muted-foreground">No venue data</p>}
+            {!healthQuery.data?.venues?.length && (
+              <p className="text-xs text-muted-foreground">No venue data</p>
+            )}
           </div>
         </Card>
       </div>

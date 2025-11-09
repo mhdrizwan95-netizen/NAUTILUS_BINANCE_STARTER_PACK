@@ -1,12 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from "react";
 
-import { stableHash } from './equality';
+import { stableHash } from "./equality";
 
 export function usePolling<T>(
   fn: () => Promise<T>,
   ms: number,
   enabled = true,
-  isEqual: (previous: T | null, next: T) => boolean = Object.is
+  isEqual: (previous: T | null, next: T) => boolean = Object.is,
 ) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<Error | null>(null);
@@ -15,7 +15,7 @@ export function usePolling<T>(
   const lastHash = useRef<string | null>(null);
   const fnRef = useRef(fn);
   const comparatorRef = useRef(isEqual);
-  const liveDisabled = (import.meta.env?.VITE_LIVE_OFF ?? 'false') === 'true';
+  const liveDisabled = (import.meta.env?.VITE_LIVE_OFF ?? "false") === "true";
   const pollingEnabled = enabled && !liveDisabled;
 
   useEffect(() => {
@@ -37,10 +37,7 @@ export function usePolling<T>(
           return;
         }
         const nextHash = stableHash(result);
-        if (
-          comparatorRef.current(lastData.current, result) ||
-          lastHash.current === nextHash
-        ) {
+        if (comparatorRef.current(lastData.current, result) || lastHash.current === nextHash) {
           lastHash.current = nextHash;
           lastData.current = result;
           return;

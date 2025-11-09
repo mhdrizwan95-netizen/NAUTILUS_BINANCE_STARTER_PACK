@@ -8,7 +8,6 @@ and updated exposure caps based on live market/account inputs.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 from engine.dynamic_policy import (
     AccountState,
@@ -46,9 +45,9 @@ def compute_order(
     open_risk_sum_pct: float,
     open_positions: int,
     exposure_total_usd: float,
-    exposure_by_symbol: Dict[str, float],
+    exposure_by_symbol: dict[str, float],
     regime_signal,
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """Return a dict containing dynamic sizing, stops, and concurrency caps."""
     strat = StrategyContext(
         name=strat_name,

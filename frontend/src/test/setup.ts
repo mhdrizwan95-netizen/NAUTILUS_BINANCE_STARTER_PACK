@@ -1,5 +1,5 @@
-import '@testing-library/jest-dom';
-import { beforeAll, afterEach, afterAll } from 'vitest';
+import "@testing-library/jest-dom";
+import { beforeAll, afterEach, afterAll } from "vitest";
 
 class MemoryStorage implements Storage {
   private store = new Map<string, string>();
@@ -31,18 +31,18 @@ class MemoryStorage implements Storage {
 
 const createStorage = () => new MemoryStorage();
 
-const ensureStorage = (prop: 'localStorage' | 'sessionStorage') => {
+const ensureStorage = (prop: "localStorage" | "sessionStorage") => {
   const existing = (globalThis as Record<string, unknown>)[prop];
-  if (!existing || typeof (existing as Storage).getItem !== 'function') {
+  if (!existing || typeof (existing as Storage).getItem !== "function") {
     Object.defineProperty(globalThis, prop, {
       value: createStorage(),
       configurable: true,
       writable: true,
     });
   }
-  if (typeof window !== 'undefined') {
+  if (typeof window !== "undefined") {
     const win = window as unknown as Record<string, unknown>;
-    if (!win[prop] || typeof (win[prop] as Storage).getItem !== 'function') {
+    if (!win[prop] || typeof (win[prop] as Storage).getItem !== "function") {
       Object.defineProperty(window, prop, {
         value: (globalThis as Record<string, unknown>)[prop],
         configurable: true,
@@ -52,8 +52,8 @@ const ensureStorage = (prop: 'localStorage' | 'sessionStorage') => {
   }
 };
 
-ensureStorage('localStorage');
-ensureStorage('sessionStorage');
+ensureStorage("localStorage");
+ensureStorage("sessionStorage");
 
 // Mock WebSocket
 global.WebSocket = class MockWebSocket {
@@ -66,14 +66,14 @@ global.WebSocket = class MockWebSocket {
   constructor() {
     // Simulate connection
     setTimeout(() => {
-      this.onopen?.(new Event('open'));
+      this.onopen?.(new Event("open"));
     }, 0);
   }
 
   send() {}
   close() {
     this.readyState = 3; // CLOSED
-    this.onclose?.(new CloseEvent('close'));
+    this.onclose?.(new CloseEvent("close"));
   }
 } as unknown as typeof WebSocket;
 
@@ -85,7 +85,7 @@ global.ResizeObserver = class ResizeObserver {
 };
 
 // Mock matchMedia
-Object.defineProperty(window, 'matchMedia', {
+Object.defineProperty(window, "matchMedia", {
   writable: true,
   value: (query: string) => ({
     matches: false,
@@ -100,19 +100,19 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 // Setup MSW server
-const mswDisabled = process.env.MSW_DISABLED === 'true';
+const mswDisabled = process.env.MSW_DISABLED === "true";
 
 export const server = await (async () => {
   if (mswDisabled) {
     return null;
   }
   const [{ setupServer }, { handlers }] = await Promise.all([
-    import('msw/node'),
-    import('./mocks/handlers'),
+    import("msw/node"),
+    import("./mocks/handlers"),
   ]);
   const instance = setupServer(...handlers);
 
-  beforeAll(() => instance.listen({ onUnhandledRequest: 'error' }));
+  beforeAll(() => instance.listen({ onUnhandledRequest: "error" }));
   afterEach(() => instance.resetHandlers());
   afterAll(() => instance.close());
 

@@ -10,7 +10,7 @@ type AuditEntry = {
 };
 
 const readDryRunFlag = (): boolean =>
-  typeof import.meta !== 'undefined' && (import.meta.env?.VITE_DRY_RUN ?? '0') === '1';
+  typeof import.meta !== "undefined" && (import.meta.env?.VITE_DRY_RUN ?? "0") === "1";
 
 export const isDryRunMode = (): boolean => readDryRunFlag();
 
@@ -22,7 +22,7 @@ export function assertWritableOperation(operation: string): void {
 
 // Content Security Policy headers (to be set by server)
 export const CSP_HEADERS = {
-  'Content-Security-Policy': [
+  "Content-Security-Policy": [
     "default-src 'self'",
     "script-src 'self' 'nonce-__CSP_NONCE__'",
     "style-src 'self' 'nonce-__CSP_NONCE__'",
@@ -33,17 +33,17 @@ export const CSP_HEADERS = {
     "base-uri 'self'",
     "form-action 'self'",
     "frame-ancestors 'none'",
-  ].join('; '),
+  ].join("; "),
 };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-const isCryptoAvailable = () => typeof window !== 'undefined' && !!window.crypto?.subtle;
+const isCryptoAvailable = () => typeof window !== "undefined" && !!window.crypto?.subtle;
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   const bytes = new Uint8Array(buffer);
-  let binary = '';
+  let binary = "";
   bytes.forEach((b) => {
     binary += String.fromCharCode(b);
   });
@@ -64,7 +64,7 @@ export class InputSanitizer {
   // Sanitize text input
   static sanitizeText(input: string): string {
     return input
-      .replace(/[<>]/g, '') // Remove potential HTML tags
+      .replace(/[<>]/g, "") // Remove potential HTML tags
       .trim()
       .slice(0, 1000); // Limit length
   }
@@ -75,17 +75,17 @@ export class InputSanitizer {
     // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(sanitized)) {
-      throw new Error('Invalid email format');
+      throw new Error("Invalid email format");
     }
     return sanitized;
   }
 
   // Sanitize numeric input
   static sanitizeNumber(input: string | number, min?: number, max?: number): number {
-    const num = typeof input === 'string' ? parseFloat(input) : input;
+    const num = typeof input === "string" ? parseFloat(input) : input;
 
     if (isNaN(num)) {
-      throw new Error('Invalid number');
+      throw new Error("Invalid number");
     }
 
     if (min !== undefined && num < min) {
@@ -110,11 +110,11 @@ export class InputSanitizer {
       }
 
       // Sanitize values based on type
-      if (typeof value === 'string') {
+      if (typeof value === "string") {
         sanitized[key] = this.sanitizeText(value);
-      } else if (typeof value === 'number') {
+      } else if (typeof value === "number") {
         sanitized[key] = value; // Numbers are safe
-      } else if (typeof value === 'boolean') {
+      } else if (typeof value === "boolean") {
         sanitized[key] = value; // Booleans are safe
       } else {
         throw new Error(`Unsupported parameter type for ${key}`);
@@ -149,7 +149,7 @@ export class RateLimiter {
     const calls = this.calls.get(endpoint)!;
 
     // Remove old calls outside the window
-    const recentCalls = calls.filter(call => call > windowStart);
+    const recentCalls = calls.filter((call) => call > windowStart);
 
     if (recentCalls.length >= limit) {
       return false; // Rate limit exceeded
@@ -168,7 +168,7 @@ export class RateLimiter {
     const windowStart = now - windowMs;
 
     const calls = this.calls.get(endpoint) || [];
-    const recentCalls = calls.filter(call => call > windowStart);
+    const recentCalls = calls.filter((call) => call > windowStart);
 
     return Math.max(0, limit - recentCalls.length);
   }
@@ -195,11 +195,11 @@ export class RequestSigner {
     if (isCryptoAvailable()) {
       const keyMaterial = encoder.encode(apiSecret);
       this.keyPromise = window.crypto.subtle.importKey(
-        'raw',
+        "raw",
         keyMaterial,
-        { name: 'HMAC', hash: 'SHA-256' },
+        { name: "HMAC", hash: "SHA-256" },
         false,
-        ['sign'],
+        ["sign"],
       );
     }
   }
@@ -209,27 +209,32 @@ export class RequestSigner {
     method: string,
     endpoint: string,
     body: Record<string, unknown> | string | undefined,
-    timestamp: string
+    timestamp: string,
   ): Promise<string> {
     if (!this.apiSecret) {
-      throw new Error('API credentials not set');
+      throw new Error("API credentials not set");
     }
 
-    const serializedBody =
-      typeof body === 'string' ? body : body ? JSON.stringify(body) : '';
+    const serializedBody = typeof body === "string" ? body : body ? JSON.stringify(body) : "";
     const message = `${method}${endpoint}${timestamp}${serializedBody}`;
 
     if (isCryptoAvailable()) {
-      const key = this.keyPromise ?? window.crypto.subtle.importKey(
-        'raw',
-        encoder.encode(this.apiSecret),
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign'],
-      );
+      const key =
+        this.keyPromise ??
+        window.crypto.subtle.importKey(
+          "raw",
+          encoder.encode(this.apiSecret),
+          { name: "HMAC", hash: "SHA-256" },
+          false,
+          ["sign"],
+        );
       this.keyPromise = key;
       const cryptoKey = await key;
-      const signatureBuffer = await window.crypto.subtle.sign('HMAC', cryptoKey, encoder.encode(message));
+      const signatureBuffer = await window.crypto.subtle.sign(
+        "HMAC",
+        cryptoKey,
+        encoder.encode(message),
+      );
       return arrayBufferToBase64(signatureBuffer);
     }
 
@@ -242,35 +247,35 @@ export class RequestSigner {
     headers: Headers,
     method: string,
     endpoint: string,
-    body?: Record<string, unknown> | string
+    body?: Record<string, unknown> | string,
   ): Promise<void> {
     if (!this.apiKey) {
       return; // No auth if credentials not set
     }
 
     const timestamp = Date.now().toString();
-    headers.set('X-API-Key', this.apiKey);
-    headers.set('X-Timestamp', timestamp);
+    headers.set("X-API-Key", this.apiKey);
+    headers.set("X-Timestamp", timestamp);
     const signature = await this.signRequest(method, endpoint, body, timestamp);
-    headers.set('X-Signature', signature);
+    headers.set("X-Signature", signature);
   }
 }
 
 // Secure storage utilities
 export class SecureStorage {
-  private static readonly PREFIX = 'nautilus_secure_';
+  private static readonly PREFIX = "nautilus_secure_";
   private static encryptionKey: CryptoKey | null = null;
 
   static async bootstrap(sessionKeyMaterial: string): Promise<void> {
     if (!isCryptoAvailable()) {
-      throw new Error('Secure storage unavailable without WebCrypto');
+      throw new Error("Secure storage unavailable without WebCrypto");
     }
     this.encryptionKey = await window.crypto.subtle.importKey(
-      'raw',
+      "raw",
       encoder.encode(sessionKeyMaterial),
-      { name: 'AES-GCM' },
+      { name: "AES-GCM" },
       false,
-      ['encrypt', 'decrypt'],
+      ["encrypt", "decrypt"],
     );
   }
 
@@ -278,12 +283,12 @@ export class SecureStorage {
   static async setItem(key: string, value: string): Promise<void> {
     try {
       if (!this.encryptionKey) {
-        throw new Error('SecureStorage not bootstrapped with session key');
+        throw new Error("SecureStorage not bootstrapped with session key");
       }
 
       const iv = window.crypto.getRandomValues(new Uint8Array(12));
       const cipherBuffer = await window.crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
+        { name: "AES-GCM", iv },
         this.encryptionKey,
         encoder.encode(value),
       );
@@ -295,7 +300,7 @@ export class SecureStorage {
 
       localStorage.setItem(this.PREFIX + key, payload);
     } catch (error) {
-      console.error('Failed to store secure item:', error);
+      console.error("Failed to store secure item:", error);
     }
   }
 
@@ -308,21 +313,21 @@ export class SecureStorage {
       }
 
       if (!this.encryptionKey) {
-        throw new Error('SecureStorage not bootstrapped with session key');
+        throw new Error("SecureStorage not bootstrapped with session key");
       }
 
       const parsed = JSON.parse(stored) as { iv?: string; value?: string };
       if (!parsed.iv || !parsed.value) {
-        throw new Error('Invalid payload');
+        throw new Error("Invalid payload");
       }
       const decrypted = await window.crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: base64ToArrayBuffer(parsed.iv) },
+        { name: "AES-GCM", iv: base64ToArrayBuffer(parsed.iv) },
         this.encryptionKey,
         base64ToArrayBuffer(parsed.value),
       );
       return decoder.decode(decrypted);
     } catch (error) {
-      console.error('Failed to retrieve secure item:', error);
+      console.error("Failed to retrieve secure item:", error);
       return null;
     }
   }
@@ -391,7 +396,9 @@ export class AuditLogger {
     }
 
     // In production, send to audit service
-    console.log('Audit log:', logEntry);
+    if (process.env.NODE_ENV === "development") {
+      console.warn("Audit log:", logEntry);
+    }
   }
 
   getRecentLogs(limit = 100): AuditEntry[] {
@@ -407,9 +414,11 @@ export class AuditLogger {
 export class NetworkSecurity {
   // Check if connection is secure
   static isSecureConnection(): boolean {
-    return window.location.protocol === 'https:' ||
-           window.location.hostname === 'localhost' ||
-           window.location.hostname === '127.0.0.1';
+    return (
+      window.location.protocol === "https:" ||
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1"
+    );
   }
 
   // Validate API endpoint
@@ -418,21 +427,17 @@ export class NetworkSecurity {
       const parsedUrl = new URL(url);
 
       // Only allow HTTPS in production
-      if (process.env.NODE_ENV === 'production' && parsedUrl.protocol !== 'https:') {
+      if (process.env.NODE_ENV === "production" && parsedUrl.protocol !== "https:") {
         return false;
       }
 
       // Allow localhost in development
-      if (process.env.NODE_ENV === 'development' && parsedUrl.hostname === 'localhost') {
+      if (process.env.NODE_ENV === "development" && parsedUrl.hostname === "localhost") {
         return true;
       }
 
       // Check against allowed domains
-      const allowedDomains = [
-        'api.nautilus.com',
-        'localhost',
-        '127.0.0.1',
-      ];
+      const allowedDomains = ["api.nautilus.com", "localhost", "127.0.0.1"];
 
       return allowedDomains.includes(parsedUrl.hostname);
     } catch {
@@ -446,12 +451,12 @@ export class NetworkSecurity {
 
     // Check for insecure connection
     if (!this.isSecureConnection()) {
-      threats.push('Insecure connection detected');
+      threats.push("Insecure connection detected");
     }
 
     // Check for dev tools (basic detection)
-    if (typeof window !== 'undefined' && typeof window.console?.clear === 'function') {
-      threats.push('Developer tools may be open');
+    if (typeof window !== "undefined" && typeof window.console?.clear === "function") {
+      threats.push("Developer tools may be open");
     }
 
     return threats;
@@ -464,7 +469,7 @@ export function initializeSecurity(): void {
   CSRFProtection.generateToken();
 
   // Log security initialization
-  AuditLogger.getInstance().logAction('security_initialized', {
+  AuditLogger.getInstance().logAction("security_initialized", {
     timestamp: Date.now(),
     userAgent: navigator.userAgent,
     secureConnection: NetworkSecurity.isSecureConnection(),
@@ -474,8 +479,8 @@ export function initializeSecurity(): void {
   setInterval(() => {
     const threats = NetworkSecurity.detectThreats();
     if (threats.length > 0) {
-      threats.forEach(threat => {
-        AuditLogger.getInstance().logAction('security_threat_detected', { threat });
+      threats.forEach((threat) => {
+        AuditLogger.getInstance().logAction("security_threat_detected", { threat });
       });
     }
   }, 30000); // Check every 30 seconds

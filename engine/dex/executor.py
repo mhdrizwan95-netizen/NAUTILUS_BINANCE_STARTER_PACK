@@ -5,8 +5,9 @@ On-chain DEX executor built on UniswapV2/Pancake router.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from engine.dex.router import DexRouter
@@ -16,6 +17,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger("engine.dex.executor")
 
 
+class DexAmountInError(ValueError):
+    """Raised when USD notional converts to zero tokens."""
+
+    def __init__(self) -> None:
+        super().__init__("Amount in must be positive")
+
+
+class DexSellQuantityError(ValueError):
+    """Raised when sell quantity converts to zero tokens."""
+
+    def __init__(self) -> None:
+        super().__init__("Sell quantity must be positive")
+
+
 @dataclass(slots=True)
 class DexExecutionResult:
     symbol: str
@@ -23,15 +38,15 @@ class DexExecutionResult:
     price: float
     notional: float
     side: str
-    tx_hash: Optional[str] = None
+    tx_hash: str | None = None
 
 
 class DexExecutor:
     def __init__(
         self,
         *,
-        wallet: "DexWallet",
-        router: "DexRouter",
+        wallet: DexWallet,
+        router: DexRouter,
         stable_token: str,
         wrapped_native: str,
         gas_limit: int,
@@ -55,7 +70,7 @@ class DexExecutor:
         decimals_out = await self.wallet.token_decimals(token_address)
         amount_in = int(notional_usd * (10**decimals_in))
         if amount_in <= 0:
-            raise ValueError("Amount in must be positive")
+            raise DexAmountInError()
         path = self._path_buy(token_address)
         await self.wallet.ensure_allowance(self.stable_token, self.router.router.address, amount_in)
         quote = await self.router.quote(amount_in, path)
@@ -92,7 +107,7 @@ class DexExecutor:
         decimals_out = await self.wallet.token_decimals(self.stable_token)
         amount_in = int(qty * (10**decimals_in))
         if amount_in <= 0:
-            raise ValueError("Sell quantity must be positive")
+            raise DexSellQuantityError()
         path = self._path_sell(token_address)
         await self.wallet.ensure_allowance(token_address, self.router.router.address, amount_in)
         quote = await self.router.quote(amount_in, path)

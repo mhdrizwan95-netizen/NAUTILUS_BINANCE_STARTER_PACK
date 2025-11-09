@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -13,7 +13,22 @@ from . import model_store
 from .config import settings
 
 
-def _load_new_data() -> Tuple[pd.DataFrame, List[str]]:
+class InsufficientTrainingDataError(RuntimeError):
+    """Raised when the HMM trainer lacks enough samples."""
+
+    def __init__(self, count: int, minimum: int) -> None:
+        super().__init__(f"not enough points to train (got {count}, need >= {minimum})")
+
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    OSError,
+    ValueError,
+    RuntimeError,
+    pd.errors.ParserError,
+)
+
+
+def _load_new_data() -> tuple[pd.DataFrame, list[str]]:
     """
     Build a dataframe from files claimed from the ledger.
     If EXACTLY_ONCE is True, we only use newly downloaded bars once.
@@ -36,8 +51,8 @@ def _load_new_data() -> Tuple[pd.DataFrame, List[str]]:
                 # assume first col
                 df.rename(columns={df.columns[0]: "timestamp"}, inplace=True)
             dfs.append(df[["timestamp", "close"]])
-        except Exception as e:
-            logger.warning(f"skipping {path}: {e}")
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            logger.warning(f"skipping {path}: {exc}")
     if not dfs:
         # Requeue anything we claimed before falling back
         if claimed_ids:
@@ -65,7 +80,7 @@ def _load_window_from_disk(days: int) -> pd.DataFrame:
             if "timestamp" not in df.columns:
                 df.rename(columns={df.columns[0]: "timestamp"}, inplace=True)
             dfs.append(df[["timestamp", "close"]])
-        except Exception as exc:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
             logger.warning("Failed to load fallback window file %s: %s", p, exc, exc_info=True)
     if not dfs:
         return pd.DataFrame(columns=["timestamp", "close"])
@@ -81,7 +96,7 @@ def _load_window_from_disk(days: int) -> pd.DataFrame:
 
 def _train_hmm(
     X: np.ndarray, n_states: int, seed: int
-) -> Tuple[GaussianHMM, StandardScaler, Dict[str, Any]]:
+) -> tuple[GaussianHMM, StandardScaler, dict[str, Any]]:
     """Train HMM with time-aware split and no leakage.
 
     - Split first (80/20 in order) to respect temporal ordering.
@@ -89,7 +104,7 @@ def _train_hmm(
     """
     n = len(X)
     if n < 100:
-        raise RuntimeError("not enough points to train")
+        raise InsufficientTrainingDataError(n, 100)
     split = int(n * 0.8)
     Xtr_raw, Xval_raw = X[:split], X[split:]
     scaler = StandardScaler()
@@ -107,28 +122,28 @@ def _train_hmm(
     return hmm, scaler, meta
 
 
-def _mark_claimed_as_processed(file_ids: List[str], delete_after: bool = True):
+def _mark_claimed_as_processed(file_ids: list[str], delete_after: bool = True):
     if not file_ids:
         return
     for fid in file_ids:
         try:
             manifest.mark_processed(fid, delete_file=delete_after, db_path=settings.LEDGER_DB)
-        except Exception as exc:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
             logger.warning(f"failed to mark {fid} processed: {exc}")
 
 
-def _requeue_claims(file_ids: List[str]):
+def _requeue_claims(file_ids: list[str]):
     if not file_ids:
         return
     try:
         manifest.requeue(file_ids, db_path=settings.LEDGER_DB)
-    except Exception as exc:
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:
         logger.warning(f"failed to requeue {len(file_ids)} files: {exc}")
 
 
 def train_once(
     n_states: int | None = None, tag: str | None = None, promote: bool = True
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     n_states = n_states or settings.HMM_STATES
     np.random.seed(settings.TRAIN_SEED)
     df_new, claimed_ids = _load_new_data()
@@ -196,7 +211,7 @@ def train_once(
         claimed_count = len(claimed_ids)
         _mark_claimed_as_processed(claimed_ids, delete_after=settings.DELETE_AFTER_PROCESS)
         claimed_ids = []
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         _requeue_claims(claimed_ids)
         raise
 

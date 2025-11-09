@@ -13,6 +13,12 @@ as unsafe.
 | `python-jose` | 3.3.0 | — (migrated to `pyjwt[crypto]` 2.9.0) | PYSEC-2024-232,<br>PYSEC-2024-233 | JWT validation now uses PyJWT + `cryptography`; we no longer vendor `ecdsa`. |
 | `ecdsa` | 0.19.1 | — (removed) | GHSA-wj6h-64fc-37mp | The only consumer was `python-jose`; removing it eliminates the vulnerable primitive entirely. |
 
+### Pending advisories (front-end toolchain)
+
+| Package | Installed | Advisory | Impact | Mitigation |
+|---------|-----------|----------|--------|------------|
+| `vite`, `vitest`, `esbuild` (dev dependencies) | 5.x / 2.x / 0.23.x | GHSA-67mh-4wv8-2f99 (esbuild request smuggling) | CI/dev-only tooling; not shipped in production artifacts. Runners are already gated by network egress policies. | Upgrade to the next coordinated Vite/Vitest release train (target: 2025-11-30) once upstream publishes patched bundles. Tracking issue: `SEC-217`. Documented here to keep the exception visible; no allowlist is configured in CI. |
+
 ### Verification
 
 ```

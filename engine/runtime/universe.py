@@ -5,9 +5,10 @@ import contextlib
 import json
 import logging
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
@@ -16,6 +17,20 @@ from ..metrics import strategy_universe_size
 from .config import RuntimeConfig, UniverseFilterConfig
 
 log = logging.getLogger("engine.runtime.universe")
+_SUPPRESSIBLE_EXCEPTIONS = (
+    OSError,
+    ValueError,
+    json.JSONDecodeError,
+    httpx.HTTPError,
+    RuntimeError,
+    ConnectionError,
+    asyncio.TimeoutError,
+)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    log.debug("%s suppressed: %s", context, exc, exc_info=True)
+
 
 BINANCE_SPOT_STREAM = "wss://stream.binance.com:9443/stream?streams={streams}"
 
@@ -35,7 +50,7 @@ class SymbolMetrics:
     bid_liquidity_usd: float = 0.0
     tick_size_pct: float = 0.0
     trend_30d_pct: float = 0.0
-    listing_age_days: Optional[float] = None
+    listing_age_days: float | None = None
     news_score: float = 0.0
     news_flag: bool = False
 
@@ -44,17 +59,17 @@ class UniverseManager:
     def __init__(self, config: RuntimeConfig) -> None:
         self._config = config
         self._lock = asyncio.Lock()
-        self._universes: Dict[str, Tuple[int, Tuple[str, ...]]] = {}
-        self._events: Dict[str, asyncio.Event] = {}
-        self._metadata: Dict[str, Dict[str, Any]] = {}
+        self._universes: dict[str, tuple[int, tuple[str, ...]]] = {}
+        self._events: dict[str, asyncio.Event] = {}
+        self._metadata: dict[str, dict[str, Any]] = {}
         self._snapshot_dir = Path(config.snapshot_dir).expanduser() if config.snapshot_dir else None
         if self._snapshot_dir:
             self._snapshot_dir.mkdir(parents=True, exist_ok=True)
-        self._spot_exchange_info: Dict[str, dict] = {}
-        self._futures_exchange_info: Dict[str, dict] = {}
+        self._spot_exchange_info: dict[str, dict] = {}
+        self._futures_exchange_info: dict[str, dict] = {}
 
     async def update(
-        self, strategy: str, symbols: Iterable[str], version_hint: Optional[int] = None
+        self, strategy: str, symbols: Iterable[str], version_hint: int | None = None
     ) -> None:
         key = strategy.lower()
         async with self._lock:
@@ -72,14 +87,10 @@ class UniverseManager:
                             {"strategy": key, "version": new_version, "symbols": clean},
                             fh,
                         )
-                except Exception:
-                    log.warning(
-                        "[universe] failed to write snapshot %s",
-                        snapshot_path,
-                        exc_info=True,
-                    )
+                except (OSError, TypeError) as exc:
+                    _log_suppressed("universe.snapshot_write", exc)
 
-    async def current(self, strategy: str) -> Tuple[int, Tuple[str, ...]]:
+    async def current(self, strategy: str) -> tuple[int, tuple[str, ...]]:
         key = strategy.lower()
         async with self._lock:
             if key not in self._universes:
@@ -90,10 +101,10 @@ class UniverseManager:
                 self._events[key] = asyncio.Event()
             return self._universes[key]
 
-    def metadata_snapshot(self) -> Dict[str, Dict[str, Any]]:
+    def metadata_snapshot(self) -> dict[str, dict[str, Any]]:
         return dict(self._metadata)
 
-    async def set_symbol_metadata(self, symbol: str, metadata: Dict[str, Any]) -> None:
+    async def set_symbol_metadata(self, symbol: str, metadata: dict[str, Any]) -> None:
         async with self._lock:
             self._metadata[symbol.upper()] = dict(metadata)
 
@@ -117,7 +128,7 @@ class BinanceMetricsFetcher:
         self.client = client
         self.timeout = timeout
 
-    async def futures_ticker_24h(self) -> List[dict]:
+    async def futures_ticker_24h(self) -> list[dict]:
         async with httpx.AsyncClient(
             base_url=self.client._futures_base,
             timeout=self.timeout,
@@ -127,7 +138,7 @@ class BinanceMetricsFetcher:
             resp.raise_for_status()
             return resp.json()
 
-    async def spot_ticker_24h(self) -> List[dict]:
+    async def spot_ticker_24h(self) -> list[dict]:
         async with httpx.AsyncClient(
             base_url=self.client._spot_base,
             timeout=self.timeout,
@@ -148,7 +159,7 @@ class BinanceMetricsFetcher:
             data = resp.json()
             return float(data.get("openInterest", 0.0))
 
-    async def leverage_brackets(self) -> Dict[str, int]:
+    async def leverage_brackets(self) -> dict[str, int]:
         async with httpx.AsyncClient(
             base_url=self.client._futures_base,
             timeout=self.timeout,
@@ -157,7 +168,7 @@ class BinanceMetricsFetcher:
             resp = await http.get("/fapi/v1/leverageBracket")
             resp.raise_for_status()
             brackets = resp.json()
-            leverage: Dict[str, int] = {}
+            leverage: dict[str, int] = {}
             for entry in brackets or []:
                 symbol = entry.get("symbol")
                 if not symbol:
@@ -178,9 +189,9 @@ class UniverseScreener:
         self.manager = manager
         self.fetcher = BinanceMetricsFetcher(client)
         self._running = False
-        self._task: Optional[asyncio.Task] = None
-        self._spot_exchange_info: Dict[str, dict] = {}
-        self._futures_exchange_info: Dict[str, dict] = {}
+        self._task: asyncio.Task | None = None
+        self._spot_exchange_info: dict[str, dict] = {}
+        self._futures_exchange_info: dict[str, dict] = {}
 
     def start(self) -> None:
         if self._task:
@@ -204,7 +215,7 @@ class UniverseScreener:
                 await self._refresh()
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
                 log.warning("universe refresh failed: %s", exc, exc_info=True)
             await asyncio.sleep(refresh)
 
@@ -236,7 +247,7 @@ class UniverseScreener:
                     resp = await http.get("/api/v3/exchangeInfo")
                     resp.raise_for_status()
                     data = resp.json()
-                    info: Dict[str, dict] = {}
+                    info: dict[str, dict] = {}
                     for sym in data.get("symbols", []) or []:
                         symbol = str(sym.get("symbol") or "").upper()
                         if not symbol:
@@ -250,8 +261,8 @@ class UniverseScreener:
                         }
                     if info:
                         self._spot_exchange_info = info
-            except Exception:
-                log.debug("failed to load spot exchange info", exc_info=True)
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("universe.spot_exchange_info", exc)
 
         if not self._futures_exchange_info:
             try:
@@ -267,7 +278,7 @@ class UniverseScreener:
                     resp = await http.get("/fapi/v1/exchangeInfo")
                     resp.raise_for_status()
                     data = resp.json()
-                    info: Dict[str, dict] = {}
+                    info: dict[str, dict] = {}
                     for sym in data.get("symbols", []) or []:
                         symbol = str(sym.get("symbol") or "").upper()
                         if not symbol:
@@ -281,12 +292,12 @@ class UniverseScreener:
                         }
                     if info:
                         self._futures_exchange_info = info
-            except Exception:
-                log.debug("failed to load futures exchange info", exc_info=True)
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("universe.futures_exchange_info", exc)
 
-    async def _gather_futures_metrics(self) -> Dict[str, SymbolMetrics]:
+    async def _gather_futures_metrics(self) -> dict[str, SymbolMetrics]:
         tickers = await self.fetcher.futures_ticker_24h()
-        metrics: Dict[str, SymbolMetrics] = {}
+        metrics: dict[str, SymbolMetrics] = {}
         for item in tickers:
             symbol = str(item.get("symbol") or "").upper()
             if not symbol.endswith("USDT"):
@@ -322,16 +333,16 @@ class UniverseScreener:
                             open_interest_usd=oi * metric.price,
                             max_leverage=metric.max_leverage,
                         )
-                except Exception:
-                    pass
+                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    _log_suppressed("universe.fetch_open_interest", exc)
 
         await asyncio.gather(*(fetch(m.symbol) for m in top_symbols))
         await self._enrich_metrics(metrics, venue="futures")
         return metrics
 
-    async def _gather_spot_metrics(self) -> Dict[str, SymbolMetrics]:
+    async def _gather_spot_metrics(self) -> dict[str, SymbolMetrics]:
         tickers = await self.fetcher.spot_ticker_24h()
-        metrics: Dict[str, SymbolMetrics] = {}
+        metrics: dict[str, SymbolMetrics] = {}
         for item in tickers:
             symbol = str(item.get("symbol") or "").upper()
             if not symbol.endswith("USDT"):
@@ -354,7 +365,7 @@ class UniverseScreener:
 
     async def _fetch_orderbook(
         self, symbol: str, venue: str, limit: int = 20
-    ) -> Optional[Tuple[float, float, float]]:
+    ) -> tuple[float, float, float] | None:
         base_url = self.client._futures_base if venue == "futures" else self.client._spot_base
         path = "/fapi/v1/depth" if venue == "futures" else "/api/v3/depth"
         headers = (
@@ -369,7 +380,8 @@ class UniverseScreener:
                 resp = await http.get(path, params={"symbol": symbol, "limit": limit})
                 resp.raise_for_status()
                 data = resp.json()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("universe.fetch_orderbook", exc)
             return None
         bids = data.get("bids") or []
         asks = data.get("asks") or []
@@ -399,7 +411,7 @@ class UniverseScreener:
 
     async def _fetch_klines(
         self, symbol: str, venue: str, interval: str, limit: int
-    ) -> Optional[List[List[str]]]:
+    ) -> list[list[str]] | None:
         base_url = self.client._futures_base if venue == "futures" else self.client._spot_base
         path = "/fapi/v1/klines" if venue == "futures" else "/api/v3/klines"
         headers = (
@@ -417,10 +429,11 @@ class UniverseScreener:
                 )
                 resp.raise_for_status()
                 return resp.json()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("universe.fetch_klines", exc)
             return None
 
-    async def _enrich_metrics(self, metrics: Dict[str, SymbolMetrics], venue: str) -> None:
+    async def _enrich_metrics(self, metrics: dict[str, SymbolMetrics], venue: str) -> None:
         if not metrics:
             return
         info_map = self._futures_exchange_info if venue == "futures" else self._spot_exchange_info
@@ -485,10 +498,10 @@ class UniverseScreener:
         await asyncio.gather(*(enrich(metric) for metric in ordered[:limit]))
 
     @staticmethod
-    def _compute_atr_pct(klines: List[List[str]], period: int = 14) -> float:
+    def _compute_atr_pct(klines: list[list[str]], period: int = 14) -> float:
         if not klines or len(klines) <= period:
             return 0.0
-        trs: List[float] = []
+        trs: list[float] = []
         prev_close = float(klines[0][4])
         for row in klines[1:]:
             high = float(row[2])
@@ -505,7 +518,7 @@ class UniverseScreener:
         return (atr / last_close) * 100 if last_close else 0.0
 
     @staticmethod
-    def _compute_price_change_pct(klines: List[List[str]], steps: int) -> float:
+    def _compute_price_change_pct(klines: list[list[str]], steps: int) -> float:
         closes = [float(row[4]) for row in klines if float(row[4]) > 0]
         if len(closes) <= steps:
             return 0.0
@@ -514,7 +527,7 @@ class UniverseScreener:
         return ((last / base) - 1.0) * 100 if base else 0.0
 
     @staticmethod
-    def _compute_trend_pct(klines: List[List[str]]) -> float:
+    def _compute_trend_pct(klines: list[list[str]]) -> float:
         closes = [float(row[4]) for row in klines if float(row[4]) > 0]
         if len(closes) < 2:
             return 0.0
@@ -525,12 +538,12 @@ class UniverseScreener:
     @staticmethod
     def _apply_filter(
         filter_cfg: UniverseFilterConfig,
-        futures_metrics: Dict[str, SymbolMetrics],
-        spot_metrics: Dict[str, SymbolMetrics],
-        metadata: Dict[str, Dict[str, Any]],
-    ) -> List[str]:
+        futures_metrics: dict[str, SymbolMetrics],
+        spot_metrics: dict[str, SymbolMetrics],
+        metadata: dict[str, dict[str, Any]],
+    ) -> list[str]:
         venues = set(filter_cfg.venues or ["futures"])
-        candidates: List[SymbolMetrics] = []
+        candidates: list[SymbolMetrics] = []
         include_set = {sym.upper() for sym in filter_cfg.include_symbols}
         metadata = {k.upper(): v for k, v in (metadata or {}).items()}
 
@@ -652,7 +665,7 @@ class UniverseScreener:
             )
 
         seen: set[str] = set()
-        ordered: List[str] = []
+        ordered: list[str] = []
         for metric in candidates:
             sym = metric.symbol.upper()
             if sym in seen:

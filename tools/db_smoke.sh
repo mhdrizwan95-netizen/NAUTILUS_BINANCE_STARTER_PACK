@@ -38,4 +38,3 @@ manifest.mark_processed(fid, delete_file=True, db_path=db)
 print('OK: ledger claim/process passed')
 PY
 echo "DB smoke finished"
-

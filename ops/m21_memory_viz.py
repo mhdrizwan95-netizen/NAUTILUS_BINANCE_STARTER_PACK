@@ -15,7 +15,6 @@ Produces lineage_graph.png with dual-axis charts showing:
 import json
 import os
 from datetime import datetime
-from typing import Dict, Optional
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -27,9 +26,11 @@ plt.rcParams.update({"font.size": 10, "figure.dpi": 160})
 
 LINEAGE_INDEX = os.path.join("data", "memory_vault", "lineage_index.json")
 OUTPUT_DIR = os.path.join("data", "memory_vault")
+_LINEAGE_ERRORS = (OSError, json.JSONDecodeError, ValueError)
+_VIS_ERRORS = (OSError, ValueError, RuntimeError)
 
 
-def load_lineage_data() -> Optional[pd.DataFrame]:
+def load_lineage_data() -> pd.DataFrame | None:
     """
     Load fossil records from the lineage index.
 
@@ -41,7 +42,7 @@ def load_lineage_data() -> Optional[pd.DataFrame]:
         return None
 
     try:
-        with open(LINEAGE_INDEX, "r") as f:
+        with open(LINEAGE_INDEX) as f:
             data = json.load(f)
 
         models = data.get("models", [])
@@ -49,25 +50,17 @@ def load_lineage_data() -> Optional[pd.DataFrame]:
             print("ℹ️  No models found in lineage index")
             return None
 
-        # Convert to DataFrame
         df = pd.DataFrame(models)
 
-        # Ensure archived_at column exists, create if missing
         if "archived_at" not in df.columns and "timestamp" in df.columns:
             df["archived_at"] = df["timestamp"]
         elif "archived_at" not in df.columns:
-            # Fallback: generate timestamps if neither exists
             now = datetime.utcnow()
             df["archived_at"] = [now.isoformat()] * len(df)
 
-        # Convert timestamp strings to datetime
         df["archived_at"] = pd.to_datetime(df["archived_at"], utc=True, errors="coerce")
-        df = df.dropna(subset=["archived_at"])  # Drop rows with invalid timestamps
-
-        # Sort by time
+        df = df.dropna(subset=["archived_at"])
         df = df.sort_values("archived_at").reset_index(drop=True)
-
-        # Extract performance metrics (handle missing data gracefully)
         df["pnl_last"] = df.apply(
             lambda row: row.get("performance_snapshot", {}).get("pnl_last", 0), axis=1
         )
@@ -75,19 +68,16 @@ def load_lineage_data() -> Optional[pd.DataFrame]:
             lambda row: row.get("performance_snapshot", {}).get("winrate_last", 0),
             axis=1,
         )
-
-        # Extract generation types for color coding
         df["generation_type"] = df.apply(lambda row: row.get("generation_type", "unknown"), axis=1)
-
+    except _LINEAGE_ERRORS as exc:
+        print(f"❌ Error loading lineage data: {exc}")
+        return None
+    else:
         print(f"📊 Loaded {len(df)} fossil records from lineage")
         return df
 
-    except Exception as e:
-        print(f"❌ Error loading lineage data: {e}")
-        return None
 
-
-def assign_generation_colors(generation_types: pd.Series) -> Dict[str, str]:
+def assign_generation_colors(generation_types: pd.Series) -> dict[str, str]:
     """
     Assign distinct colors to different generation types.
 
@@ -446,25 +436,22 @@ def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     try:
-        # Main lineage graph
         lineage_path = os.path.join(OUTPUT_DIR, "lineage_graph.png")
         create_lineage_graph(df, lineage_path)
 
-        # Performance distribution
-        if len(df) >= 5:  # Only if we have enough data
+        if len(df) >= 5:
             dist_path = os.path.join(OUTPUT_DIR, "performance_distributions.png")
             create_performance_distribution(df, dist_path)
 
-        # Generation comparison
         if len(df) >= 3 and df["generation_type"].nunique() > 1:
             gen_path = os.path.join(OUTPUT_DIR, "generation_performance.png")
             create_generation_type_summary(df, gen_path)
 
-        print(f"\n✅ Visualization complete! Check {OUTPUT_DIR}/ for generated plots.")
-
-    except Exception as e:
-        print(f"❌ Error during visualization: {e}")
+    except _VIS_ERRORS as exc:
+        print(f"❌ Error during visualization: {exc}")
         return
+    else:
+        print(f"\n✅ Visualization complete! Check {OUTPUT_DIR}/ for generated plots.")
 
 
 if __name__ == "__main__":

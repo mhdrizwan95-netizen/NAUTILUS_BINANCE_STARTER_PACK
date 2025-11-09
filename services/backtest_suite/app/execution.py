@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 @dataclass
@@ -13,7 +13,7 @@ class ExecutionModel:
     def __init__(self, fee_bp: float, slip_bp: float):
         self.fee_bp = fee_bp
         self.slip_bp = slip_bp
-        self.pos: Optional[Position] = None
+        self.pos: Position | None = None
         self.trades = []  # list of dicts
 
     def _price_with_costs(self, side: str, price: float) -> float:
@@ -24,7 +24,7 @@ class ExecutionModel:
         else:
             return price - slip - fee
 
-    def on_signal(self, order: Dict[str, Any], bar: Dict[str, Any]):
+    def on_signal(self, order: dict[str, Any], bar: dict[str, Any]):
         if order is None:
             return
         side, qty = order["side"], float(order.get("qty", 0.0))
@@ -41,25 +41,22 @@ class ExecutionModel:
                     "notional": qty * px,
                 }
             )
-        else:
-            # simple flip/close
-            if self.pos.side != side:
-                pnl = (
-                    (px - self.pos.entry) * (1.0 if self.pos.side == "buy" else -1.0) * self.pos.qty
-                )
-                self.trades.append(
-                    {
-                        "action": "close",
-                        "side": self.pos.side,
-                        "qty": self.pos.qty,
-                        "price": px,
-                        "pnl": pnl,
-                        "notional": self.pos.qty * px,
-                    }
-                )
-                self.pos = None
+        # simple flip/close
+        elif self.pos.side != side:
+            pnl = (px - self.pos.entry) * (1.0 if self.pos.side == "buy" else -1.0) * self.pos.qty
+            self.trades.append(
+                {
+                    "action": "close",
+                    "side": self.pos.side,
+                    "qty": self.pos.qty,
+                    "price": px,
+                    "pnl": pnl,
+                    "notional": self.pos.qty * px,
+                }
+            )
+            self.pos = None
 
-    def mark_to_market(self, bar: Dict[str, Any]) -> float:
+    def mark_to_market(self, bar: dict[str, Any]) -> float:
         if self.pos is None:
             return 0.0
         dir = 1.0 if self.pos.side == "buy" else -1.0

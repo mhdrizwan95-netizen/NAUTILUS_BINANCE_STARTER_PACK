@@ -1,30 +1,30 @@
-import { Play, Square, Settings2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { Play, Square, Settings2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { toast } from "sonner";
 
-import { DynamicParamForm } from '@/components/forms/DynamicParamForm';
-import { MiniChart } from '@/components/MiniChart';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { DynamicParamForm } from "@/components/forms/DynamicParamForm";
+import { MiniChart } from "@/components/MiniChart";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Separator } from '@/components/ui/separator';
-import { Switch } from '@/components/ui/switch';
-import { getStrategies, startStrategy, stopStrategy, updateStrategy } from '@/lib/api';
-import { generateIdempotencyKey } from '@/lib/idempotency';
-import { useAppStore, usePagination, usePaginationActions } from '@/lib/store';
-import type { StrategySummary } from '@/types/trading';
+} from "@/components/ui/dialog";
+import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { getStrategies, startStrategy, stopStrategy, updateStrategy } from "@/lib/api";
+import { generateIdempotencyKey } from "@/lib/idempotency";
+import { useAppStore, usePagination, usePaginationActions } from "@/lib/store";
+import type { StrategySummary } from "@/types/trading";
 
 function formatCurrency(value: number) {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
     maximumFractionDigits: 2,
   }).format(value);
 }
@@ -36,7 +36,7 @@ export function StrategyTab() {
   const [configureTarget, setConfigureTarget] = useState<StrategySummary | null>(null);
   const opsToken = useAppStore((state) => state.opsAuth.token);
   const opsActor = useAppStore((state) => state.opsAuth.actor);
-  const pageInfo = usePagination('strategies');
+  const pageInfo = usePagination("strategies");
   const { setPagination, clearPagination } = usePaginationActions();
 
   const refresh = useCallback(async () => {
@@ -44,10 +44,10 @@ export function StrategyTab() {
     try {
       const payload = await getStrategies();
       setStrategies(payload.data);
-      setPagination('strategies', payload.page);
+      setPagination("strategies", payload.page);
     } catch (error) {
       if (error instanceof Error) {
-        toast.error('Unable to load strategies', { description: error.message });
+        toast.error("Unable to load strategies", { description: error.message });
       }
     } finally {
       setLoading(false);
@@ -60,10 +60,10 @@ export function StrategyTab() {
     try {
       const payload = await getStrategies({ cursor: pageInfo.nextCursor });
       setStrategies((prev) => [...prev, ...payload.data]);
-      setPagination('strategies', payload.page);
+      setPagination("strategies", payload.page);
     } catch (error) {
       if (error instanceof Error) {
-        toast.error('Unable to load additional strategies', { description: error.message });
+        toast.error("Unable to load additional strategies", { description: error.message });
       }
     } finally {
       setLoading(false);
@@ -71,17 +71,17 @@ export function StrategyTab() {
   };
 
   useEffect(() => {
-    clearPagination('strategies');
+    clearPagination("strategies");
     void refresh();
   }, [clearPagination, refresh]);
 
   const requireCredentials = () => {
     if (!opsToken.trim()) {
-      toast.error('Set OPS API token in Settings before issuing control actions');
+      toast.error("Set OPS API token in Settings before issuing control actions");
       return false;
     }
     if (!opsActor.trim()) {
-      toast.error('Provide an operator call-sign before issuing control actions');
+      toast.error("Provide an operator call-sign before issuing control actions");
       return false;
     }
     return true;
@@ -100,16 +100,12 @@ export function StrategyTab() {
     setBusyId(strategy.id);
     try {
       const nextParams = { ...(strategy.params ?? {}), dry_run: enabled };
-      await updateStrategy(
-        strategy.id,
-        nextParams,
-        buildControlOptions(`dryrun-${strategy.id}`),
-      );
-      toast.success(`Dry run ${enabled ? 'enabled' : 'disabled'} for ${strategy.name}`);
+      await updateStrategy(strategy.id, nextParams, buildControlOptions(`dryrun-${strategy.id}`));
+      toast.success(`Dry run ${enabled ? "enabled" : "disabled"} for ${strategy.name}`);
       await refresh();
     } catch (error) {
       if (error instanceof Error) {
-        toast.error('Failed to toggle dry run', { description: error.message });
+        toast.error("Failed to toggle dry run", { description: error.message });
       }
     } finally {
       setBusyId(null);
@@ -122,12 +118,16 @@ export function StrategyTab() {
     }
     setBusyId(strategy.id);
     try {
-      await startStrategy(strategy.id, strategy.params, buildControlOptions(`start-${strategy.id}`));
+      await startStrategy(
+        strategy.id,
+        strategy.params,
+        buildControlOptions(`start-${strategy.id}`),
+      );
       toast.success(`Started ${strategy.name}`);
       await refresh();
     } catch (error) {
       if (error instanceof Error) {
-        toast.error('Failed to start strategy', { description: error.message });
+        toast.error("Failed to start strategy", { description: error.message });
       }
     } finally {
       setBusyId(null);
@@ -141,11 +141,11 @@ export function StrategyTab() {
     setBusyId(strategy.id);
     try {
       await stopStrategy(strategy.id, buildControlOptions(`stop-${strategy.id}`));
-      toast('Strategy stopped', { description: strategy.name });
+      toast("Strategy stopped", { description: strategy.name });
       await refresh();
     } catch (error) {
       if (error instanceof Error) {
-        toast.error('Failed to stop strategy', { description: error.message });
+        toast.error("Failed to stop strategy", { description: error.message });
       }
     } finally {
       setBusyId(null);
@@ -162,18 +162,18 @@ export function StrategyTab() {
 
       {pageInfo?.totalHint !== undefined ? (
         <div className="text-xs text-muted-foreground">
-          Showing {strategies.length} of {pageInfo.totalHint ?? '∞'} strategies
+          Showing {strategies.length} of {pageInfo.totalHint ?? "∞"} strategies
         </div>
       ) : null}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {appliedStrategies.map((strategy) => {
           const performance = strategy.performance;
-          const trend: 'up' | 'down' | 'neutral' = performance?.equitySeries?.length
+          const trend: "up" | "down" | "neutral" = performance?.equitySeries?.length
             ? performance.equitySeries.at(-1)!.equity >= performance.equitySeries[0].equity
-              ? 'up'
-              : 'down'
-            : 'neutral';
+              ? "up"
+              : "down"
+            : "neutral";
           const sparkline = performance?.equitySeries?.map((point) => point.equity) ?? [];
           const pnlValue = performance?.pnl ?? 0;
 
@@ -185,25 +185,25 @@ export function StrategyTab() {
                     <h3 className="text-base font-semibold">{strategy.name}</h3>
                     <Badge
                       variant={
-                        strategy.status === 'running'
-                          ? 'secondary'
-                          : strategy.status === 'error'
-                          ? 'destructive'
-                          : 'outline'
+                        strategy.status === "running"
+                          ? "secondary"
+                          : strategy.status === "error"
+                            ? "destructive"
+                            : "outline"
                       }
                     >
                       {strategy.status.toUpperCase()}
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {strategy.kind} • {strategy.symbols.join(', ')}
+                    {strategy.kind} • {strategy.symbols.join(", ")}
                   </p>
                 </div>
                 <div className="h-16 w-40">
                   {sparkline.length > 1 ? (
                     <MiniChart
                       data={sparkline}
-                      color={trend === 'up' ? '#10b981' : trend === 'down' ? '#ef4444' : '#6366f1'}
+                      color={trend === "up" ? "#10b981" : trend === "down" ? "#ef4444" : "#6366f1"}
                       trend={trend}
                     />
                   ) : (
@@ -217,24 +217,28 @@ export function StrategyTab() {
               <div className="grid grid-cols-2 gap-3 text-xs">
                 <div>
                   <span className="text-muted-foreground">PnL</span>
-                  <p className={pnlValue >= 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  <p className={pnlValue >= 0 ? "text-emerald-400" : "text-red-400"}>
                     {formatCurrency(pnlValue)}
                   </p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Win Rate</span>
-                  <p>{performance?.winRate !== undefined ? `${(performance.winRate * 100).toFixed(1)}%` : '—'}</p>
+                  <p>
+                    {performance?.winRate !== undefined
+                      ? `${(performance.winRate * 100).toFixed(1)}%`
+                      : "—"}
+                  </p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Sharpe</span>
-                  <p>{performance?.sharpe !== undefined ? performance.sharpe.toFixed(2) : '—'}</p>
+                  <p>{performance?.sharpe !== undefined ? performance.sharpe.toFixed(2) : "—"}</p>
                 </div>
                 <div>
                   <span className="text-muted-foreground">Drawdown</span>
                   <p>
                     {performance?.drawdown !== undefined
                       ? `${(performance.drawdown * 100).toFixed(1)}%`
-                      : '—'}
+                      : "—"}
                   </p>
                 </div>
               </div>
@@ -256,7 +260,7 @@ export function StrategyTab() {
               <Separator />
 
               <div className="flex items-center gap-2">
-                {strategy.status !== 'running' ? (
+                {strategy.status !== "running" ? (
                   <Button
                     size="sm"
                     onClick={() => handleStart(strategy)}
@@ -297,12 +301,15 @@ export function StrategyTab() {
       {pageInfo?.nextCursor ? (
         <div className="flex justify-center">
           <Button onClick={loadMore} disabled={loading} variant="outline">
-            {loading ? 'Loading…' : 'Load older strategies'}
+            {loading ? "Loading…" : "Load older strategies"}
           </Button>
         </div>
       ) : null}
 
-      <Dialog open={configureTarget !== null} onOpenChange={(open) => !open && setConfigureTarget(null)}>
+      <Dialog
+        open={configureTarget !== null}
+        onOpenChange={(open) => !open && setConfigureTarget(null)}
+      >
         <DialogContent className="max-w-xl">
           {configureTarget && (
             <DialogHeader>
@@ -328,12 +335,12 @@ export function StrategyTab() {
                     values,
                     buildControlOptions(`update-${configureTarget.id}`),
                   );
-                  toast.success('Strategy updated');
+                  toast.success("Strategy updated");
                   setConfigureTarget(null);
                   await refresh();
                 } catch (error) {
                   if (error instanceof Error) {
-                    toast.error('Failed to update strategy', { description: error.message });
+                    toast.error("Failed to update strategy", { description: error.message });
                   }
                 } finally {
                   setBusyId(null);

@@ -19,4 +19,3 @@ dex:
   max_live_positions: 1
   max_slippage_pct: 0.8
   tax_max_pct: 5
-

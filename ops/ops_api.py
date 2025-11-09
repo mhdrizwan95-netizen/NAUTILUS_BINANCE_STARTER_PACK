@@ -9,11 +9,12 @@ import shlex
 import subprocess
 import time
 import uuid
+from contextlib import suppress
 from functools import lru_cache
 from http import HTTPStatus
 from pathlib import Path
 from pathlib import Path as Path2
-from typing import Any, Dict, List
+from typing import Any
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, WebSocket, status
@@ -89,6 +90,16 @@ from ops.ui_services import (
     StrategyGovernanceService,
 )
 
+try:  # pragma: no cover - optional test dependency
+    from respx.models import SideEffectError as _RespxSideEffectError
+except ImportError:  # pragma: no cover - prod deployments lack respx
+    _RESPX_ERRORS: tuple[type[Exception], ...] = ()
+else:
+    _RESPX_ERRORS = (_RespxSideEffectError,)
+
+_ENGINE_HEALTH_ERRORS = (httpx.HTTPError, asyncio.TimeoutError, ValueError)
+_HTTP_CLIENT_ERRORS = (httpx.HTTPError, ValueError) + _RESPX_ERRORS
+
 # Risk monitoring configuration
 RISK_LIMIT_USD = float(os.getenv("RISK_LIMIT_USD_PER_SYMBOL", "1000"))
 ALERT_WEBHOOK_URL = os.getenv("ALERT_WEBHOOK_URL")
@@ -146,9 +157,9 @@ def _structured_error_payload(
     code: str,
     message: str,
     *,
-    details: Dict[str, Any] | None = None,
-) -> Dict[str, Any]:
-    payload: Dict[str, Any] = {"error": {"code": code, "message": message}}
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"error": {"code": code, "message": message}}
     if details:
         payload["error"]["details"] = details
     req_id = current_request_id()
@@ -161,7 +172,7 @@ def _structured_error_response(
     status_code: int,
     code: str,
     message: str,
-    details: Dict[str, Any] | None = None,
+    details: dict[str, Any] | None = None,
 ) -> JSONResponse:
     payload = _structured_error_payload(code, message, details=details)
     return JSONResponse(payload, status_code=status_code)
@@ -176,10 +187,7 @@ class _RequestIDMiddleware(BaseHTTPMiddleware):
             response = await call_next(request)
         finally:
             reset_request_context(token)
-        try:
-            response.headers["X-Request-ID"] = req_id
-        except Exception:
-            pass
+        response.headers["X-Request-ID"] = req_id
         return response
 
 
@@ -214,11 +222,8 @@ class _ApiVersionMiddleware(BaseHTTPMiddleware):
         finally:
             _API_VERSION.reset(token)
 
-        try:
-            response.headers["X-API-Version"] = version
-            response.headers["X-API-Versions"] = ",".join(sorted(SUPPORTED_API_VERSIONS))
-        except Exception:
-            pass
+        response.headers["X-API-Version"] = version
+        response.headers["X-API-Versions"] = ",".join(sorted(SUPPORTED_API_VERSIONS))
         return response
 
 
@@ -226,15 +231,14 @@ class _HttpMetricsMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start = time.perf_counter()
         route = _route_template(request)
+        response: Response | None = None
         try:
             response = await call_next(request)
-        except Exception:
+            return response
+        finally:
             duration = time.perf_counter() - start
-            observe_http_request("ops-api", request.method, route, 500, duration)
-            raise
-        duration = time.perf_counter() - start
-        observe_http_request("ops-api", request.method, route, response.status_code, duration)
-        return response
+            status_code = response.status_code if response else 500
+            observe_http_request("ops-api", request.method, route, status_code, duration)
 
 
 def _route_template(request: Request) -> str:
@@ -260,7 +264,7 @@ async def _handle_http_exception(request: Request, exc: HTTPException) -> JSONRe
     detail = exc.detail
     code = f"http.{exc.status_code}"
     message = HTTPStatus(exc.status_code).phrase
-    details: Dict[str, Any] | None = None
+    details: dict[str, Any] | None = None
     if isinstance(detail, dict):
         code = detail.get("code", code)
         message = str(detail.get("message", message))
@@ -294,13 +298,27 @@ async def _handle_unhandled_exception(request: Request, exc: Exception) -> JSONR
 async def readyz():
     try:
         eng = await engine_health()
-        engine_ok = eng.get("engine") == "ok"
-    except Exception:
-        engine_ok = False
-    return {"ok": engine_ok}
+    except httpx.HTTPError:
+        return {"ok": False}
+    else:
+        return {"ok": eng.get("engine") == "ok"}
 
 
 # T6: Auth token for control actions
+class OpsApiTokenFileError(RuntimeError):
+    """Raised when the Ops API token file cannot be read."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__(f"Failed to read OPS_API_TOKEN_FILE ({path})")
+
+
+class OpsApiTokenMissingError(RuntimeError):
+    """Raised when Ops API token configuration is missing."""
+
+    def __init__(self) -> None:
+        super().__init__("Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Ops API")
+
+
 def _load_ops_token() -> str:
     token = os.getenv("OPS_API_TOKEN")
     token_file = os.getenv("OPS_API_TOKEN_FILE")
@@ -308,14 +326,14 @@ def _load_ops_token() -> str:
         try:
             secret = Path(token_file).read_text(encoding="utf-8").strip()
         except OSError as exc:
-            raise RuntimeError(f"Failed to read OPS_API_TOKEN_FILE ({token_file})") from exc
+            raise OpsApiTokenFileError(token_file) from exc
         if secret:
             token = secret
     dry_run = os.getenv("DRY_RUN", "0").lower() in {"1", "true", "yes"}
     if dry_run and not token:
         return "dry-run-token"
     if not token or token == "dev-token":
-        raise RuntimeError("Set OPS_API_TOKEN or OPS_API_TOKEN_FILE before starting the Ops API")
+        raise OpsApiTokenMissingError()
     return token
 
 
@@ -388,7 +406,7 @@ def _http_retry_get(url: str, *, timeout: float = 1.0, attempts: int = 3, backof
             r = httpx.get(url, timeout=timeout, headers=headers or None)
             r.raise_for_status()
             return r.json()
-        except Exception:  # noqa: BLE001
+        except (httpx.HTTPError, ValueError):
             if i == attempts - 1:
                 break
             time.sleep(backoff * (i + 1))
@@ -411,11 +429,12 @@ def _http_retry_post(
                 headers["X-Request-ID"] = rid
             r = httpx.post(url, json=json, timeout=timeout, headers=headers or None)
             r.raise_for_status()
-            return r
-        except Exception:  # noqa: BLE001
+        except httpx.HTTPError:
             if i == attempts - 1:
                 raise
             time.sleep(backoff * (i + 1))
+        else:
+            return r
 
 
 class KillReq(BaseModel):
@@ -431,25 +450,21 @@ class RetrainReq(BaseModel):
 async def get_status():
     st = {"ts": int(time.time()), "trading_enabled": True}
     if STATE_FILE.exists():
-        try:
+        with suppress(json.JSONDecodeError, OSError):
             st.update(json.loads(STATE_FILE.read_text()))
-        except Exception:
-            pass
 
     # Extend with richer runtime info for the dash
     try:
-        # Macro/micro state snapshots if available
         macro_state = int(os.environ.get("MACRO_STATE", "1"))
         st["macro_state"] = macro_state
-        # Pull lineage head (if exists)
         lineage_path = os.path.join("data", "memory_vault", "lineage_index.json")
         if os.path.exists(lineage_path):
-            with open(lineage_path, "r") as f:
+            with open(lineage_path) as f:
                 j = json.load(f)
             st["lineage_total_generations"] = len(j.get("models", []))
             st["lineage_latest"] = j["models"][-1] if j.get("models") else {}
-    except Exception as e:
-        st["status_warning"] = f"{e}"
+    except (ValueError, json.JSONDecodeError, OSError) as exc:
+        st["status_warning"] = str(exc)
 
     # include latest account snapshot
     st["balances"] = ACCOUNT_CACHE.get("balances", {})
@@ -459,16 +474,13 @@ async def get_status():
     st["cash"] = ACCOUNT_CACHE.get("cash", 0.0)
     st["exposure"] = ACCOUNT_CACHE.get("exposure", 0.0)
 
-    # lightweight health check to ML
-    try:
-        r = _http_retry_get(f"{ML_URL}/health", timeout=0.5, attempts=2, backoff=0.1)
-        st["ml"] = r or {"ok": False}
-    except Exception:
-        st["ml"] = {"ok": False}
+    st["ml"] = _http_retry_get(f"{ML_URL}/health", timeout=0.5, attempts=2, backoff=0.1) or {
+        "ok": False
+    }
 
     try:
         engine = await engine_health()
-    except Exception as exc:  # noqa: BLE001
+    except _ENGINE_HEALTH_ERRORS as exc:
         engine = {"ok": False, "error": str(exc)}
     st["engine"] = engine
 
@@ -499,9 +511,10 @@ def retrain(req: RetrainReq, request: Request):
             attempts=2,
             backoff=0.2,
         )
+    except httpx.HTTPError as exc:
+        raise HTTPException(500, f"ML retrain failed: {exc}") from exc
+    else:
         return {"ok": True, "ml_response": r.json()}
-    except Exception as e:
-        raise HTTPException(500, f"ML retrain failed: {e}")
 
 
 # ---------- New: mode metadata for dashboard ----------
@@ -538,7 +551,7 @@ def get_lineage():
     graph = os.path.join("data", "memory_vault", "lineage_graph.png")
     if not os.path.exists(idx):
         return {"ok": False, "error": "no lineage index"}
-    with open(idx, "r") as f:
+    with open(idx) as f:
         j = json.load(f)
     return {"ok": True, "index": j, "graph": graph if os.path.exists(graph) else None}
 
@@ -552,23 +565,20 @@ class PromoteReq(BaseModel):
 def canary_promote(req: PromoteReq, request: Request) -> dict:
     _check_auth(request)
     """Promote a canary model tag into active use."""
+    cmd = "./ops/m11_canary_promote.sh " + shlex.quote(req.target_tag)
     try:
-        cmd = "./ops/m11_canary_promote.sh " + shlex.quote(req.target_tag)
         subprocess.check_call(cmd, shell=True)
+    except subprocess.CalledProcessError as exc:
+        raise HTTPException(500, f"promotion failed: {exc}") from exc
+    else:
         return {"ok": True, "promoted": req.target_tag}
-    except Exception as e:
-        raise HTTPException(500, f"promotion failed: {e}")
 
 
 # ---------- Optional: flush guardrails ----------
 @APP.post("/flush_guardrails")
 def flush_guardrails():
     """Soft-reset guardrail counters (used for incident recovery testing)."""
-    try:
-        # No-op placeholder; implement if you persist counters externally
-        return {"ok": True, "flushed": True}
-    except Exception as e:
-        raise HTTPException(500, f"flush failed: {e}")
+    return {"ok": True, "flushed": True}
 
 
 # ---------- T3: Health & readiness endpoints ----------
@@ -647,7 +657,7 @@ def _update_metrics_account_fields(
                 updated = True
         if updated:
             _save_snap(_Snapshot(metrics=_Metrics(**metrics), ts=time.time()))
-    except Exception as exc:
+    except (OSError, ValueError) as exc:
         print("account metrics update failed:", exc, flush=True)
 
 
@@ -691,13 +701,14 @@ def _publish_account_snapshot(state: dict) -> None:
 
 # engine-driven polling loop
 async def _engine_poll_loop():
+    engine_poll_errors = (httpx.HTTPError, ValueError, OSError)
     while True:
         try:
             portfolio = await get_portfolio()
             portfolio["source"] = "engine"
             _publish_account_snapshot(portfolio)
             await _persist_snapshot(portfolio)
-        except Exception as exc:  # noqa: BLE001
+        except engine_poll_errors as exc:
             print("engine poll error:", exc, flush=True)
         await asyncio.sleep(float(os.getenv("ENGINE_POLL_SEC", "2")))
 
@@ -720,7 +731,7 @@ async def _persist_snapshot(portfolio: dict) -> None:
         with fn.open("a") as f:
             f.write(json.dumps(payload) + "\n")
         _trim_snapshots()
-    except Exception as exc:  # noqa: BLE001
+    except OSError as exc:
         print("snapshot persist failed:", exc, flush=True)
 
 
@@ -755,7 +766,7 @@ async def _risk_monitor_iteration() -> None:
                 symbol = item.get("symbol", "UNKNOWN")
                 try:
                     value_usd = abs(float(item.get("value_usd", 0.0)))
-                except Exception:
+                except (TypeError, ValueError):
                     value_usd = 0.0
                 if value_usd > RISK_LIMIT_USD:
                     alert_msg = f"🚨 RISK LIMIT BREACH: {symbol} exposure ${value_usd:.2f} > ${RISK_LIMIT_USD}"
@@ -767,11 +778,11 @@ async def _risk_monitor_iteration() -> None:
                     webhook_payload = {"text": alert_msg, "timestamp": time.time()}
                     try:
                         await client.post(ALERT_WEBHOOK_URL, json=webhook_payload, timeout=3)
-                    except Exception as webhook_exc:
+                    except _HTTP_CLIENT_ERRORS as webhook_exc:
                         print(f"[RISK] Webhook failed: {webhook_exc}")
 
-    except Exception as e:  # noqa: BLE001
-        print(f"[RISK] Monitor error: {e}")
+    except _HTTP_CLIENT_ERRORS as exc:
+        print(f"[RISK] Monitor error: {exc}")
 
 
 async def _risk_monitoring_loop(run_once: bool = False):
@@ -806,16 +817,15 @@ def _acquire_singleton_lock(name: str) -> bool:
         fd = _os.open(path, _os.O_CREAT | _os.O_RDWR)
         _fcntl.flock(fd, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
         _TRACKER_LOCK_FD = fd  # keep open to hold the lock
-        return True
     except BlockingIOError:
-        try:
-            if "fd" in locals():
+        if "fd" in locals():
+            with suppress(OSError):
                 _os.close(fd)
-        except Exception:
-            pass
         return False
-    except Exception:
+    except OSError:
         return False
+    else:
+        return True
 
 
 @APP.on_event("startup")
@@ -856,8 +866,8 @@ async def _start_canary_manager():
 
         asyncio.create_task(canary_evaluation_loop())
         print("[CANARY] Canary manager started - continuous model evaluation active")
-    except Exception as e:
-        print(f"[WARN] Canary manager startup failed: {e}")
+    except ImportError as exc:
+        print(f"[WARN] Canary manager startup failed: {exc}")
 
 
 @APP.on_event("startup")
@@ -868,8 +878,8 @@ async def _start_capital_allocator():
 
         asyncio.create_task(allocation_loop())
         print("[ALLOC] Capital allocator started - dynamic capital optimization active")
-    except Exception as e:
-        print(f"[WARN] Capital allocator startup failed: {e}")
+    except ImportError as exc:
+        print(f"[WARN] Capital allocator startup failed: {exc}")
 
 
 @APP.on_event("startup")
@@ -889,8 +899,8 @@ async def _start_strategy_governance():
                 if enabled:
                     promote_best()
                 await asyncio.sleep(60)
-            except Exception as e:
-                logging.warning(f"[Governance] Promoter error: {e}")
+            except (RuntimeError, ValueError) as exc:
+                logging.warning("[Governance] Promoter error: %s", exc)
                 await asyncio.sleep(30)  # Retry sooner on error
 
     asyncio.create_task(promotion_loop())
@@ -911,22 +921,33 @@ ACC = None  # Remove legacy BinanceAccountProvider instantiation to prevent impo
 
 
 # ---------- Multi-Venue Aggregation Endpoints ----------
-async def _fetch_json(client: httpx.AsyncClient, url: str) -> Dict[str, Any]:
+async def _fetch_json(client: httpx.AsyncClient, url: str) -> dict[str, Any]:
     try:
         r = await client.get(url, timeout=3)
         r.raise_for_status()
         data = r.json()
-        logging.debug("aggregate fetch success for %s: %s", url, data)
-        return data
-    except Exception as exc:
+    except _HTTP_CLIENT_ERRORS as exc:
         logging.debug("aggregate fetch failed for %s: %s", url, exc)
         return {}
+    else:
+        logging.debug("aggregate fetch success for %s: %s", url, data)
+        return data
 
 
-async def _fetch_many(paths: List[str]) -> List[Dict[str, Any]]:
+async def _fetch_many(paths: list[str]) -> list[dict[str, Any]]:
     limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
     async with httpx.AsyncClient(limits=limits, trust_env=True) as client:
-        return await asyncio.gather(*[_fetch_json(client, p) for p in paths])
+        coros = [_fetch_json(client, p) for p in paths]
+        results = await asyncio.gather(*coros, return_exceptions=True)
+
+    normalized: list[dict[str, Any]] = []
+    for path, result in zip(paths, results, strict=False):
+        if isinstance(result, dict):
+            normalized.append(result)
+            continue
+        logging.warning("aggregate fetch unexpected failure for %s: %s", path, result)
+        normalized.append({})
+    return normalized
 
 
 @APP.get("/aggregate/health")
@@ -1020,11 +1041,8 @@ from ops.strategy_selector import get_leaderboard  # noqa: E402
 @APP.get("/strategy/leaderboard")
 def get_strategy_leaderboard():
     """Return live strategy leaderboard with performance rankings."""
-    try:
-        leaderboard = get_leaderboard()
-        return {"ok": True, "leaderboard": leaderboard}
-    except Exception as e:
-        return {"error": str(e)}
+    leaderboard = get_leaderboard()
+    return {"ok": True, "leaderboard": leaderboard}
 
 
 # Status endpoint with full registry
@@ -1036,7 +1054,7 @@ def get_strategy_status():
         return {"error": "strategy registry not found"}
     try:
         registry = json.loads(registry_path.read_text())
-    except Exception:
+    except json.JSONDecodeError:
         return {"error": "invalid registry format"}
 
     return {"registry": registry, "leaderboard": get_leaderboard(), "ts": time.time()}
@@ -1051,9 +1069,10 @@ def get_promotion_history():
         return {"error": "strategy registry not found"}
     try:
         registry = json.loads(registry_path.read_text())
+    except json.JSONDecodeError as exc:
+        return {"error": str(exc)}
+    else:
         return {"ok": True, "promotion_log": registry.get("promotion_log", [])}
-    except Exception as e:
-        return {"error": str(e)}
 
 
 @APP.get("/strategy/ui")
@@ -1063,8 +1082,8 @@ def get_strategy_ui():
 
     try:
         return get_strategy_ui_html()
-    except Exception as e:
-        return f"<html><body><h1>Error Loading Dashboard</h1><p>{str(e)[:200]}</p></body></html>"
+    except (RuntimeError, ValueError, OSError) as exc:
+        return f"<html><body><h1>Error Loading Dashboard</h1><p>{str(exc)[:200]}</p></body></html>"
 
 
 @APP.post("/strategy/promote")
@@ -1112,9 +1131,10 @@ def manual_promote_strategy(req: dict, request: Request):
 
         asyncio.run(push_model_update(model_tag))
 
+    except (OSError, ValueError, RuntimeError) as exc:
+        return {"error": str(exc)}
+    else:
         return {"ok": True, "promoted": model_tag, "trades_required": min_t}
-    except Exception as e:
-        return {"error": str(e)}
 
 
 # WebSocket proxies for the Command Center UI
@@ -1172,12 +1192,12 @@ async def _start_situations_consumer():
                         payload = line[6:]
                         try:
                             evt = json.loads(payload)
-                            name = evt.get("situation") or "unknown"
-                            SSE_COUNTER.labels(name=name).inc()
-                        except Exception:
-                            pass
-        except Exception:
-            pass
+                        except json.JSONDecodeError:
+                            continue
+                        name = evt.get("situation") or "unknown"
+                        SSE_COUNTER.labels(name=name).inc()
+        except _HTTP_CLIENT_ERRORS as exc:
+            print(f"[SITUATIONS] SSE consumer error: {exc}")
 
     asyncio.create_task(_run())
 
@@ -1226,10 +1246,7 @@ async def ws_multiplex(websocket: WebSocket):
                 kpis = j.get("kpis") or {}
 
                 # Portfolio return_pct/gain via direct registry snapshot
-                try:
-                    port = get_portfolio_snapshot()
-                except Exception:
-                    port = {}
+                port = get_portfolio_snapshot()
 
                 data = {
                     "totalPnL": float(kpis.get("totalPnl") or 0.0),
@@ -1246,9 +1263,11 @@ async def ws_multiplex(websocket: WebSocket):
                 }
                 if "metrics" in channels:
                     await websocket.send_json(msg)
-            except Exception:
-                # Ignore transient errors; continue loop
-                pass
+            except WebSocketDisconnect:
+                break
+            except (httpx.HTTPError, ValueError):
+                await asyncio.sleep(3)
+                continue
             await asyncio.sleep(3)
 
     async def _push_venues_loop():
@@ -1279,8 +1298,11 @@ async def ws_multiplex(websocket: WebSocket):
                 }
                 if "venues" in channels:
                     await websocket.send_json(msg)
-            except Exception:
-                pass
+            except WebSocketDisconnect:
+                break
+            except (httpx.HTTPError, ValueError):
+                await asyncio.sleep(5)
+                continue
             await asyncio.sleep(5)
 
     async def _recv_loop():
@@ -1303,9 +1325,9 @@ async def ws_multiplex(websocket: WebSocket):
                     pass
             except WebSocketDisconnect:
                 break
-            except Exception:
+            except (json.JSONDecodeError, TypeError):
                 # Malformed payloads are ignored
-                pass
+                continue
 
     # Run loops until client disconnects
     metrics_task = asyncio.create_task(_push_metrics_loop())

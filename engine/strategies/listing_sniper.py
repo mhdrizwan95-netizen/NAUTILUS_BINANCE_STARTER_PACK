@@ -4,8 +4,10 @@ import asyncio
 import inspect
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Sequence, Set
+from datetime import UTC
+from typing import Any
 
 import httpx
 
@@ -27,6 +29,17 @@ from shared.cooldown import CooldownTracker
 from shared.listing_utils import generate_listing_targets
 
 logger = logging.getLogger("engine.strategies.listing_sniper")
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -145,10 +158,10 @@ class ListingOpportunity:
     symbol: str
     article_id: str
     title: str
-    url: Optional[str]
+    url: str | None
     announced_at: float
-    go_live_at: Optional[float]
-    initial_price: Optional[float] = None
+    go_live_at: float | None
+    initial_price: float | None = None
     attempts: int = 0
 
 
@@ -162,18 +175,18 @@ class ListingSniper:
         router: OrderRouter,
         risk: RiskRails,
         rest_client: Any,
-        cfg: Optional[ListingSniperConfig] = None,
+        cfg: ListingSniperConfig | None = None,
     ) -> None:
         self.cfg = cfg or load_listing_sniper_config()
         self.router = router
         self.risk = risk
         self.rest_client = rest_client
         self._cooldowns = CooldownTracker(self.cfg.cooldown_sec)
-        self._tasks: Set[asyncio.Task] = set()
-        self._seen_ids: Set[str] = set()
-        self._forwarded: Set[str] = set()
-        self._opportunities: Dict[str, ListingOpportunity] = {}
-        self._dex_forwarded: Set[str] = set()
+        self._tasks: set[asyncio.Task] = set()
+        self._seen_ids: set[str] = set()
+        self._forwarded: set[str] = set()
+        self._opportunities: dict[str, ListingOpportunity] = {}
+        self._dex_forwarded: set[str] = set()
         self._executor = StrategyExecutor(
             risk=risk,
             router=router,
@@ -182,7 +195,7 @@ class ListingSniper:
         )
 
     # ------------------------------------------------------------------ public API
-    async def on_external_event(self, evt: Dict[str, Any]) -> None:
+    async def on_external_event(self, evt: dict[str, Any]) -> None:
         if not self.cfg.enabled:
             return
         source = str(evt.get("source") or "").lower()
@@ -237,7 +250,7 @@ class ListingSniper:
 
     # ------------------------------------------------------------------ internals
     def _record_announcement(
-        self, symbol: str, announced_at: float, go_live_at: Optional[float]
+        self, symbol: str, announced_at: float, go_live_at: float | None
     ) -> None:
         if self.cfg.metrics_enabled:
             listing_sniper_announcements_total.labels(symbol=symbol, action="received").inc()
@@ -268,7 +281,7 @@ class ListingSniper:
         await self._await_go_live(op)
 
         start = time.time()
-        baseline: Optional[float] = None
+        baseline: float | None = None
         last_price: float = 0.0
         last_spread: float = 0.0
 
@@ -326,7 +339,7 @@ class ListingSniper:
                     "ts": time.time(),
                 }
             )
-        except Exception as exc:  # noqa: BLE001
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
             logger.warning("[LISTING] execution failed for %s: %s", symbol, exc)
             self._record_skip(symbol, "execution_exception")
             if self.cfg.metrics_enabled:
@@ -365,7 +378,7 @@ class ListingSniper:
             qty_filled = float(
                 router_result.get("filled_qty_base") or router_result.get("executedQty") or 0.0
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             avg_fill = last_price
             qty_filled = 0.0
 
@@ -383,7 +396,7 @@ class ListingSniper:
     def _sizing_notional(self) -> float:
         try:
             equity = float(self.router._portfolio.state.equity)  # type: ignore[attr-defined]
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             equity = 0.0
         if equity <= 0:
             equity = float(self.cfg.fallback_equity_usd)
@@ -417,9 +430,9 @@ class ListingSniper:
     async def _deploy_exit_plan(
         self,
         symbol: str,
-        execution: Dict[str, Any],
+        execution: dict[str, Any],
         fallback_price: float,
-        _market_choice: Optional[str],
+        _market_choice: str | None,
     ) -> None:
         qty = float(execution.get("filled_qty_base") or execution.get("executedQty") or 0.0)
         avg_px = float(
@@ -438,7 +451,7 @@ class ListingSniper:
             stop_price = max(avg_px * 0.0001, stop_price)
             try:
                 await self.router.amend_stop_reduce_only(symbol, "SELL", stop_price, abs(qty))
-            except Exception as exc:  # noqa: BLE001
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
                 logger.debug("[LISTING] stop placement failed for %s: %s", symbol, exc)
 
         levels = [price for price in target_prices if price > 0]
@@ -453,7 +466,7 @@ class ListingSniper:
             if callable(rounder):
                 try:
                     price = rounder(symbol, raw_price)
-                except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS:
                     price = raw_price
             clip_qty = per_clip if idx < len(levels) - 1 else max(qty - placed, 0.0)
             placed += clip_qty
@@ -461,7 +474,7 @@ class ListingSniper:
                 continue
             try:
                 await self.router.place_reduce_only_limit(symbol, "SELL", clip_qty, price)
-            except Exception as exc:  # noqa: BLE001
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
                 logger.debug("[LISTING] tp placement failed for %s @%.4f: %s", symbol, price, exc)
 
     async def _forward_legacy(self, symbol: str, announced_at: float) -> None:
@@ -490,7 +503,7 @@ class ListingSniper:
                     source="binance_announcements",
                 )
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             logger.debug("[LISTING] failed to forward legacy event for %s", symbol)
         await self._maybe_emit_dex_candidate(symbol)
 
@@ -527,21 +540,21 @@ class ListingSniper:
         try:
             await BUS.publish("strategy.dex_candidate", payload)
             self._dex_forwarded.add(base)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             logger.debug("[LISTING] dex candidate publish failed for %s", symbol)
 
-    async def _fetch_dex_candidate(self, token: str) -> Optional[Dict[str, Any]]:
+    async def _fetch_dex_candidate(self, token: str) -> dict[str, Any] | None:
         url = f"https://api.dexscreener.com/latest/dex/search?q={token}"
         try:
             async with httpx.AsyncClient(timeout=8.0) as client:
                 res = await client.get(url)
                 res.raise_for_status()
                 data = res.json() or {}
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return None
         pairs = data.get("pairs") or data.get("tokens") or []
         token_upper = token.upper()
-        best: Optional[Dict[str, Any]] = None
+        best: dict[str, Any] | None = None
         best_liq = 0.0
         for item in pairs:
             base_meta = item.get("baseToken") or {}
@@ -607,12 +620,12 @@ class ListingSniper:
                     if inspect.isawaitable(res):
                         res = await res
                     price = self._extract_price(res)
-        except Exception as exc:  # noqa: BLE001
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
             logger.debug("[LISTING] price fetch failed for %s: %s", symbol, exc)
         return price, spread
 
-    def _extract_symbols(self, evt: Dict[str, Any]) -> Set[str]:
-        symbols: Set[str] = set()
+    def _extract_symbols(self, evt: dict[str, Any]) -> set[str]:
+        symbols: set[str] = set()
         for hint in evt.get("asset_hints") or []:
             sym = str(hint).upper().strip()
             if not sym:
@@ -628,7 +641,7 @@ class ListingSniper:
             symbols.add(sym)
         return symbols
 
-    def _extract_go_live_at(self, payload: Dict[str, Any], title: str) -> Optional[float]:
+    def _extract_go_live_at(self, payload: dict[str, Any], title: str) -> float | None:
         for key in (
             "goLiveTime",
             "go_live_time",
@@ -651,11 +664,11 @@ class ListingSniper:
                 return ts
         return None
 
-    def _parse_go_live_from_text(self, text: str) -> Optional[float]:
+    def _parse_go_live_from_text(self, text: str) -> float | None:
         if not text:
             return None
         import re
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         for line in text.splitlines():
             lowered = line.lower()
@@ -686,10 +699,10 @@ class ListingSniper:
                     hour_i,
                     minute_i,
                     second_i,
-                    tzinfo=timezone.utc,
+                    tzinfo=UTC,
                 )
                 return dt.timestamp()
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 continue
         return None
 
@@ -712,7 +725,7 @@ class ListingSniper:
             from datetime import datetime
 
             return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return time.time()
 
     @staticmethod

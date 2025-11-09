@@ -1,11 +1,11 @@
-import { memo } from 'react';
+import { memo } from "react";
 
-import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
-import { Skeleton } from './ui/skeleton';
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Skeleton } from "./ui/skeleton";
 
-type OpsCommand = 'pause' | 'resume' | 'flatten' | 'kill' | 'config';
+type OpsCommand = "pause" | "resume" | "flatten" | "kill" | "config";
 
 export interface OpsPanelSkeletonProps {
   /** Whether the operator supplied X-Ops-Token + two-man approvals */
@@ -30,8 +30,8 @@ export const OpsPanelSkeleton = memo(
               Pause, resume, flatten, and emergency stop actions proxy to the Ops API.
             </p>
           </div>
-          <Badge variant={tradingEnabled ? 'secondary' : 'destructive'}>
-            {tradingEnabled ? 'Trading enabled' : 'Trading paused'}
+          <Badge variant={tradingEnabled ? "secondary" : "destructive"}>
+            {tradingEnabled ? "Trading enabled" : "Trading paused"}
           </Badge>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -39,7 +39,7 @@ export const OpsPanelSkeleton = memo(
             variant="outline"
             className="justify-start gap-2"
             disabled={!isAuthorized || loading || !tradingEnabled}
-            onClick={() => onCommand?.('pause')}
+            onClick={() => onCommand?.("pause")}
           >
             Pause trading
           </Button>
@@ -47,7 +47,7 @@ export const OpsPanelSkeleton = memo(
             variant="outline"
             className="justify-start gap-2"
             disabled={!isAuthorized || loading || tradingEnabled}
-            onClick={() => onCommand?.('resume')}
+            onClick={() => onCommand?.("resume")}
           >
             Resume trading
           </Button>
@@ -55,7 +55,7 @@ export const OpsPanelSkeleton = memo(
             variant="outline"
             className="justify-start gap-2"
             disabled={!isAuthorized || loading}
-            onClick={() => onCommand?.('flatten')}
+            onClick={() => onCommand?.("flatten")}
           >
             Flatten positions
           </Button>
@@ -63,7 +63,7 @@ export const OpsPanelSkeleton = memo(
             variant="destructive"
             className="justify-start gap-2"
             disabled={!isAuthorized || loading}
-            onClick={() => onCommand?.('kill')}
+            onClick={() => onCommand?.("kill")}
           >
             Emergency stop
           </Button>
@@ -84,14 +84,14 @@ export const OpsPanelSkeleton = memo(
             size="sm"
             className="w-full justify-center"
             disabled={!isAuthorized || loading}
-            onClick={() => onCommand?.('config')}
+            onClick={() => onCommand?.("config")}
           >
             Save config overrides
           </Button>
         </CardContent>
       </Card>
     </div>
-  )
+  ),
 );
 
-OpsPanelSkeleton.displayName = 'OpsPanelSkeleton';
+OpsPanelSkeleton.displayName = "OpsPanelSkeleton";

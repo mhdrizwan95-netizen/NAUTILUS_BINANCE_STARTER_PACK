@@ -58,4 +58,3 @@ risk_depeg_active > 0
 - Keep `EVENT_BREAKOUT_METRICS=true` even in dry‑run for full visibility.
 - Enable Telegram digest (`TELEGRAM_ENABLED=true`) for daily summaries; consider `DIGEST_6H_ENABLED=true` for 6‑hour buckets during rollout.
 - Health notifications: `HEALTH_TG_ENABLED=true` to get a concise ping on state changes.
-

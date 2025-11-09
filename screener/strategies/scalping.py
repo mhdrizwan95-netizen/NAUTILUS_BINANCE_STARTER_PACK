@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, MutableMapping, Optional, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
+from typing import Any
 
 from .base import (
     StrategyCandidate,
@@ -41,11 +42,11 @@ class ScalpingScreener(StrategyScreener):
     def evaluate(
         self,
         symbol: str,
-        meta: Optional[Mapping[str, Any]],
+        meta: Mapping[str, Any] | None,
         klines: Sequence[Sequence[Any]],
         book: Mapping[str, Any],
         features: Mapping[str, Any],
-    ) -> Optional[StrategyCandidate]:
+    ) -> StrategyCandidate | None:
         spread_ratio = float(features.get("spread_over_atr", 9.0) or 9.0)
         if spread_ratio > 1.25:
             return None
@@ -64,7 +65,7 @@ class ScalpingScreener(StrategyScreener):
             if best_bid and best_ask:
                 mid = (best_bid + best_ask) / 2.0
                 imbalance = (best_bid - mid) / mid
-        except Exception:
+        except (IndexError, TypeError, ValueError):
             imbalance = 0.0
         score = (
             (0.004 - abs_value(vwap_dev)) * 2_500.0

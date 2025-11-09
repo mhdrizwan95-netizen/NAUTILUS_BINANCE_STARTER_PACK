@@ -8,10 +8,14 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-} from 'recharts';
+} from "recharts";
+
+type EquityPoint = {
+  t: string;
+} & Record<string, number | string>;
 
 type EquityCurvesProps = {
-  data: Array<{ t: string; [strategyId: string]: number }>;
+  data: EquityPoint[];
   series: Array<{ key: string; label: string }>;
 };
 

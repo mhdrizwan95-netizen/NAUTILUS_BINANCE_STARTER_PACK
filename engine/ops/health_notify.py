@@ -1,5 +1,29 @@
 from __future__ import annotations
 
+import asyncio
+import logging
+from typing import Any
+
+import httpx
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logging.getLogger("engine.health").debug("%s suppressed: %s", context, exc, exc_info=True)
+
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+    httpx.HTTPError,
+)
+
 
 class HealthNotifier:
     def __init__(self, cfg: dict, bus, tg, log, clock, metrics) -> None:
@@ -14,15 +38,16 @@ class HealthNotifier:
         try:
             # Subscribe
             bus.subscribe("health.state", self.on_health_state)
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("health notifier subscribe", exc)
 
-    async def on_health_state(self, evt: dict) -> None:
+    async def on_health_state(self, evt: dict[str, Any]) -> None:
         if not bool(self.cfg.get("HEALTH_TG_ENABLED", False)):
             return
+        state_val = evt.get("state")
         try:
-            new = int(evt.get("state"))
-        except Exception:
+            new = int(state_val)
+        except (TypeError, ValueError):
             return
         reason = str(evt.get("reason", ""))
         now = float(self.clock.time())
@@ -34,16 +59,13 @@ class HealthNotifier:
             self.metrics.health_transitions_total.labels(
                 str(self.last_state), str(new), reason
             ).inc()
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("health transition metric", exc)
         self.last_state, self.last_change_ts = new, now
         labels = {0: "OK", 1: "DEGRADED", 2: "HALTED"}
         emoji = {0: "🟢", 1: "🟡", 2: "🔴"}
         msg = f"{emoji.get(new,'❔')} *Health state:* {labels.get(new,str(new))}\n*Reason:* `{reason}`"
         try:
             await self.tg.send(msg)
-        except Exception as e:
-            try:
-                self.log.warning("[HEALTH] Telegram send failed: %s", e)
-            except Exception:
-                pass
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            self.log.exception("[HEALTH] Telegram send failed")

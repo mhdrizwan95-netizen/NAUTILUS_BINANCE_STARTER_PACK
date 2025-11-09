@@ -1,5 +1,3 @@
-from typing import Optional
-
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -30,8 +28,8 @@ class Settings(BaseSettings):
 
     REQUIRE_AUTH: bool = False
     JWT_ALG: str = "HS256"
-    JWT_SECRET: Optional[str] = None
-    JWT_PUBLIC_KEY: Optional[str] = None
+    JWT_SECRET: str | None = None
+    JWT_PUBLIC_KEY: str | None = None
     LOG_LEVEL: str = "INFO"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")

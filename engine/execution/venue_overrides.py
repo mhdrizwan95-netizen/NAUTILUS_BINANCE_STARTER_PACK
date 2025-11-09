@@ -4,7 +4,6 @@ import os
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Dict, Tuple
 
 
 def _as_bool(v: str | None, default: bool) -> bool:
@@ -29,9 +28,9 @@ class VenueOverrides:
 
     def __init__(self, clock=time):
         self.clock = clock
-        self.size_mult: Dict[str, Tuple[float, float]] = {}  # sym -> (mult, until)
-        self.scalp_block: Dict[str, _TTLFlag] = {}
-        self.maker_block: Dict[str, _TTLFlag] = {}
+        self.size_mult: dict[str, tuple[float, float]] = {}  # sym -> (mult, until)
+        self.scalp_block: dict[str, _TTLFlag] = {}
+        self.maker_block: dict[str, _TTLFlag] = {}
         self._slip_cap_bps = float(
             os.getenv("AUTO_CUTBACK_SLIP_CAP_BPS", os.getenv("FUT_TAKER_MAX_SLIP_BPS", "15"))
         )
@@ -45,9 +44,9 @@ class VenueOverrides:
         self._spread_dur = float(os.getenv("AUTO_MAKER_SPREAD_DURATION_MIN", "30")) * 60.0
         self._slip_window = float(os.getenv("AUTO_CUTBACK_SLIP_WINDOW_MIN", "5")) * 60.0
         # rolling deques of timestamps
-        self._skip_slippage: Dict[str, deque] = defaultdict(deque)
-        self._spread_events: Dict[str, deque] = defaultdict(deque)
-        self._slip_samples: Dict[str, deque] = defaultdict(deque)  # (ts, bps)
+        self._skip_slippage: dict[str, deque] = defaultdict(deque)
+        self._spread_events: dict[str, deque] = defaultdict(deque)
+        self._slip_samples: dict[str, deque] = defaultdict(deque)  # (ts, bps)
 
     # --- getters ---
     def get_size_mult(self, sym: str) -> float:

@@ -1,11 +1,11 @@
-import { useQuery } from '@tanstack/react-query';
-import { motion } from 'motion/react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { useQuery } from "@tanstack/react-query";
+import { motion } from "motion/react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { toast } from "sonner";
 
-import { TabbedInterface } from './components/TabbedInterface';
-import { TopHUD } from './components/TopHUD';
-import { Toaster } from './components/ui/sonner';
+import { TabbedInterface } from "./components/TabbedInterface";
+import { TopHUD } from "./components/TopHUD";
+import { Toaster } from "./components/ui/sonner";
 import {
   getConfigEffective,
   getDashboardSummary,
@@ -14,21 +14,21 @@ import {
   setTradingEnabled,
   flattenPositions,
   updateConfig,
-} from './lib/api';
-import { buildSummarySearchParams } from './lib/dashboardFilters';
-import { useRenderCounter } from './lib/debug/why';
-import { stableHash } from './lib/equality';
-import { generateIdempotencyKey } from './lib/idempotency';
-import { queryClient, queryKeys } from './lib/queryClient';
-import { useAppStore, useDashboardFilters } from './lib/store';
-import { mergeMetricsSnapshot, mergeVenuesSnapshot } from './lib/streamMergers';
-import { useWebSocket } from './lib/websocket';
+} from "./lib/api";
+import { buildSummarySearchParams } from "./lib/dashboardFilters";
+import { useRenderCounter } from "./lib/debug/why";
+import { stableHash } from "./lib/equality";
+import { generateIdempotencyKey } from "./lib/idempotency";
+import { queryClient, queryKeys } from "./lib/queryClient";
+import { useAppStore, useDashboardFilters } from "./lib/store";
+import { mergeMetricsSnapshot, mergeVenuesSnapshot } from "./lib/streamMergers";
+import { useWebSocket } from "./lib/websocket";
 
 type DashboardSummarySnapshot = Awaited<ReturnType<typeof getDashboardSummary>>;
 type HealthSnapshot = Awaited<ReturnType<typeof getHealth>>;
 
 const scheduleTask = (cb: () => void) => {
-  if (typeof queueMicrotask === 'function') {
+  if (typeof queueMicrotask === "function") {
     queueMicrotask(cb);
   } else {
     void Promise.resolve().then(cb);
@@ -36,28 +36,36 @@ const scheduleTask = (cb: () => void) => {
 };
 
 const isMetricPayload = (value: unknown): value is Record<string, number> =>
-  typeof value === 'object' &&
+  typeof value === "object" &&
   value !== null &&
-  Object.values(value).every((entry) => typeof entry === 'number');
+  Object.values(value).every((entry) => typeof entry === "number");
 
 const sanitizeVenues = (value: unknown): Array<Record<string, unknown>> => {
   if (Array.isArray(value)) {
-    return value.filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null);
+    return value.filter(
+      (entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null,
+    );
   }
-  if (typeof value === 'object' && value !== null && Array.isArray((value as { venues?: unknown }).venues)) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    Array.isArray((value as { venues?: unknown }).venues)
+  ) {
     return ((value as { venues?: unknown }).venues as unknown[]).filter(
-      (entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null,
+      (entry): entry is Record<string, unknown> => typeof entry === "object" && entry !== null,
     );
   }
   return [];
 };
 
-export default function App() {
-  useRenderCounter('App');
+export function App() {
+  useRenderCounter("App");
   const [isBooting, setIsBooting] = useState(true);
-  const [mode, setMode] = useState<'paper' | 'live'>('paper');
+  const [mode, setMode] = useState<"paper" | "live">("paper");
   const [notifiedOnline, setNotifiedOnline] = useState(false);
-  const [controlState, setControlState] = useState<'pause' | 'resume' | 'flatten' | 'kill' | null>(null);
+  const [controlState, setControlState] = useState<"pause" | "resume" | "flatten" | "kill" | null>(
+    null,
+  );
   const opsAuth = useAppStore((state) => state.opsAuth);
   const dashboardFilters = useDashboardFilters();
   const summaryParams = useMemo(
@@ -112,8 +120,8 @@ export default function App() {
 
   useEffect(() => {
     if (!notifiedOnline && summaryQuery.isSuccess) {
-      toast.info('Nautilus Terminal Online', {
-        description: 'All systems operational',
+      toast.info("Nautilus Terminal Online", {
+        description: "All systems operational",
       });
       setNotifiedOnline(true);
     }
@@ -123,14 +131,14 @@ export default function App() {
     const effective = configQuery.data?.effective as Record<string, unknown> | undefined;
     const overrides = configQuery.data?.overrides as Record<string, unknown> | undefined;
     const dryRunValue = (effective?.DRY_RUN ?? overrides?.DRY_RUN) as unknown;
-    if (typeof dryRunValue === 'boolean') {
-      setMode(dryRunValue ? 'paper' : 'live');
+    if (typeof dryRunValue === "boolean") {
+      setMode(dryRunValue ? "paper" : "live");
     }
   }, [configQuery.data]);
 
   const tradingEnabled = (() => {
     const value = opsStatusQuery.data?.state?.trading_enabled;
-    return typeof value === 'boolean' ? value : true;
+    return typeof value === "boolean" ? value : true;
   })();
 
   const hudMetrics = summaryQuery.data
@@ -146,34 +154,34 @@ export default function App() {
   const venueStatuses = healthQuery.data?.venues ?? null;
   const hasHealthyVenue =
     venueStatuses && venueStatuses.length > 0
-      ? venueStatuses.some((venue) => venue.status !== 'down')
+      ? venueStatuses.some((venue) => venue.status !== "down")
       : false;
   const isRealtimeConnected = wsConnected || hasHealthyVenue;
 
   const confirmFlatten = () => {
     const confirmed = window.confirm(
-      'Flatten will attempt to close every open position immediately. Continue?'
+      "Flatten will attempt to close every open position immediately. Continue?",
     );
     if (!confirmed) {
-      toast.info('Flatten cancelled');
+      toast.info("Flatten cancelled");
     }
     return confirmed;
   };
 
   const promptKillReason = () => {
     const reason = window.prompt(
-      'Emergency stop requires a reason for audit logging. Enter reason to proceed:',
-      ''
+      "Emergency stop requires a reason for audit logging. Enter reason to proceed:",
+      "",
     );
     if (!reason || !reason.trim()) {
-      toast.error('Kill switch aborted: reason required');
+      toast.error("Kill switch aborted: reason required");
       return null;
     }
     const confirmed = window.confirm(
-      'EMERGENCY STOP will disable trading and queue a flatten. Confirm to proceed.'
+      "EMERGENCY STOP will disable trading and queue a flatten. Confirm to proceed.",
     );
     if (!confirmed) {
-      toast.info('Kill switch cancelled');
+      toast.info("Kill switch cancelled");
       return null;
     }
     return reason.trim();
@@ -181,11 +189,13 @@ export default function App() {
 
   const requireOpsToken = () => {
     if (!opsAuth.token.trim()) {
-      toast.error('Set an OPS API token in Settings before issuing control actions.');
+      toast.error("Set an OPS API token in Settings before issuing control actions.");
       return false;
     }
     if (!opsAuth.actor.trim()) {
-      toast.error('Provide an operator call-sign for the audit log before issuing control actions.');
+      toast.error(
+        "Provide an operator call-sign for the audit log before issuing control actions.",
+      );
       return false;
     }
     return true;
@@ -202,12 +212,12 @@ export default function App() {
   };
 
   const notifyControlError = (title: string, error: unknown) => {
-    const description = error instanceof Error ? error.message : 'Unknown error';
+    const description = error instanceof Error ? error.message : "Unknown error";
     toast.error(title, { description });
   };
 
   const withControl = async (
-    state: 'pause' | 'resume' | 'flatten' | 'kill',
+    state: "pause" | "resume" | "flatten" | "kill",
     fn: () => Promise<void>,
   ) => {
     setControlState(state);
@@ -225,7 +235,7 @@ export default function App() {
 
     const nextToken = {
       type: lastMessage.type,
-      ts: typeof lastMessage.timestamp === 'number' ? lastMessage.timestamp : null,
+      ts: typeof lastMessage.timestamp === "number" ? lastMessage.timestamp : null,
     };
     if (
       lastProcessedMessage.current &&
@@ -236,8 +246,12 @@ export default function App() {
     }
     lastProcessedMessage.current = nextToken;
 
-    if (lastMessage.type === 'metrics') {
-      const payloadCandidate = lastMessage.data?.kpis ?? lastMessage.data;
+    if (lastMessage.type === "metrics") {
+      const data = lastMessage.data;
+      const payloadCandidate =
+        typeof data === "object" && data !== null && "kpis" in data
+          ? (data as { kpis?: unknown }).kpis
+          : data;
       if (!isMetricPayload(payloadCandidate)) {
         return;
       }
@@ -255,7 +269,7 @@ export default function App() {
       });
     }
 
-    if (lastMessage.type === 'venues' || lastMessage.type === 'health') {
+    if (lastMessage.type === "venues" || lastMessage.type === "health") {
       const venues = sanitizeVenues(lastMessage.data);
       const digest = stableHash(venues);
       if (venuesDigestRef.current === digest) {
@@ -276,28 +290,28 @@ export default function App() {
     if (!requireOpsToken()) {
       return;
     }
-    if (newMode === 'live') {
+    if (newMode === "live") {
       const acknowledged = window.confirm(
-        'Switching to LIVE mode will disable dry-run safeguards and place real orders. Confirm to proceed.'
+        "Switching to LIVE mode will disable dry-run safeguards and place real orders. Confirm to proceed.",
       );
       if (!acknowledged) {
-        toast.info('Live mode unchanged', {
-          description: 'Dry-run remains enabled until an operator confirms the switch.',
+        toast.info("Live mode unchanged", {
+          description: "Dry-run remains enabled until an operator confirms the switch.",
         });
         return;
       }
     }
     const previous = mode;
     try {
-      await updateConfig({ DRY_RUN: newMode === 'paper' }, buildControlOptions(`mode-${newMode}`));
+      await updateConfig({ DRY_RUN: newMode === "paper" }, buildControlOptions(`mode-${newMode}`));
       await queryClient.invalidateQueries({ queryKey: queryKeys.settings.config() });
       setMode(newMode);
       toast.success(`Switched to ${newMode.toUpperCase()} mode`, {
-        description: newMode === 'live' ? 'Real capital at risk' : 'Simulated trading active',
+        description: newMode === "live" ? "Real capital at risk" : "Simulated trading active",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      toast.error('Failed to toggle trading mode', { description: message });
+      const message = error instanceof Error ? error.message : "Unknown error";
+      toast.error("Failed to toggle trading mode", { description: message });
       setMode(previous);
     }
   };
@@ -306,15 +320,15 @@ export default function App() {
     if (!requireOpsToken()) {
       return;
     }
-    await withControl('pause', async () => {
+    await withControl("pause", async () => {
       try {
-        await setTradingEnabled(false, buildControlOptions('pause'));
+        await setTradingEnabled(false, buildControlOptions("pause"));
         await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
-        toast.warning('Trading paused', {
-          description: 'All new orders halted until resume or restart.',
+        toast.warning("Trading paused", {
+          description: "All new orders halted until resume or restart.",
         });
       } catch (error) {
-        notifyControlError('Failed to pause trading', error);
+        notifyControlError("Failed to pause trading", error);
         throw error;
       }
     });
@@ -324,13 +338,13 @@ export default function App() {
     if (!requireOpsToken()) {
       return;
     }
-    await withControl('resume', async () => {
+    await withControl("resume", async () => {
       try {
-        await setTradingEnabled(true, buildControlOptions('resume'));
+        await setTradingEnabled(true, buildControlOptions("resume"));
         await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
-        toast.success('Trading resumed', { description: 'Engines may submit new orders.' });
+        toast.success("Trading resumed", { description: "Engines may submit new orders." });
       } catch (error) {
-        notifyControlError('Failed to resume trading', error);
+        notifyControlError("Failed to resume trading", error);
         throw error;
       }
     });
@@ -343,14 +357,14 @@ export default function App() {
     if (!confirmFlatten()) {
       return;
     }
-    await withControl('flatten', async () => {
+    await withControl("flatten", async () => {
       try {
-        const result = await flattenPositions(buildControlOptions('flatten'));
-        toast.info('Flatten request submitted', {
+        const result = await flattenPositions(buildControlOptions("flatten"));
+        toast.info("Flatten request submitted", {
           description: `Attempted to close ${result.requested} positions (${result.succeeded} succeeded).`,
         });
       } catch (error) {
-        notifyControlError('Flatten request failed', error);
+        notifyControlError("Flatten request failed", error);
         throw error;
       }
     });
@@ -364,16 +378,16 @@ export default function App() {
     if (!reason) {
       return;
     }
-    await withControl('kill', async () => {
+    await withControl("kill", async () => {
       try {
-        await setTradingEnabled(false, buildControlOptions('kill-pause'), reason);
+        await setTradingEnabled(false, buildControlOptions("kill-pause"), reason);
         await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
-        const result = await flattenPositions(buildControlOptions('kill-flatten'));
-        toast.error('EMERGENCY STOP ACTIVATED', {
+        const result = await flattenPositions(buildControlOptions("kill-flatten"));
+        toast.error("EMERGENCY STOP ACTIVATED", {
           description: `Trading disabled and flatten queued (${result.succeeded}/${result.requested}).`,
         });
       } catch (error) {
-        notifyControlError('Kill switch failed', error);
+        notifyControlError("Kill switch failed", error);
         throw error;
       }
     });
@@ -387,9 +401,9 @@ export default function App() {
             className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-cyan-400 via-violet-400 to-indigo-500 relative"
             animate={{
               boxShadow: [
-                '0 0 20px rgba(0, 245, 212, 0.3)',
-                '0 0 40px rgba(0, 245, 212, 0.5)',
-                '0 0 20px rgba(0, 245, 212, 0.3)',
+                "0 0 20px rgba(0, 245, 212, 0.3)",
+                "0 0 40px rgba(0, 245, 212, 0.5)",
+                "0 0 20px rgba(0, 245, 212, 0.3)",
               ],
             }}
             transition={{ duration: 2, repeat: Infinity }}

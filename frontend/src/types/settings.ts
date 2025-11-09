@@ -19,7 +19,7 @@ export interface TrendStrategyConfig {
 export interface ScalpStrategyConfig {
   spreadPercent: number;
   stopPercent: number;
-  orderType: 'limit' | 'market';
+  orderType: "limit" | "market";
   maxScalpsPerDay: number;
 }
 
@@ -47,14 +47,14 @@ export interface ListingStrategyConfig {
 
 export interface VolScannerConfig {
   spikePercent: number;
-  mode: 'alert' | 'trade';
+  mode: "alert" | "trade";
   minVolume: number;
 }
 
 // Schema used to render dynamic parameter forms
 export type ParamField =
   | {
-      type: 'number' | 'integer';
+      type: "number" | "integer";
       key: string;
       label: string;
       min?: number;
@@ -64,14 +64,14 @@ export type ParamField =
       hint?: string;
     }
   | {
-      type: 'boolean';
+      type: "boolean";
       key: string;
       label: string;
       default?: boolean;
       hint?: string;
     }
   | {
-      type: 'string';
+      type: "string";
       key: string;
       label: string;
       placeholder?: string;
@@ -79,7 +79,7 @@ export type ParamField =
       hint?: string;
     }
   | {
-      type: 'select';
+      type: "select";
       key: string;
       label: string;
       options: Array<{ value: string; label: string }>;
@@ -89,5 +89,5 @@ export type ParamField =
 
 export type ParamSchema = {
   title?: string;
-  fields: ParamField[];
+  fields: ReadonlyArray<ParamField>;
 };

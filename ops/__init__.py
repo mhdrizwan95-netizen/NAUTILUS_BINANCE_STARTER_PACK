@@ -24,7 +24,7 @@ try:  # Compatibility shim for respx>=0.20
                 return _respx.calls[idx].request  # type: ignore[attr-defined]
 
         _respx.requests = _RequestsProxy()  # type: ignore[attr-defined]
-except Exception:
-    pass
+except ImportError:
+    _respx = None  # type: ignore[assignment]
 
 __all__ = []  # explicit namespace

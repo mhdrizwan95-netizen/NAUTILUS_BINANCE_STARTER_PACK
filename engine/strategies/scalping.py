@@ -5,8 +5,9 @@ from __future__ import annotations
 import math
 import time
 from collections import defaultdict, deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Callable, Deque, Dict, Optional
+from typing import TYPE_CHECKING
 
 from engine import metrics
 from engine.config.defaults import SCALP_DEFAULTS
@@ -15,9 +16,19 @@ from engine.core.market_resolver import resolve_market_choice
 from engine.state.cooldown import Cooldowns
 from engine.universe.effective import StrategyUniverse
 
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
 try:  # Optional dependency used for realistic slippage estimation
     from ops import slip_model as _slip_module  # type: ignore
-except Exception:  # pragma: no cover - optional runtime dependency
+except ImportError:  # pragma: no cover - optional runtime dependency
     _slip_module = None  # type: ignore
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -53,7 +64,7 @@ class ScalpConfig:
     book_stale_sec: float
 
 
-def load_scalp_config(scanner: "SymbolScanner" | None = None) -> ScalpConfig:
+def load_scalp_config(scanner: SymbolScanner | None = None) -> ScalpConfig:
     universe = StrategyUniverse(scanner).get("scalp") or []
     symbols = tuple(universe)
     window = max(5.0, env_float("SCALP_WINDOW_SEC", SCALP_DEFAULTS["SCALP_WINDOW_SEC"]))
@@ -128,7 +139,7 @@ def load_scalp_config(scanner: "SymbolScanner" | None = None) -> ScalpConfig:
     )
 
 
-def _rsi(prices: list[float], length: int) -> Optional[float]:
+def _rsi(prices: list[float], length: int) -> float | None:
     if length <= 1 or len(prices) <= length:
         return None
     gains = 0.0
@@ -190,42 +201,42 @@ class ScalpStrategyModule:
 
     def __init__(
         self,
-        cfg: Optional[ScalpConfig] = None,
+        cfg: ScalpConfig | None = None,
         *,
         clock=time,
-        slip_predictor: Optional[Callable[[Dict[str, float]], float]] = None,
-        scanner: "SymbolScanner" | None = None,
+        slip_predictor: Callable[[dict[str, float]], float] | None = None,
+        scanner: SymbolScanner | None = None,
     ) -> None:
         base_cfg = cfg or load_scalp_config(scanner)
         self.cfg = base_cfg
         self.enabled = self.cfg.enabled
         self._clock = clock
-        self._windows: Dict[str, Deque[tuple[float, float]]] = defaultdict(deque)
-        self._books: Dict[str, _BookState] = {}
+        self._windows: dict[str, deque[tuple[float, float]]] = defaultdict(deque)
+        self._books: dict[str, _BookState] = {}
         self._cooldowns = Cooldowns(default_ttl=self.cfg.cooldown_sec)
-        self._signal_history: Dict[str, Deque[float]] = defaultdict(deque)
+        self._signal_history: dict[str, deque[float]] = defaultdict(deque)
         self._slip_predictor = slip_predictor or self._load_slip_predictor()
         self._universe = StrategyUniverse(scanner)
 
-    def _load_slip_predictor(self) -> Optional[Callable[[Dict[str, float]], float]]:
+    def _load_slip_predictor(self) -> Callable[[dict[str, float]], float] | None:
         if not _slip_module:
             return None
         try:
             model = _slip_module.load_model()
-        except Exception:  # pragma: no cover - best effort
+        except _SUPPRESSIBLE_EXCEPTIONS:  # pragma: no cover - best effort
             return None
         if not model:
             return None
 
-        def _predict(features: Dict[str, float]) -> float:
+        def _predict(features: dict[str, float]) -> float:
             try:
                 return float(_slip_module.predict_slip_bp(model, features))
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 return 0.0
 
         return _predict
 
-    def _book_for(self, base: str, now: float) -> Optional[_BookState]:
+    def _book_for(self, base: str, now: float) -> _BookState | None:
         book = self._books.get(base)
         if not book:
             return None
@@ -240,7 +251,7 @@ class ScalpStrategyModule:
         ask_price: float,
         bid_qty: float,
         ask_qty: float,
-        ts: Optional[float] = None,
+        ts: float | None = None,
     ) -> None:
         if not self.enabled:
             return
@@ -263,16 +274,16 @@ class ScalpStrategyModule:
         try:
             metrics.scalp_spread_bp.labels(symbol=base, venue=venue).set(book.spread_bp)
             metrics.scalp_orderbook_imbalance.labels(symbol=base, venue=venue).set(book.imbalance)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
-    def _estimate_slippage_bp(self, features: Dict[str, float]) -> float:
+    def _estimate_slippage_bp(self, features: dict[str, float]) -> float:
         predictor = self._slip_predictor
         if not predictor:
             return 0.0
         return float(predictor(features))
 
-    def _slip_features(self, book: _BookState, *, side: str, range_bps: float) -> Dict[str, float]:
+    def _slip_features(self, book: _BookState, *, side: str, range_bps: float) -> dict[str, float]:
         return {
             "spread_bp": max(book.spread_bp, 0.0),
             "depth_imbalance": book.imbalance,
@@ -306,10 +317,10 @@ class ScalpStrategyModule:
             metrics.scalp_slippage_estimate_bp.labels(symbol=base, venue=venue, side=side).set(
                 slip_bp
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
-    def handle_tick(self, symbol: str, price: float, ts: float) -> Optional[dict]:
+    def handle_tick(self, symbol: str, price: float, ts: float) -> dict | None:
         if not self.enabled or price <= 0.0 or not math.isfinite(price):
             return None
         if not symbol:
@@ -358,7 +369,7 @@ class ScalpStrategyModule:
             metrics.scalp_position.labels(symbol=base, venue=venue).set(price_pos)
             if rsi_value is not None:
                 metrics.scalp_rsi.labels(symbol=base, venue=venue).set(rsi_value)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
         history = self._signal_history[base]
@@ -371,7 +382,7 @@ class ScalpStrategyModule:
         if not self._cooldowns.allow(base, now=now):
             return None
 
-        side: Optional[str] = None
+        side: str | None = None
         reason = ""
         imbalance = book.imbalance
 

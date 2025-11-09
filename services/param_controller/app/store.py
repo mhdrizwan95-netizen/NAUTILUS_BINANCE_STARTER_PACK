@@ -2,7 +2,6 @@ import json
 import sqlite3
 import time
 from pathlib import Path
-from typing import List, Tuple
 
 DDL = """
 CREATE TABLE IF NOT EXISTS presets(
@@ -50,7 +49,7 @@ def upsert_preset(db_path: str, strategy: str, instrument: str, preset_id: str, 
     conn.close()
 
 
-def list_presets(db_path: str, strategy: str, instrument: str) -> List[Tuple[str, dict]]:
+def list_presets(db_path: str, strategy: str, instrument: str) -> list[tuple[str, dict]]:
     conn = connect(db_path)
     cur = conn.cursor()
     cur.execute(
@@ -87,7 +86,7 @@ def log_outcome(
     conn.close()
 
 
-def fetch_outcomes(db_path: str, strategy: str, instrument: str) -> List[Tuple[str, float, dict]]:
+def fetch_outcomes(db_path: str, strategy: str, instrument: str) -> list[tuple[str, float, dict]]:
     conn = connect(db_path)
     cur = conn.cursor()
     cur.execute(

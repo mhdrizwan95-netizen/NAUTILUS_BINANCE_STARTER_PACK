@@ -1,0 +1,8 @@
+exclude_dirs:
+  - tests
+  - docs
+  - frontend
+severity: "MEDIUM"
+confidence: "HIGH"
+tests:
+  - B110

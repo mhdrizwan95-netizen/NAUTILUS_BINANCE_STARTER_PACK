@@ -3,7 +3,19 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Dict, Set
+
+from engine.core.event_bus import BUS
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    asyncio.TimeoutError,
+)
 
 
 class EventBreakoutTrailer:
@@ -13,31 +25,29 @@ class EventBreakoutTrailer:
             os.getenv("EVENT_BREAKOUT_TRAIL_INTERVAL_SEC", str(interval_sec or 2))
         )
         self.log = logging.getLogger("engine.event_breakout.trailer")
-        self._tracked: Set[str] = set()  # symbols (BASEQUOTE)
-        self._last_stop: Dict[str, float] = {}
+        self._tracked: set[str] = set()  # symbols (BASEQUOTE)
+        self._last_stop: dict[str, float] = {}
         try:
             from engine import metrics as MET
 
             self._MET = MET
-        except Exception:
+        except ImportError:
             self._MET = None
 
     async def run(self) -> None:
         # Subscribe to open events to add symbols
         try:
-            from engine.core.event_bus import BUS
-
             BUS.subscribe("strategy.event_breakout_open", self._on_open)
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            self.log.debug("[EVENT-BO:TRAIL] subscribe failed", exc_info=True)
         while True:
             try:
                 await self._tick()
-            except Exception as e:
-                self.log.warning("[EVENT-BO:TRAIL] tick error: %s", e)
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                self.log.warning("[EVENT-BO:TRAIL] tick error: %s", exc)
             await asyncio.sleep(self.interval)
 
-    async def _on_open(self, evt: Dict) -> None:
+    async def _on_open(self, evt: dict) -> None:
         sym = (evt.get("symbol") or "").upper()
         if sym:
             self._tracked.add(sym)
@@ -45,7 +55,7 @@ class EventBreakoutTrailer:
             if getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_open_positions.set(len(self._tracked))
-                except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS:
                     pass
 
     async def _tick(self) -> None:
@@ -61,7 +71,7 @@ class EventBreakoutTrailer:
                     try:
                         self._MET.event_bo_open_positions.set(len(self._tracked))
                         self._MET.event_bo_trail_exits_total.labels(symbol=sym).inc()
-                    except Exception:
+                    except _SUPPRESSIBLE_EXCEPTIONS:
                         pass
                 continue
             last = await self._last_price(sym)
@@ -73,7 +83,7 @@ class EventBreakoutTrailer:
             # Round
             try:
                 desired = self.router.round_tick(f"{sym}.BINANCE", desired)
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
             # Only tighten
             if desired <= (self._last_stop.get(sym, 0.0) or 0.0):
@@ -85,15 +95,13 @@ class EventBreakoutTrailer:
             if getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_trail_updates_total.labels(symbol=sym).inc()
-                except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS:
                     pass
             # Publish rollup event for digest
             try:
-                from engine.core.event_bus import BUS
-
                 await BUS.publish("event_bo.trail", {"symbol": sym})
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                self.log.debug("[EVENT-BO:TRAIL] trail publish failed for %s", sym, exc_info=True)
 
     def _position_qty(self, sym: str) -> float:
         try:
@@ -105,14 +113,14 @@ class EventBreakoutTrailer:
             if pos is None:
                 return 0.0
             return float(getattr(pos, "quantity", 0.0) or 0.0)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return 0.0
 
     async def _last_price(self, sym: str) -> float | None:
         try:
             px = await self.router.get_last_price(f"{sym}.BINANCE")
             return float(px) if px else None
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return None
 
     async def _atr(self, sym: str) -> float:
@@ -147,5 +155,5 @@ class EventBreakoutTrailer:
                 return 0.0
             trs = trs[1:]
             return sum(trs) / len(trs)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return 0.0

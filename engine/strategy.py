@@ -7,7 +7,8 @@ import os
 import threading
 import time
 from collections import defaultdict, deque
-from typing import Any, Callable, Deque, Dict, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
@@ -27,17 +28,26 @@ from .strategies.scalping import ScalpStrategyModule, load_scalp_config
 from .strategies.trend_follow import TrendStrategyModule, load_trend_config
 from .telemetry.publisher import record_tick_latency
 
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    ValueError,
+)
+
 try:
     from .strategies.momentum_realtime import (
         MomentumStrategyModule,
         load_momentum_rt_config,
     )
-except Exception:  # pragma: no cover - optional component
+except ImportError:  # pragma: no cover - optional component
     MomentumStrategyModule = None  # type: ignore
     load_momentum_rt_config = None  # type: ignore
 try:
     from .strategies.symbol_scanner import SymbolScanner, load_symbol_scanner_config
-except Exception:  # pragma: no cover - optional component
+except ImportError:  # pragma: no cover - optional component
     SymbolScanner = None  # type: ignore
     load_symbol_scanner_config = None  # type: ignore
 
@@ -52,29 +62,29 @@ if SymbolScanner and load_symbol_scanner_config:
         if _scanner_cfg.enabled:
             SYMBOL_SCANNER = SymbolScanner(_scanner_cfg)
             SYMBOL_SCANNER.start()
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         SYMBOL_SCANNER = None
 
 TREND_CFG = None
-TREND_MODULE: Optional[TrendStrategyModule] = None
+TREND_MODULE: TrendStrategyModule | None = None
 try:
     TREND_CFG = load_trend_config(SYMBOL_SCANNER)
     if TREND_CFG.enabled:
         TREND_MODULE = TrendStrategyModule(TREND_CFG, scanner=SYMBOL_SCANNER)
-except Exception:
+except _SUPPRESSIBLE_EXCEPTIONS:
     TREND_MODULE = None
 
 SCALP_CFG = None
-SCALP_MODULE: Optional[ScalpStrategyModule] = None
+SCALP_MODULE: ScalpStrategyModule | None = None
 try:
     SCALP_CFG = load_scalp_config(SYMBOL_SCANNER)
     if SCALP_CFG.enabled:
         SCALP_MODULE = ScalpStrategyModule(SCALP_CFG, scanner=SYMBOL_SCANNER)
-except Exception:
+except _SUPPRESSIBLE_EXCEPTIONS:
     SCALP_MODULE = None
 
 MOMENTUM_RT_CFG = None
-MOMENTUM_RT_MODULE: Optional[MomentumStrategyModule] = None
+MOMENTUM_RT_MODULE: MomentumStrategyModule | None = None
 if "MomentumStrategyModule" in globals() and MomentumStrategyModule and load_momentum_rt_config:
     try:
         MOMENTUM_RT_CFG = load_momentum_rt_config(SYMBOL_SCANNER)
@@ -86,11 +96,11 @@ if "MomentumStrategyModule" in globals() and MomentumStrategyModule and load_mom
                 MOMENTUM_RT_CFG.pct_move_threshold * 100.0,
                 MOMENTUM_RT_CFG.volume_spike_ratio,
             )
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         MOMENTUM_RT_MODULE = None
 
 _SCALP_BUS_WIRED = False
-_SCALP_BRACKET_MANAGER: Optional[ScalpBracketManager] = None
+_SCALP_BRACKET_MANAGER: ScalpBracketManager | None = None
 
 
 def _wire_scalp_fill_handler() -> None:
@@ -101,11 +111,11 @@ def _wire_scalp_fill_handler() -> None:
         BUS.subscribe("trade.fill", _scalp_fill_handler)
         _SCALP_BUS_WIRED = True
         logging.getLogger(__name__).info("Scalping fill handler wired")
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         logging.getLogger(__name__).warning("Scalping fill handler wiring failed", exc_info=True)
 
 
-async def _scalp_fill_handler(evt: Dict[str, Any]) -> None:
+async def _scalp_fill_handler(evt: dict[str, Any]) -> None:
     if not SCALP_MODULE or not getattr(SCALP_MODULE, "enabled", False):
         return
     meta = evt.get("strategy_meta")
@@ -158,7 +168,7 @@ def _start_scalp_bracket_watch(
         try:
             poll = max(0.5, min(5.0, float(SCALP_CFG.window_sec) / 12.0))
             ttl = max(60.0, float(SCALP_CFG.window_sec) * 3.0)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             poll = max(poll, 1.0)
             ttl = max(ttl, 180.0)
 
@@ -184,15 +194,23 @@ if SCALP_MODULE and getattr(SCALP_MODULE, "enabled", False):
     _wire_scalp_fill_handler()
 
 
+class InvalidMovingAverageWindow(ValueError):
+    """Raised when the configured MA crossover windows are invalid."""
+
+
+class OrderRouterUnavailableError(RuntimeError):
+    """Raised when the engine app cannot expose the order router."""
+
+
 class _MACross:
     def __init__(self, fast: int, slow: int):
         if fast >= slow:
-            raise ValueError("fast MA must be < slow MA")
+            raise InvalidMovingAverageWindow()
         self.fast = fast
         self.slow = slow
-        self.windows: Dict[str, Deque[float]] = defaultdict(deque)
+        self.windows: dict[str, deque[float]] = defaultdict(deque)
 
-    def push(self, symbol: str, price: float) -> Optional[str]:
+    def push(self, symbol: str, price: float) -> str | None:
         w = self.windows[symbol]
         w.append(price)
         # Cap deque to slow window
@@ -210,17 +228,17 @@ class _MACross:
 
 
 # Global variables for scheduler
-_loop_thread: Optional[threading.Thread] = None
+_loop_thread: threading.Thread | None = None
 _stop_flag: threading.Event = threading.Event()
 _mac = _MACross(S_CFG.fast, S_CFG.slow)
-_tick_listeners: List[Callable[[str, float, float], object]] = []
-_last_tick_ts: Dict[str, float] = defaultdict(float)
+_tick_listeners: list[Callable[[str, float, float], object]] = []
+_last_tick_ts: dict[str, float] = defaultdict(float)
 _SYMBOL_COOLDOWNS = Cooldowns(default_ttl=getattr(S_CFG, "cooldown_sec", 0.0))
-_last_trade_price: Dict[str, float] = defaultdict(float)
+_last_trade_price: dict[str, float] = defaultdict(float)
 _entry_block_until: float = time.time() + float(os.getenv("WARMUP_SEC", "0"))
 
 
-async def _on_market_tick_event(event: Dict[str, Any]) -> None:
+async def _on_market_tick_event(event: dict[str, Any]) -> None:
     symbol = str(event.get("symbol") or "")
     price = event.get("price")
     if not symbol or price is None:
@@ -235,7 +253,7 @@ async def _on_market_tick_event(event: Dict[str, Any]) -> None:
     except (TypeError, ValueError):
         ts_val = time.time()
     vol_raw = event.get("volume")
-    volume: Optional[float]
+    volume: float | None
     if vol_raw is None:
         volume = None
     else:
@@ -251,13 +269,13 @@ async def _on_market_tick_event(event: Dict[str, Any]) -> None:
 
 try:
     BUS.subscribe("market.tick", _on_market_tick_event)
-except Exception:
+except _SUPPRESSIBLE_EXCEPTIONS:
     logging.getLogger(__name__).warning(
         "Failed to subscribe strategy to market.tick", exc_info=True
     )
 
 
-async def _on_market_book_event(event: Dict[str, Any]) -> None:
+async def _on_market_book_event(event: dict[str, Any]) -> None:
     if not SCALP_MODULE or not getattr(SCALP_MODULE, "enabled", False):
         return
     symbol = str(event.get("symbol") or "")
@@ -277,13 +295,13 @@ async def _on_market_book_event(event: Dict[str, Any]) -> None:
         ts_val = time.time()
     try:
         SCALP_MODULE.handle_book(symbol, bid, ask, bid_qty, ask_qty, ts_val)
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         logging.getLogger(__name__).debug("Failed to process book for %s", symbol, exc_info=True)
 
 
 try:
     BUS.subscribe("market.book", _on_market_book_event)
-except Exception:
+except _SUPPRESSIBLE_EXCEPTIONS:
     logging.getLogger(__name__).warning(
         "Failed to subscribe strategy to market.book", exc_info=True
     )
@@ -292,16 +310,14 @@ except Exception:
 class StrategySignal(BaseModel):
     symbol: str = Field(..., description="e.g. BTCUSDT.BINANCE")
     side: str = Field(..., pattern=r"^(BUY|SELL)$")
-    quote: Optional[float] = Field(None, description="USDT notional (preferred)")
-    quantity: Optional[float] = Field(None, description="Base qty (alternative)")
-    dry_run: Optional[bool] = Field(None, description="Override STRATEGY_DRY_RUN")
-    tag: Optional[str] = Field(None, description="Optional label (e.g. 'ma_cross')")
-    meta: Optional[Dict[str, Any]] = Field(
+    quote: float | None = Field(None, description="USDT notional (preferred)")
+    quantity: float | None = Field(None, description="Base qty (alternative)")
+    dry_run: bool | None = Field(None, description="Override STRATEGY_DRY_RUN")
+    tag: str | None = Field(None, description="Optional label (e.g. 'ma_cross')")
+    meta: dict[str, Any] | None = Field(
         None, description="Optional strategy metadata (e.g. stops, targets)"
     )
-    market: Optional[str] = Field(
-        None, description="Preferred Binance market (spot, futures, margin)"
-    )
+    market: str | None = Field(None, description="Preferred Binance market (spot, futures, margin)")
 
 
 @router.post("/strategy/signal")
@@ -311,8 +327,8 @@ def post_strategy_signal(sig: StrategySignal, request: Request):
     return _execute_strategy_signal(sig, idem_key=idem)
 
 
-_EXECUTOR: Optional[StrategyExecutor] = None
-_EXECUTOR_OVERRIDE: Optional[StrategyExecutor] = None
+_EXECUTOR: StrategyExecutor | None = None
+_EXECUTOR_OVERRIDE: StrategyExecutor | None = None
 
 
 def _get_executor() -> StrategyExecutor:
@@ -322,11 +338,11 @@ def _get_executor() -> StrategyExecutor:
     if _EXECUTOR is None:
         try:
             from .app import router as order_router_instance
-        except Exception as exc:  # pragma: no cover - import guard
-            raise RuntimeError("order router unavailable") from exc
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - import guard
+            raise OrderRouterUnavailableError() from exc
         try:
             from .app import _config_hash as _cfg_hash  # type: ignore[attr-defined]
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             _cfg_hash = None
         _EXECUTOR = StrategyExecutor(
             risk=RAILS,
@@ -338,12 +354,12 @@ def _get_executor() -> StrategyExecutor:
     return _EXECUTOR
 
 
-def set_executor_override(executor: Optional[StrategyExecutor]) -> None:
+def set_executor_override(executor: StrategyExecutor | None) -> None:
     global _EXECUTOR_OVERRIDE
     _EXECUTOR_OVERRIDE = executor
 
 
-def get_executor_override() -> Optional[StrategyExecutor]:
+def get_executor_override() -> StrategyExecutor | None:
     return _EXECUTOR_OVERRIDE
 
 
@@ -352,7 +368,7 @@ def reset_executor_cache() -> None:
     _EXECUTOR = None
 
 
-def _signal_payload(sig: StrategySignal) -> Dict[str, Any]:
+def _signal_payload(sig: StrategySignal) -> dict[str, Any]:
     return {
         "strategy": sig.tag or "strategy",
         "symbol": sig.symbol,
@@ -367,7 +383,7 @@ def _signal_payload(sig: StrategySignal) -> Dict[str, Any]:
     }
 
 
-def _present_strategy_result(result: Dict[str, Any]) -> Dict[str, Any]:
+def _present_strategy_result(result: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(result, dict):
         return result
     status = result.get("status")
@@ -379,8 +395,8 @@ def _present_strategy_result(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def _execute_strategy_signal_async(
-    sig: StrategySignal, *, idem_key: Optional[str] = None
-) -> Dict[str, Any]:
+    sig: StrategySignal, *, idem_key: str | None = None
+) -> dict[str, Any]:
     executor = _get_executor()
     result = await executor.execute(_signal_payload(sig), idem_key=idem_key)
     if result.get("status") == "submitted":
@@ -388,9 +404,7 @@ async def _execute_strategy_signal_async(
     return _present_strategy_result(result)
 
 
-def _execute_strategy_signal(
-    sig: StrategySignal, *, idem_key: Optional[str] = None
-) -> Dict[str, Any]:
+def _execute_strategy_signal(sig: StrategySignal, *, idem_key: str | None = None) -> dict[str, Any]:
     executor = _get_executor()
     result = executor.execute_sync(_signal_payload(sig), idem_key=idem_key)
     if result.get("status") == "submitted":
@@ -418,7 +432,7 @@ def _notify_listeners(symbol: str, price: float, ts: float) -> None:
                 except RuntimeError:
                     # No running loop in this thread; drop async listener result
                     pass
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             continue
 
 
@@ -443,7 +457,7 @@ def on_tick(
         scalp_decision = None
         try:
             scalp_decision = SCALP_MODULE.handle_tick(qualified, price, ts_val)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             scalp_decision = None
         if scalp_decision:
             scalp_symbol = str(scalp_decision.get("symbol") or qualified)
@@ -475,7 +489,7 @@ def on_tick(
                         side=scalp_side,
                         source=scalp_tag,
                     ).inc()
-                except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS:
                     pass
             return
 
@@ -483,7 +497,7 @@ def on_tick(
         momentum_decision = None
         try:
             momentum_decision = MOMENTUM_RT_MODULE.handle_tick(qualified, price, ts_val, volume)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             momentum_decision = None
         if momentum_decision:
             momentum_symbol = str(momentum_decision.get("symbol") or qualified)
@@ -518,7 +532,7 @@ def on_tick(
                         side=momentum_side,
                         source=momentum_tag,
                     ).inc()
-                except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS:
                     pass
             return
 
@@ -526,7 +540,7 @@ def on_tick(
         trend_decision = None
         try:
             trend_decision = TREND_MODULE.handle_tick(qualified, price, ts_val)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             trend_decision = None
         if trend_decision:
             trend_symbol = str(trend_decision.get("symbol") or qualified)
@@ -554,7 +568,7 @@ def on_tick(
                     metrics.strategy_orders_total.labels(
                         symbol=base, venue=venue, side=trend_side, source=trend_tag
                     ).inc()
-                except Exception:
+                except _SUPPRESSIBLE_EXCEPTIONS:
                     pass
             return
 
@@ -583,16 +597,16 @@ def on_tick(
                 probs = hmm_decision[2].get("probs") or []
                 if isinstance(probs, (list, tuple)) and probs:
                     hmm_conf = float(max(probs))
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             hmm_decision = None
             hmm_conf = 0.0
 
     # --- Ensemble fusion ---
     fused = ensemble_policy.combine(base, ma_side, ma_conf, hmm_decision)
 
-    signal_side: Optional[str] = None
+    signal_side: str | None = None
     signal_quote: float = S_CFG.quote_usdt
-    signal_meta: Dict = {}
+    signal_meta: dict = {}
     conf_to_emit = 0.0
 
     if fused:
@@ -613,11 +627,11 @@ def on_tick(
         signal_value = 1.0 if signal_side == "BUY" else -1.0
     try:
         metrics.strategy_signal.labels(symbol=base, venue=venue).set(signal_value)
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         pass
     try:
         metrics.strategy_confidence.labels(symbol=base, venue=venue).set(conf_to_emit)
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         pass
 
     if signal_side:
@@ -641,13 +655,13 @@ def on_tick(
                 metrics.strategy_orders_total.labels(
                     symbol=base, venue=venue, side=signal_side, source=source_tag
                 ).inc()
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
 
         if fused:
             try:
                 _schedule_bracket_watch(qualified, signal_side, price)
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
 
 
@@ -660,11 +674,11 @@ def _record_tick_latency(symbol: str) -> None:
     latency_ms = max(0.0, (time.time() - tick_ts) * 1000.0)
     try:
         metrics.strategy_tick_to_order_latency_ms.observe(latency_ms)
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         pass
     try:
         record_tick_latency(symbol, latency_ms)
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         pass
 
 
@@ -674,7 +688,7 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
     try:
         if os.getenv("PYTEST_CURRENT_TEST"):
             return True
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         pass
     base_symbol = symbol.split(".")[0]
     base_window = max(0.5, S_CFG.cooldown_sec * calibration_cooldown_scale(base_symbol))
@@ -691,7 +705,7 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
             metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(
                 remaining
             )
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
         return False
 
@@ -701,12 +715,12 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
         metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(
             dynamic_window
         )
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         pass
     return True
 
 
-def _latest_price(symbol: str) -> Optional[float]:
+def _latest_price(symbol: str) -> float | None:
     """Synchronous price lookup for scheduler thread without touching event loop.
 
     Uses a one-off blocking HTTP call to the Binance public ticker endpoint
@@ -726,7 +740,7 @@ def _latest_price(symbol: str) -> Optional[float]:
         r = httpx.get(f"{base}{path}", params={"symbol": clean}, timeout=5.0)
         r.raise_for_status()
         return float(r.json().get("price"))
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         return None
 
 
@@ -825,7 +839,7 @@ def start_scheduler():
             t0 = time.time()
             try:
                 _tick_once()
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
             dt = max(0.0, S_CFG.interval_sec - (time.time() - t0))
             _stop_flag.wait(dt)
@@ -854,7 +868,7 @@ def _ensure_scalp_bracket_manager() -> ScalpBracketManager:
     return _SCALP_BRACKET_MANAGER
 
 
-async def _submit_scalp_exit(payload: Dict[str, Any]) -> None:
+async def _submit_scalp_exit(payload: dict[str, Any]) -> None:
     symbol = str(payload.get("symbol") or "").upper()
     if not symbol:
         return
@@ -887,5 +901,5 @@ async def _submit_scalp_exit(payload: Dict[str, Any]) -> None:
     base = symbol.split(".")[0]
     try:
         metrics.scalp_bracket_exits_total.labels(symbol=base, venue=venue, mode=tag).inc()
-    except Exception:
+    except _SUPPRESSIBLE_EXCEPTIONS:
         pass

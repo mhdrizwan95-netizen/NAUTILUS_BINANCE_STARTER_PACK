@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+import asyncio
 import hashlib
 import hmac
+import logging
 import os
 import time
 import urllib.parse
@@ -9,6 +11,20 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger("adapters.account_provider")
+_FETCH_ERRORS = (
+    asyncio.TimeoutError,
+    httpx.HTTPError,
+    ConnectionError,
+    RuntimeError,
+    ValueError,
+)
+_PARSE_ERRORS = (TypeError, ValueError)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
 def _now_ms() -> int:
@@ -120,16 +136,16 @@ class BinanceAccountProvider:
         spot, usdm, coinm = {}, {}, {}
         try:
             spot = await self.fetch_spot_account()
-        except Exception:
-            pass
+        except _FETCH_ERRORS as exc:
+            _log_suppressed("binance.fetch_spot_account", exc)
         try:
             usdm = await self.fetch_usdm_account()
-        except Exception:
-            pass
+        except _FETCH_ERRORS as exc:
+            _log_suppressed("binance.fetch_usdm_account", exc)
         try:
             coinm = await self.fetch_coinm_account()
-        except Exception:
-            pass
+        except _FETCH_ERRORS as exc:
+            _log_suppressed("binance.fetch_coinm_account", exc)
 
         # Simplified equity estimates:
         # Spot: sum of free + locked *assumed in USDT terms if asset == USDT (otherwise 0 for compactness)
@@ -144,14 +160,16 @@ class BinanceAccountProvider:
         def usdm_equity_usdt(fut: dict[str, Any]) -> float:
             try:
                 return float(fut.get("totalWalletBalance", 0))
-            except Exception:
+            except _PARSE_ERRORS as exc:
+                _log_suppressed("binance.usdm_equity", exc)
                 return 0.0
 
         # COIN-M: sum wallet balances across assets (approx in their asset terms; left as 0 for simplicity)
         def coinm_equity_est(cm: dict[str, Any]) -> float:
             try:
                 return sum(float(x.get("walletBalance", 0)) for x in cm.get("assets", []))
-            except Exception:
+            except _PARSE_ERRORS as exc:
+                _log_suppressed("binance.coinm_equity", exc)
                 return 0.0
 
         metrics = {

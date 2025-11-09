@@ -15,7 +15,7 @@ Key Features:
 
 import logging
 import os
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import joblib
 import numpy as np
@@ -25,6 +25,45 @@ from sklearn.linear_model import SGDClassifier
 from sklearn.preprocessing import StandardScaler
 
 logger = logging.getLogger(__name__)
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+
+
+class ModelNotTrainedError(RuntimeError):
+    """Raised when inference is attempted before training."""
+
+    def __init__(self, name: str, action: str):
+        super().__init__(f"{name} must be trained before {action}")
+        self.name = name
+        self.action = action
+
+
+class ModelArtifactMissingError(FileNotFoundError):
+    """Raised when a required model artifact is missing."""
+
+    def __init__(self, path: str):
+        super().__init__(path)
+        self.path = path
+
+
+class ActiveRegimeError(RuntimeError):
+    """Raised when policy inference occurs without active regime/policy."""
+
+    @classmethod
+    def not_set(cls) -> "ActiveRegimeError":
+        return cls("no active regime set; call switch() first")
+
+    @classmethod
+    def missing_policy(cls, regime: str) -> "ActiveRegimeError":
+        return cls(f"no policy loaded for active regime {regime}")
 
 
 class MacroRegimeHMM:
@@ -85,7 +124,7 @@ class MacroRegimeHMM:
             Array of regime names with shape (n_samples,)
         """
         if not self.trained:
-            raise RuntimeError("MacroRegimeHMM must be trained before prediction")
+            raise ModelNotTrainedError("MacroRegimeHMM", "prediction")
 
         X_scaled = self.scaler.transform(X)
         states = self.model.predict(X_scaled)
@@ -103,7 +142,7 @@ class MacroRegimeHMM:
             Probability matrix with shape (n_samples, n_states)
         """
         if not self.trained:
-            raise RuntimeError("MacroRegimeHMM must be trained before prediction")
+            raise ModelNotTrainedError("MacroRegimeHMM", "prediction")
 
         X_scaled = self.scaler.transform(X)
         _, probs = self.model.decode(X_scaled)
@@ -120,12 +159,12 @@ class MacroRegimeHMM:
             Average log-likelihood per sample
         """
         if not self.trained:
-            raise RuntimeError("MacroRegimeHMM must be trained before scoring")
+            raise ModelNotTrainedError("MacroRegimeHMM", "scoring")
 
         X_scaled = self.scaler.transform(X)
         return self.model.score(X_scaled) / len(X)
 
-    def get_regime_stats(self) -> Dict[str, Any]:
+    def get_regime_stats(self) -> dict[str, Any]:
         """
         Get regime detection statistics.
 
@@ -142,7 +181,7 @@ class MacroRegimeHMM:
         regime_stats = {}
         for i, regime in enumerate(self.regime_names):
             regime_stats[regime] = {
-                "transitions_from": dict(zip(self.regime_names, transmat[i])),
+                "transitions_from": dict(zip(self.regime_names, transmat[i], strict=False)),
                 "mean_state": self.model.means_[i].tolist(),
                 "std_state": np.sqrt(self.model.covars_[i]).tolist(),
             }
@@ -169,7 +208,7 @@ class MacroRegimeHMM:
     def load(self, path: str) -> "MacroRegimeHMM":
         """Load a trained model from disk."""
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Model file not found: {path}")
+            raise ModelArtifactMissingError(path)
 
         bundle = joblib.load(path)
         self.model = bundle["model"]
@@ -197,7 +236,7 @@ class HierarchicalPolicy:
         self.regime_stats = {}
         self.switch_log = []
 
-    def load_regime_policy(self, regime: str) -> Tuple[SGDClassifier, Dict]:
+    def load_regime_policy(self, regime: str) -> tuple[SGDClassifier, dict]:
         """
         Load a regime-specific policy head.
 
@@ -217,7 +256,7 @@ class HierarchicalPolicy:
                 logger.warning(f"No policy for regime {regime}, using fallback {fallback_fname}")
                 path = fallback_path
             else:
-                raise FileNotFoundError(f"No policy found for regime {regime} at {path}")
+                raise ModelArtifactMissingError(path)
 
         bundle = joblib.load(path)
         policy = bundle.get("policy", bundle)  # Handle both formats
@@ -239,30 +278,27 @@ class HierarchicalPolicy:
         if new_regime == self.active_regime:
             return False
 
-        # Load new policy
         try:
             policy, metadata = self.load_regime_policy(new_regime)
-            self.loaded_policies[new_regime] = (policy, metadata)
-            old_regime = self.active_regime
-            self.active_regime = new_regime
-
-            # Log the switch
-            switch_event = {
-                "timestamp": pd.Timestamp.now(),
-                "from_regime": old_regime,
-                "to_regime": new_regime,
-                "metadata": metadata,
-            }
-            self.switch_log.append(switch_event)
-
-            logger.info(f"Switched from {old_regime} to {new_regime}")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to switch to regime {new_regime}: {e}")
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            logger.exception("Failed to switch to regime %s", new_regime)
             return False
 
-    def infer(self, features: np.ndarray) -> Dict[str, Any]:
+        self.loaded_policies[new_regime] = (policy, metadata)
+        old_regime = self.active_regime
+        self.active_regime = new_regime
+
+        switch_event = {
+            "timestamp": pd.Timestamp.now(),
+            "from_regime": old_regime,
+            "to_regime": new_regime,
+            "metadata": metadata,
+        }
+        self.switch_log.append(switch_event)
+        logger.info("Switched from %s to %s", old_regime, new_regime)
+        return True
+
+    def infer(self, features: np.ndarray) -> dict[str, Any]:
         """
         Make inference using the active regime policy.
 
@@ -273,10 +309,10 @@ class HierarchicalPolicy:
             Decision dictionary with action, confidence, and regime
         """
         if self.active_regime is None:
-            raise RuntimeError("No active regime set - call switch() first")
+            raise ActiveRegimeError.not_set()
 
         if self.active_regime not in self.loaded_policies:
-            raise RuntimeError(f"No policy loaded for active regime {self.active_regime}")
+            raise ActiveRegimeError.missing_policy(self.active_regime)
 
         policy, metadata = self.loaded_policies[self.active_regime]
 
@@ -309,18 +345,18 @@ class HierarchicalPolicy:
                 "metadata": metadata,
             }
 
-        except Exception as e:
-            logger.error(f"Inference failed for regime {self.active_regime}: {e}")
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            logger.exception("Inference failed for regime %s", self.active_regime)
             # Return safe fallback
             return {
                 "action": 0,  # HOLD
                 "confidence": 0.0,
                 "regime": self.active_regime,
                 "probabilities": [0.0, 0.0, 0.0],
-                "error": str(e),
+                "error": str(exc),
             }
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get hierarchical policy statistics.
 

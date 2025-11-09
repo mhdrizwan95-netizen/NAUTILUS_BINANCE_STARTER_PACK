@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import (
     Any,
-    Dict,
-    Mapping,
-    MutableMapping,
-    Optional,
-    Sequence,
 )
 
 from shared.signal_math import confidence_from_score
@@ -18,7 +14,7 @@ from shared.signal_math import confidence_from_score
 MappingLike = Mapping[str, Any]
 
 
-def freeze_mapping(payload: Optional[MappingLike]) -> MappingLike:
+def freeze_mapping(payload: MappingLike | None) -> MappingLike:
     """Return an immutable mapping copy of *payload*."""
 
     return MappingProxyType(dict(payload or {}))
@@ -33,15 +29,15 @@ class StrategySignal:
     side: str
     confidence: float
     entry_mode: str
-    suggested_stop: Optional[float]
-    suggested_tp: Optional[float]
+    suggested_stop: float | None
+    suggested_tp: float | None
     validity_ttl: int
     metadata: MappingLike = field(default_factory=dict)
 
     def __post_init__(self) -> None:  # pragma: no cover - dataclass mutation guard
         object.__setattr__(self, "metadata", freeze_mapping(self.metadata))
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "strategy_id": self.strategy_id,
             "symbol": self.symbol,
@@ -66,7 +62,7 @@ class StrategyCandidate:
     def __post_init__(self) -> None:  # pragma: no cover - dataclass mutation guard
         object.__setattr__(self, "context", freeze_mapping(self.context))
 
-    def as_dict(self) -> Dict[str, Any]:
+    def as_dict(self) -> dict[str, Any]:
         return {
             "score": round(self.score, 6),
             "signal": self.signal.as_dict(),
@@ -85,21 +81,21 @@ class StrategyScreener:
     def evaluate(
         self,
         symbol: str,
-        meta: Optional[MappingLike],
+        meta: MappingLike | None,
         klines: Sequence[Sequence[Any]],
         book: Mapping[str, Any],
         features: MappingLike,
-    ) -> Optional[StrategyCandidate]:
+    ) -> StrategyCandidate | None:
         raise NotImplementedError
 
 
-def sma(values: Sequence[float], length: int) -> Optional[float]:
+def sma(values: Sequence[float], length: int) -> float | None:
     if length <= 0 or len(values) < length:
         return None
     return sum(values[-length:]) / float(length)
 
 
-def rsi(values: Sequence[float], length: int = 14) -> Optional[float]:
+def rsi(values: Sequence[float], length: int = 14) -> float | None:
     if length <= 0:
         return None
     closes = [float(v) for v in values]
@@ -107,7 +103,7 @@ def rsi(values: Sequence[float], length: int = 14) -> Optional[float]:
         return None
     gains: list[float] = []
     losses: list[float] = []
-    for prev, curr in zip(closes, closes[1:]):
+    for prev, curr in zip(closes, closes[1:], strict=False):
         delta = curr - prev
         if delta >= 0:
             gains.append(delta)
@@ -129,14 +125,14 @@ def rsi(values: Sequence[float], length: int = 14) -> Optional[float]:
         return 100.0 - (100.0 / (1.0 + rs))
 
     rsi_value = _compute(avg_gain, avg_loss)
-    for gain, loss in zip(gains[length:], losses[length:]):
+    for gain, loss in zip(gains[length:], losses[length:], strict=False):
         avg_gain = ((avg_gain * (length - 1)) + gain) / length
         avg_loss = ((avg_loss * (length - 1)) + loss) / length
         rsi_value = _compute(avg_gain, avg_loss)
     return rsi_value
 
 
-def atr(klines: Sequence[Sequence[Any]], length: int = 14) -> Optional[float]:
+def atr(klines: Sequence[Sequence[Any]], length: int = 14) -> float | None:
     if length <= 0 or len(klines) <= length:
         return None
     prev_close = float(klines[-length - 1][4])
@@ -153,21 +149,21 @@ def atr(klines: Sequence[Sequence[Any]], length: int = 14) -> Optional[float]:
     return sum(ranges) / len(ranges)
 
 
-def swing_low(klines: Sequence[Sequence[Any]], lookback: int = 8) -> Optional[float]:
+def swing_low(klines: Sequence[Sequence[Any]], lookback: int = 8) -> float | None:
     if lookback <= 0 or len(klines) < lookback:
         return None
     lows = [float(row[3]) for row in klines[-lookback:]]
     return min(lows) if lows else None
 
 
-def swing_high(klines: Sequence[Sequence[Any]], lookback: int = 8) -> Optional[float]:
+def swing_high(klines: Sequence[Sequence[Any]], lookback: int = 8) -> float | None:
     if lookback <= 0 or len(klines) < lookback:
         return None
     highs = [float(row[2]) for row in klines[-lookback:]]
     return max(highs) if highs else None
 
 
-def listing_age(meta: Optional[MappingLike]) -> Optional[float]:
+def listing_age(meta: MappingLike | None) -> float | None:
     if not meta:
         return None
     if "listing_age_days" in meta:
@@ -181,7 +177,7 @@ def listing_age(meta: Optional[MappingLike]) -> Optional[float]:
     try:
         ts = float(meta.get("ts", 0.0))
         return max(0.0, (ts - float(onboard)) / 86_400_000.0)
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
 

@@ -5,6 +5,13 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+_SPEC_ERRORS: tuple[type[Exception], ...] = (
+    OSError,
+    ValueError,
+    json.JSONDecodeError,
+    TypeError,
+)
+
 
 @dataclass(frozen=True)
 class SymbolSpec:
@@ -46,8 +53,8 @@ if SPECS_FILE.exists():
         print(
             f"Loaded venue specs from {SPECS_FILE}: {sum(len(v) for v in SPECS.values())} symbols"
         )
-    except Exception as e:
-        print(f"[WARN] Failed to load {SPECS_FILE}: {e}, using defaults")
+    except _SPEC_ERRORS as exc:
+        print(f"[WARN] Failed to load {SPECS_FILE}: {exc}, using defaults")
 
 # Fallback: ensure we have basic defaults if JSON is empty or failed
 if not SPECS["BINANCE"]:

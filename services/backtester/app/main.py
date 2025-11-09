@@ -21,7 +21,7 @@ def load_dataset(path: str) -> pd.DataFrame:
     return df
 
 
-def main():
+def main() -> None:
     ds_path = os.getenv("DATASET", "/historical/sample.csv")
     retrain_min = int(os.getenv("RETRAIN_EVERY_MIN", "360"))
     step_minutes = int(os.getenv("STEP_MINUTES", "5"))

@@ -6,22 +6,35 @@ import json
 import os
 import subprocess as sp
 from pathlib import Path
-from typing import Dict, List
 
 ROOT = Path(__file__).resolve().parents[1]
 CURSOR = ROOT / "ops" / "training_cursor.json"
+
+
+class CommandFailed(SystemExit):
+    """Raised when a shell command exits non-zero."""
+
+    def __init__(self, cmd: str) -> None:
+        super().__init__(f"Command failed: {cmd}")
+
+
+class TrainingCursorMissing(SystemExit):
+    """Raised when the training cursor file is missing."""
+
+    def __init__(self, path: Path) -> None:
+        super().__init__(f"Missing training cursor file: {path}")
 
 
 def run(cmd: str) -> None:
     print(">>", cmd, flush=True)
     rc = sp.call(cmd, shell=True)
     if rc != 0:
-        raise SystemExit(f"cmd failed: {cmd}")
+        raise CommandFailed(cmd)
 
 
 def load_cursor() -> dict:
     if not CURSOR.exists():
-        raise SystemExit("missing ops/training_cursor.json")
+        raise TrainingCursorMissing(CURSOR)
     c = json.loads(CURSOR.read_text())
     c["next_date"] = dt.date.fromisoformat(c["next_date"])  # type: ignore[assignment]
     c["lower_bound"] = dt.date.fromisoformat(c["lower_bound"])  # type: ignore[assignment]
@@ -34,7 +47,7 @@ def save_cursor(c: dict, next_date: dt.date) -> None:
     CURSOR.write_text(json.dumps(c2, indent=2))
 
 
-def day_paths(symbol: str, day: dt.date) -> Dict[str, Path]:
+def day_paths(symbol: str, day: dt.date) -> dict[str, Path]:
     dstr = day.isoformat()
     return dict(
         raw=ROOT / f"data/raw/binance/spot/1m/{symbol}/{day.year}/{dstr}.parquet",
@@ -44,13 +57,13 @@ def day_paths(symbol: str, day: dt.date) -> Dict[str, Path]:
     )
 
 
-def cleanup_day(day: dt.date, symbols: List[str]) -> None:
+def cleanup_day(day: dt.date, symbols: list[str]) -> None:
     for s in symbols:
         for p in day_paths(s, day).values():
             try:
                 if p.exists():
                     p.unlink()
-            except Exception:
+            except OSError:
                 pass
 
 
@@ -59,7 +72,7 @@ def main() -> None:
     cur = load_cursor()
     day: dt.date = cur["next_date"]
     lb: dt.date = cur["lower_bound"]
-    symbols: List[str] = list(cur.get("symbols", []))
+    symbols: list[str] = list(cur.get("symbols", []))
     wrap: bool = bool(cur.get("wrap_mode", False))
 
     if day < lb:

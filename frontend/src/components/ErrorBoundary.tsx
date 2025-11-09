@@ -1,9 +1,9 @@
-import { AlertTriangle, RefreshCw } from 'lucide-react';
-import type { ComponentType, ReactNode, ErrorInfo } from 'react';
-import { ErrorBoundary as ReactErrorBoundary } from 'react-error-boundary';
+import { AlertTriangle, RefreshCw } from "lucide-react";
+import type { ComponentType, ReactNode, ErrorInfo } from "react";
+import { ErrorBoundary as ReactErrorBoundary } from "react-error-boundary";
 
-import { Button } from './ui/button';
-import { Card } from './ui/card';
+import { Button } from "./ui/button";
+import { Card } from "./ui/card";
 
 interface ErrorFallbackProps {
   error: Error;
@@ -19,9 +19,7 @@ function ErrorFallback({ error, resetErrorBoundary }: ErrorFallbackProps) {
             <AlertTriangle className="w-6 h-6 text-red-400" />
           </div>
         </div>
-        <h2 className="text-lg font-semibold text-zinc-100 mb-2">
-          Something went wrong
-        </h2>
+        <h2 className="text-lg font-semibold text-zinc-100 mb-2">Something went wrong</h2>
         <p className="text-sm text-zinc-400 mb-6">
           An unexpected error occurred. Please try refreshing the page.
         </p>
@@ -30,15 +28,11 @@ function ErrorFallback({ error, resetErrorBoundary }: ErrorFallbackProps) {
             <RefreshCw className="w-4 h-4 mr-2" />
             Try Again
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => window.location.reload()}
-            className="w-full"
-          >
+          <Button variant="outline" onClick={() => window.location.reload()} className="w-full">
             Reload Page
           </Button>
         </div>
-        {process.env.NODE_ENV === 'development' && (
+        {process.env.NODE_ENV === "development" && (
           <details className="mt-4 text-left">
             <summary className="text-xs text-zinc-500 cursor-pointer">
               Error Details (Development)
@@ -63,13 +57,13 @@ interface AppErrorBoundaryProps {
 export function AppErrorBoundary({
   children,
   fallback: Fallback = ErrorFallback,
-  onError
+  onError,
 }: AppErrorBoundaryProps) {
   const handleError = (error: Error, errorInfo: ErrorInfo) => {
-    console.error('AppErrorBoundary captured error:', error, errorInfo);
+    console.error("AppErrorBoundary captured error:", error, errorInfo);
     // Log to console in development
-    if (process.env.NODE_ENV === 'development') {
-      console.error('Error Boundary caught an error:', error, errorInfo);
+    if (process.env.NODE_ENV === "development") {
+      console.error("Error Boundary caught an error:", error, errorInfo);
     }
 
     // Call custom error handler if provided
@@ -97,7 +91,7 @@ export function AppErrorBoundary({
 export function ComponentErrorBoundary({
   children,
   fallback: Fallback,
-  onError
+  onError,
 }: {
   children: ReactNode;
   fallback?: ComponentType<ErrorFallbackProps>;

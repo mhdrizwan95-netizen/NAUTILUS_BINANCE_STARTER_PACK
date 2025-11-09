@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping, MutableMapping, Optional, Sequence
+from collections.abc import Mapping, MutableMapping, Sequence
+from typing import Any
 
 from .base import (
     StrategyCandidate,
@@ -56,11 +57,11 @@ class TrendFollowingScreener(StrategyScreener):
     def evaluate(
         self,
         symbol: str,
-        meta: Optional[Mapping[str, Any]],
+        meta: Mapping[str, Any] | None,
         klines: Sequence[Sequence[Any]],
         book: Mapping[str, Any],
         features: Mapping[str, Any],
-    ) -> Optional[StrategyCandidate]:
+    ) -> StrategyCandidate | None:
         closes = [float(row[4]) for row in klines if len(row) > 4]
         if len(closes) < 50:
             return None

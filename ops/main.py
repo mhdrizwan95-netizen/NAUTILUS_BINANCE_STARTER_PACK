@@ -18,7 +18,7 @@ import random
 import sys
 import time
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Any
 
 import httpx
 from prometheus_client import Counter, Gauge, start_http_server
@@ -77,7 +77,8 @@ async def ping_engine(client: httpx.AsyncClient) -> None:
         snap_ok = 1 if bool(data.get("snapshot_loaded")) else 0
         ENGINE_SNAPSHOT_LOADED.set(snap_ok)
         LAST_PING_EPOCH.set(time.time())
-    except Exception:
+    except _PING_ERRORS:
+        LOGGER.warning("Engine ping failed", exc_info=True)
         PING_ERRORS.inc()
 
 
@@ -129,7 +130,7 @@ async def trade() -> None:
     # Get symbols
     explicit = os.getenv("TRADE_SYMBOLS") or os.getenv("SYMBOLS")
     if explicit:
-        symbols: List[str] = [s.strip() for s in explicit.split(",") if s.strip()]
+        symbols: list[str] = [s.strip() for s in explicit.split(",") if s.strip()]
     else:
         # Fetch symbols using temp client since we don't have shared one yet
         async with httpx.AsyncClient(timeout=10.0):
@@ -149,7 +150,7 @@ async def trade() -> None:
     # Initialize storm-proof components
     limiter = RateLimiter(max_per_min)
     sem = asyncio.Semaphore(max_parallel)
-    last_probe_ts: Dict[str, float] = defaultdict(lambda: 0.0)
+    last_probe_ts: dict[str, float] = defaultdict(lambda: 0.0)
 
     # Circuit breaker with environment-configurable thresholds
     breaker = CircuitBreaker(
@@ -235,3 +236,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         log_event("executor.shutdown", level="warning")
         sys.exit(0)
+_HTTP_ERRORS = (httpx.HTTPError, httpx.RequestError)
+_PING_ERRORS = _HTTP_ERRORS + (json.JSONDecodeError, KeyError, ValueError)

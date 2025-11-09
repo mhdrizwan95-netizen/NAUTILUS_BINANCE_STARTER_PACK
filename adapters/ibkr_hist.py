@@ -16,11 +16,16 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 
+class IbkrDependencyError(RuntimeError):
+    def __init__(self) -> None:
+        super().__init__("ib_insync not installed: pip install ib_insync")
+
+
 def fetch_1m(ticker: str = "AAPL", endDateTime: str = "", durationStr: str = "2 W") -> pd.DataFrame:
     try:
         from ib_insync import IB, Stock, util
-    except Exception as exc:  # pragma: no cover - optional dependency
-        raise RuntimeError("ib_insync not installed: pip install ib_insync") from exc
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise IbkrDependencyError() from exc
 
     host = os.getenv("IBKR_HOST", "127.0.0.1")
     port = int(os.getenv("IBKR_PORT", "7497"))

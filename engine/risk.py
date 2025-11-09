@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import collections
+import logging
 import math
 import threading
 import time
 from collections import defaultdict, deque
-from typing import Any, Callable, Deque, Dict, Literal, Optional
+from collections.abc import Callable
+from typing import Any, Literal
 
 from .config import RiskConfig
 from .core.market_resolver import resolve_market_choice
@@ -22,6 +24,23 @@ from .metrics import (
     venue_error_rate_pct,
     venue_exposure_usd,
 )
+
+logger = logging.getLogger(__name__)
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
 class RiskError(Exception):
@@ -41,7 +60,7 @@ class OrderRateLimiter:
 
     def __init__(self, max_per_min: int):
         self.max_per_min = max_per_min
-        self.events: Deque[float] = deque()
+        self.events: deque[float] = deque()
 
     def allow(self) -> bool:
         now = time.time()
@@ -118,7 +137,8 @@ class RiskRails:
             from . import risk_quarantine as _rq  # lazy import to avoid cycles
 
             q, remain = _rq.is_quarantined(symbol)
-        except Exception:
+        except (ImportError, _SUPPRESSIBLE_EXCEPTIONS) as exc:
+            _log_suppressed("risk quarantine lookup", exc)
             q, remain = (False, 0.0)
         if q:
             return False, {
@@ -151,7 +171,7 @@ class RiskRails:
                 }
 
         # Exposure breakers (symbol & total)
-        snap: Dict[str, Any] = {}
+        snap: dict[str, Any] = {}
         portfolio_state: Any = None
         prices: Callable[[str], float]
 
@@ -185,13 +205,15 @@ class RiskRails:
                         if isinstance(res, (int, float)):
                             return float(res)
                         return float(res)  # type: ignore[arg-type]
-                    except Exception:
+                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                        _log_suppressed("risk price lookup", exc)
                         return 0.0
 
                 prices = _price_lookup
             else:
                 prices = _zero_price
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("risk snapshot fetch", exc)
             snap = {}
             prices = _zero_price
 
@@ -222,7 +244,8 @@ class RiskRails:
                     # Cannot await in sync context; fall back to 0
                     return 0.0
                 return float(px or 0.0)
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("risk resolve price", exc)
                 return 0.0
 
         base_symbol = symbol_base if symbol_base.endswith("USD") else f"{symbol_base}USD"
@@ -246,7 +269,7 @@ class RiskRails:
         positions = list(raw_positions) if isinstance(raw_positions, (list, tuple)) else []
         sym_expo = 0.0
         total_expo = 0.0
-        venue_exposures: Dict[str, float] = defaultdict(float)
+        venue_exposures: dict[str, float] = defaultdict(float)
 
         for pos in positions:
             try:
@@ -270,7 +293,8 @@ class RiskRails:
                 total_expo += value
                 if pos_base == symbol_base:
                     sym_expo += value
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("risk position ingestion", exc)
                 continue
 
         # Update exposure gauges
@@ -364,7 +388,7 @@ class RiskRails:
 
     def refresh_snapshot_metrics(
         self, snap: dict[str, Any] | None, venue: str | None = None
-    ) -> "RiskRails.SnapshotMetricsState":
+    ) -> RiskRails.SnapshotMetricsState:
         """Refresh risk gauges from a portfolio snapshot.
 
         Snapshot contract (best-effort):
@@ -411,8 +435,8 @@ class RiskRails:
             try:
                 risk_equity_buffer_usd.set(buffer_usd)
                 risk_equity_drawdown_pct.set(drawdown_pct)
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("risk equity gauges", exc)
 
             if floor_breach or drawdown_breach:
                 breaker_active = True
@@ -422,8 +446,8 @@ class RiskRails:
                 )
                 try:
                     risk_equity_floor_breach.set(1)
-                except Exception:
-                    pass
+                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    _log_suppressed("risk floor breach set", exc)
                 remaining = self._equity_breaker_until - now
                 breaker_payload = {
                     "error": "EQUITY_FLOOR" if floor_breach else "EQUITY_DRAWDOWN",
@@ -436,22 +460,22 @@ class RiskRails:
                 if not self._equity_breaker_active:
                     try:
                         risk_equity_floor_breach.set(0)
-                    except Exception:
-                        pass
+                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                        _log_suppressed("risk floor reset (equity)", exc)
         else:
             if self._equity_breaker_active and now >= self._equity_breaker_until:
                 self._equity_breaker_active = False
             if not self._equity_breaker_active:
                 try:
                     risk_equity_floor_breach.set(0)
-                except Exception:
-                    pass
+                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    _log_suppressed("risk floor reset (no equity)", exc)
 
         return RiskRails.SnapshotMetricsState(
             breaker_active=breaker_active, breaker_payload=breaker_payload
         )
 
-    def _extract_equity(self, snap: dict[str, Any] | None) -> Optional[float]:
+    def _extract_equity(self, snap: dict[str, Any] | None) -> float | None:
         snap_dict = snap if isinstance(snap, dict) else None
         if snap_dict is None:
             return None
@@ -468,7 +492,8 @@ class RiskRails:
             unrealized = self._sanitize_float(pnl_section.get("unrealized"))
             if cash is not None or unrealized is not None:
                 return (cash or 0.0) + (unrealized or 0.0)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("risk extract equity", exc)
             return None
         return None
 
@@ -481,7 +506,7 @@ class RiskRails:
             return 0.0
         return dd
 
-    def _sanitize_float(self, value: Any) -> Optional[float]:
+    def _sanitize_float(self, value: Any) -> float | None:
         if value is None:
             return None
         try:
@@ -492,16 +517,16 @@ class RiskRails:
             return None
         return val
 
-    def _update_exposure_gauges(self, venue_exposures: Dict[str, float]) -> None:
+    def _update_exposure_gauges(self, venue_exposures: dict[str, float]) -> None:
         try:
+            cap = max(0.0, float(self.cfg.exposure_cap_venue_usd))
             for ven, val in venue_exposures.items():
                 safe_val = abs(val) if math.isfinite(val) else 0.0
                 venue_exposure_usd.labels(venue=ven).set(max(0.0, safe_val))
-                cap = max(0.0, float(self.cfg.exposure_cap_venue_usd))
                 headroom = max(0.0, cap - safe_val)
                 risk_exposure_headroom_usd.labels(venue=ven).set(headroom)
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("risk exposure gauges", exc)
 
     def _update_exposures_from_snapshot(
         self, snap: dict[str, Any] | None, venue_default: str | None
@@ -517,7 +542,7 @@ class RiskRails:
                 self._update_exposure_gauges({venue_default: 0.0})
             return
 
-        exposures: Dict[str, float] = defaultdict(float)
+        exposures: dict[str, float] = defaultdict(float)
         for pos in positions:
             if not isinstance(pos, dict):
                 continue
@@ -548,8 +573,8 @@ class RiskRails:
                 cap = max(0.0, float(self.cfg.exposure_cap_venue_usd))
                 exposure_cap_usd.labels(venue=venue_key).set(cap)
                 risk_exposure_headroom_usd.labels(venue=venue_key).set(cap)
-        except Exception:
-            pass
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("risk config gauges", exc)
 
     def record_result(self, ok: bool):
         """Record venue operation result for error rate monitoring."""
@@ -591,7 +616,8 @@ class RiskRails:
             return 0.0
         try:
             return max(0.0, float(self._compute_drawdown_pct(self._last_equity)))
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed("risk drawdown calc", exc)
             return 0.0
 
     def last_equity(self) -> float:
@@ -617,8 +643,8 @@ class RiskRails:
             self._equity_breaker_active = False
             try:
                 risk_equity_floor_breach.set(0)
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("risk breaker reset", exc)
 
 
 def _trading_disabled_via_flag() -> bool:
@@ -628,8 +654,8 @@ def _trading_disabled_via_flag() -> bool:
         path = "state/trading_enabled.flag"
         if not os.path.exists(path):
             return False
-        with open(path, "r", encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             raw = (fh.read() or "").strip().lower()
-        return raw in {"0", "false", "no", "off"}
-    except Exception:
+    except (OSError, ValueError):
         return False
+    return raw in {"0", "false", "no", "off"}

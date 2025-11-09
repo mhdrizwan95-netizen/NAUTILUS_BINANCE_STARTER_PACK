@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import time
 from collections import deque
-from typing import Any, Dict, List, Tuple
+from queue import Full
+from typing import Any
 from uuid import uuid4
 
 from .predicates import pred_ok
@@ -12,15 +13,15 @@ from .store import SituationStore
 class Matcher:
     def __init__(self, store: SituationStore):
         self.store = store
-        self.cooldowns: Dict[Tuple[str, str], float] = {}
+        self.cooldowns: dict[tuple[str, str], float] = {}
         self.recent = deque(maxlen=1000)
-        self.subscribers: List[Any] = []  # queues for SSE/streaming
+        self.subscribers: list[Any] = []  # queues for SSE/streaming
 
     def evaluate(
-        self, symbol: str, feats: Dict[str, Any], ts: float | None = None
-    ) -> List[Dict[str, Any]]:
+        self, symbol: str, feats: dict[str, Any], ts: float | None = None
+    ) -> list[dict[str, Any]]:
         ts = ts or time.time()
-        hits: List[Dict[str, Any]] = []
+        hits: list[dict[str, Any]] = []
         for s in self.store.active():
             key = (symbol, s.name)
             if ts < self.cooldowns.get(key, 0):
@@ -44,6 +45,6 @@ class Matcher:
                 for q in list(self.subscribers):
                     try:
                         q.put_nowait(hit)
-                    except Exception:
-                        pass
+                    except Full:
+                        continue
         return hits

@@ -3,15 +3,27 @@ from __future__ import annotations
 import json
 import threading
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
 
 import httpx
 
 from engine.config import get_settings
 from engine.config.defaults import GLOBAL_DEFAULTS, SYMBOL_SCANNER_DEFAULTS
 from engine.config.env import env_bool, env_float, env_int, env_str, split_symbols
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    httpx.HTTPError,
+)
 
 
 @dataclass
@@ -97,12 +109,12 @@ def load_symbol_scanner_config() -> SymbolScannerConfig:
 class SymbolScanner:
     def __init__(self, cfg: SymbolScannerConfig):
         self.cfg = cfg
-        self._selected: List[str] = list(cfg.universe[: cfg.top_n])
-        self._scores: Dict[str, float] = {}
-        self._last_selected: Dict[str, float] = {}
+        self._selected: list[str] = list(cfg.universe[: cfg.top_n])
+        self._scores: dict[str, float] = {}
+        self._last_selected: dict[str, float] = {}
         self._lock = threading.Lock()
         self._stop = threading.Event()
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._base_url = (get_settings().base_url or "https://api.binance.com").rstrip("/")
         self._state_path = Path(self.cfg.state_path)
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -111,7 +123,7 @@ class SymbolScanner:
             from engine import metrics as MET
 
             self._metrics = MET
-        except Exception:
+        except ImportError:
             self._metrics = None
 
     def start(self) -> None:
@@ -125,12 +137,12 @@ class SymbolScanner:
         if self._thread:
             self._thread.join(timeout=1.0)
 
-    def get_selected(self) -> List[str]:
+    def get_selected(self) -> list[str]:
         with self._lock:
             return list(self._selected)
 
     # ------------------------------------------------------------------ compatibility helpers
-    def current_universe(self, strategy: str | None = None) -> List[str]:
+    def current_universe(self, strategy: str | None = None) -> list[str]:
         """Return the currently selected universe for ``strategy``.
 
         The current implementation does not differentiate by strategy and simply
@@ -151,12 +163,12 @@ class SymbolScanner:
         while not self._stop.is_set():
             try:
                 self._scan_once()
-            except Exception:
+            except _SUPPRESSIBLE_EXCEPTIONS:
                 pass
             self._stop.wait(self.cfg.interval_sec)
 
     def _scan_once(self) -> None:
-        ranked: List[tuple[str, float]] = []
+        ranked: list[tuple[str, float]] = []
         now = time.time()
         for sym in self.cfg.universe:
             if self._cooldown_active(sym, now):
@@ -180,7 +192,7 @@ class SymbolScanner:
                 self._inc_selected(sym)
         self._persist_state()
 
-    def _fetch_klines(self, symbol: str) -> Optional[List[List[str]]]:
+    def _fetch_klines(self, symbol: str) -> list[list[str]] | None:
         url = f"{self._base_url}/api/v3/klines"
         try:
             resp = httpx.get(
@@ -196,11 +208,11 @@ class SymbolScanner:
             data = resp.json()
             if isinstance(data, list) and data:
                 return data
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return None
         return None
 
-    def _score_symbol(self, symbol: str, klines: List[List[str]]) -> Optional[float]:
+    def _score_symbol(self, symbol: str, klines: list[list[str]]) -> float | None:
         try:
             closes = [float(row[4]) for row in klines]
             highs = [float(row[2]) for row in klines]
@@ -224,17 +236,17 @@ class SymbolScanner:
                 + trend * self.cfg.weight_trend
                 + atr_pct / 100.0 * self.cfg.weight_vol
             )
-            score = round(score, 6)
-            return score
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return None
+        else:
+            return round(score, 6)
 
-    def _atr(self, highs: List[float], lows: List[float], closes: List[float]) -> float:
+    def _atr(self, highs: list[float], lows: list[float], closes: list[float]) -> float:
         if len(highs) < 2:
             return 0.0
         trs = []
         prev_close = closes[0]
-        for high, low, close in zip(highs[1:], lows[1:], closes[1:]):
+        for high, low, close in zip(highs[1:], lows[1:], closes[1:], strict=False):
             tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
             trs.append(tr)
             prev_close = close
@@ -252,7 +264,7 @@ class SymbolScanner:
             return
         try:
             self._metrics.symbol_scanner_score.labels(symbol=symbol).set(score)
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
     def _inc_selected(self, symbol: str) -> None:
@@ -260,7 +272,7 @@ class SymbolScanner:
             return
         try:
             self._metrics.symbol_scanner_selected_total.labels(symbol=symbol).inc()
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
     def _persist_state(self) -> None:
@@ -271,7 +283,7 @@ class SymbolScanner:
         }
         try:
             self._state_path.write_text(json.dumps(payload, indent=2))
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
     def _load_state(self) -> None:
@@ -282,7 +294,7 @@ class SymbolScanner:
             self._selected = list(data.get("selected") or self._selected)
             self._scores = data.get("scores") or {}
             self._last_selected = data.get("last_selected") or {}
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             pass
 
 

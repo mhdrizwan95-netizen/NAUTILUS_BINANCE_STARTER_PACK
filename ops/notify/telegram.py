@@ -31,7 +31,7 @@ class Telegram:
         try:
             if force_ipv4:
                 connector = aiohttp.TCPConnector(family=socket.AF_INET)
-        except Exception:
+        except OSError:
             connector = None
         try:
             async with aiohttp.ClientSession(connector=connector) as s:
@@ -39,8 +39,8 @@ class Telegram:
                     if r.status != 200:
                         try:
                             body = await r.text()
-                        except Exception:
+                        except aiohttp.ClientError:
                             body = "<no body>"
                         self.log.warning("[TG] send status %s: %s", r.status, body)
-        except Exception as e:
-            self.log.warning("[TG] send error: %s", e)
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            self.log.warning("[TG] send error: %s", exc)

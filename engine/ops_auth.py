@@ -4,7 +4,6 @@ import hmac
 import logging
 import os
 from pathlib import Path
-from typing import Optional
 
 from fastapi import HTTPException, Request
 
@@ -12,7 +11,7 @@ _log = logging.getLogger("engine.ops_auth")
 _TOKEN_FILE_WARNING_EMITTED = False
 
 
-def load_ops_token() -> Optional[str]:
+def load_ops_token() -> str | None:
     """Return the configured Ops API token, preferring file-mounted secrets."""
     token = (os.getenv("OPS_API_TOKEN") or "").strip()
     token_file = os.getenv("OPS_API_TOKEN_FILE")

@@ -3,12 +3,11 @@ from __future__ import annotations
 import argparse
 import os
 from datetime import datetime, timedelta
-from typing import List
 
 import pandas as pd
 
 
-def daterange(start: str, end: str) -> List[str]:
+def daterange(start: str, end: str) -> list[str]:
     s = datetime.strptime(start, "%Y-%m-%d")
     e = datetime.strptime(end, "%Y-%m-%d")
     out = []

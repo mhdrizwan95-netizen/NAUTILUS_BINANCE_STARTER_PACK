@@ -2,21 +2,41 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import time
-from typing import Any, Dict, List
+from typing import Any
 
 from .state import SnapshotStore
 
+logger = logging.getLogger(__name__)
+
 try:
     from engine.metrics import REGISTRY as _METRICS
-except Exception:
+except ImportError:
     _METRICS = {}
+
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    asyncio.TimeoutError,
+)
+_STORE_ERRORS = _SUPPRESSIBLE_EXCEPTIONS + (ImportError,)
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
 class ExchangeClientProto:
     """Tiny protocol the real client should satisfy."""
 
-    def my_trades_since(self, symbol: str, start_ms: int) -> List[Dict[str, Any]]:
+    def my_trades_since(self, symbol: str, start_ms: int) -> list[dict[str, Any]]:
         raise NotImplementedError
 
 
@@ -42,7 +62,7 @@ class PortfolioProto:
 
 
 def reconcile_since_snapshot(
-    *, portfolio: PortfolioProto, client: ExchangeClientProto, symbols: List[str]
+    *, portfolio: PortfolioProto, client: ExchangeClientProto, symbols: list[str]
 ) -> dict:
     """
     Idempotent: loads the last snapshot timestamp, fetches fills since then for each symbol,
@@ -53,7 +73,7 @@ def reconcile_since_snapshot(
     start_ms = (snap or {}).get("ts_ms", 0)
 
     # Collect trades across symbols
-    trades: List[Dict[str, Any]] = []
+    trades: list[dict[str, Any]] = []
     for s in symbols:
         try:
             result = client.my_trades_since(s, start_ms)
@@ -65,8 +85,8 @@ def reconcile_since_snapshot(
                 else:
                     result = asyncio.run_coroutine_threadsafe(result, loop).result()
             trades.extend(result or [])
-        except Exception:
-            # Best-effort: skip symbol on API error; can log if needed
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            _log_suppressed(f"reconcile fetch for {s}", exc)
             continue
     trades.sort(key=lambda t: t.get("time", 0))
 
@@ -90,7 +110,7 @@ def reconcile_since_snapshot(
                 )
                 or 0.0
             )
-        except Exception:
+        except (TypeError, ValueError):
             fee = 0.0
         if sym and qty and px:
             venue_hint = str(t.get("venue") or "BINANCE").upper()
@@ -126,15 +146,15 @@ def reconcile_since_snapshot(
                         "ts": int(time.time() * 1000),
                     }
                 )
-            except Exception:
-                pass
+            except _STORE_ERRORS as exc:
+                _log_suppressed("reconcile store insert", exc)
             # Increment venue trades counter for observability
             try:
                 ctr = _METRICS.get("venue_trades_total")
                 if ctr is not None:
                     ctr.inc()
-            except Exception:
-                pass
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("reconcile metrics increment", exc)
 
     # Persist new snapshot
     new_snap = portfolio.snapshot()

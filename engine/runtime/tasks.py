@@ -2,19 +2,27 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Coroutine, Optional, Set
+from collections.abc import Coroutine
+from typing import Any
 
 log = logging.getLogger(__name__)
 
-_TASKS: Set[asyncio.Task[Any]] = set()
+_TASKS: set[asyncio.Task[Any]] = set()
 
 
-def spawn(coro: Coroutine[Any, Any, Any], *, name: Optional[str] = None) -> asyncio.Task[Any]:
+class MissingEventLoopError(RuntimeError):
+    """Raised when spawn() is called without an active event loop."""
+
+    def __init__(self) -> None:
+        super().__init__("spawn() requires a running event loop")
+
+
+def spawn(coro: Coroutine[Any, Any, Any], *, name: str | None = None) -> asyncio.Task[Any]:
     """Create and track an asyncio task, logging exceptions centrally."""
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError as exc:  # pragma: no cover - defensive
-        raise RuntimeError("spawn() requires a running event loop") from exc
+        raise MissingEventLoopError() from exc
 
     task = loop.create_task(coro, name=name)
     _TASKS.add(task)

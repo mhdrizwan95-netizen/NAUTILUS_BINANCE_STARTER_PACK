@@ -7,13 +7,26 @@ import math
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Deque, Optional
 
 from engine.config.defaults import MOMENTUM_15M_DEFAULTS
 from engine.config.env import env_bool, env_float, env_int, env_str
 from engine.execution.execute import StrategyExecutor
 
 logger = logging.getLogger("engine.momentum.15m")
+_SUPPRESSIBLE_EXCEPTIONS = (
+    AttributeError,
+    ConnectionError,
+    LookupError,
+    OSError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
+_EXECUTION_ERRORS = _SUPPRESSIBLE_EXCEPTIONS
+
+
+def _log_suppressed(context: str, exc: Exception) -> None:
+    logger.debug("%s suppressed: %s", context, exc, exc_info=True)
 
 
 @dataclass(frozen=True)
@@ -65,9 +78,7 @@ def load_momentum_15m_config() -> Momentum15mConfig:
 class Momentum15mStrategy:
     """Naive 15-minute momentum breakout strategy that interacts via StrategyExecutor."""
 
-    def __init__(
-        self, router, risk, cfg: Optional[Momentum15mConfig] = None, *, clock=time
-    ) -> None:
+    def __init__(self, router, risk, cfg: Momentum15mConfig | None = None, *, clock=time) -> None:
         self.cfg = cfg or load_momentum_15m_config()
         self._router = router
         self._clock = clock
@@ -78,7 +89,7 @@ class Momentum15mStrategy:
         self._base = self.symbol.split(".")[0]
         self._venue = self.symbol.split(".")[1]
         lookback = max(3, int(self.cfg.lookback_ticks))
-        self._window: Deque[float] = deque(maxlen=lookback)
+        self._window: deque[float] = deque(maxlen=lookback)
         self._executor = StrategyExecutor(
             risk=risk,
             router=router,
@@ -95,9 +106,10 @@ class Momentum15mStrategy:
             if pos is None:
                 return 0.0
             qty = float(getattr(pos, "quantity", 0.0) or 0.0)
-            return qty
-        except Exception:
+        except _SUPPRESSIBLE_EXCEPTIONS:
             return 0.0
+        else:
+            return qty
 
     def on_tick(self, symbol: str, price: float, ts: float) -> None:
         if not self.cfg.enabled:
@@ -113,7 +125,8 @@ class Momentum15mStrategy:
 
         now = ts if ts is not None else self._clock.time()
         self._window.append(float(price))
-        if len(self._window) < self._window.maxlen:
+        window_maxlen = self._window.maxlen or 0
+        if window_maxlen <= 0 or len(self._window) < window_maxlen:
             return
 
         window_high = max(self._window)
@@ -124,7 +137,7 @@ class Momentum15mStrategy:
         position_qty = self._position_quantity()
         in_position = position_qty > 0.0
 
-        side: Optional[str] = None
+        side: str | None = None
         qty: float = 0.0
         meta_reason = ""
 
@@ -180,8 +193,8 @@ class Momentum15mStrategy:
                 )
             else:
                 self._last_signal_ts = now
-        except Exception:
-            logger.exception("[MOMO15] failed to submit signal")
+        except _EXECUTION_ERRORS as exc:
+            _log_suppressed("momentum_15m.execute", exc)
 
 
 __all__ = [

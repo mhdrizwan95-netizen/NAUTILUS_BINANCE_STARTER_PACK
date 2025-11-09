@@ -1,14 +1,14 @@
-import { Power, Activity, Wifi, WifiOff, Pause, Play, RefreshCw } from 'lucide-react';
-import { motion } from 'motion/react';
-import { useId } from 'react';
-import type { ReactNode } from 'react';
+import { Power, Activity, Wifi, WifiOff, Pause, Play, RefreshCw } from "lucide-react";
+import { motion } from "motion/react";
+import { useId } from "react";
+import type { ReactNode } from "react";
 
-import { useRenderCounter } from '@/lib/debug/why';
-import { isDryRunMode } from '@/lib/security';
+import { useRenderCounter } from "@/lib/debug/why";
+import { isDryRunMode } from "@/lib/security";
 
-import { Badge } from './ui/badge';
-import { Button } from './ui/button';
-import { Switch } from './ui/switch';
+import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
+import { Switch } from "./ui/switch";
 
 export interface TopHudMetrics {
   totalPnl: number;
@@ -20,23 +20,23 @@ export interface TopHudMetrics {
 
 export interface TopHudVenue {
   name: string;
-  status: 'ok' | 'warn' | 'down';
+  status: "ok" | "warn" | "down";
   latencyMs: number;
   queue: number;
 }
 
 export interface TopHUDProps {
-  mode: 'paper' | 'live';
+  mode: "paper" | "live";
   metrics?: TopHudMetrics | null;
   venues?: TopHudVenue[] | null;
   isConnected?: boolean;
   isLoading?: boolean;
-  onModeChange: (mode: 'paper' | 'live') => void | Promise<void>;
+  onModeChange: (mode: "paper" | "live") => void | Promise<void>;
   onKillSwitch: () => void | Promise<void>;
   onPause: () => void | Promise<void>;
   onResume: () => void | Promise<void>;
   onFlatten: () => void | Promise<void>;
-  controlState?: 'pause' | 'resume' | 'flatten' | 'kill' | null;
+  controlState?: "pause" | "resume" | "flatten" | "kill" | null;
   tradingEnabled?: boolean;
 }
 
@@ -54,7 +54,7 @@ export function TopHUD({
   controlState = null,
   tradingEnabled = true,
 }: TopHUDProps) {
-  useRenderCounter('TopHUD');
+  useRenderCounter("TopHUD");
   const dryRunMode = isDryRunMode();
   const switchId = useId();
   const switchLabelId = `${switchId}-label`;
@@ -62,9 +62,9 @@ export function TopHUD({
   const statusLiveId = useId();
 
   const formatCurrency = (value: number) =>
-    new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
+    new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(value);
@@ -74,11 +74,12 @@ export function TopHUD({
 
   const metricsAvailable = Boolean(metrics) && !isLoading;
 
-  const totalPnlValue = metricsAvailable && metrics ? formatCurrency(metrics.totalPnl) : '--';
-  const winRateValue = metricsAvailable && metrics ? `${formatPercent(metrics.winRate)} win` : undefined;
-  const sharpeValue = metricsAvailable && metrics ? metrics.sharpe.toFixed(2) : '--';
-  const drawdownValue = metricsAvailable && metrics ? formatDrawdown(metrics.maxDrawdown) : '--';
-  const positionsValue = metricsAvailable && metrics ? metrics.openPositions.toString() : '--';
+  const totalPnlValue = metricsAvailable && metrics ? formatCurrency(metrics.totalPnl) : "--";
+  const winRateValue =
+    metricsAvailable && metrics ? `${formatPercent(metrics.winRate)} win` : undefined;
+  const sharpeValue = metricsAvailable && metrics ? metrics.sharpe.toFixed(2) : "--";
+  const drawdownValue = metricsAvailable && metrics ? formatDrawdown(metrics.maxDrawdown) : "--";
+  const positionsValue = metricsAvailable && metrics ? metrics.openPositions.toString() : "--";
 
   return (
     <motion.div
@@ -110,7 +111,9 @@ export function TopHUD({
                 <WifiOff className="w-4 h-4 text-red-400" aria-hidden="true" />
               )}
               <span className="sr-only">
-                {isConnected ? 'Connected to engine and market data' : 'Disconnected from engine and market data'}
+                {isConnected
+                  ? "Connected to engine and market data"
+                  : "Disconnected from engine and market data"}
               </span>
             </div>
             <p className="text-zinc-500 text-xs tracking-wider">TERMINAL</p>
@@ -119,7 +122,7 @@ export function TopHUD({
 
         {/* Center: Mode Toggle */}
         <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-zinc-800/50 border border-zinc-700/50">
-          <span className={`text-xs ${mode === 'paper' ? 'text-amber-400' : 'text-zinc-500'}`}>
+          <span className={`text-xs ${mode === "paper" ? "text-amber-400" : "text-zinc-500"}`}>
             PAPER
           </span>
           <span id={switchLabelId} className="sr-only">
@@ -128,13 +131,13 @@ export function TopHUD({
           <Switch
             id={switchId}
             aria-labelledby={switchLabelId}
-            checked={mode === 'live'}
+            checked={mode === "live"}
             onCheckedChange={(checked: boolean) => {
-              const nextMode = checked ? 'live' : 'paper';
+              const nextMode = checked ? "live" : "paper";
               void onModeChange(nextMode);
             }}
           />
-          <span className={`text-xs ${mode === 'live' ? 'text-emerald-400' : 'text-zinc-500'}`}>
+          <span className={`text-xs ${mode === "live" ? "text-emerald-400" : "text-zinc-500"}`}>
             LIVE
           </span>
         </div>
@@ -147,7 +150,7 @@ export function TopHUD({
             onClick={() => {
               void onPause();
             }}
-            disabled={controlState === 'pause' || !tradingEnabled}
+            disabled={controlState === "pause" || !tradingEnabled}
             className="gap-2 border-amber-400/30 text-amber-400 hover:bg-amber-500/10"
           >
             <Pause className="w-4 h-4" aria-hidden="true" />
@@ -159,7 +162,7 @@ export function TopHUD({
             onClick={() => {
               void onResume();
             }}
-            disabled={controlState === 'resume' || tradingEnabled}
+            disabled={controlState === "resume" || tradingEnabled}
             className="gap-2 border-emerald-400/30 text-emerald-400 hover:bg-emerald-500/10"
           >
             <Play className="w-4 h-4" aria-hidden="true" />
@@ -171,7 +174,7 @@ export function TopHUD({
             onClick={() => {
               void onFlatten();
             }}
-            disabled={controlState === 'flatten'}
+            disabled={controlState === "flatten"}
             className="gap-2 border-cyan-400/30 text-cyan-300 hover:bg-cyan-500/10"
           >
             <RefreshCw className="w-4 h-4" aria-hidden="true" />
@@ -183,7 +186,7 @@ export function TopHUD({
             onClick={() => {
               void onKillSwitch();
             }}
-            disabled={controlState === 'kill'}
+            disabled={controlState === "kill"}
             className="gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
             aria-describedby={killDescriptionId}
           >
@@ -194,14 +197,14 @@ export function TopHUD({
             Immediately disable live trading across all venues.
           </span>
           <Badge
-            variant={tradingEnabled ? 'secondary' : 'destructive'}
+            variant={tradingEnabled ? "secondary" : "destructive"}
             id={statusLiveId}
             role="status"
             aria-live="polite"
             aria-atomic="true"
             className="uppercase tracking-wide"
           >
-            {tradingEnabled ? 'Trading enabled' : 'Trading paused'}
+            {tradingEnabled ? "Trading enabled" : "Trading paused"}
           </Badge>
         </div>
       </div>
@@ -209,7 +212,11 @@ export function TopHUD({
       {/* Row 2: Global Metrics & Venue Status */}
       <div className="flex items-center justify-between">
         {/* Left: Global Metrics */}
-        <dl className="grid gap-4 sm:flex sm:items-center sm:gap-8" aria-live="polite" aria-describedby={statusLiveId}>
+        <dl
+          className="grid gap-4 sm:flex sm:items-center sm:gap-8"
+          aria-live="polite"
+          aria-describedby={statusLiveId}
+        >
           <MetricDisplay
             label="PnL"
             value={totalPnlValue}
@@ -217,9 +224,9 @@ export function TopHUD({
             color={
               metricsAvailable && metrics
                 ? metrics.totalPnl >= 0
-                  ? 'text-emerald-400'
-                  : 'text-red-400'
-                : 'text-zinc-600'
+                  ? "text-emerald-400"
+                  : "text-red-400"
+                : "text-zinc-600"
             }
           />
           <MetricDisplay
@@ -228,9 +235,9 @@ export function TopHUD({
             color={
               metricsAvailable && metrics
                 ? metrics.sharpe > 1
-                  ? 'text-cyan-400'
-                  : 'text-zinc-400'
-                : 'text-zinc-600'
+                  ? "text-cyan-400"
+                  : "text-zinc-400"
+                : "text-zinc-600"
             }
           />
           <MetricDisplay
@@ -239,15 +246,15 @@ export function TopHUD({
             color={
               metricsAvailable && metrics
                 ? metrics.maxDrawdown < 0.1
-                  ? 'text-zinc-400'
-                  : 'text-amber-400'
-                : 'text-zinc-600'
+                  ? "text-zinc-400"
+                  : "text-amber-400"
+                : "text-zinc-600"
             }
           />
           <MetricDisplay
             label="Positions"
             value={positionsValue}
-            color={metricsAvailable ? 'text-zinc-300' : 'text-zinc-600'}
+            color={metricsAvailable ? "text-zinc-300" : "text-zinc-600"}
           />
         </dl>
 
@@ -273,13 +280,15 @@ function MetricDisplay({
   subtitle?: ReactNode;
   color?: string;
 }) {
-  const isText = typeof value === 'string' || typeof value === 'number';
+  const isText = typeof value === "string" || typeof value === "number";
 
   return (
     <>
       <dt className="text-xs text-zinc-500 tracking-wider">{label}</dt>
       <dd className="flex items-baseline gap-2">
-        <span className={isText ? `font-mono ${color ?? 'text-zinc-300'}` : 'font-mono text-zinc-300'}>
+        <span
+          className={isText ? `font-mono ${color ?? "text-zinc-300"}` : "font-mono text-zinc-300"}
+        >
           {value}
         </span>
         {subtitle && <span className="text-xs text-zinc-600 font-mono">{subtitle}</span>}
@@ -290,15 +299,15 @@ function MetricDisplay({
 
 function VenueIndicator({ venue }: { venue: TopHudVenue }) {
   const statusColor = {
-    ok: 'bg-emerald-400',
-    warn: 'bg-amber-400',
-    down: 'bg-red-500',
+    ok: "bg-emerald-400",
+    warn: "bg-amber-400",
+    down: "bg-red-500",
   }[venue.status];
 
   const statusLabel = {
-    ok: 'Healthy',
-    warn: 'Degraded',
-    down: 'Offline',
+    ok: "Healthy",
+    warn: "Degraded",
+    down: "Offline",
   }[venue.status];
 
   return (
@@ -310,7 +319,7 @@ function VenueIndicator({ venue }: { venue: TopHudVenue }) {
     >
       <div className="relative">
         <div className={`w-2 h-2 rounded-full ${statusColor}`} aria-hidden="true" />
-        {venue.status === 'ok' && (
+        {venue.status === "ok" && (
           <motion.div
             className={`w-2 h-2 rounded-full ${statusColor} absolute inset-0`}
             animate={{ scale: [1, 2, 1], opacity: [1, 0, 1] }}

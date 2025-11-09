@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Callable, Dict, Optional
+from collections.abc import Callable
+from typing import Any
 
 from engine import metrics
 from engine.core.event_bus import EventBus
 
 logger = logging.getLogger("engine.market_data.dispatcher")
+_DISPATCH_ERRORS: tuple[type[Exception], ...] = (RuntimeError, ValueError)
 
 
 class MarketDataDispatcher:
@@ -21,7 +23,7 @@ class MarketDataDispatcher:
         self.venue = venue
         self._log = logger
 
-    def handle_stream_event(self, event: Dict[str, Any]) -> None:
+    def handle_stream_event(self, event: dict[str, Any]) -> None:
         """Handle a message emitted by the WebSocket client."""
         if not isinstance(event, dict):
             return
@@ -35,15 +37,15 @@ class MarketDataDispatcher:
         try:
             evt_type = str(enriched.get("type") or "tick").lower()
             metrics.market_data_events_total.labels(source=self.source, type=evt_type).inc()
-        except Exception as exc:
+        except _DISPATCH_ERRORS as exc:
             self._log.debug("Failed to record market data metric: %s", exc, exc_info=True)
         try:
             self.bus.fire(topic, enriched)
-        except Exception as exc:
+        except _DISPATCH_ERRORS as exc:
             self._log.debug("Failed to dispatch market data event: %s", exc, exc_info=True)
 
     @staticmethod
-    def _topic_for_event(event_type: Optional[str]) -> Optional[str]:
+    def _topic_for_event(event_type: str | None) -> str | None:
         if not event_type:
             return "market.tick"
         normalized = str(event_type).lower()
@@ -64,11 +66,11 @@ class MarketDataLogger:
         bus: EventBus,
         *,
         sample_rate_hz: float = 5.0,
-        logger: Optional[logging.Logger] = None,
+        logger: logging.Logger | None = None,
     ) -> None:
         self.bus = bus
         self._log = logger or logging.getLogger("engine.market_data.logger")
-        self._handler: Optional[Callable[[Dict[str, Any]], Any]] = None
+        self._handler: Callable[[dict[str, Any]], Any] | None = None
         self._min_interval = 0.0 if sample_rate_hz <= 0 else max(0.01, 1.0 / float(sample_rate_hz))
         self._last_logged = 0.0
 
@@ -76,7 +78,7 @@ class MarketDataLogger:
         if self._handler is not None:
             return
 
-        async def _handle(event: Dict[str, Any]) -> None:
+        async def _handle(event: dict[str, Any]) -> None:
             now = time.monotonic()
             if now - self._last_logged < self._min_interval:
                 return

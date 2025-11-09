@@ -100,4 +100,3 @@ can replay the decisions offline.
 `FeedConfig` supports custom timestamp/price/volume column names and automatically
 converts second-based timestamps to milliseconds for compatibility with the live
 strategy modules.
-

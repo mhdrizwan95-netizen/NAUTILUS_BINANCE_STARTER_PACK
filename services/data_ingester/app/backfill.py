@@ -1,7 +1,6 @@
 import os
 import time
 from pathlib import Path
-from typing import Optional
 
 import ccxt  # type: ignore
 import pandas as pd
@@ -12,6 +11,12 @@ from services.common import manifest
 from .config import settings
 
 EARLIEST_BINANCE_TS = 1502942400000  # 2017-08-17 00:00:00 UTC
+_FETCH_ERRORS = (
+    ccxt.BaseError,
+    ValueError,
+    RuntimeError,
+    OSError,
+)
 
 
 def _exchange():
@@ -51,7 +56,7 @@ def _target_end_ts() -> int:
     return int(time.time() * 1000)
 
 
-def _write_chunk(symbol: str, frame: pd.DataFrame) -> Optional[str]:
+def _write_chunk(symbol: str, frame: pd.DataFrame) -> str | None:
     t_start = int(frame["timestamp"].min())
     t_end = int(frame["timestamp"].max())
     dest_dir = _landing_dir(symbol)
@@ -99,8 +104,8 @@ def run_backfill() -> None:
                     since=since,
                     limit=settings.BATCH_LIMIT,
                 )
-            except Exception as exc:  # pragma: no cover - network dependent
-                logger.warning("Fetch error for %s at %s: %s", symbol, since, exc)
+            except _FETCH_ERRORS:  # pragma: no cover - network dependent
+                logger.exception("Fetch error for %s at %s", symbol, since)
                 _sleep()
                 continue
 

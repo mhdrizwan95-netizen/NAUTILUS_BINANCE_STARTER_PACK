@@ -1,11 +1,10 @@
-import { TrendingUp, TrendingDown, Minus, AlertTriangle } from 'lucide-react';
-import { motion } from 'motion/react';
+import { TrendingUp, TrendingDown, Minus, AlertTriangle } from "lucide-react";
+import { motion } from "motion/react";
 
-import { MiniChart } from './MiniChart';
-import { Badge } from './ui/badge';
-import { getVenueColor, getVenueGradient } from '../lib/mockData';
-import type { StrategyPerformance, Venue, Strategy } from '../types/trading';
-
+import { MiniChart } from "./MiniChart";
+import { Badge } from "./ui/badge";
+import { getVenueColor, getVenueGradient } from "../lib/mockData";
+import type { StrategyPerformance, Venue, Strategy } from "../types/trading";
 
 interface StrategyPodProps {
   performance: StrategyPerformance;
@@ -20,16 +19,16 @@ export function StrategyPod({ performance, strategy, venue, onClick }: StrategyP
   const venueGradient = getVenueGradient(venue.type);
 
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
       minimumFractionDigits: 0,
       maximumFractionDigits: 0,
     }).format(value);
   };
 
   const formatPercent = (value: number) => {
-    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+    return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
   };
 
   const getTrendIcon = () => {
@@ -39,15 +38,15 @@ export function StrategyPod({ performance, strategy, venue, onClick }: StrategyP
   };
 
   const getPnLColor = () => {
-    if (metrics.pnlPercent > 0) return 'text-emerald-400';
-    if (metrics.pnlPercent < 0) return 'text-red-400';
-    return 'text-zinc-400';
+    if (metrics.pnlPercent > 0) return "text-emerald-400";
+    if (metrics.pnlPercent < 0) return "text-red-400";
+    return "text-zinc-400";
   };
 
   const healthColor = {
-    optimal: 'border-emerald-400/20 bg-emerald-400/5',
-    warning: 'border-amber-400/20 bg-amber-400/5',
-    critical: 'border-red-400/20 bg-red-400/5',
+    optimal: "border-emerald-400/20 bg-emerald-400/5",
+    warning: "border-amber-400/20 bg-amber-400/5",
+    critical: "border-red-400/20 bg-red-400/5",
   }[health];
 
   return (
@@ -69,15 +68,10 @@ export function StrategyPod({ performance, strategy, venue, onClick }: StrategyP
         <div>
           <div className="flex items-center gap-2 mb-1">
             <h3 className="text-zinc-100">{strategy.name}</h3>
-            {health === 'critical' && (
-              <AlertTriangle className="w-4 h-4 text-red-400" />
-            )}
+            {health === "critical" && <AlertTriangle className="w-4 h-4 text-red-400" />}
           </div>
           <div className="flex items-center gap-2">
-            <Badge
-              variant="outline"
-              className="text-xs px-2 py-0 border-zinc-700/50 text-zinc-400"
-            >
+            <Badge variant="outline" className="text-xs px-2 py-0 border-zinc-700/50 text-zinc-400">
               {venue.name}
             </Badge>
             <span className="text-xs text-zinc-600 font-mono">{metrics.tradeCount} trades</span>
@@ -108,7 +102,7 @@ export function StrategyPod({ performance, strategy, venue, onClick }: StrategyP
         <MiniChart
           data={metrics.sparkline}
           color={venueColor}
-          trend={metrics.pnlPercent > 0 ? 'up' : metrics.pnlPercent < 0 ? 'down' : 'neutral'}
+          trend={metrics.pnlPercent > 0 ? "up" : metrics.pnlPercent < 0 ? "down" : "neutral"}
         />
       </div>
 
@@ -119,7 +113,7 @@ export function StrategyPod({ performance, strategy, venue, onClick }: StrategyP
             <span className="text-xs text-zinc-500 font-mono">{symbol.symbol}</span>
             <span
               className={`text-xs font-mono ${
-                symbol.pnl >= 0 ? 'text-emerald-400/70' : 'text-red-400/70'
+                symbol.pnl >= 0 ? "text-emerald-400/70" : "text-red-400/70"
               }`}
             >
               {formatCurrency(symbol.pnl)}

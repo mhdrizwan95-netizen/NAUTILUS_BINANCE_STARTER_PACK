@@ -7,21 +7,30 @@ import argparse
 import json
 from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Dict
 
 from backtests.engine import BacktestEngine, FeedConfig
 from engine.strategies.trend_follow import TrendStrategyModule, load_trend_config
 
 
-def _parse_data_map(pairs: list[str]) -> Dict[str, Path]:
-    mapping: Dict[str, Path] = {}
+class DataMappingError(ValueError):
+    def __init__(self, raw: str) -> None:
+        super().__init__(f"Data mapping must be '<interval>=<path>', got '{raw}'")
+
+
+class IntervalMappingError(ValueError):
+    def __init__(self, raw: str) -> None:
+        super().__init__(f"Invalid interval for mapping '{raw}'")
+
+
+def _parse_data_map(pairs: list[str]) -> dict[str, Path]:
+    mapping: dict[str, Path] = {}
     for item in pairs:
         if "=" not in item:
-            raise ValueError(f"Data mapping must be '<interval>=<path>', got '{item}'")
+            raise DataMappingError(item)
         interval, path = item.split("=", 1)
         interval = interval.strip()
         if not interval:
-            raise ValueError(f"Invalid interval for mapping '{item}'")
+            raise IntervalMappingError(item)
         mapping[interval] = Path(path.strip())
     return mapping
 
@@ -29,10 +38,10 @@ def _parse_data_map(pairs: list[str]) -> Dict[str, Path]:
 def run_backtest(
     *,
     symbol: str,
-    data_map: Dict[str, Path],
+    data_map: dict[str, Path],
     warmup: int,
     output: Path,
-) -> Dict:
+) -> dict:
     cfg = replace(
         load_trend_config(),
         enabled=True,

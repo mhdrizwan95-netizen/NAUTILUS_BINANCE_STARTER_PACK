@@ -1,14 +1,15 @@
-import { memo } from 'react';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import { memo } from "react";
+import { LineChart, Line, ResponsiveContainer } from "recharts";
 
 interface MiniChartProps {
   data: number[];
   color: string;
+  trend?: "up" | "down" | "neutral";
 }
 
 export const MiniChart = memo(({ data, color }: MiniChartProps) => {
   const chartData = data.map((value, index) => ({ value, index }));
-  
+
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart data={chartData}>
@@ -25,4 +26,4 @@ export const MiniChart = memo(({ data, color }: MiniChartProps) => {
   );
 });
 
-MiniChart.displayName = 'MiniChart';
+MiniChart.displayName = "MiniChart";

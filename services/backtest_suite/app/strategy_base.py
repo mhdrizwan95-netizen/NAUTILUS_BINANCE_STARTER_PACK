@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class Strategy:
@@ -6,7 +6,7 @@ class Strategy:
         self.name = name
         self.instrument = instrument
 
-    def on_bar(self, bar: Dict[str, Any], params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def on_bar(self, bar: dict[str, Any], params: dict[str, Any]) -> dict[str, Any] | None:
         """
         Return an order dict or None.
         Order example: { "side": "buy", "qty": 1.0, "price": bar["close"], "tag": "...", "stop": price, "tp": price }
