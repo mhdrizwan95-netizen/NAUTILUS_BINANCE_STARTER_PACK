@@ -1,5 +1,14 @@
 import { useQuery, useInfiniteQuery, useQueryClient } from "@tanstack/react-query";
-import { Calendar as CalendarIcon, Filter, RefreshCcw } from "lucide-react";
+import {
+  AlertCircle,
+  AlertTriangle,
+  Calendar as CalendarIcon,
+  Filter,
+  Info,
+  RefreshCcw,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, useId } from "react";
 import type { DateRange } from "react-day-picker";
 
@@ -19,12 +28,7 @@ import {
   toDateRange,
 } from "../../lib/dashboardFilters";
 import { queryKeys } from "../../lib/queryClient";
-import {
-  useDashboardFilterActions,
-  useDashboardFilters,
-  usePagination,
-  usePaginationActions,
-} from "../../lib/store";
+import { useDashboardFilterActions, useDashboardFilters } from "../../lib/store";
 import {
   validateApiResponse,
   dashboardSummarySchema,
@@ -45,7 +49,6 @@ import { Checkbox } from "../ui/checkbox";
 import { Label } from "../ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { ScrollArea } from "../ui/scroll-area";
-import { Separator } from "../ui/separator";
 import { Skeleton } from "../ui/skeleton";
 import {
   Table,
@@ -71,13 +74,40 @@ function formatPercent(value: number) {
 
 type EquityPoint = { t: string } & Record<string, number | string>;
 
+const isSameDateRange = (a?: DateRange, b?: DateRange) => {
+  if (a?.from?.getTime() !== b?.from?.getTime()) return false;
+  if (a?.to?.getTime() !== b?.to?.getTime()) return false;
+  return true;
+};
+
+const isShallowEqualArray = (a: string[], b: string[]) => {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+};
+
+const getLastPageInfo = (pages: Array<{ page: PageMetadata | null }> | undefined) => {
+  if (!pages?.length) return null;
+  const last = pages[pages.length - 1];
+  return last?.page ?? null;
+};
+
+const PANEL_CLASS =
+  "rounded-2xl border border-zinc-800/60 bg-zinc-950/40 backdrop-blur-sm shadow-lg shadow-black/10";
+
+type MetricColor = "emerald" | "red" | "cyan" | "amber" | "zinc";
+
+type MetricItem = {
+  key: string;
+  label: string;
+  value: string | null;
+  color: MetricColor;
+  subtitle?: string;
+  trend?: "up" | "down";
+};
+
 export function DashboardTab() {
   const dashboardFilters = useDashboardFilters();
   const { setDashboardFilters } = useDashboardFilterActions();
-  const { setPagination, clearPagination } = usePaginationActions();
-  const positionsPageInfo = usePagination("positions");
-  const tradesPageInfo = usePagination("trades");
-  const alertsPageInfo = usePagination("alerts");
   const queryClient = useQueryClient();
 
   const [pendingRange, setPendingRange] = useState<DateRange | undefined>(() =>
@@ -89,9 +119,16 @@ export function DashboardTab() {
   const [selectedSymbols, setSelectedSymbols] = useState<string[]>(dashboardFilters.symbols);
 
   useEffect(() => {
-    setPendingRange(toDateRange(dashboardFilters));
-    setSelectedStrategies(dashboardFilters.strategies);
-    setSelectedSymbols(dashboardFilters.symbols);
+    const nextRange = toDateRange(dashboardFilters);
+    setPendingRange((previous) => (isSameDateRange(previous, nextRange) ? previous : nextRange));
+    setSelectedStrategies((previous) =>
+      isShallowEqualArray(previous, dashboardFilters.strategies)
+        ? previous
+        : dashboardFilters.strategies,
+    );
+    setSelectedSymbols((previous) =>
+      isShallowEqualArray(previous, dashboardFilters.symbols) ? previous : dashboardFilters.symbols,
+    );
   }, [dashboardFilters]);
 
   const positionsHeadingId = useId();
@@ -110,11 +147,10 @@ export function DashboardTab() {
   };
 
   const resetPagedFeeds = useCallback(() => {
-    clearPagination("positions", "trades", "alerts");
     queryClient.removeQueries({ queryKey: queryKeys.dashboard.positions() });
     queryClient.removeQueries({ queryKey: queryKeys.dashboard.trades() });
     queryClient.removeQueries({ queryKey: queryKeys.dashboard.alerts() });
-  }, [clearPagination, queryClient]);
+  }, [queryClient]);
 
   // Build query parameters
   const summaryParams = useMemo(
@@ -154,15 +190,6 @@ export function DashboardTab() {
     initialPageParam: undefined as string | undefined,
   });
 
-  useEffect(() => {
-    const pages = positionsQuery.data?.pages;
-    if (!pages?.length) return;
-    const last = pages[pages.length - 1];
-    if (last?.page) {
-      setPagination("positions", last.page);
-    }
-  }, [positionsQuery.data, setPagination]);
-
   const tradesQuery = useInfiniteQuery({
     queryKey: queryKeys.dashboard.trades(),
     queryFn: ({ pageParam }) =>
@@ -173,15 +200,6 @@ export function DashboardTab() {
     staleTime: 10 * 1000,
     initialPageParam: undefined as string | undefined,
   });
-
-  useEffect(() => {
-    const pages = tradesQuery.data?.pages;
-    if (!pages?.length) return;
-    const last = pages[pages.length - 1];
-    if (last?.page) {
-      setPagination("trades", last.page);
-    }
-  }, [setPagination, tradesQuery.data]);
 
   const alertsQuery = useInfiniteQuery({
     queryKey: queryKeys.dashboard.alerts(),
@@ -194,21 +212,54 @@ export function DashboardTab() {
     initialPageParam: undefined as string | undefined,
   });
 
-  useEffect(() => {
-    const pages = alertsQuery.data?.pages;
-    if (!pages?.length) return;
-    const last = pages[pages.length - 1];
-    if (last?.page) {
-      setPagination("alerts", last.page);
-    }
-  }, [alertsQuery.data, setPagination]);
-
   const positionsPages = positionsQuery.data?.pages ?? [];
   const positions = positionsPages.flatMap((page) => page.data);
   const tradesPages = tradesQuery.data?.pages ?? [];
   const trades = tradesPages.flatMap((page) => page.data);
   const alertsPages = alertsQuery.data?.pages ?? [];
   const alerts = alertsPages.flatMap((page) => page.data);
+  const positionsPageInfo = useMemo(() => getLastPageInfo(positionsPages), [positionsPages]);
+  const tradesPageInfo = useMemo(() => getLastPageInfo(tradesPages), [tradesPages]);
+  const alertsPageInfo = useMemo(() => getLastPageInfo(alertsPages), [alertsPages]);
+
+  const summaryKpis = summaryQuery.data?.kpis;
+  const metricItems: MetricItem[] = [
+    {
+      key: "totalPnl",
+      label: "Total PnL",
+      value: summaryKpis ? formatCurrency(summaryKpis.totalPnl) : null,
+      color: summaryKpis
+        ? summaryKpis.totalPnl >= 0
+          ? "emerald"
+          : "red"
+        : ("zinc" as MetricColor),
+      trend: summaryKpis ? (summaryKpis.totalPnl >= 0 ? "up" : "down") : undefined,
+    },
+    {
+      key: "winRate",
+      label: "Win Rate",
+      value: summaryKpis ? formatPercent(summaryKpis.winRate) : null,
+      color: "cyan" as MetricColor,
+    },
+    {
+      key: "sharpe",
+      label: "Sharpe",
+      value: summaryKpis ? summaryKpis.sharpe.toFixed(2) : null,
+      color: "amber" as MetricColor,
+    },
+    {
+      key: "drawdown",
+      label: "Max Drawdown",
+      value: summaryKpis ? formatPercent(summaryKpis.maxDrawdown) : null,
+      color: "red" as MetricColor,
+    },
+    {
+      key: "positions",
+      label: "Open Positions",
+      value: summaryKpis ? summaryKpis.openPositions.toString() : null,
+      color: "zinc" as MetricColor,
+    },
+  ];
   const hasMorePositions =
     Boolean(positionsPageInfo?.nextCursor) ||
     Boolean(positionsPageInfo?.hasMore) ||
@@ -461,60 +512,21 @@ export function DashboardTab() {
         )}
       </Card>
 
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-5">
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground">Total PnL</div>
-          <div className="text-lg font-semibold">
-            {summaryQuery.data ? (
-              formatCurrency(summaryQuery.data.kpis.totalPnl)
-            ) : (
-              <Skeleton className="h-6 w-32" />
-            )}
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground">Win Rate</div>
-          <div className="text-lg font-semibold">
-            {summaryQuery.data ? (
-              formatPercent(summaryQuery.data.kpis.winRate)
-            ) : (
-              <Skeleton className="h-6 w-24" />
-            )}
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground">Sharpe</div>
-          <div className="text-lg font-semibold">
-            {summaryQuery.data ? (
-              summaryQuery.data.kpis.sharpe.toFixed(2)
-            ) : (
-              <Skeleton className="h-6 w-16" />
-            )}
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground">Max Drawdown</div>
-          <div className="text-lg font-semibold">
-            {summaryQuery.data ? (
-              formatPercent(summaryQuery.data.kpis.maxDrawdown)
-            ) : (
-              <Skeleton className="h-6 w-24" />
-            )}
-          </div>
-        </Card>
-        <Card className="p-4">
-          <div className="text-xs text-muted-foreground">Positions</div>
-          <div className="text-lg font-semibold">
-            {summaryQuery.data ? (
-              summaryQuery.data.kpis.openPositions
-            ) : (
-              <Skeleton className="h-6 w-12" />
-            )}
-          </div>
-        </Card>
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4 2xl:grid-cols-5">
+        {metricItems.map((item) => (
+          <MetricCard
+            key={item.key}
+            label={item.label}
+            value={item.value}
+            color={item.color}
+            subtitle={item.subtitle}
+            trend={item.trend}
+            loading={!summaryKpis}
+          />
+        ))}
       </div>
 
-      <Card className="space-y-4 p-4">
+      <Card className={`${PANEL_CLASS} space-y-4 p-5`}>
         <div className="flex items-center justify-between">
           <h3 className="font-medium">Equity Curves</h3>
         </div>
@@ -525,18 +537,18 @@ export function DashboardTab() {
       </Card>
 
       <div className="grid gap-4 md:grid-cols-2">
-        <Card className="space-y-4 p-4">
+        <Card className={`${PANEL_CLASS} space-y-4 p-5 min-h-[360px]`}>
           <h3 className="font-medium">PnL by Symbol</h3>
           <PnlBySymbol data={summaryQuery.data?.pnlBySymbol ?? []} />
         </Card>
-        <Card className="space-y-4 p-4">
+        <Card className={`${PANEL_CLASS} space-y-4 p-5 min-h-[360px]`}>
           <h3 className="font-medium">Distribution of Returns</h3>
           <ReturnsHistogram returns={summaryQuery.data?.returns ?? []} />
         </Card>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-4">
-        <Card className="p-4">
+        <Card className={`${PANEL_CLASS} flex flex-col p-5 min-h-[360px]`}>
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 id={positionsHeadingId} className="font-medium">
               Open Positions
@@ -545,33 +557,37 @@ export function DashboardTab() {
               <span className="text-xs text-muted-foreground text-right">{positionsSummary}</span>
             ) : null}
           </div>
-          <Table aria-labelledby={positionsHeadingId}>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Entry</TableHead>
-                <TableHead>Mark</TableHead>
-                <TableHead className="text-right">PnL</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {positions.map((position) => (
-                <TableRow key={position.id}>
-                  <TableCell>{position.symbol}</TableCell>
-                  <TableCell>{position.qty}</TableCell>
-                  <TableCell>{formatCurrency(position.entry)}</TableCell>
-                  <TableCell>{formatCurrency(position.mark)}</TableCell>
-                  <TableCell
-                    className={`text-right ${position.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
-                  >
-                    {formatCurrency(position.pnl)}
-                  </TableCell>
+          <div className="mt-2 flex-1 overflow-auto rounded-xl border border-zinc-900/40">
+            <Table aria-labelledby={positionsHeadingId}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Qty</TableHead>
+                  <TableHead>Entry</TableHead>
+                  <TableHead>Mark</TableHead>
+                  <TableHead className="text-right">PnL</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-            <TableCaption>{positions.length === 0 ? "No open positions" : undefined}</TableCaption>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {positions.map((position) => (
+                  <TableRow key={position.id}>
+                    <TableCell>{position.symbol}</TableCell>
+                    <TableCell>{position.qty}</TableCell>
+                    <TableCell>{formatCurrency(position.entry)}</TableCell>
+                    <TableCell>{formatCurrency(position.mark)}</TableCell>
+                    <TableCell
+                      className={`text-right ${position.pnl >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                    >
+                      {formatCurrency(position.pnl)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+              <TableCaption>
+                {positions.length === 0 ? "No open positions" : undefined}
+              </TableCaption>
+            </Table>
+          </div>
           {hasMorePositions ? (
             <div className="mt-3 flex justify-center">
               <Button
@@ -586,7 +602,7 @@ export function DashboardTab() {
           ) : null}
         </Card>
 
-        <Card className="p-4">
+        <Card className={`${PANEL_CLASS} flex flex-col p-5 min-h-[360px]`}>
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 id={tradesHeadingId} className="font-medium">
               Recent Trades
@@ -595,35 +611,39 @@ export function DashboardTab() {
               <span className="text-xs text-muted-foreground text-right">{tradesSummary}</span>
             ) : null}
           </div>
-          <Table aria-labelledby={tradesHeadingId}>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>Symbol</TableHead>
-                <TableHead>Side</TableHead>
-                <TableHead>Qty</TableHead>
-                <TableHead>Price</TableHead>
-                <TableHead className="text-right">PnL</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {trades.map((trade) => (
-                <TableRow key={trade.id}>
-                  <TableCell>{new Date(trade.timestamp).toLocaleTimeString()}</TableCell>
-                  <TableCell>{trade.symbol}</TableCell>
-                  <TableCell className={trade.side === "buy" ? "text-emerald-400" : "text-red-400"}>
-                    {trade.side.toUpperCase()}
-                  </TableCell>
-                  <TableCell>{trade.quantity}</TableCell>
-                  <TableCell>{formatCurrency(trade.price)}</TableCell>
-                  <TableCell className="text-right">
-                    {trade.pnl !== undefined ? formatCurrency(trade.pnl) : "—"}
-                  </TableCell>
+          <div className="mt-2 flex-1 overflow-auto rounded-xl border border-zinc-900/40">
+            <Table aria-labelledby={tradesHeadingId}>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Time</TableHead>
+                  <TableHead>Symbol</TableHead>
+                  <TableHead>Side</TableHead>
+                  <TableHead>Qty</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead className="text-right">PnL</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-            <TableCaption>{trades.length === 0 ? "No recent trades" : undefined}</TableCaption>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {trades.map((trade) => (
+                  <TableRow key={trade.id}>
+                    <TableCell>{new Date(trade.timestamp).toLocaleTimeString()}</TableCell>
+                    <TableCell>{trade.symbol}</TableCell>
+                    <TableCell
+                      className={trade.side === "buy" ? "text-emerald-400" : "text-red-400"}
+                    >
+                      {trade.side.toUpperCase()}
+                    </TableCell>
+                    <TableCell>{trade.quantity}</TableCell>
+                    <TableCell>{formatCurrency(trade.price)}</TableCell>
+                    <TableCell className="text-right">
+                      {trade.pnl !== undefined ? formatCurrency(trade.pnl) : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+              <TableCaption>{trades.length === 0 ? "No recent trades" : undefined}</TableCaption>
+            </Table>
+          </div>
           {hasMoreTrades ? (
             <div className="mt-3 flex justify-center">
               <Button
@@ -638,35 +658,32 @@ export function DashboardTab() {
           ) : null}
         </Card>
 
-        <Card className="p-4">
+        <Card className={`${PANEL_CLASS} flex flex-col p-5 min-h-[360px]`}>
           <div className="mb-3 flex items-center justify-between gap-2">
             <h3 className="font-medium">Alerts</h3>
             {alertsSummary ? (
               <span className="text-xs text-muted-foreground text-right">{alertsSummary}</span>
             ) : null}
           </div>
-          <ScrollArea className="h-64 pr-2">
+          <ScrollArea className="mt-2 flex-1 pr-2">
             <div className="space-y-3">
-              {alerts.map((alert) => (
-                <div key={alert.id} className="rounded-md border border-border p-3">
-                  <div className="flex items-center justify-between text-xs text-muted-foreground">
-                    <span>{new Date(alert.timestamp).toLocaleTimeString()}</span>
-                    <Badge
-                      variant={
-                        alert.type === "error"
-                          ? "destructive"
-                          : alert.type === "warning"
-                            ? "secondary"
-                            : "outline"
-                      }
-                    >
-                      {alert.type.toUpperCase()}
-                    </Badge>
+              {alerts.map((alert) => {
+                const visuals = getAlertVisuals(alert.type);
+                return (
+                  <div
+                    key={alert.id}
+                    className={`flex items-start gap-3 rounded-xl border p-3 ${visuals.bg} ${visuals.border}`}
+                  >
+                    <div className={`rounded-full p-1 ${visuals.color}`}>{visuals.icon}</div>
+                    <div className="flex-1">
+                      <p className="text-sm text-zinc-200">{alert.message}</p>
+                      <p className="text-xs text-zinc-500">
+                        {new Date(alert.timestamp).toLocaleTimeString()}
+                      </p>
+                    </div>
                   </div>
-                  <Separator className="my-2" />
-                  <p className="text-sm leading-tight text-muted-foreground">{alert.message}</p>
-                </div>
-              ))}
+                );
+              })}
               {alerts.length === 0 && <p className="text-xs text-muted-foreground">No alerts</p>}
             </div>
           </ScrollArea>
@@ -684,11 +701,11 @@ export function DashboardTab() {
           ) : null}
         </Card>
 
-        <Card className="p-4">
+        <Card className={`${PANEL_CLASS} flex flex-col p-5 min-h-[360px]`}>
           <h3 className="mb-3 font-medium">Venue Health</h3>
           <div className="space-y-3">
             {healthQuery.data?.venues.map((venue) => (
-              <div key={venue.name} className="rounded-md border border-border p-3 text-sm">
+              <div key={venue.name} className="rounded-xl border border-zinc-900/40 p-3 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="font-medium">{venue.name}</span>
                   <Badge
@@ -717,4 +734,65 @@ export function DashboardTab() {
       </div>
     </div>
   );
+}
+
+interface MetricCardProps {
+  label: string;
+  value: string | null;
+  subtitle?: string;
+  trend?: "up" | "down";
+  color: MetricColor;
+  loading: boolean;
+}
+
+function MetricCard({ label, value, subtitle, trend, color, loading }: MetricCardProps) {
+  const colorClasses: Record<MetricColor, string> = {
+    emerald: "text-emerald-400",
+    red: "text-red-400",
+    cyan: "text-cyan-300",
+    amber: "text-amber-300",
+    zinc: "text-zinc-200",
+  };
+
+  return (
+    <div className={`${PANEL_CLASS} min-h-[130px] space-y-2 p-5`}>
+      <div className="flex items-center justify-between text-[11px] uppercase tracking-wide text-zinc-500">
+        <span>{label}</span>
+        {trend === "up" ? (
+          <TrendingUp className="h-4 w-4 text-emerald-400" />
+        ) : trend === "down" ? (
+          <TrendingDown className="h-4 w-4 text-red-400" />
+        ) : null}
+      </div>
+      <div className={`font-mono text-2xl ${colorClasses[color]}`}>
+        {loading ? <Skeleton className="h-6 w-24" /> : (value ?? "—")}
+      </div>
+      {subtitle ? <p className="text-xs text-zinc-500">{subtitle}</p> : null}
+    </div>
+  );
+}
+
+function getAlertVisuals(type: string) {
+  if (type === "error") {
+    return {
+      icon: <AlertCircle className="h-4 w-4" />,
+      color: "bg-red-500/10 text-red-400",
+      bg: "bg-red-500/5",
+      border: "border-red-400/30",
+    };
+  }
+  if (type === "warning") {
+    return {
+      icon: <AlertTriangle className="h-4 w-4" />,
+      color: "bg-amber-500/10 text-amber-300",
+      bg: "bg-amber-500/5",
+      border: "border-amber-300/30",
+    };
+  }
+  return {
+    icon: <Info className="h-4 w-4" />,
+    color: "bg-cyan-500/10 text-cyan-300",
+    bg: "bg-cyan-500/5",
+    border: "border-cyan-300/30",
+  };
 }

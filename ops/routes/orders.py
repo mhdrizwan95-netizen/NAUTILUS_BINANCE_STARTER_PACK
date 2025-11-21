@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from ops.engine_client import market_order
-from ops.ui_api import require_ops_token
+from ops.idempotency import reserve_idempotency, store_response
+from ops.middleware.control_guard import ControlContext, IdempotentGuard
 
 router = APIRouter()
 _REQUEST_ERRORS = (RuntimeError, ValueError, ConnectionError)
+IdemGuardDep = Annotated[ControlContext, Depends(IdempotentGuard)]
 
 
 class QuoteOrQuantityRequired(ValueError):
@@ -53,9 +55,12 @@ class MarketOrderIn(BaseModel):
 
 
 @router.post("/orders/market")
-async def create_market_order(body: MarketOrderIn, _auth: None = Depends(require_ops_token)):
-    try:
-        result = await market_order(body.payload())
-    except _REQUEST_ERRORS as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return result
+async def create_market_order(body: MarketOrderIn, guard: IdemGuardDep):
+    idem_key = guard.idempotency_key
+    with reserve_idempotency(idem_key):
+        try:
+            result = await market_order(body.payload())
+        except _REQUEST_ERRORS as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        store_response(idem_key, result if isinstance(result, dict) else {"result": result})
+        return result

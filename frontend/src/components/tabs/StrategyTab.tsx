@@ -1,4 +1,4 @@
-import { Play, Square, Settings2 } from "lucide-react";
+import { Play, Square, Settings2, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -14,11 +14,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { getStrategies, startStrategy, stopStrategy, updateStrategy } from "@/lib/api";
+import {
+  getStrategies,
+  startStrategy,
+  stopStrategy,
+  updateStrategy,
+  type PageMetadata,
+} from "@/lib/api";
 import { generateIdempotencyKey } from "@/lib/idempotency";
-import { useAppStore, usePagination, usePaginationActions } from "@/lib/store";
+import { useAppStore } from "@/lib/store";
 import type { StrategySummary } from "@/types/trading";
 
 function formatCurrency(value: number) {
@@ -29,6 +34,9 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+const STRATEGY_CARD_CLASS =
+  "rounded-2xl border border-zinc-800/60 bg-zinc-950/40 backdrop-blur-sm shadow-lg shadow-black/10";
+
 export function StrategyTab() {
   const [strategies, setStrategies] = useState<StrategySummary[]>([]);
   const [loading, setLoading] = useState(false);
@@ -36,15 +44,14 @@ export function StrategyTab() {
   const [configureTarget, setConfigureTarget] = useState<StrategySummary | null>(null);
   const opsToken = useAppStore((state) => state.opsAuth.token);
   const opsActor = useAppStore((state) => state.opsAuth.actor);
-  const pageInfo = usePagination("strategies");
-  const { setPagination, clearPagination } = usePaginationActions();
+  const [pageInfo, setPageInfo] = useState<PageMetadata | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const payload = await getStrategies();
       setStrategies(payload.data);
-      setPagination("strategies", payload.page);
+      setPageInfo(payload.page ?? null);
     } catch (error) {
       if (error instanceof Error) {
         toast.error("Unable to load strategies", { description: error.message });
@@ -52,7 +59,7 @@ export function StrategyTab() {
     } finally {
       setLoading(false);
     }
-  }, [setPagination]);
+  }, []);
 
   const loadMore = async () => {
     if (!pageInfo?.nextCursor) return;
@@ -60,7 +67,7 @@ export function StrategyTab() {
     try {
       const payload = await getStrategies({ cursor: pageInfo.nextCursor });
       setStrategies((prev) => [...prev, ...payload.data]);
-      setPagination("strategies", payload.page);
+      setPageInfo(payload.page ?? null);
     } catch (error) {
       if (error instanceof Error) {
         toast.error("Unable to load additional strategies", { description: error.message });
@@ -71,9 +78,9 @@ export function StrategyTab() {
   };
 
   useEffect(() => {
-    clearPagination("strategies");
+    setPageInfo(null);
     void refresh();
-  }, [clearPagination, refresh]);
+  }, [refresh]);
 
   const requireCredentials = () => {
     if (!opsToken.trim()) {
@@ -155,7 +162,7 @@ export function StrategyTab() {
   const appliedStrategies = useMemo(() => strategies, [strategies]);
 
   return (
-    <div className="mx-auto max-w-6xl space-y-4 p-6">
+    <div className="space-y-6 p-6">
       {loading && strategies.length === 0 ? (
         <div className="text-sm text-muted-foreground">Loading strategies…</div>
       ) : null}
@@ -166,7 +173,7 @@ export function StrategyTab() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {appliedStrategies.map((strategy) => {
           const performance = strategy.performance;
           const trend: "up" | "down" | "neutral" = performance?.equitySeries?.length
@@ -176,30 +183,47 @@ export function StrategyTab() {
             : "neutral";
           const sparkline = performance?.equitySeries?.map((point) => point.equity) ?? [];
           const pnlValue = performance?.pnl ?? 0;
+          const statusAdornment =
+            strategy.status === "running"
+              ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
+              : strategy.status === "error"
+                ? "border-red-400/40 bg-red-500/10 text-red-300"
+                : "border-zinc-700 bg-zinc-900 text-zinc-400";
 
           return (
-            <Card key={strategy.id} className="flex flex-col gap-4 p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-base font-semibold">{strategy.name}</h3>
-                    <Badge
-                      variant={
-                        strategy.status === "running"
-                          ? "secondary"
-                          : strategy.status === "error"
-                            ? "destructive"
-                            : "outline"
-                      }
-                    >
-                      {strategy.status.toUpperCase()}
-                    </Badge>
+            <Card
+              key={strategy.id}
+              className={`${STRATEGY_CARD_CLASS} flex flex-col gap-5 p-5 min-h-[360px]`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex h-12 w-12 items-center justify-center rounded-xl border ${statusAdornment}`}
+                  >
+                    <Zap className="h-5 w-5" />
                   </div>
-                  <p className="text-xs text-muted-foreground">
-                    {strategy.kind} • {strategy.symbols.join(", ")}
-                  </p>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-semibold">{strategy.name}</h3>
+                      <Badge
+                        variant={
+                          strategy.status === "running"
+                            ? "secondary"
+                            : strategy.status === "error"
+                              ? "destructive"
+                              : "outline"
+                        }
+                        className="text-[11px]"
+                      >
+                        {strategy.status.toUpperCase()}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {strategy.kind} • {strategy.symbols.join(", ")}
+                    </p>
+                  </div>
                 </div>
-                <div className="h-16 w-40">
+                <div className="flex h-20 min-w-[200px] flex-1 items-center justify-center rounded-xl border border-zinc-800/70 bg-zinc-950/40 p-3 sm:max-w-[240px]">
                   {sparkline.length > 1 ? (
                     <MiniChart
                       data={sparkline}
@@ -207,35 +231,37 @@ export function StrategyTab() {
                       trend={trend}
                     />
                   ) : (
-                    <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                      No data
-                    </div>
+                    <div className="text-xs text-muted-foreground">No data</div>
                   )}
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3 text-xs">
-                <div>
-                  <span className="text-muted-foreground">PnL</span>
-                  <p className={pnlValue >= 0 ? "text-emerald-400" : "text-red-400"}>
+              <div className="grid gap-3 text-center text-xs sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-xl border border-zinc-800/60 bg-zinc-950/40 p-3">
+                  <p className="text-[10px] uppercase text-zinc-500">PnL</p>
+                  <p
+                    className={`font-mono text-sm ${pnlValue >= 0 ? "text-emerald-400" : "text-red-400"}`}
+                  >
                     {formatCurrency(pnlValue)}
                   </p>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Win Rate</span>
-                  <p>
+                <div className="rounded-xl border border-zinc-800/60 bg-zinc-950/40 p-3">
+                  <p className="text-[10px] uppercase text-zinc-500">Win Rate</p>
+                  <p className="font-mono text-sm text-zinc-100">
                     {performance?.winRate !== undefined
                       ? `${(performance.winRate * 100).toFixed(1)}%`
                       : "—"}
                   </p>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Sharpe</span>
-                  <p>{performance?.sharpe !== undefined ? performance.sharpe.toFixed(2) : "—"}</p>
+                <div className="rounded-xl border border-zinc-800/60 bg-zinc-950/40 p-3">
+                  <p className="text-[10px] uppercase text-zinc-500">Sharpe</p>
+                  <p className="font-mono text-sm text-zinc-100">
+                    {performance?.sharpe !== undefined ? performance.sharpe.toFixed(2) : "—"}
+                  </p>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Drawdown</span>
-                  <p>
+                <div className="rounded-xl border border-zinc-800/60 bg-zinc-950/40 p-3">
+                  <p className="text-[10px] uppercase text-zinc-500">Drawdown</p>
+                  <p className="font-mono text-sm text-zinc-100">
                     {performance?.drawdown !== undefined
                       ? `${(performance.drawdown * 100).toFixed(1)}%`
                       : "—"}
@@ -243,9 +269,9 @@ export function StrategyTab() {
                 </div>
               </div>
 
-              <div className="rounded-lg border border-zinc-800/60 bg-zinc-950/40 p-3 text-xs">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-1">
+              <div className="rounded-xl border border-zinc-800/60 bg-black/20 p-4 text-xs">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
                     <p className="font-medium text-zinc-200">Dry run mode</p>
                     <p className="text-zinc-500">Simulate orders without placing live trades.</p>
                   </div>
@@ -257,9 +283,7 @@ export function StrategyTab() {
                 </div>
               </div>
 
-              <Separator />
-
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-3 border-t border-zinc-800/60 pt-4">
                 {strategy.status !== "running" ? (
                   <Button
                     size="sm"

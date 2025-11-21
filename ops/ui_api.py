@@ -10,7 +10,9 @@ import os
 import random
 import secrets
 import time
-from collections import OrderedDict, deque
+from collections import deque
+from collections.abc import Iterator
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 from tempfile import NamedTemporaryFile
@@ -25,12 +27,11 @@ from fastapi import (
     Header,
     HTTPException,
     Query,
-    Request,
     WebSocket,
     WebSocketDisconnect,
     status,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from ops import pnl_dashboard as pnl
 from ops import ui_state
@@ -38,6 +39,7 @@ from ops.env import engine_endpoints
 from ops.governance_daemon import (
     reload_governance_policies as governance_reload_policies,
 )
+from ops.idempotency import reserve_idempotency, store_response
 from ops.middleware.control_guard import (
     ControlContext,
     ControlGuard,
@@ -89,19 +91,6 @@ def http_error(
     )
 
 
-def _require_idempotency(request: Request) -> tuple[str, dict[str, Any] | None]:
-    key = request.headers.get("Idempotency-Key")
-    if not key:
-        http_error(
-            status.HTTP_400_BAD_REQUEST,
-            "idempotency.missing_header",
-            "Missing Idempotency-Key header",
-        )
-    assert key is not None
-    cached = _idempotency_lookup(key)
-    return key, cached
-
-
 router = APIRouter(prefix="/api", tags=["command-center"])
 _SUPPRESSIBLE_EXCEPTIONS = (
     AttributeError,
@@ -114,10 +103,6 @@ _SUPPRESSIBLE_EXCEPTIONS = (
     asyncio.TimeoutError,
     httpx.HTTPError,
 )
-
-_IDEMPOTENCY_CACHE: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
-_IDEMPOTENCY_LOCK = RLock()
-_IDEMPOTENCY_MAX = 512
 CONTROL_AUDIT_PATH = Path("ops/logs/control_actions.jsonl")
 _WS_SESSIONS: dict[str, float] = {}
 _WS_SESSION_LOCK = RLock()
@@ -149,13 +134,43 @@ class TransferRequest(BaseModel):
     target: str
 
 
+class KillSwitchReasonRequired(ValueError):
+    def __init__(self) -> None:
+        super().__init__("reason required when disabling trading")
+
+
 class KillSwitchRequest(BaseModel):
     enabled: bool
     reason: str | None = None
 
+    @model_validator(mode="after")
+    def check_reason(self) -> KillSwitchRequest:
+        if not self.enabled:
+            reason = (self.reason or "").strip()
+            if not reason:
+                raise KillSwitchReasonRequired()
+            self.reason = reason
+        elif self.reason:
+            self.reason = self.reason.strip()
+        return self
+
+
+class FlattenReasonRequired(ValueError):
+    def __init__(self) -> None:
+        super().__init__("reason required for flatten requests")
+
 
 class FlattenRequest(BaseModel):
     dryRun: bool | None = False
+    reason: str
+
+    @model_validator(mode="after")
+    def ensure_reason(self) -> FlattenRequest:
+        reason = (self.reason or "").strip()
+        if not reason:
+            raise FlattenReasonRequired()
+        self.reason = reason
+        return self
 
 
 class OpsTokenFileError(RuntimeError):
@@ -185,6 +200,12 @@ def require_ops_token(x_ops_token: str | None = Header(None)) -> None:
 
 def get_state() -> dict[str, Any]:
     return ui_state.get_services()
+
+
+@contextmanager
+def _ensure_idempotency(idem_key: str | None) -> Iterator[None]:
+    with reserve_idempotency(idem_key or None):
+        yield
 
 
 IdemGuardDep = Annotated[ControlContext, Depends(IdempotentGuard)]
@@ -217,28 +238,6 @@ def _load_params() -> dict[str, Any]:
 
 def _save_params(payload: dict[str, Any]) -> None:
     PARAMS_PATH.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-
-
-def _idempotency_lookup(key: str) -> dict[str, Any] | None:
-    with _IDEMPOTENCY_LOCK:
-        cached = _IDEMPOTENCY_CACHE.get(key)
-        if cached:
-            return cached[1]
-    return None
-
-
-def _idempotency_store(key: str, response: dict[str, Any]) -> None:
-    with _IDEMPOTENCY_LOCK:
-        _IDEMPOTENCY_CACHE[key] = (time.time(), response)
-        _IDEMPOTENCY_CACHE.move_to_end(key)
-        while len(_IDEMPOTENCY_CACHE) > _IDEMPOTENCY_MAX:
-            _IDEMPOTENCY_CACHE.popitem(last=False)
-
-
-def _idempotency_cached_response(idem_key: str) -> dict[str, Any] | None:
-    if not idem_key:
-        return None
-    return _idempotency_lookup(idem_key)
 
 
 def _encode_cursor(offset: int) -> str:
@@ -492,36 +491,33 @@ async def config_update(
     state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
+    with _ensure_idempotency(idem_key):
+        payload = {k: v for k, v in patch.dict().items() if v is not None}
+        if not payload:
+            result = await state["config"].get_effective()
+            payload_for_audit: dict[str, Any] = {"noop": True}
+        else:
+            try:
+                result = await state["config"].patch(
+                    payload,
+                    actor=guard.actor,
+                    approver=guard.approver,
+                )
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            payload_for_audit = payload
 
-    payload = {k: v for k, v in patch.dict().items() if v is not None}
-    if not payload:
-        result = await state["config"].get_effective()
-        payload_for_audit: dict[str, Any] = {"noop": True}
-    else:
-        try:
-            result = await state["config"].patch(
-                payload,
-                actor=guard.actor,
-                approver=guard.approver,
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        payload_for_audit = payload
-
-    response = result
-    _record_control_action(
-        "config.patch",
-        guard.actor,
-        guard.approver,
-        idem_key,
-        payload_for_audit,
-        {"ok": True, "result": result},
-    )
-    _idempotency_store(idem_key, response)
-    return response
+        response = result
+        _record_control_action(
+            "config.patch",
+            guard.actor,
+            guard.approver,
+            idem_key,
+            payload_for_audit,
+            {"ok": True, "result": result},
+        )
+        store_response(idem_key, response)
+        return response
 
 
 @router.get("/strategies/governance")
@@ -570,24 +566,20 @@ async def strategies_patch(
     state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
+    with _ensure_idempotency(idem_key):
+        updates = patch.dict(exclude_none=True)
+        result = await state["strategy"].patch(strategy_id, updates)
 
-    updates = patch.dict(exclude_none=True)
-    result = await state["strategy"].patch(strategy_id, updates)
-
-    _record_control_action(
-        "strategy.patch",
-        guard.actor,
-        guard.approver,
-        idem_key,
-        {"strategyId": strategy_id, **updates},
-        {"ok": True, "result": result},
-    )
-    if idem_key:
-        _idempotency_store(idem_key, result)
-    return result
+        _record_control_action(
+            "strategy.patch",
+            guard.actor,
+            guard.approver,
+            idem_key,
+            {"strategyId": strategy_id, **updates},
+            {"ok": True, "result": result},
+        )
+        store_response(idem_key, result)
+        return result
 
 
 @router.get("/universe/{strategy_id}")
@@ -665,12 +657,24 @@ async def orders_open(
 async def orders_cancel(
     body: CancelOrdersRequest,
     state: StateDep,
-    _auth: AuthDep,
+    guard: IdemGuardDep,
 ) -> Any:
-    try:
-        return await state["orders"].cancel_many(body.orderIds)
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    idem_key = guard.idempotency_key or ""
+    with _ensure_idempotency(idem_key):
+        try:
+            result = await state["orders"].cancel_many(body.orderIds)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        _record_control_action(
+            "orders.cancel",
+            guard.actor,
+            guard.approver,
+            idem_key,
+            {"orderIds": body.orderIds},
+            result,
+        )
+        store_response(idem_key, result)
+        return result
 
 
 @router.get("/positions/open")
@@ -698,52 +702,51 @@ async def killswitch(
     state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
-
-    result = await state["ops"].set_trading_enabled(payload.enabled)
-    action = "resume" if payload.enabled else "pause"
-    response = {"ok": True, "action": action, "result": result}
-    _record_control_action(
-        action,
-        guard.actor,
-        guard.approver,
-        idem_key,
-        payload.model_dump(),
-        response,
-    )
-    _idempotency_store(idem_key, response)
-    return response
+    with _ensure_idempotency(idem_key):
+        reason = payload.reason.strip() if payload.reason else None
+        result = await state["ops"].set_trading_enabled(payload.enabled, reason=reason)
+        if not payload.enabled:
+            result["state"] = "HALT"
+        action = "resume" if payload.enabled else "pause"
+        response = {"ok": True, "action": action, "result": result}
+        _record_control_action(
+            action,
+            guard.actor,
+            guard.approver,
+            idem_key,
+            {**payload.model_dump(), "reason": reason},
+            response,
+        )
+        store_response(idem_key, response)
+        return response
 
 
 @router.post("/ops/flatten")
 async def flatten_portfolio(
-    _body: FlattenRequest,
+    payload: FlattenRequest,
     guard: IdemGuardDep,
     state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
+    with _ensure_idempotency(idem_key):
+        try:
+            result = await state["ops"].flatten_positions(
+                actor=guard.actor, reason=payload.reason.strip()
+            )
+        except RuntimeError as exc:  # pragma: no cover - defensive
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
 
-    try:
-        result = await state["ops"].flatten_positions(actor=guard.actor)
-    except RuntimeError as exc:  # pragma: no cover - defensive
-        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, str(exc)) from exc
-
-    response = {"ok": True, "action": "flatten", **result}
-    _record_control_action(
-        "flatten",
-        guard.actor,
-        guard.approver,
-        idem_key,
-        {},
-        response,
-    )
-    _idempotency_store(idem_key, response)
-    return response
+        response = {"ok": True, "action": "flatten", **result}
+        _record_control_action(
+            "flatten",
+            guard.actor,
+            guard.approver,
+            idem_key,
+            {"reason": payload.reason},
+            response,
+        )
+        store_response(idem_key, response)
+        return response
 
 
 @router.post("/governance/reload")
@@ -798,28 +801,24 @@ async def account_transfer(
     state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
+    with _ensure_idempotency(idem_key):
+        try:
+            result = await state["ops"].transfer_internal(
+                body.asset, body.amount, body.source, body.target
+            )
+        except RuntimeError as exc:  # pragma: no cover - defensive
+            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Transfer failed: {exc}") from exc
 
-    try:
-        result = await state["ops"].transfer_internal(
-            body.asset, body.amount, body.source, body.target
+        _record_control_action(
+            "account.transfer",
+            guard.actor,
+            guard.approver,
+            idem_key,
+            body.dict(),
+            result,
         )
-    except RuntimeError as exc:  # pragma: no cover - defensive
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"Transfer failed: {exc}") from exc
-
-    _record_control_action(
-        "account.transfer",
-        guard.actor,
-        guard.approver,
-        idem_key,
-        body.dict(),
-        result,
-    )
-    if idem_key:
-        _idempotency_store(idem_key, result)
-    return result
+        store_response(idem_key, result)
+        return result
 
 
 @router.post("/events/trade")
@@ -943,32 +942,29 @@ async def cc_strategy_start(
     body: dict[str, Any] | None = None,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
-
-    try:
-        await state["strategy"].patch(strategy_id, {"enabled": True})
-        if body and isinstance(body.get("params"), dict):
-            store = _load_params()
-            store[strategy_id] = body["params"]
-            _save_params(store)
-    except HTTPException:
-        raise
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    else:
-        response = {"ok": True, "action": "start", "strategyId": strategy_id}
-        _record_control_action(
-            "strategy.start",
-            guard.actor,
-            guard.approver,
-            idem_key,
-            body or {},
-            response,
-        )
-        _idempotency_store(idem_key, response)
-        return response
+    with _ensure_idempotency(idem_key):
+        try:
+            await state["strategy"].patch(strategy_id, {"enabled": True})
+            if body and isinstance(body.get("params"), dict):
+                store = _load_params()
+                store[strategy_id] = body["params"]
+                _save_params(store)
+        except HTTPException:
+            raise
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        else:
+            response = {"ok": True, "action": "start", "strategyId": strategy_id}
+            _record_control_action(
+                "strategy.start",
+                guard.actor,
+                guard.approver,
+                idem_key,
+                body or {},
+                response,
+            )
+            store_response(idem_key, response)
+            return response
 
 
 @router.post("/strategies/{strategy_id}/stop")
@@ -978,28 +974,25 @@ async def cc_strategy_stop(
     state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
-
-    try:
-        await state["strategy"].patch(strategy_id, {"enabled": False})
-    except HTTPException:
-        raise
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    else:
-        response = {"ok": True, "action": "stop", "strategyId": strategy_id}
-        _record_control_action(
-            "strategy.stop",
-            guard.actor,
-            guard.approver,
-            idem_key,
-            {"strategyId": strategy_id},
-            response,
-        )
-        _idempotency_store(idem_key, response)
-        return response
+    with _ensure_idempotency(idem_key):
+        try:
+            await state["strategy"].patch(strategy_id, {"enabled": False})
+        except HTTPException:
+            raise
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        else:
+            response = {"ok": True, "action": "stop", "strategyId": strategy_id}
+            _record_control_action(
+                "strategy.stop",
+                guard.actor,
+                guard.approver,
+                idem_key,
+                {"strategyId": strategy_id},
+                response,
+            )
+            store_response(idem_key, response)
+            return response
 
 
 @router.post("/strategies/{strategy_id}/update")
@@ -1010,34 +1003,31 @@ async def cc_strategy_update(
     state: StateDep,
 ) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
+    with _ensure_idempotency(idem_key):
+        params = body.get("params") or {}
+        if not isinstance(params, dict):
+            raise HTTPException(status_code=400, detail="params must be an object")
 
-    params = body.get("params") or {}
-    if not isinstance(params, dict):
-        raise HTTPException(status_code=400, detail="params must be an object")
-
-    try:
-        store = _load_params()
-        store[strategy_id] = params
-        _save_params(store)
-    except HTTPException:
-        raise
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    else:
-        response = {"ok": True, "action": "update", "strategyId": strategy_id}
-        _record_control_action(
-            "strategy.update",
-            guard.actor,
-            guard.approver,
-            idem_key,
-            body,
-            response,
-        )
-        _idempotency_store(idem_key, response)
-        return response
+        try:
+            store = _load_params()
+            store[strategy_id] = params
+            _save_params(store)
+        except HTTPException:
+            raise
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        else:
+            response = {"ok": True, "action": "update", "strategyId": strategy_id}
+            _record_control_action(
+                "strategy.update",
+                guard.actor,
+                guard.approver,
+                idem_key,
+                body,
+                response,
+            )
+            store_response(idem_key, response)
+            return response
 
 
 # Backtests: job tracker backed by filesystem so multiple workers share state
@@ -1118,60 +1108,57 @@ def _synth_backtest_result(strategy_name: str) -> dict[str, Any]:
 @router.post("/backtests")
 async def cc_backtest_start(payload: dict[str, Any], guard: IdemGuardDep) -> Any:
     idem_key = guard.idempotency_key or ""
-    cached = _idempotency_cached_response(idem_key)
-    if cached:
-        return cached
+    with _ensure_idempotency(idem_key):
+        job_id = f"job-{int(time.time()*1000)}-{random.randint(100,999)}"
+        _save_job(job_id, {"status": "queued", "progress": 0.0})
 
-    job_id = f"job-{int(time.time()*1000)}-{random.randint(100,999)}"
-    _save_job(job_id, {"status": "queued", "progress": 0.0})
-
-    async def _run(job: str, strategy_id: str | None) -> None:
-        try:
-            cur = _load_job(job) or {}
-            cur.update({"status": "running"})
-            _save_job(job, cur)
-            for i in range(5):
-                await asyncio.sleep(0.8)
+        async def _run(job: str, strategy_id: str | None) -> None:
+            try:
                 cur = _load_job(job) or {}
-                cur["progress"] = (i + 1) / 6
+                cur.update({"status": "running"})
                 _save_job(job, cur)
-            # Produce result
-            result = _synth_backtest_result(strategy_id or "strategy")
-            _save_job(job, {"status": "done", "progress": 1.0, "result": result})
-        except _SUPPRESSIBLE_EXCEPTIONS:
-            _save_job(job, {"status": "error", "progress": 1.0})
+                for i in range(5):
+                    await asyncio.sleep(0.8)
+                    cur = _load_job(job) or {}
+                    cur["progress"] = (i + 1) / 6
+                    _save_job(job, cur)
+                # Produce result
+                result = _synth_backtest_result(strategy_id or "strategy")
+                _save_job(job, {"status": "done", "progress": 1.0, "result": result})
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                _save_job(job, {"status": "error", "progress": 1.0})
 
-    # Schedule via event loop if available, and also a thread-based runner
-    # so tests using TestClient (with short-lived loops) still complete.
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(_run(job_id, payload.get("strategyId")))
-    except RuntimeError:
-        pass
-
-    import threading
-
-    def _thread_runner() -> None:
+        # Schedule via event loop if available, and also a thread-based runner
+        # so tests using TestClient (with short-lived loops) still complete.
         try:
-            # Run the async job in a dedicated loop
-            asyncio.run(_run(job_id, payload.get("strategyId")))
-        except _SUPPRESSIBLE_EXCEPTIONS:
-            _save_job(job_id, {"status": "error", "progress": 1.0})
+            loop = asyncio.get_running_loop()
+            loop.create_task(_run(job_id, payload.get("strategyId")))
+        except RuntimeError:
+            pass
 
-    t = threading.Thread(target=_thread_runner, name=f"backtest-{job_id}", daemon=True)
-    t.start()
+        import threading
 
-    response = {"ok": True, "jobId": job_id}
-    _record_control_action(
-        "backtest.start",
-        guard.actor,
-        guard.approver,
-        idem_key,
-        payload,
-        response,
-    )
-    _idempotency_store(idem_key, response)
-    return response
+        def _thread_runner() -> None:
+            try:
+                # Run the async job in a dedicated loop
+                asyncio.run(_run(job_id, payload.get("strategyId")))
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                _save_job(job_id, {"status": "error", "progress": 1.0})
+
+        t = threading.Thread(target=_thread_runner, name=f"backtest-{job_id}", daemon=True)
+        t.start()
+
+        response = {"ok": True, "jobId": job_id}
+        _record_control_action(
+            "backtest.start",
+            guard.actor,
+            guard.approver,
+            idem_key,
+            payload,
+            response,
+        )
+        store_response(idem_key, response)
+        return response
 
 
 @router.get("/backtests/{job_id}")

@@ -68,6 +68,8 @@ from ops.telemetry_store import (
     save as _save_snap,
 )
 from ops.ui_api import (
+    FlattenReasonRequired,
+    KillSwitchReasonRequired,
     broadcast_account,
     cc_health,
     ws_account,
@@ -76,9 +78,7 @@ from ops.ui_api import (
     ws_price,
     ws_trades,
 )
-from ops.ui_api import (
-    router as ui_router,
-)
+from ops.ui_api import router as ui_router
 from ops.ui_services import (
     ConfigService,
     FeedsGovernanceService,
@@ -89,6 +89,7 @@ from ops.ui_services import (
     ScannerService,
     StrategyGovernanceService,
 )
+from shared.time_guard import check_clock_skew
 
 try:  # pragma: no cover - optional test dependency
     from respx.models import SideEffectError as _RespxSideEffectError
@@ -274,13 +275,58 @@ async def _handle_http_exception(request: Request, exc: HTTPException) -> JSONRe
     return _structured_error_response(exc.status_code, code, message, details)
 
 
+def _sanitize_ctx_value(value: Any) -> Any:
+    if isinstance(value, BaseException):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _sanitize_ctx_value(v) for k, v in value.items()}
+    if isinstance(value, list | tuple | set):
+        sanitized = [_sanitize_ctx_value(item) for item in value]
+        return sanitized if isinstance(value, list) else list(sanitized)
+    if hasattr(value, "__dict__"):
+        return str(value)
+    return value
+
+
+def _sanitize_validation_errors(
+    errors: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], str | None]:
+    sanitized: list[dict[str, Any]] = []
+    reason_hint: str | None = None
+    for err in errors:
+        data = dict(err)
+        original_ctx = err.get("ctx")
+        if isinstance(original_ctx, dict):
+            err_obj = original_ctx.get("error")
+            data["ctx"] = {k: _sanitize_ctx_value(v) for k, v in original_ctx.items()}
+            if isinstance(err_obj, FlattenReasonRequired):
+                reason_hint = "flatten"
+            elif isinstance(err_obj, KillSwitchReasonRequired):
+                reason_hint = "kill"
+        sanitized.append(data)
+    return sanitized, reason_hint
+
+
 @APP.exception_handler(RequestValidationError)
 async def _handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    errors, reason_hint = _sanitize_validation_errors(exc.errors())
+    if reason_hint == "flatten":
+        return _structured_error_response(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "reason.required",
+            "A reason is required when issuing flatten requests.",
+        )
+    if reason_hint == "kill":
+        return _structured_error_response(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "reason.required",
+            "Provide an audit reason when disabling trading.",
+        )
     return _structured_error_response(
         status.HTTP_422_UNPROCESSABLE_ENTITY,
         "request.validation_failed",
         "Request validation failed.",
-        {"fields": exc.errors()},
+        {"fields": errors},
     )
 
 
@@ -292,6 +338,34 @@ async def _handle_unhandled_exception(request: Request, exc: Exception) -> JSONR
         "internal.server_error",
         "An internal server error occurred.",
     )
+
+
+@APP.exception_handler(FlattenReasonRequired)
+async def _handle_flatten_reason_error(
+    request: Request, exc: FlattenReasonRequired
+) -> JSONResponse:
+    return _structured_error_response(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        "reason.required",
+        "A reason is required when issuing flatten requests.",
+    )
+
+
+@APP.exception_handler(KillSwitchReasonRequired)
+async def _handle_kill_switch_reason_error(
+    request: Request, exc: KillSwitchReasonRequired
+) -> JSONResponse:
+    return _structured_error_response(
+        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        "reason.required",
+        "Provide an audit reason when disabling trading.",
+    )
+
+
+@APP.on_event("startup")
+async def _ops_clock_skew_probe() -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: check_clock_skew("ops"))
 
 
 @APP.get("/readyz")

@@ -55,6 +55,12 @@ const ensureStorage = (prop: "localStorage" | "sessionStorage") => {
 ensureStorage("localStorage");
 ensureStorage("sessionStorage");
 
+// Disable Zustand persistence during tests to keep snapshots stable
+if (typeof window !== "undefined") {
+  type PersistWindow = Window & { __NAUTILUS_DISABLE_PERSIST__?: boolean };
+  (window as PersistWindow).__NAUTILUS_DISABLE_PERSIST__ = true;
+}
+
 // Mock WebSocket
 global.WebSocket = class MockWebSocket {
   onopen: ((event: Event) => void) | null = null;

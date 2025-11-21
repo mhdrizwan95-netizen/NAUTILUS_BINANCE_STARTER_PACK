@@ -10,6 +10,7 @@ import type {
   MetricsModel,
 } from "@/types/trading";
 
+import { withTimeout } from "./net/withTimeout";
 import type { ConfigEffective } from "./validation";
 
 export interface ControlRequestOptions {
@@ -22,6 +23,7 @@ export interface ControlRequestOptions {
 const BASE = "";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const BOOT_QUERY_TIMEOUT_MS = 8_000;
 const API_VERSION = "v1";
 
 export interface FetchPageOptions {
@@ -37,10 +39,7 @@ interface TimeoutSignal {
   cleanup: () => void;
 }
 
-const createTimeoutSignal = (
-  signal?: AbortSignal,
-  timeoutMs: number = DEFAULT_TIMEOUT_MS,
-): TimeoutSignal => {
+const createTimeoutSignal = (signal: AbortSignal | undefined, timeoutMs: number): TimeoutSignal => {
   if (signal?.aborted) {
     return { signal, cleanup: () => {} };
   }
@@ -69,20 +68,23 @@ const createTimeoutSignal = (
   return { signal: controller.signal, cleanup };
 };
 
-async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
-  const { signal: timeoutSignal, cleanup } = createTimeoutSignal(signal);
+async function api<T>(
+  path: string,
+  init?: RequestInit,
+  signal?: AbortSignal,
+  timeoutMs: number = DEFAULT_TIMEOUT_MS,
+): Promise<T> {
+  const { signal: timeoutSignal, cleanup } = createTimeoutSignal(signal, timeoutMs);
 
-  try {
-    const response = await fetch(`${BASE}${path}`, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        "X-API-Version": API_VERSION,
-        ...(init?.headers ?? {}),
-      },
-      signal: timeoutSignal,
-    });
-
+  const request = fetch(`${BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Version": API_VERSION,
+      ...(init?.headers ?? {}),
+    },
+    signal: timeoutSignal,
+  }).then(async (response) => {
     if (!response.ok) {
       let message = `Request to ${path} failed with ${response.status}`;
       let code: string | undefined;
@@ -119,9 +121,13 @@ async function api<T>(path: string, init?: RequestInit, signal?: AbortSignal): P
     }
 
     return response.json() as Promise<T>;
+  });
+
+  try {
+    return await withTimeout(request, timeoutMs, path);
   } catch (error) {
     if (error instanceof DOMException && error.name === "TimeoutError") {
-      throw new Error(`Request to ${path} timed out after ${DEFAULT_TIMEOUT_MS}ms`);
+      throw new Error(`Request to ${path} timed out after ${timeoutMs}ms`);
     }
     throw error;
   } finally {
@@ -243,7 +249,7 @@ export const getDashboardSummary = (q: URLSearchParams, signal?: AbortSignal) =>
     equityByStrategy: Array<{ t: string } & Record<string, number | string>>;
     pnlBySymbol: Array<{ symbol: string; pnl: number }>;
     returns: number[];
-  }>(`/api/metrics/summary?${q.toString()}`, undefined, signal);
+  }>(`/api/metrics/summary?${q.toString()}`, undefined, signal, BOOT_QUERY_TIMEOUT_MS);
 
 export const getPositions = (options?: FetchPageOptions) => {
   const params = buildPageQuery(options);
@@ -290,7 +296,7 @@ export const getHealth = (signal?: AbortSignal) =>
       latencyMs: number;
       queue: number;
     }>;
-  }>("/api/health", undefined, signal);
+  }>("/api/health", undefined, signal, BOOT_QUERY_TIMEOUT_MS);
 
 // Aggregated portfolio & exposure
 export const getAggregatePortfolio = (signal?: AbortSignal) =>
@@ -341,7 +347,7 @@ export const setTradingEnabled = (
     options?.signal,
   );
 
-export const flattenPositions = (options: ControlRequestOptions) =>
+export const flattenPositions = (options: ControlRequestOptions, reason: string) =>
   api<{
     flattened: Array<Record<string, unknown>>;
     requested: number;
@@ -350,7 +356,7 @@ export const flattenPositions = (options: ControlRequestOptions) =>
     "/api/ops/flatten",
     {
       method: "POST",
-      body: JSON.stringify({}),
+      body: JSON.stringify({ reason }),
       headers: buildControlHeaders(options),
     },
     options?.signal,

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { create, type StoreApi } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 
@@ -127,39 +128,56 @@ type StoreCreator = (
 const createAppStore: StoreCreator = (set, _get, _store) => {
   void _get;
   void _store;
+  type SetterArg = Parameters<typeof set>[0];
+  const apply = (label: string, updater: SetterArg) => {
+    if (typeof window !== "undefined" && import.meta.env.DEV) {
+      const win = window as NautilusWindow & {
+        __NAUTILUS_STORE_COUNTS?: Record<string, number>;
+        __NAUTILUS_LAST_ACTION?: string;
+      };
+      const counts = (win.__NAUTILUS_STORE_COUNTS ??= {});
+      counts[label] = (counts[label] ?? 0) + 1;
+      win.__NAUTILUS_LAST_ACTION = label;
+      if (counts[label] <= 5 || counts[label] % 25 === 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[store:${label}]`, counts[label]);
+      }
+    }
+    set(updater);
+  };
   return {
     ...defaultState,
 
     // Mode actions
-    setMode: (mode) => set({ mode }),
+    setMode: (mode) => apply("setMode", { mode }),
 
     // Preferences actions
     updatePreferences: (preferences) =>
-      set((state) => ({
+      apply("updatePreferences", (state) => ({
         preferences: { ...state.preferences, ...preferences },
       })),
     resetPreferences: () =>
-      set(() => ({
+      apply("resetPreferences", () => ({
         preferences: defaultState.preferences,
       })),
 
     // Ops auth actions
     setOpsToken: (token) =>
-      set((state) => ({
+      apply("setOpsToken", (state) => ({
         opsAuth: { ...state.opsAuth, token },
       })),
     setOpsActor: (actor) =>
-      set((state) => ({
+      apply("setOpsActor", (state) => ({
         opsAuth: { ...state.opsAuth, actor },
       })),
     clearOpsAuth: () =>
-      set(() => ({
+      apply("clearOpsAuth", () => ({
         opsAuth: defaultState.opsAuth,
       })),
 
     // Real-time data actions
     updateGlobalMetrics: (metrics) =>
-      set((state) => ({
+      apply("updateGlobalMetrics", (state) => ({
         realTimeData: {
           ...state.realTimeData,
           globalMetrics: metrics,
@@ -167,7 +185,7 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
         },
       })),
     updatePerformances: (performances) =>
-      set((state) => ({
+      apply("updatePerformances", (state) => ({
         realTimeData: {
           ...state.realTimeData,
           performances,
@@ -175,7 +193,7 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
         },
       })),
     updateVenues: (venues) =>
-      set((state) => ({
+      apply("updateVenues", (state) => ({
         realTimeData: {
           ...state.realTimeData,
           venues,
@@ -183,7 +201,7 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
         },
       })),
     updateRealTimeData: (data) =>
-      set((state) => ({
+      apply("updateRealTimeData", (state) => ({
         realTimeData: {
           ...state.realTimeData,
           ...data,
@@ -193,15 +211,15 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
 
     // UI actions
     setSidebarOpen: (sidebarOpen) =>
-      set((state) => ({
+      apply("setSidebarOpen", (state) => ({
         ui: { ...state.ui, sidebarOpen },
       })),
     setActiveTab: (activeTab) =>
-      set((state) => ({
+      apply("setActiveTab", (state) => ({
         ui: { ...state.ui, activeTab },
       })),
     setLoadingState: (key, loading) =>
-      set((state) => ({
+      apply("setLoadingState", (state) => ({
         ui: {
           ...state.ui,
           loadingStates: {
@@ -211,19 +229,19 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
         },
       })),
     clearLoadingStates: () =>
-      set((state) => ({
+      apply("clearLoadingStates", (state) => ({
         ui: { ...state.ui, loadingStates: {} },
       })),
     setDashboardFilters: (filters) =>
-      set((state) => ({
+      apply("setDashboardFilters", (state) => ({
         ui: { ...state.ui, dashboardFilters: filters },
       })),
     setPagination: (key, page) =>
-      set((state) => {
+      apply("setPagination", (state) => {
         const current = state.ui.pagination[key] ?? null;
         const nextValue = page ?? null;
         if (isSamePage(current, nextValue)) {
-          return {};
+          return state;
         }
         const nextPagination = { ...state.ui.pagination };
         if (nextValue === null) {
@@ -236,10 +254,10 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
         };
       }),
     clearPagination: (...keys) =>
-      set((state) => {
+      apply("clearPagination", (state) => {
         if (!keys.length) {
           if (Object.keys(state.ui.pagination).length === 0) {
-            return {};
+            return state;
           }
           return {
             ui: { ...state.ui, pagination: {} },
@@ -256,7 +274,7 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
         });
 
         if (!changed) {
-          return {};
+          return state;
         }
 
         return {
@@ -265,7 +283,7 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
       }),
 
     // Utility actions
-    reset: () => set(defaultState),
+    reset: () => apply("reset", defaultState),
   };
 };
 
@@ -302,42 +320,76 @@ export const useRealTimeData = () => useAppStore((state) => state.realTimeData);
 export const useUIState = () => useAppStore((state) => state.ui);
 
 // Action selectors
-export const useModeActions = () => useAppStore((state) => ({ setMode: state.setMode }));
-export const usePreferenceActions = () =>
-  useAppStore((state) => ({
-    updatePreferences: state.updatePreferences,
-    resetPreferences: state.resetPreferences,
-  }));
+export const useModeActions = () => {
+  const setMode = useAppStore((state) => state.setMode);
+  return useMemo(() => ({ setMode }), [setMode]);
+};
+export const usePreferenceActions = () => {
+  const updatePreferences = useAppStore((state) => state.updatePreferences);
+  const resetPreferences = useAppStore((state) => state.resetPreferences);
+  return useMemo(
+    () => ({
+      updatePreferences,
+      resetPreferences,
+    }),
+    [updatePreferences, resetPreferences],
+  );
+};
 export const useRealTimeActions = (): Pick<
   AppActions,
   "updateGlobalMetrics" | "updatePerformances" | "updateVenues" | "updateRealTimeData"
-> =>
-  useAppStore((state) => ({
-    updateGlobalMetrics: state.updateGlobalMetrics,
-    updatePerformances: state.updatePerformances,
-    updateVenues: state.updateVenues,
-    updateRealTimeData: state.updateRealTimeData,
-  }));
-export const useUIActions = () =>
-  useAppStore((state) => ({
-    setSidebarOpen: state.setSidebarOpen,
-    setActiveTab: state.setActiveTab,
-    setLoadingState: state.setLoadingState,
-    clearLoadingStates: state.clearLoadingStates,
-    setDashboardFilters: state.setDashboardFilters,
-  }));
+> => {
+  const updateGlobalMetrics = useAppStore((state) => state.updateGlobalMetrics);
+  const updatePerformances = useAppStore((state) => state.updatePerformances);
+  const updateVenues = useAppStore((state) => state.updateVenues);
+  const updateRealTimeData = useAppStore((state) => state.updateRealTimeData);
+  return useMemo(
+    () => ({
+      updateGlobalMetrics,
+      updatePerformances,
+      updateVenues,
+      updateRealTimeData,
+    }),
+    [updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData],
+  );
+};
+export const useUIActions = () => {
+  const setSidebarOpen = useAppStore((state) => state.setSidebarOpen);
+  const setActiveTab = useAppStore((state) => state.setActiveTab);
+  const setLoadingState = useAppStore((state) => state.setLoadingState);
+  const clearLoadingStates = useAppStore((state) => state.clearLoadingStates);
+  const setDashboardFilters = useAppStore((state) => state.setDashboardFilters);
+  return useMemo(
+    () => ({
+      setSidebarOpen,
+      setActiveTab,
+      setLoadingState,
+      clearLoadingStates,
+      setDashboardFilters,
+    }),
+    [setSidebarOpen, setActiveTab, setLoadingState, clearLoadingStates, setDashboardFilters],
+  );
+};
 
 export const useDashboardFilters = (): DashboardFiltersState =>
   useAppStore((state) => state.ui.dashboardFilters);
 
-export const useDashboardFilterActions = (): Pick<AppActions, "setDashboardFilters"> =>
-  useAppStore((state) => ({ setDashboardFilters: state.setDashboardFilters }));
+export const useDashboardFilterActions = (): Pick<AppActions, "setDashboardFilters"> => {
+  const setDashboardFilters = useAppStore((state) => state.setDashboardFilters);
+  return useMemo(() => ({ setDashboardFilters }), [setDashboardFilters]);
+};
 
 export const usePagination = (key: string) =>
   useAppStore((state) => state.ui.pagination[key] ?? null);
 
-export const usePaginationActions = (): Pick<AppActions, "setPagination" | "clearPagination"> =>
-  useAppStore((state) => ({
-    setPagination: state.setPagination,
-    clearPagination: state.clearPagination,
-  }));
+export const usePaginationActions = (): Pick<AppActions, "setPagination" | "clearPagination"> => {
+  const setPagination = useAppStore((state) => state.setPagination);
+  const clearPagination = useAppStore((state) => state.clearPagination);
+  return useMemo(
+    () => ({
+      setPagination,
+      clearPagination,
+    }),
+    [setPagination, clearPagination],
+  );
+};

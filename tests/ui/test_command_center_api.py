@@ -12,6 +12,14 @@ from ops.ui_services import OrdersService, PortfolioService
 OPS_TOKEN = os.getenv("OPS_API_TOKEN", "test-ops-token-1234567890")
 
 
+def _ops_headers() -> dict[str, str]:
+    return {
+        "X-Ops-Token": OPS_TOKEN,
+        "X-Ops-Actor": "unit-test",
+        "Idempotency-Key": f"test-{uuid.uuid4()}",
+    }
+
+
 @pytest.fixture()
 def client() -> TestClient:
     from ops import ops_api as appmod
@@ -100,8 +108,7 @@ def test_backtest_replay_returns_cached_job_id(client: TestClient) -> None:
     first = client.post("/api/backtests", json=payload, headers=headers)
     assert first.status_code == 200
     second = client.post("/api/backtests", json=payload, headers=headers)
-    assert second.status_code == 200
-    assert first.json() == second.json()
+    assert second.status_code == 409
 
 
 def test_trades_recent_returns_paginated_envelope(client: TestClient) -> None:
@@ -203,10 +210,78 @@ def test_strategy_patch_enforces_idempotency(client: TestClient) -> None:
             json={"enabled": True},
             headers=headers,
         )
-        assert replay.status_code == 200
-        assert replay.json() == payload
+        assert replay.status_code == 409
     finally:
         ui_state.configure(strategy=original_strategy)
+
+
+def test_kill_switch_requires_reason_when_disabling(client: TestClient) -> None:
+    headers = _ops_headers()
+    resp = client.post(
+        "/api/ops/kill-switch",
+        json={"enabled": False, "reason": ""},
+        headers=headers,
+    )
+    assert resp.status_code == 422
+    body = resp.json()
+    assert body["error"]["code"] == "reason.required"
+
+    kill_headers = _ops_headers()
+    resp_ok = client.post(
+        "/api/ops/kill-switch",
+        json={"enabled": False, "reason": "maintenance window"},
+        headers=kill_headers,
+    )
+    assert resp_ok.status_code == 200
+
+    resume_headers = _ops_headers()
+    resume = client.post(
+        "/api/ops/kill-switch",
+        json={"enabled": True, "reason": "resume"},
+        headers=resume_headers,
+    )
+    assert resume.status_code == 200
+
+
+def test_flatten_requires_reason_and_is_idempotent(client: TestClient) -> None:
+    class _StubOpsService:
+        def __init__(self) -> None:
+            self.last: dict[str, Any] | None = None
+
+        async def flatten_positions(self, actor: str | None, reason: str) -> dict[str, Any]:
+            self.last = {"actor": actor, "reason": reason}
+            return {"flattened": True}
+
+    original_ops = ui_state.get_service("ops")
+    stub_ops = _StubOpsService()
+    ui_state.configure(ops=stub_ops)
+    try:
+        headers = _ops_headers()
+        resp_missing = client.post(
+            "/api/ops/flatten",
+            json={"reason": ""},
+            headers=headers,
+        )
+        assert resp_missing.status_code == 422
+        assert resp_missing.json()["error"]["code"] == "reason.required"
+
+        headers = _ops_headers()
+        resp_ok = client.post(
+            "/api/ops/flatten",
+            json={"reason": "audit"},
+            headers=headers,
+        )
+        assert resp_ok.status_code == 200
+        assert stub_ops.last == {"actor": "unit-test", "reason": "audit"}
+
+        replay = client.post(
+            "/api/ops/flatten",
+            json={"reason": "audit"},
+            headers=headers,
+        )
+        assert replay.status_code == 409
+    finally:
+        ui_state.configure(ops=original_ops)
 
 
 def test_account_transfer_enforces_idempotency(client: TestClient) -> None:
@@ -242,8 +317,7 @@ def test_account_transfer_enforces_idempotency(client: TestClient) -> None:
         json=transfer_payload,
         headers=headers,
     )
-    assert repeat.status_code == 200
-    assert repeat.json() == first_payload
+    assert repeat.status_code == 409
 
 
 def test_ws_session_requires_actor(client: TestClient) -> None:

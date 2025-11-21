@@ -1,5 +1,5 @@
 import { Calendar as CalendarIcon, Filter, Play, RotateCcw, Download, Loader2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { DateRange } from "react-day-picker";
 import { toast } from "sonner";
 
@@ -48,6 +48,9 @@ const getDefaultRange = (): DateRange => {
   return { from, to };
 };
 
+const PANEL_CLASS =
+  "rounded-2xl border border-zinc-800/60 bg-zinc-950/40 backdrop-blur-sm shadow-lg shadow-black/10";
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
@@ -55,6 +58,11 @@ function formatCurrency(value: number) {
     maximumFractionDigits: 2,
   }).format(value);
 }
+
+const areStringArraysEqual = (a: string[], b: string[]) => {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+};
 
 export function BacktestingTab() {
   useRenderCounter("BacktestingTab");
@@ -71,6 +79,7 @@ export function BacktestingTab() {
   const [submitting, setSubmitting] = useState(false);
   const opsToken = useAppStore((state) => state.opsAuth.token);
   const opsActor = useAppStore((state) => state.opsAuth.actor);
+  const lastPolledJobHashRef = useRef<string | null>(null);
 
   const selectedStrategy = useMemo(
     () => strategies.find((strategy) => strategy.id === selectedStrategyId) ?? null,
@@ -97,10 +106,18 @@ export function BacktestingTab() {
   }, []);
 
   useEffect(() => {
-    if (selectedStrategy) {
-      setSelectedSymbols(selectedStrategy.symbols);
-      setOverrides(selectedStrategy.params ?? {});
+    if (!selectedStrategy) {
+      return;
     }
+    setSelectedSymbols((previous) =>
+      areStringArraysEqual(previous, selectedStrategy.symbols)
+        ? previous
+        : selectedStrategy.symbols,
+    );
+    const nextOverrides = selectedStrategy.params ?? {};
+    setOverrides((previous) =>
+      stableHash(previous) === stableHash(nextOverrides) ? previous : nextOverrides,
+    );
   }, [selectedStrategy]);
 
   const pollingFn = useCallback(() => {
@@ -124,15 +141,21 @@ export function BacktestingTab() {
   );
 
   useEffect(() => {
-    if (polledJob) {
-      setJobSnapshot(polledJob);
-      if (polledJob.status === "done") {
-        toast.success("Backtest completed", { description: "Results ready below" });
-        setJobId(null);
-      } else if (polledJob.status === "error") {
-        toast.error("Backtest failed");
-        setJobId(null);
-      }
+    if (!polledJob) {
+      return;
+    }
+    const nextHash = stableHash(polledJob);
+    if (lastPolledJobHashRef.current === nextHash) {
+      return;
+    }
+    lastPolledJobHashRef.current = nextHash;
+    setJobSnapshot(polledJob);
+    if (polledJob.status === "done") {
+      toast.success("Backtest completed", { description: "Results ready below" });
+      setJobId((current) => (current === null ? current : null));
+    } else if (polledJob.status === "error") {
+      toast.error("Backtest failed");
+      setJobId((current) => (current === null ? current : null));
     }
   }, [polledJob]);
 
@@ -233,7 +256,7 @@ export function BacktestingTab() {
   return (
     <div className="space-y-6 p-6">
       <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="space-y-4 p-4 lg:col-span-1">
+        <Card className={`${PANEL_CLASS} space-y-4 p-5 lg:col-span-1`}>
           <div className="space-y-2">
             <Label className="text-xs text-muted-foreground">Strategy</Label>
             <Select value={selectedStrategyId} onValueChange={setSelectedStrategyId}>
@@ -400,7 +423,7 @@ export function BacktestingTab() {
         </Card>
 
         <div className="space-y-4 lg:col-span-2">
-          <Card className="p-4">
+          <Card className={`${PANEL_CLASS} p-5`}>
             <div className="flex items-center justify-between">
               <div>
                 <h3 className="font-medium">Status</h3>
@@ -424,7 +447,7 @@ export function BacktestingTab() {
 
           {pendingResult && (
             <>
-              <Card className="p-4">
+              <Card className={`${PANEL_CLASS} p-5`}>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h3 className="font-medium">Summary</h3>
                   <div className="flex gap-2">
@@ -462,7 +485,7 @@ export function BacktestingTab() {
                 </div>
               </Card>
 
-              <Card className="space-y-4 p-4">
+              <Card className={`${PANEL_CLASS} space-y-4 p-5`}>
                 <h3 className="font-medium">Equity Curve</h3>
                 <EquityCurves
                   data={pendingResult.equityCurve.map((point) => ({
@@ -479,17 +502,17 @@ export function BacktestingTab() {
               </Card>
 
               <div className="grid gap-4 md:grid-cols-2">
-                <Card className="space-y-4 p-4">
+                <Card className={`${PANEL_CLASS} space-y-4 p-5`}>
                   <h3 className="font-medium">PnL by Symbol</h3>
                   <PnlBySymbol data={pendingResult.pnlBySymbol} />
                 </Card>
-                <Card className="space-y-4 p-4">
+                <Card className={`${PANEL_CLASS} space-y-4 p-5`}>
                   <h3 className="font-medium">Distribution of Returns</h3>
                   <ReturnsHistogram returns={pendingResult.returns} />
                 </Card>
               </div>
 
-              <Card className="p-4">
+              <Card className={`${PANEL_CLASS} p-5`}>
                 <h3 className="mb-3 font-medium">Trades</h3>
                 <Table>
                   <TableHeader>

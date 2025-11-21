@@ -519,7 +519,7 @@ services:
         condition: service_healthy
     volumes:
       - backtest_research_volume:/research
-      - backtest_results_volume:/results
+      - ./backtests/results:/results
     command: ["run"]
     restart: unless-stopped
     networks:
@@ -575,4 +575,3 @@ volumes:
   ml_models_volume:
   ml_shared_volume:
   backtest_research_volume:
-  backtest_results_volume:

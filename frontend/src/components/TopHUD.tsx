@@ -1,7 +1,6 @@
-import { Power, Activity, Wifi, WifiOff, Pause, Play, RefreshCw } from "lucide-react";
+import { Activity, Pause, Play, Power, RefreshCw, Wifi, WifiOff } from "lucide-react";
 import { motion } from "motion/react";
-import { useId } from "react";
-import type { ReactNode } from "react";
+import { useId, useMemo } from "react";
 
 import { useRenderCounter } from "@/lib/debug/why";
 import { isDryRunMode } from "@/lib/security";
@@ -59,18 +58,6 @@ export function TopHUD({
   const switchId = useId();
   const switchLabelId = `${switchId}-label`;
   const killDescriptionId = useId();
-  const statusLiveId = useId();
-
-  const formatCurrency = (value: number) =>
-    new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(value);
-
-  const formatPercent = (value: number) => `${(value * 100).toFixed(0)}%`;
-  const formatDrawdown = (value: number) => `${(value * 100).toFixed(2)}%`;
 
   const metricsAvailable = Boolean(metrics) && !isLoading;
 
@@ -78,50 +65,45 @@ export function TopHUD({
   const winRateValue =
     metricsAvailable && metrics ? `${formatPercent(metrics.winRate)} win` : undefined;
   const sharpeValue = metricsAvailable && metrics ? metrics.sharpe.toFixed(2) : "--";
-  const drawdownValue = metricsAvailable && metrics ? formatDrawdown(metrics.maxDrawdown) : "--";
+  const drawdownValue =
+    metricsAvailable && metrics ? `${(metrics.maxDrawdown * 100).toFixed(2)}%` : "--";
   const positionsValue = metricsAvailable && metrics ? metrics.openPositions.toString() : "--";
+
+  const venueSnapshot = useMemo(() => venues ?? [], [venues]);
 
   return (
     <motion.div
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="px-8 py-3 bg-zinc-900/70 backdrop-blur-xl border-b border-zinc-800/50"
+      className="px-6 py-3 bg-zinc-900/70 backdrop-blur-xl border-b border-zinc-800/40 shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
     >
-      {/* Row 1: Branding, Actions, Kill Switch */}
-      <div className="flex items-center justify-between mb-3">
-        {/* Left: Branding */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <div className="relative">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-indigo-500 opacity-20 absolute inset-0 blur-md" />
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-cyan-400 to-indigo-500 flex items-center justify-center relative">
-              <Activity className="w-4 h-4 text-zinc-900" aria-hidden="true" />
+            <div className="absolute inset-0 w-10 h-10 rounded-xl bg-gradient-to-br from-cyan-400 to-indigo-500 opacity-30 blur-lg" />
+            <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-indigo-500">
+              <Activity className="h-4 w-4 text-zinc-950" aria-hidden="true" />
             </div>
           </div>
-          <div>
+          <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <h1 className="text-zinc-100 tracking-tight">NAUTILUS</h1>
+              <h1 className="text-lg font-semibold tracking-tight text-zinc-100">NAUTILUS</h1>
               {dryRunMode && (
                 <Badge className="bg-amber-500/20 text-amber-200 border border-amber-400/30">
                   DRY RUN
                 </Badge>
               )}
               {isConnected ? (
-                <Wifi className="w-4 h-4 text-emerald-400" aria-hidden="true" />
+                <Wifi className="h-4 w-4 text-emerald-400" aria-hidden="true" />
               ) : (
-                <WifiOff className="w-4 h-4 text-red-400" aria-hidden="true" />
+                <WifiOff className="h-4 w-4 text-red-400" aria-hidden="true" />
               )}
-              <span className="sr-only">
-                {isConnected
-                  ? "Connected to engine and market data"
-                  : "Disconnected from engine and market data"}
-              </span>
             </div>
-            <p className="text-zinc-500 text-xs tracking-wider">TERMINAL</p>
+            <p className="text-xs tracking-[0.3em] text-zinc-500">TERMINAL</p>
           </div>
         </div>
 
-        {/* Center: Mode Toggle */}
-        <div className="flex items-center gap-3 px-4 py-2 rounded-xl bg-zinc-800/50 border border-zinc-700/50">
+        <div className="flex items-center gap-3 rounded-xl border border-zinc-800/70 bg-zinc-900/60 px-4 py-2">
           <span className={`text-xs ${mode === "paper" ? "text-amber-400" : "text-zinc-500"}`}>
             PAPER
           </span>
@@ -142,198 +124,154 @@ export function TopHUD({
           </span>
         </div>
 
-        {/* Right: Kill Switch */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              void onPause();
-            }}
+            onClick={() => void onPause()}
             disabled={controlState === "pause" || !tradingEnabled}
-            className="gap-2 border-amber-400/30 text-amber-400 hover:bg-amber-500/10"
+            className="gap-2 border-amber-400/30 text-amber-300 hover:bg-amber-500/10"
           >
-            <Pause className="w-4 h-4" aria-hidden="true" />
+            <Pause className="h-4 w-4" aria-hidden="true" />
             Pause
           </Button>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              void onResume();
-            }}
+            onClick={() => void onResume()}
             disabled={controlState === "resume" || tradingEnabled}
-            className="gap-2 border-emerald-400/30 text-emerald-400 hover:bg-emerald-500/10"
+            className="gap-2 border-emerald-400/30 text-emerald-300 hover:bg-emerald-500/10"
           >
-            <Play className="w-4 h-4" aria-hidden="true" />
+            <Play className="h-4 w-4" aria-hidden="true" />
             Resume
           </Button>
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              void onFlatten();
-            }}
+            onClick={() => void onFlatten()}
             disabled={controlState === "flatten"}
             className="gap-2 border-cyan-400/30 text-cyan-300 hover:bg-cyan-500/10"
           >
-            <RefreshCw className="w-4 h-4" aria-hidden="true" />
+            <RefreshCw className="h-4 w-4" aria-hidden="true" />
             Flatten
           </Button>
           <Button
             variant="destructive"
             size="sm"
-            onClick={() => {
-              void onKillSwitch();
-            }}
+            onClick={() => void onKillSwitch()}
             disabled={controlState === "kill"}
-            className="gap-2 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30"
+            className="gap-2 border border-red-500/40 bg-red-500/10 text-red-400 hover:bg-red-500/20"
             aria-describedby={killDescriptionId}
           >
-            <Power className="w-4 h-4" aria-hidden="true" />
+            <Power className="h-4 w-4" aria-hidden="true" />
             KILL
           </Button>
           <span id={killDescriptionId} className="sr-only">
             Immediately disable live trading across all venues.
           </span>
-          <Badge
-            variant={tradingEnabled ? "secondary" : "destructive"}
-            id={statusLiveId}
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-            className="uppercase tracking-wide"
-          >
-            {tradingEnabled ? "Trading enabled" : "Trading paused"}
-          </Badge>
         </div>
       </div>
 
-      {/* Row 2: Global Metrics & Venue Status */}
-      <div className="flex items-center justify-between">
-        {/* Left: Global Metrics */}
-        <dl
-          className="grid gap-4 sm:flex sm:items-center sm:gap-8"
-          aria-live="polite"
-          aria-describedby={statusLiveId}
-        >
-          <MetricDisplay
-            label="PnL"
-            value={totalPnlValue}
-            subtitle={winRateValue}
-            color={
-              metricsAvailable && metrics
-                ? metrics.totalPnl >= 0
-                  ? "text-emerald-400"
-                  : "text-red-400"
-                : "text-zinc-600"
-            }
-          />
+      <div className="mt-4 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-wrap items-center gap-6">
+          <MetricDisplay label="Total PnL" value={totalPnlValue} subtitle={winRateValue} />
+          <MetricDivider />
           <MetricDisplay
             label="Sharpe"
             value={sharpeValue}
-            color={
-              metricsAvailable && metrics
-                ? metrics.sharpe > 1
-                  ? "text-cyan-400"
-                  : "text-zinc-400"
-                : "text-zinc-600"
-            }
+            subtitle="Risk-adjusted"
+            accent="text-cyan-400"
           />
+          <MetricDivider />
           <MetricDisplay
-            label="Drawdown"
+            label="Max Drawdown"
             value={drawdownValue}
-            color={
-              metricsAvailable && metrics
-                ? metrics.maxDrawdown < 0.1
-                  ? "text-zinc-400"
-                  : "text-amber-400"
-                : "text-zinc-600"
-            }
+            subtitle="Peak to trough"
+            accent="text-amber-400"
           />
-          <MetricDisplay
-            label="Positions"
-            value={positionsValue}
-            color={metricsAvailable ? "text-zinc-300" : "text-zinc-600"}
-          />
-        </dl>
+          <MetricDivider />
+          <MetricDisplay label="Open Positions" value={positionsValue} accent="text-zinc-300" />
+        </div>
 
-        {/* Right: Venue Status */}
-        <div className="flex items-center gap-2">
-          {(venues ?? []).map((venue) => (
-            <VenueIndicator key={venue.name} venue={venue} />
-          ))}
+        <div className="flex flex-wrap items-center gap-2">
+          {venueSnapshot.length ? (
+            venueSnapshot.map((venue) => <VenueChip key={venue.name} venue={venue} />)
+          ) : (
+            <span className="text-xs text-zinc-500">No venue telemetry</span>
+          )}
         </div>
       </div>
     </motion.div>
   );
 }
 
+function MetricDivider() {
+  return <div className="hidden h-8 w-px bg-zinc-800/70 md:block" />;
+}
+
 function MetricDisplay({
   label,
   value,
   subtitle,
-  color,
+  accent = "text-emerald-400",
 }: {
   label: string;
-  value: ReactNode;
-  subtitle?: ReactNode;
-  color?: string;
+  value: string;
+  subtitle?: string;
+  accent?: string;
 }) {
-  const isText = typeof value === "string" || typeof value === "number";
-
   return (
-    <>
-      <dt className="text-xs text-zinc-500 tracking-wider">{label}</dt>
-      <dd className="flex items-baseline gap-2">
-        <span
-          className={isText ? `font-mono ${color ?? "text-zinc-300"}` : "font-mono text-zinc-300"}
-        >
-          {value}
-        </span>
-        {subtitle && <span className="text-xs text-zinc-600 font-mono">{subtitle}</span>}
-      </dd>
-    </>
+    <div className="flex flex-col">
+      <span className="text-xs text-zinc-500 tracking-wider">{label}</span>
+      <div className="flex items-baseline gap-2">
+        <span className={`font-mono text-base ${accent}`}>{value}</span>
+        {subtitle && <span className="text-xs font-mono text-zinc-600">{subtitle}</span>}
+      </div>
+    </div>
   );
 }
 
-function VenueIndicator({ venue }: { venue: TopHudVenue }) {
-  const statusColor = {
-    ok: "bg-emerald-400",
-    warn: "bg-amber-400",
-    down: "bg-red-500",
-  }[venue.status];
-
-  const statusLabel = {
-    ok: "Healthy",
-    warn: "Degraded",
-    down: "Offline",
-  }[venue.status];
+function VenueChip({ venue }: { venue: TopHudVenue }) {
+  const status =
+    venue.status === "ok" ? "connected" : venue.status === "warn" ? "degraded" : "offline";
+  const statusColor =
+    status === "connected"
+      ? "bg-emerald-400"
+      : status === "degraded"
+        ? "bg-amber-400"
+        : "bg-zinc-600";
 
   return (
-    <div
-      className="px-3 py-1.5 rounded-lg bg-zinc-800/50 border border-zinc-700/40 flex items-center gap-3"
-      role="status"
-      aria-live="polite"
-      aria-label={`${venue.name} status ${statusLabel}. Latency ${venue.latencyMs} milliseconds. Queue depth ${venue.queue}.`}
-    >
+    <div className="flex items-center gap-2 rounded-lg border border-zinc-800/60 bg-zinc-900/40 px-3 py-1.5">
       <div className="relative">
-        <div className={`w-2 h-2 rounded-full ${statusColor}`} aria-hidden="true" />
-        {venue.status === "ok" && (
+        <div className={`h-2 w-2 rounded-full ${statusColor}`} />
+        {status === "connected" && (
           <motion.div
-            className={`w-2 h-2 rounded-full ${statusColor} absolute inset-0`}
+            className={`absolute inset-0 h-2 w-2 rounded-full ${statusColor}`}
             animate={{ scale: [1, 2, 1], opacity: [1, 0, 1] }}
             transition={{ duration: 2, repeat: Infinity }}
-            aria-hidden="true"
           />
         )}
       </div>
-      <div className="flex flex-col">
-        <span className="text-xs text-zinc-200 tracking-wide">{venue.name}</span>
-        <span className="text-[10px] text-zinc-500 font-mono">
-          {statusLabel} · {venue.latencyMs}ms · q{venue.queue}
+      <div className="flex flex-col leading-tight">
+        <span className="text-xs font-mono text-zinc-200">{venue.name}</span>
+        <span className="text-[10px] font-mono text-zinc-500">
+          {venue.latencyMs ?? 0}ms · q{venue.queue ?? 0}
         </span>
       </div>
     </div>
   );
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function formatPercent(value: number) {
+  return `${(value * 100).toFixed(0)}%`;
 }

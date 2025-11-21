@@ -1,7 +1,9 @@
-import { useEffect, useRef, useCallback, useState, useMemo } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo, useSyncExternalStore } from "react";
+import { useShallow } from "zustand/react/shallow";
 
 import { issueWebsocketSession } from "./api";
 import { useAppStore, useRealTimeActions } from "./store";
+import { wsGetSnapshot, wsSetState, wsSubscribe } from "./wsStore";
 import type { GlobalMetrics, StrategyPerformance, Venue } from "../types/trading";
 
 type OutgoingMessage = Record<string, unknown>;
@@ -232,27 +234,32 @@ export function initializeWebSocket(
 }
 
 export function useWebSocket(): WebSocketHookResult {
+  const isTestMode =
+    (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") ||
+    (typeof import.meta !== "undefined" && import.meta.env?.VITE_DISABLE_WS === "1") ||
+    (typeof globalThis !== "undefined" &&
+      Boolean((globalThis as { __NAUTILUS_DISABLE_WS__?: boolean }).__NAUTILUS_DISABLE_WS__));
+
   const liveDisabled = resolveLiveDisabled();
-  const disabledResult: WebSocketHookResult = useMemo(
-    () => ({
+  const disabledResult: WebSocketHookResult = useMemo(() => {
+    const noop = () => {};
+    return {
       isConnected: false,
       lastMessage: null,
-      sendMessage: () => {
-        console.warn("WebSocket disabled; dropping message");
-      },
-      reconnect: () => {},
-    }),
-    [],
-  );
+      sendMessage: noop,
+      reconnect: noop,
+    } satisfies WebSocketHookResult;
+  }, []);
 
-  if (liveDisabled) {
+  if (liveDisabled || isTestMode) {
     return disabledResult;
   }
 
   const { updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData } =
     useRealTimeActions();
-  const { token: opsToken, actor: opsActor } = useAppStore((state) => state.opsAuth);
-  const lastMessageRef = useRef<WebSocketMessage | null>(null);
+  const [opsToken, opsActor] = useAppStore(
+    useShallow((state) => [state.opsAuth.token, state.opsAuth.actor] as const),
+  );
   const managerRef = useRef<WebSocketManager | null>(null);
   const actionsRef = useRef({
     updateGlobalMetrics,
@@ -274,7 +281,7 @@ export function useWebSocket(): WebSocketHookResult {
   };
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
-    lastMessageRef.current = message;
+    wsSetState({ lastMessage: message });
 
     // Handle different message types using the current actions
     switch (message.type) {
@@ -303,6 +310,7 @@ export function useWebSocket(): WebSocketHookResult {
 
   const handleConnect = useCallback(() => {
     wsDevLog("WebSocket connected - subscribing to real-time data");
+    wsSetState({ connected: true });
     // Subscribe to real-time updates
     managerRef.current?.sendMessage({
       type: "subscribe",
@@ -312,6 +320,7 @@ export function useWebSocket(): WebSocketHookResult {
 
   const handleDisconnect = useCallback(() => {
     wsDevLog("WebSocket disconnected");
+    wsSetState({ connected: false });
   }, []);
 
   const handleError = useCallback((error: Event) => {
@@ -322,7 +331,7 @@ export function useWebSocket(): WebSocketHookResult {
     const trimmedToken = opsToken.trim();
     const trimmedActor = opsActor.trim();
     if (!trimmedToken || !trimmedActor) {
-      setWsSession(null);
+      setWsSession((prev) => (prev === null ? prev : null));
       managerRef.current?.disconnect();
       managerRef.current = null;
       currentUrl = null;
@@ -422,12 +431,17 @@ export function useWebSocket(): WebSocketHookResult {
     managerRef.current?.connect();
   }, []);
 
-  return {
-    isConnected: managerRef.current?.isConnected || false,
-    lastMessage: lastMessageRef.current,
-    sendMessage,
-    reconnect,
-  };
+  const snapshot = useSyncExternalStore(wsSubscribe, wsGetSnapshot, wsGetSnapshot);
+
+  return useMemo(
+    () => ({
+      isConnected: snapshot.connected,
+      lastMessage: snapshot.lastMessage,
+      sendMessage,
+      reconnect,
+    }),
+    [snapshot, sendMessage, reconnect],
+  );
 }
 
 // React Query integration for WebSocket status

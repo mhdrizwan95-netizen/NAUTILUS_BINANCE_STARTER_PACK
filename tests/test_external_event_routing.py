@@ -28,7 +28,10 @@ def test_external_event_routing_behaviour():
 
             event = ExternalEvent(source="binance_announcements", payload={"symbol": "XYZUSDT"})
             await publish_external_event(event)
-            await asyncio.sleep(0.05)
+            for _ in range(10):
+                if received_one and received_two:
+                    break
+                await asyncio.sleep(0.05)
 
             assert received_one and received_two
             assert received_one[0]["source"] == "binance_announcements"
@@ -51,7 +54,10 @@ def test_external_event_routing_behaviour():
             bus_legacy.subscribe("events.external_feed", sink)
 
             await bus_legacy.publish("events.binance_listing", {"symbol": "ABCUSDT"})
-            await asyncio.sleep(0.05)
+            for _ in range(10):
+                if bridged_events:
+                    break
+                await asyncio.sleep(0.05)
 
             assert bridged_events
             assert bridged_events[0]["payload"]["symbol"] == "ABCUSDT"

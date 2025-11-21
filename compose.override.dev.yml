@@ -1,0 +1,15 @@
+services:
+  engine_binance:
+    environment:
+      - TRADING_ENABLED=false
+      - STRATEGY_DRY_RUN=true
+      - SCALP_MAKER_SHADOW=true
+      - ROLE=exporter
+      - BINANCE_WS_ENABLED=false
+  engine_binance_exporter:
+    environment:
+      - BINANCE_WS_ENABLED=false
+  executor:
+    environment:
+      - ENABLE_EXECUTION=false
+      - DRY_RUN=true

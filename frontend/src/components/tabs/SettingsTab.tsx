@@ -44,6 +44,9 @@ const CONFIG_FLAGS = [
   },
 ];
 
+const PANEL_CLASS =
+  "rounded-2xl border border-zinc-800/60 bg-zinc-950/40 backdrop-blur-sm shadow-lg shadow-black/10";
+
 export function SettingsTab() {
   const queryClient = useQueryClient();
   const opsToken = useAppStore((state) => state.opsAuth.token);
@@ -182,7 +185,7 @@ export function SettingsTab() {
 
   return (
     <div className="space-y-6 p-6">
-      <Card>
+      <Card className={PANEL_CLASS}>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
             <CardTitle>OPS API Token</CardTitle>
@@ -234,7 +237,7 @@ export function SettingsTab() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className={PANEL_CLASS}>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
             <CardTitle>Protection & Automation Flags</CardTitle>
@@ -311,7 +314,7 @@ export function SettingsTab() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className={PANEL_CLASS}>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
             <CardTitle>Runtime Overrides</CardTitle>
@@ -354,7 +357,7 @@ export function SettingsTab() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className={PANEL_CLASS}>
         <CardHeader>
           <CardTitle>Effective Configuration</CardTitle>
           <CardDescription>

@@ -1,0 +1,49 @@
+Metadata-Version: 2.4
+Name: nautilus-hmm-binance
+Version: 0.1.0
+Requires-Python: <3.13,>=3.11
+Requires-Dist: nautilus_trader[binance]>=1.210.0
+Requires-Dist: fastapi==0.120.4
+Requires-Dist: uvicorn[standard]==0.30.6
+Requires-Dist: httpx==0.27.2
+Requires-Dist: requests==2.32.4
+Requires-Dist: jinja2==3.1.6
+Requires-Dist: prometheus-client==0.20.0
+Requires-Dist: prometheus-fastapi-instrumentator==6.1.0
+Requires-Dist: redis==5.0.4
+Requires-Dist: pandas==2.2.3
+Requires-Dist: numpy==1.26.4
+Requires-Dist: pyarrow<22.0.0,>=20.0.0
+Requires-Dist: scikit-learn==1.5.2
+Requires-Dist: xgboost==2.1.1
+Requires-Dist: hmmlearn==0.3.2
+Requires-Dist: duckdb==1.1.0
+Requires-Dist: python-dotenv==1.0.1
+Requires-Dist: loguru==0.7.2
+Requires-Dist: pydantic==2.8.2
+Requires-Dist: pydantic-settings==2.11.0
+Requires-Dist: pyjwt[crypto]==2.9.0
+Requires-Dist: PyYAML==6.0.1
+Requires-Dist: tabulate==0.9.0
+Requires-Dist: matplotlib==3.8.4
+Requires-Dist: watchfiles==0.21.0
+Requires-Dist: watchdog==4.0.1
+Provides-Extra: dev
+Requires-Dist: bandit==1.7.9; extra == "dev"
+Requires-Dist: black==24.10.0; extra == "dev"
+Requires-Dist: hypothesis==6.115.5; extra == "dev"
+Requires-Dist: mypy==1.11.2; extra == "dev"
+Requires-Dist: pip-audit==2.7.3; extra == "dev"
+Requires-Dist: pip-tools==7.4.1; extra == "dev"
+Requires-Dist: pre-commit==3.8.0; extra == "dev"
+Requires-Dist: pytest==8.3.3; extra == "dev"
+Requires-Dist: pytest-asyncio==0.23.8; extra == "dev"
+Requires-Dist: respx[httpx]==0.21.1; extra == "dev"
+Requires-Dist: trio==0.26.2; extra == "dev"
+Requires-Dist: ruff==0.6.9; extra == "dev"
+Requires-Dist: types-python-dateutil==2.9.0.20240906; extra == "dev"
+Requires-Dist: types-requests==2.32.0.20241016; extra == "dev"
+Requires-Dist: web3==6.20.1; extra == "dev"
+Requires-Dist: pandas-stubs==2.2.2.240807; extra == "dev"
+Requires-Dist: eth-typing>=4.2.0; extra == "dev"
+Requires-Dist: setuptools==80.9.0; extra == "dev"

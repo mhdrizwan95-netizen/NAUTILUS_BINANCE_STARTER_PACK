@@ -70,6 +70,7 @@ from engine.runtime import tasks as runtime_tasks
 from engine.state import SnapshotStore
 from engine.universe import configured_universe, last_prices
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
+from shared.time_guard import check_clock_skew
 
 setup_logging()
 
@@ -87,6 +88,8 @@ _SUPPRESSIBLE_EXCEPTIONS = (
     TypeError,
     ValueError,
     KeyError,
+    ModuleNotFoundError,
+    ImportError,
     asyncio.TimeoutError,
 )
 MODEL_TAG = os.getenv("MODEL_TAG", "hmm_v1")
@@ -167,6 +170,12 @@ log_dry_run_banner("engine.app")
 app.add_middleware(_RequestIDMiddleware)
 app.add_middleware(_HttpMetricsMiddleware)
 app.add_middleware(RedactionMiddleware)
+
+
+@app.on_event("startup")
+async def _clock_skew_probe() -> None:
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, lambda: check_clock_skew("engine"))
 
 
 def _truthy_env(name: str) -> bool:
@@ -1130,8 +1139,6 @@ async def on_startup() -> None:
         await router.initialize_balances()
         # Optional: seed starting cash for demo/test if no balances detected
         try:
-            import os
-
             state = portfolio.state
             if state.cash is None or state.cash <= 0:
                 seed = os.getenv("STARTING_CASH_USD") or os.getenv("ENGINE_STARTING_CASH_USD")
@@ -1751,12 +1758,19 @@ def _startup_load_snapshot_and_reconcile() -> None:
             _startup_logger.warning("Failed to hydrate portfolio from snapshot", exc_info=True)
     else:
         _startup_logger.info("No persisted portfolio snapshot found; starting fresh")
-    # 2) Best-effort reconcile to catch up with missed fills
-    try:
-        post_reconcile()  # same logic; small universe should be fast
-    except _SUPPRESSIBLE_EXCEPTIONS:
-        # Non-fatal — engine can still serve, UI can trigger /reconcile manually
-        _startup_logger.warning("Initial reconcile on startup failed", exc_info=True)
+    # 2) Best-effort reconcile to catch up with missed fills (only if credentials exist)
+    api_key = (os.getenv("BINANCE_API_KEY") or "").strip()
+    api_secret = (os.getenv("BINANCE_API_SECRET") or "").strip()
+    if api_key and api_secret and api_key not in {"__REQUIRED__", "__PLACEHOLDER__"}:
+        try:
+            post_reconcile()  # same logic; small universe should be fast
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            # Non-fatal — engine can still serve, UI can trigger /reconcile manually
+            _startup_logger.warning("Initial reconcile on startup failed", exc_info=True)
+    else:
+        _startup_logger.warning(
+            "Skipping startup reconcile because Binance API credentials are not configured."
+        )
     # 3) Start strategy scheduler if enabled
     try:
         strategy.start_scheduler()

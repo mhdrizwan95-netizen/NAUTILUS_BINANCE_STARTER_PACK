@@ -1,24 +1,33 @@
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { toast } from "sonner";
 
 import { TabbedInterface } from "./components/TabbedInterface";
 import { TopHUD } from "./components/TopHUD";
 import { Toaster } from "./components/ui/sonner";
 import {
+  flattenPositions,
   getConfigEffective,
   getDashboardSummary,
   getHealth,
   getOpsStatus,
   setTradingEnabled,
-  flattenPositions,
   updateConfig,
 } from "./lib/api";
 import { buildSummarySearchParams } from "./lib/dashboardFilters";
 import { useRenderCounter } from "./lib/debug/why";
 import { stableHash } from "./lib/equality";
 import { generateIdempotencyKey } from "./lib/idempotency";
+import { LoopGuard } from "./lib/loopGuard";
 import { queryClient, queryKeys } from "./lib/queryClient";
 import { useAppStore, useDashboardFilters } from "./lib/store";
 import { mergeMetricsSnapshot, mergeVenuesSnapshot } from "./lib/streamMergers";
@@ -26,6 +35,21 @@ import { useWebSocket } from "./lib/websocket";
 
 type DashboardSummarySnapshot = Awaited<ReturnType<typeof getDashboardSummary>>;
 type HealthSnapshot = Awaited<ReturnType<typeof getHealth>>;
+
+const BOOT_TIMEOUT_MS = 10_000;
+
+type BootPhase = "booting" | "ready" | "degraded";
+
+type BootStatus = {
+  phase: BootPhase;
+  note?: string | null;
+};
+
+type ShellProps = {
+  bootStatus: BootStatus;
+  summaryParamsKey: string;
+  setBootStatus: Dispatch<SetStateAction<BootStatus>>;
+};
 
 const scheduleTask = (cb: () => void) => {
   if (typeof queueMicrotask === "function") {
@@ -60,13 +84,7 @@ const sanitizeVenues = (value: unknown): Array<Record<string, unknown>> => {
 
 export function App() {
   useRenderCounter("App");
-  const [isBooting, setIsBooting] = useState(true);
-  const [mode, setMode] = useState<"paper" | "live">("paper");
-  const [notifiedOnline, setNotifiedOnline] = useState(false);
-  const [controlState, setControlState] = useState<"pause" | "resume" | "flatten" | "kill" | null>(
-    null,
-  );
-  const opsAuth = useAppStore((state) => state.opsAuth);
+  const [bootStatus, setBootStatus] = useState<BootStatus>({ phase: "booting", note: null });
   const dashboardFilters = useDashboardFilters();
   const summaryParams = useMemo(
     () => buildSummarySearchParams(dashboardFilters),
@@ -77,46 +95,222 @@ export function App() {
     () => queryKeys.dashboard.summary({ params: summaryParamsKey }),
     [summaryParamsKey],
   );
+  const healthQueryKey = useMemo(() => queryKeys.dashboard.health(), []);
+  const summaryQueryKeyRef = useRef(summaryQueryKey);
+  const healthQueryKeyRef = useRef(healthQueryKey);
+  summaryQueryKeyRef.current = summaryQueryKey;
+  healthQueryKeyRef.current = healthQueryKey;
+  const bootResolvedRef = useRef(false);
+  const bootFetchInFlightRef = useRef(false);
+
+  useEffect(() => {
+    if (bootResolvedRef.current || bootFetchInFlightRef.current) {
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    const paramsForBoot = new URLSearchParams(summaryParamsKey);
+    bootFetchInFlightRef.current = true;
+
+    const hydrateBootData = async () => {
+      const [summaryResult, healthResult] = await Promise.allSettled([
+        getDashboardSummary(paramsForBoot, controller.signal),
+        getHealth(controller.signal),
+      ]);
+      if (cancelled) {
+        return;
+      }
+      if (summaryResult.status === "fulfilled") {
+        queryClient.setQueryData(summaryQueryKeyRef.current, summaryResult.value);
+      }
+      if (healthResult.status === "fulfilled") {
+        queryClient.setQueryData(healthQueryKeyRef.current, healthResult.value);
+      }
+      bootResolvedRef.current = true;
+      const summaryError =
+        summaryResult.status === "rejected" && summaryResult.reason instanceof Error
+          ? summaryResult.reason
+          : null;
+      const healthError =
+        healthResult.status === "rejected" && healthResult.reason instanceof Error
+          ? healthResult.reason
+          : null;
+      const note = summaryError?.message ?? healthError?.message ?? null;
+      setBootStatus({
+        phase:
+          summaryResult.status === "fulfilled" && healthResult.status === "fulfilled"
+            ? "ready"
+            : "degraded",
+        note,
+      });
+    };
+
+    hydrateBootData()
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        bootResolvedRef.current = true;
+        setBootStatus({
+          phase: "degraded",
+          note: error instanceof Error ? error.message : "Boot fetch failed",
+        });
+      })
+      .finally(() => {
+        bootFetchInFlightRef.current = false;
+      });
+
+    return () => {
+      cancelled = true;
+      bootFetchInFlightRef.current = false;
+      controller.abort();
+    };
+  }, [summaryParamsKey]);
+
+  useEffect(() => {
+    if (bootResolvedRef.current) {
+      return;
+    }
+    const timeout = window.setTimeout(() => {
+      if (bootResolvedRef.current) {
+        return;
+      }
+      bootResolvedRef.current = true;
+      setBootStatus({
+        phase: "degraded",
+        note: "Boot timeout — continuing in degraded mode",
+      });
+    }, BOOT_TIMEOUT_MS);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  if (bootStatus.phase === "booting") {
+    return (
+      <div className="h-screen bg-zinc-950 flex items-center justify-center">
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center">
+          <motion.div
+            className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-cyan-400 via-violet-400 to-indigo-500 relative"
+            animate={{
+              boxShadow: [
+                "0 0 20px rgba(0, 245, 212, 0.3)",
+                "0 0 40px rgba(0, 245, 212, 0.5)",
+                "0 0 20px rgba(0, 245, 212, 0.3)",
+              ],
+            }}
+            transition={{ duration: 2, repeat: Infinity }}
+          />
+          <motion.h1
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="text-zinc-100 mb-2"
+          >
+            NAUTILUS TERMINAL
+          </motion.h1>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ delay: 0.5 }}
+            className="text-zinc-500 text-sm tracking-wider"
+          >
+            INITIALIZING NEURAL NETWORK...
+          </motion.p>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <CommandCenterShell
+      bootStatus={bootStatus}
+      summaryParamsKey={summaryParamsKey}
+      setBootStatus={setBootStatus}
+    />
+  );
+}
+
+function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: ShellProps) {
+  const [mode, setMode] = useState<"paper" | "live">("paper");
+  const [notifiedOnline, setNotifiedOnline] = useState(false);
+  const [controlState, setControlState] = useState<"pause" | "resume" | "flatten" | "kill" | null>(
+    null,
+  );
+  const opsToken = useAppStore((state) => state.opsAuth.token);
+  const opsActor = useAppStore((state) => state.opsAuth.actor);
+  // TEMP DEBUG
   const { lastMessage, isConnected: wsConnected } = useWebSocket();
   const lastProcessedMessage = useRef<{ type: string; ts: number | null } | null>(null);
   const metricsDigestRef = useRef<string | null>(null);
   const venuesDigestRef = useRef<string | null>(null);
 
-  const summaryQuery = useQuery({
-    queryKey: summaryQueryKey,
-    queryFn: () => getDashboardSummary(summaryParams),
-    staleTime: 30 * 1000,
-  });
+  const summaryParams = useMemo(() => new URLSearchParams(summaryParamsKey), [summaryParamsKey]);
+  const summaryQueryKey = useMemo(
+    () => queryKeys.dashboard.summary({ params: summaryParamsKey }),
+    [summaryParamsKey],
+  );
+  const fetchDashboardSummary = useCallback(
+    () => getDashboardSummary(summaryParams),
+    [summaryParams],
+  );
+  const summaryQueryOptions = useMemo(
+    () => ({
+      queryKey: summaryQueryKey,
+      queryFn: fetchDashboardSummary,
+      staleTime: 30 * 1000,
+    }),
+    [summaryQueryKey, fetchDashboardSummary],
+  );
+  const summaryQuery = useQuery(summaryQueryOptions);
 
-  const configQuery = useQuery({
-    queryKey: queryKeys.settings.config(),
-    queryFn: () => getConfigEffective(),
-    staleTime: 60 * 1000,
-  });
+  const configQueryKey = useMemo(() => queryKeys.settings.config(), []);
+  const fetchConfig = useCallback(() => getConfigEffective(), []);
+  const configQueryOptions = useMemo(
+    () => ({
+      queryKey: configQueryKey,
+      queryFn: fetchConfig,
+      staleTime: 60 * 1000,
+    }),
+    [configQueryKey, fetchConfig],
+  );
+  const configQuery = useQuery(configQueryOptions);
 
-  const opsStatusQuery = useQuery({
-    queryKey: queryKeys.ops.status(),
-    queryFn: () => getOpsStatus(),
-    refetchInterval: 15 * 1000,
-  });
+  const opsStatusQueryKey = useMemo(() => queryKeys.ops.status(), []);
+  const fetchOpsStatus = useCallback(() => getOpsStatus(), []);
+  const opsStatusQueryOptions = useMemo(
+    () => ({
+      queryKey: opsStatusQueryKey,
+      queryFn: fetchOpsStatus,
+      refetchInterval: 15 * 1000,
+    }),
+    [opsStatusQueryKey, fetchOpsStatus],
+  );
+  const opsStatusQuery = useQuery(opsStatusQueryOptions);
 
-  const healthQueryKey = queryKeys.dashboard.health();
-  const healthQuery = useQuery({
-    queryKey: healthQueryKey,
-    queryFn: () => getHealth(),
-    staleTime: 30 * 1000,
-  });
+  const healthQueryKey = useMemo(() => queryKeys.dashboard.health(), []);
+  const fetchHealth = useCallback(() => getHealth(), []);
+  const healthQueryOptions = useMemo(
+    () => ({
+      queryKey: healthQueryKey,
+      queryFn: fetchHealth,
+      staleTime: 30 * 1000,
+    }),
+    [healthQueryKey, fetchHealth],
+  );
+  const healthQuery = useQuery(healthQueryOptions);
+
+  const renderGuardRef = useRef<LoopGuard | null>(null);
+  if (!renderGuardRef.current) {
+    renderGuardRef.current = new LoopGuard({
+      maxIter: 500,
+      timeoutMs: 5_000,
+      sampleEvery: 5,
+      name: "App render",
+    });
+  }
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setIsBooting(false), 1200);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (!summaryQuery.isLoading && !healthQuery.isLoading) {
-      setIsBooting(false);
-    }
-  }, [summaryQuery.isLoading, healthQuery.isLoading]);
+    renderGuardRef.current?.reset();
+  }, [summaryQuery.status, healthQuery.status]);
 
   useEffect(() => {
     if (!notifiedOnline && summaryQuery.isSuccess) {
@@ -127,106 +321,49 @@ export function App() {
     }
   }, [notifiedOnline, summaryQuery.isSuccess]);
 
-  useEffect(() => {
+  const configDerivedMode = useMemo(() => {
     const effective = configQuery.data?.effective as Record<string, unknown> | undefined;
     const overrides = configQuery.data?.overrides as Record<string, unknown> | undefined;
     const dryRunValue = (effective?.DRY_RUN ?? overrides?.DRY_RUN) as unknown;
     if (typeof dryRunValue === "boolean") {
-      setMode(dryRunValue ? "paper" : "live");
+      return dryRunValue ? "paper" : "live";
     }
+    return null;
   }, [configQuery.data]);
+
+  useEffect(() => {
+    if (!configDerivedMode) {
+      return;
+    }
+    setMode((prev) => (prev === configDerivedMode ? prev : configDerivedMode));
+  }, [configDerivedMode]);
+
+  const handleRecovery = useCallback(() => {
+    setBootStatus((prev) => (prev.phase === "ready" ? prev : { phase: "ready", note: prev.note }));
+  }, [setBootStatus]);
+
+  useEffect(() => {
+    if (bootStatus.phase !== "degraded") {
+      return;
+    }
+    if (summaryQuery.status === "success" && healthQuery.status === "success") {
+      handleRecovery();
+    }
+  }, [bootStatus.phase, summaryQuery.status, healthQuery.status, handleRecovery]);
 
   const tradingEnabled = (() => {
     const value = opsStatusQuery.data?.state?.trading_enabled;
     return typeof value === "boolean" ? value : true;
   })();
 
-  const hudMetrics = summaryQuery.data
-    ? {
-        totalPnl: summaryQuery.data.kpis.totalPnl,
-        winRate: summaryQuery.data.kpis.winRate,
-        sharpe: summaryQuery.data.kpis.sharpe,
-        maxDrawdown: summaryQuery.data.kpis.maxDrawdown,
-        openPositions: summaryQuery.data.kpis.openPositions,
-      }
-    : null;
-
-  const venueStatuses = healthQuery.data?.venues ?? null;
-  const hasHealthyVenue =
-    venueStatuses && venueStatuses.length > 0
-      ? venueStatuses.some((venue) => venue.status !== "down")
-      : false;
-  const isRealtimeConnected = wsConnected || hasHealthyVenue;
-
-  const confirmFlatten = () => {
-    const confirmed = window.confirm(
-      "Flatten will attempt to close every open position immediately. Continue?",
-    );
-    if (!confirmed) {
-      toast.info("Flatten cancelled");
-    }
-    return confirmed;
+  const renderState = {
+    bootPhase: bootStatus.phase,
+    summaryStatus: summaryQuery.status,
+    healthStatus: healthQuery.status,
+    opsStatus: tradingEnabled,
+    wsConnected,
   };
-
-  const promptKillReason = () => {
-    const reason = window.prompt(
-      "Emergency stop requires a reason for audit logging. Enter reason to proceed:",
-      "",
-    );
-    if (!reason || !reason.trim()) {
-      toast.error("Kill switch aborted: reason required");
-      return null;
-    }
-    const confirmed = window.confirm(
-      "EMERGENCY STOP will disable trading and queue a flatten. Confirm to proceed.",
-    );
-    if (!confirmed) {
-      toast.info("Kill switch cancelled");
-      return null;
-    }
-    return reason.trim();
-  };
-
-  const requireOpsToken = () => {
-    if (!opsAuth.token.trim()) {
-      toast.error("Set an OPS API token in Settings before issuing control actions.");
-      return false;
-    }
-    if (!opsAuth.actor.trim()) {
-      toast.error(
-        "Provide an operator call-sign for the audit log before issuing control actions.",
-      );
-      return false;
-    }
-    return true;
-  };
-
-  const buildControlOptions = (prefix: string) => {
-    const token = opsAuth.token.trim();
-    const actor = opsAuth.actor.trim();
-    return {
-      token,
-      actor,
-      idempotencyKey: generateIdempotencyKey(prefix),
-    };
-  };
-
-  const notifyControlError = (title: string, error: unknown) => {
-    const description = error instanceof Error ? error.message : "Unknown error";
-    toast.error(title, { description });
-  };
-
-  const withControl = async (
-    state: "pause" | "resume" | "flatten" | "kill",
-    fn: () => Promise<void>,
-  ) => {
-    setControlState(state);
-    try {
-      await fn();
-    } finally {
-      setControlState(null);
-    }
-  };
+  renderGuardRef.current.tick(renderState);
 
   useEffect(() => {
     if (!lastMessage) {
@@ -286,6 +423,88 @@ export function App() {
     }
   }, [lastMessage, summaryQueryKey, healthQueryKey]);
 
+  const confirmFlatten = () => {
+    const confirmed = window.confirm(
+      "Flatten will attempt to close every open position immediately. Continue?",
+    );
+    if (!confirmed) {
+      toast.info("Flatten cancelled");
+    }
+    return confirmed;
+  };
+
+  const promptFlattenReason = () => {
+    const reason = window.prompt(
+      "Provide a reason for the flatten request (required for audit logging):",
+      "",
+    );
+    if (!reason || !reason.trim()) {
+      toast.info("Flatten cancelled: reason required");
+      return null;
+    }
+    return reason.trim();
+  };
+
+  const promptKillReason = () => {
+    const reason = window.prompt(
+      "Emergency stop requires a reason for audit logging. Enter reason to proceed:",
+      "",
+    );
+    if (!reason || !reason.trim()) {
+      toast.error("Kill switch aborted: reason required");
+      return null;
+    }
+    const confirmed = window.confirm(
+      "EMERGENCY STOP will disable trading and queue a flatten. Confirm to proceed.",
+    );
+    if (!confirmed) {
+      toast.info("Kill switch cancelled");
+      return null;
+    }
+    return reason.trim();
+  };
+
+  const requireOpsToken = () => {
+    if (!opsToken.trim()) {
+      toast.error("Set an OPS API token in Settings before issuing control actions.");
+      return false;
+    }
+    if (!opsActor.trim()) {
+      toast.error(
+        "Provide an operator call-sign for the audit log before issuing control actions.",
+      );
+      return false;
+    }
+    return true;
+  };
+
+  const buildControlOptions = (prefix: string) => {
+    const token = opsToken.trim();
+    const actor = opsActor.trim();
+    return {
+      token,
+      actor,
+      idempotencyKey: generateIdempotencyKey(prefix),
+    };
+  };
+
+  const notifyControlError = (title: string, error: unknown) => {
+    const description = error instanceof Error ? error.message : "Unknown error";
+    toast.error(title, { description });
+  };
+
+  const withControl = async (
+    state: "pause" | "resume" | "flatten" | "kill",
+    fn: () => Promise<void>,
+  ) => {
+    setControlState(state);
+    try {
+      await fn();
+    } finally {
+      setControlState(null);
+    }
+  };
+
   const handleModeChange = async (newMode: typeof mode) => {
     if (!requireOpsToken()) {
       return;
@@ -304,15 +523,15 @@ export function App() {
     const previous = mode;
     try {
       await updateConfig({ DRY_RUN: newMode === "paper" }, buildControlOptions(`mode-${newMode}`));
-      await queryClient.invalidateQueries({ queryKey: queryKeys.settings.config() });
+      await queryClient.invalidateQueries({ queryKey: configQueryKey });
       setMode(newMode);
       toast.success(`Switched to ${newMode.toUpperCase()} mode`, {
         description: newMode === "live" ? "Real capital at risk" : "Simulated trading active",
       });
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown error";
-      toast.error("Failed to toggle trading mode", { description: message });
       setMode(previous);
+      notifyControlError("Failed to toggle trading mode", error);
+      throw error;
     }
   };
 
@@ -323,9 +542,9 @@ export function App() {
     await withControl("pause", async () => {
       try {
         await setTradingEnabled(false, buildControlOptions("pause"));
-        await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
+        await queryClient.invalidateQueries({ queryKey: opsStatusQueryKey });
         toast.warning("Trading paused", {
-          description: "All new orders halted until resume or restart.",
+          description: "Engines will stop submitting new orders.",
         });
       } catch (error) {
         notifyControlError("Failed to pause trading", error);
@@ -341,7 +560,7 @@ export function App() {
     await withControl("resume", async () => {
       try {
         await setTradingEnabled(true, buildControlOptions("resume"));
-        await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
+        await queryClient.invalidateQueries({ queryKey: opsStatusQueryKey });
         toast.success("Trading resumed", { description: "Engines may submit new orders." });
       } catch (error) {
         notifyControlError("Failed to resume trading", error);
@@ -357,9 +576,13 @@ export function App() {
     if (!confirmFlatten()) {
       return;
     }
+    const reason = promptFlattenReason();
+    if (!reason) {
+      return;
+    }
     await withControl("flatten", async () => {
       try {
-        const result = await flattenPositions(buildControlOptions("flatten"));
+        const result = await flattenPositions(buildControlOptions("flatten"), reason);
         toast.info("Flatten request submitted", {
           description: `Attempted to close ${result.requested} positions (${result.succeeded} succeeded).`,
         });
@@ -381,8 +604,8 @@ export function App() {
     await withControl("kill", async () => {
       try {
         await setTradingEnabled(false, buildControlOptions("kill-pause"), reason);
-        await queryClient.invalidateQueries({ queryKey: queryKeys.ops.status() });
-        const result = await flattenPositions(buildControlOptions("kill-flatten"));
+        await queryClient.invalidateQueries({ queryKey: opsStatusQueryKey });
+        const result = await flattenPositions(buildControlOptions("kill-flatten"), reason);
         toast.error("EMERGENCY STOP ACTIVATED", {
           description: `Trading disabled and flatten queued (${result.succeeded}/${result.requested}).`,
         });
@@ -393,44 +616,30 @@ export function App() {
     });
   };
 
-  if (isBooting) {
-    return (
-      <div className="h-screen bg-zinc-950 flex items-center justify-center">
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center">
-          <motion.div
-            className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-gradient-to-br from-cyan-400 via-violet-400 to-indigo-500 relative"
-            animate={{
-              boxShadow: [
-                "0 0 20px rgba(0, 245, 212, 0.3)",
-                "0 0 40px rgba(0, 245, 212, 0.5)",
-                "0 0 20px rgba(0, 245, 212, 0.3)",
-              ],
-            }}
-            transition={{ duration: 2, repeat: Infinity }}
-          />
-          <motion.h1
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="text-zinc-100 mb-2"
-          >
-            NAUTILUS TERMINAL
-          </motion.h1>
-          <motion.p
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-            className="text-zinc-500 text-sm tracking-wider"
-          >
-            INITIALIZING NEURAL NETWORK...
-          </motion.p>
-        </motion.div>
-      </div>
-    );
-  }
+  const hudMetrics = summaryQuery.data
+    ? {
+        totalPnl: summaryQuery.data.kpis.totalPnl,
+        winRate: summaryQuery.data.kpis.winRate,
+        sharpe: summaryQuery.data.kpis.sharpe,
+        maxDrawdown: summaryQuery.data.kpis.maxDrawdown,
+        openPositions: summaryQuery.data.kpis.openPositions,
+      }
+    : null;
+
+  const venueStatuses = healthQuery.data?.venues ?? null;
+  const hasHealthyVenue =
+    venueStatuses && venueStatuses.length > 0
+      ? venueStatuses.some((venue) => venue.status !== "down")
+      : false;
+  const isRealtimeConnected = wsConnected || hasHealthyVenue;
 
   return (
     <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden dark">
+      {bootStatus.phase === "degraded" ? (
+        <div className="bg-amber-500/10 border-b border-amber-500/40 text-amber-200 text-sm px-4 py-2">
+          Running in degraded mode{bootStatus.note ? ` — ${bootStatus.note}` : ""}
+        </div>
+      ) : null}
       <TopHUD
         mode={mode}
         metrics={hudMetrics}

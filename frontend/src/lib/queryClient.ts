@@ -4,34 +4,17 @@ import type { DefaultOptions } from "@tanstack/react-query";
 // Default query options for consistent behavior
 const defaultQueryOptions: DefaultOptions = {
   queries: {
-    // Cache data for 5 minutes by default
-    staleTime: 5 * 60 * 1000, // 5 minutes
-    // Keep data in cache for 10 minutes
-    gcTime: 10 * 60 * 1000, // 10 minutes (formerly cacheTime)
-    // Retry failed requests 3 times with exponential backoff
-    retry: (failureCount, error) => {
-      // Don't retry on 4xx errors (client errors)
-      if (error instanceof Error) {
-        const maybeStatus = (error as Error & { status?: number }).status;
-        if (typeof maybeStatus === "number" && maybeStatus >= 400 && maybeStatus < 500) {
-          return false;
-        }
-      }
-      // Retry up to 3 times for other errors
-      return failureCount < 3;
-    },
-    // Retry delay with exponential backoff
-    retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
-    // Refetch on window focus for real-time data
-    refetchOnWindowFocus: true,
-    // Don't refetch on reconnect by default (we'll handle this manually)
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+    retry: 1,
+    retryDelay: 2_000,
+    refetchOnWindowFocus: false,
     refetchOnReconnect: false,
+    networkMode: "always",
   },
   mutations: {
-    // Retry mutations once on failure
     retry: 1,
-    // Retry delay for mutations
-    retryDelay: 1000,
+    retryDelay: 1_000,
   },
 };
 

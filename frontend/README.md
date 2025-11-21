@@ -8,6 +8,12 @@ Run `npm i` to install the dependencies.
 
 Run `npm run dev` to start the development server.
 
+## End-to-end tests / Playwright
+
+-   Playwright now targets the running Command Center served by `hmm_ops` (`http://localhost:8002`). Make sure `make dry-run` or `docker compose up ops` is active before running `npx playwright test`.
+-   Override the URL with `PW_BASE_URL=http://your-host:port npx playwright test` if your stack is reachable elsewhere.
+-   If you still want Playwright to spin up a dev server automatically (e.g., for quick UI-only checks), provide `PW_WEB_SERVER_CMD="npm run dev -- --host 127.0.0.1 --port 4176"` so the config knows how to start/stop it.
+
 ## Debugging render loops
 
 -   Dev builds ship with `useWhyDidYouUpdate` + render counters (see `src/lib/debug/why.ts`). Open the browser console to inspect `why-did-you-update` or `render-count` logs for hot components such as `App`, `TopHUD`, and `BacktestingTab`.

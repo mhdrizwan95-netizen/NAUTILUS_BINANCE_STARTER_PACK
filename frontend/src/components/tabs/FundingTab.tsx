@@ -48,6 +48,9 @@ function formatEpoch(epoch: number | null | undefined) {
   return date.toLocaleString();
 }
 
+const PANEL_CLASS =
+  "rounded-2xl border border-zinc-800/60 bg-zinc-950/40 backdrop-blur-sm shadow-lg shadow-black/10";
+
 export function FundingTab() {
   const queryClient = useQueryClient();
   const opsToken = useAppStore((state) => state.opsAuth.token);
@@ -181,7 +184,7 @@ export function FundingTab() {
 
   return (
     <div className="space-y-6 p-6">
-      <Card>
+      <Card className={PANEL_CLASS}>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
             <CardTitle>Capital Buckets</CardTitle>
@@ -305,7 +308,7 @@ export function FundingTab() {
         />
       </div>
 
-      <Card>
+      <Card className={PANEL_CLASS}>
         <CardHeader className="flex flex-row items-center justify-between gap-2">
           <div>
             <CardTitle>Symbol Exposure</CardTitle>
@@ -358,7 +361,7 @@ export function FundingTab() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className={PANEL_CLASS}>
         <CardHeader>
           <CardTitle>Venue PnL Snapshot</CardTitle>
           <CardDescription>Realized vs unrealized performance by venue</CardDescription>
@@ -424,7 +427,7 @@ type MetricCardProps = {
 
 function MetricCard({ title, description, value, icon, footer, loading }: MetricCardProps) {
   return (
-    <Card className="bg-zinc-900/40 border-zinc-800">
+    <Card className={`${PANEL_CLASS} h-full`}>
       <CardHeader className="flex flex-row items-center justify-between gap-4">
         <div>
           <CardTitle className="text-sm text-zinc-200">{title}</CardTitle>
@@ -446,7 +449,7 @@ function MetricCard({ title, description, value, icon, footer, loading }: Metric
 
 function EmptyState({ message }: { message: string }) {
   return (
-    <div className="flex min-h-[120px] items-center justify-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/40 px-4 text-sm text-zinc-500">
+    <div className="flex min-h-[120px] items-center justify-center rounded-2xl border border-dashed border-zinc-800 bg-black/20 px-4 text-sm text-zinc-500">
       {message}
     </div>
   );

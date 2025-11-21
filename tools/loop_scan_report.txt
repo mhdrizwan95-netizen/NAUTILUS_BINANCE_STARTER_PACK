@@ -1,0 +1,50 @@
+[while_true] engine/app.py:560 while True:         try:             result = await rest.ensure_futures_balance(                 min_fut_usdt=MIN_FUT_BAL_USDT,                 topup_chunk_usdt
+[while_true] engine/app.py:602 while True:         try:             timestamp = time.time()             futures_total = futures_available = 0.0             try:                 futures_snapsh
+[while_true] engine/app.py:1161 while True:         try:             from engine.core import venue_specs_loader              venue_specs_loader.refresh()             global _last_specs_refresh
+[while_true] engine/app.py:1631 while True:                     try:                         await depeg.tick()                         from engine.metrics import risk_depeg_active
+[while_true] engine/app.py:1658 while True:                     try:                         await funding.tick()                     except _SUPPRESSIBLE_EXCEPTIONS as exc:
+[while_true] engine/app.py:2705 while True:                 topic, data = await queue.get()                 # Format as SSE (Server-Sent Events)                 yield f"event: {topic}\ndata: {
+[while_true] engine/app.py:3172 while True:         try:             if settings.is_futures:                 await _refresh_binance_futures_snapshot()             else:                 await _
+[while_true] engine/app.py:3218 while True:         tick_start = time.monotonic()         snapshot: dict[str, Any] | None = None         try:             snapshot = await router.get_account_sn
+[while_true] engine/app.py:3465 while True:             now = time.time()             try:                 for base in list(_BINANCE_WS_SYMBOLS) or []:                     last_ts = _binance_m
+[while_true] engine/core/binance_ws.py:105 while True:             try:                 async with websockets.connect(                     url,                     ping_interval=15,                     p
+[while_true] engine/core/event_bus.py:180 while True:             queue = self._queue             if queue is None:                 if not self._running:                     break                 await
+[while_true] engine/core/kraken_ws.py:85 while True:             try:                 async with websockets.connect(                     self.url,                     ssl=ssl_ctx,                     p
+[while_true] engine/core/oco_trailing.py:41 while True:         try:             # Get open orders and group by OCO             open_orders = list(_oms.list_open())             grouped = {}             fo
+[while_true] engine/core/oco_trailing.py:194 while True:             try:                 for trail_id, trail in list(self.active_trails.items()):                     try:                         await sel
+[while_true] engine/core/reconcile_daemon.py:43 while True:         try:             await _perform_reconciliation()             _reconcile_runs.inc()             await asyncio.sleep(interval)          except
+[while_true] engine/core/signal_queue.py:51 while True:                 evt = await self.get()                 if evt.expires_at and float(evt.expires_at) < time.time():                     continue
+[while_true] engine/feeds/binance_announcements.py:80 while True:         started = time.perf_counter()         try:             # prune expired             now = time.time()             for key, expiry in list(see
+[while_true] engine/feeds/dexscreener.py:156 while True:         try:             cands = await fetch_top_gainers()             for c in cands[:5]:                 tier = "A" if social_roc(c.symbol) >= 2.5
+[while_true] engine/ops/digest.py:101 while True:             try:                 self.rollups.maybe_reset()                 text = self._summary()                 await self.tg.send(text)
+[while_true] engine/ops/stop_validator.py:131 while True:             try:                 await self._sweep_positions()             except _SUPPRESSIBLE_EXCEPTIONS as exc:                 _log_suppressed("
+[while_true] engine/ops/ws_runner.py:69 while True:             try:                 ws = await self.ws_factory()                 self.log.info("[WS] connected")                 if self.cfg.get("WS_HE
+[while_true] engine/runtime/universe.py:117 while True:             async with self._lock:                 current_version, _ = self._universes.get(key, (0, ()))                 if current_version != last
+[while_true] engine/storage/sqlite.py:39 while True:         try:             sql, params = _Q.get(timeout=0.25)             batch.append((sql, params))         except queue.Empty:             pass
+[while_true] engine/strategies/event_breakout_trail.py:43 while True:             try:                 await self._tick()             except _SUPPRESSIBLE_EXCEPTIONS as exc:                 self.log.warning("[EVENT-BO:
+[while_true] engine/strategies/listing_sniper.py:423 while True:             remaining = wait_until - time.time()             if remaining <= 0:                 break             logger.info("[LISTING] %s waiting
+[while_true] ops/auto_probe.py:247 while True:         try:             r = await client.post(                 f"{engine_base}/orders/market",                 headers={"Content-Type": "applicatio
+[while_true] ops/background.py:41 while True:             for symbol in upper_symbols:                 try:                     response = await client.get(BINANCE_PRICE_URL, params={"symbol": s
+[while_true] ops/background.py:61 while True:         try:             snapshot = await portfolio.snapshot()             if snapshot:                 await broadcast_account(
+[while_true] ops/canary_manager.py:492 while True:         try:             logging.info("[CANARY] 🔬 Starting canary evaluation...")              # Only evaluate if auto-promotion is enabled
+[while_true] ops/capital_allocator.py:334 while True:         try:             # Fetch live metrics             metrics = await fetch_live_metrics()              if not metrics.get("models"):
+[while_true] ops/exposure_collector.py:42 while True:         try:             endpoints = _engine_endpoints()             if not endpoints:                 logging.warning("Exposure collector: no engin
+[while_true] ops/main.py:99 while True:             await ping_engine(client)             await asyncio.sleep(PING_INTERVAL_SEC)   async def trade() -> None:     """Start the lightweight t
+[while_true] ops/net.py:68 while True:         try:             response = await client.request(method, url, **kwargs)             if response.status_code not in retry_statuses:
+[while_true] ops/net.py:105 while True:         try:             response = client.request(method, url, **kwargs)             if response.status_code not in retry_statuses:
+[while_true] ops/ops_api.py:705 while True:         try:             portfolio = await get_portfolio()             portfolio["source"] = "engine"             _publish_account_snapshot(portfoli
+[while_true] ops/ops_api.py:794 while True:         await _risk_monitor_iteration()         await asyncio.sleep(EXPOSURE_CHECK_INTERVAL)   import fcntl as _fcntl  # noqa: E402 import os as _os
+[while_true] ops/ops_api.py:897 while True:             try:                 if enabled:                     promote_best()                 await asyncio.sleep(60)             except (RuntimeE
+[while_true] ops/ops_api.py:1240 while True:             try:                 # Pull summary KPIs via local HTTP to reuse existing logic                 async with httpx.AsyncClient(timeout=3.0
+[while_true] ops/ops_api.py:1274 while True:             try:                 h = await cc_health()  # Reuse existing aggregator                 venues = []                 for v in h.get("venu
+[while_true] ops/ops_api.py:1309 while True:             try:                 incoming = await websocket.receive_json()                 t = incoming.get("type")                 if t == "subscri
+[while_true] ops/pnl_collector.py:71 while True:         try:             endpoints = engine_endpoints()             limits = httpx.Limits(max_connections=10, max_keepalive_connections=10)
+[while_true] ops/portfolio_collector.py:124 while True:         try:             endpoints = engine_endpoints()             async with httpx.AsyncClient() as client:                 results = await asynci
+[while_true] ops/situations/router.py:76 while True:                 evt = await q.get()                 yield f"data: {json.dumps(evt)}\n\n"         finally:             try:                 _matcher.
+[while_true] ops/strategy_tracker.py:134 while True:         try:             all_data = {}             current_model = registry.get("current_model")             for e in engines:                 data
+[while_true] ops/ui_api.py:1499 while True:             await asyncio.sleep(60.0)     except WebSocketDisconnect:         pass     finally:         peers.discard(websocket)   async def _broadc
+[while_true] ops/vol_ranker.py:138 while True:         try:             run_once()         except _SUPPRESSIBLE_EXCEPTIONS as exc:             print(f"[vol_ranker] error during refresh: {exc}")
+[while_true] screener/service.py:203 while True:             try:                 # Run a synchronous scan; it will post hits to situations                 before = time.time()                 scan
+[while_true] situations/events.py:20 while True:             evt = await _queue.get()             yield f"data: {json.dumps(evt)}\n\n"      return StreamingResponse(gen(), media_type="text/event-st
+[while_true] tools/synthetic_feed.py:158 while True:         futures_metrics, spot_metrics, metadata = exchange.metrics_snapshot()         universes = config.universes or {}         for strategy, filte
+[while_true] tools/synthetic_feed.py:176 while True:         start = time.time()         for strategy in strategies:             _, symbols = await manager.current(strategy)             if not symbols:

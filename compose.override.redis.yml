@@ -1,0 +1,25 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: hmm_redis
+    command:
+      - redis-server
+      - --appendonly
+      - "no"
+    networks:
+      - trading_net
+    ports:
+      - "6379:6379"
+
+  ops:
+    environment:
+      IDEMPOTENCY_REDIS_URL: redis://redis:6379/0
+      OPS_WORKERS: "3"
+    depends_on:
+      redis:
+        condition: service_started
+
+networks:
+  trading_net:
+    external: true
+    name: nautilus_trading_network

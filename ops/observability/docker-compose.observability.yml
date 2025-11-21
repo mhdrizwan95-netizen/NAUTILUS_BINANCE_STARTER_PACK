@@ -28,8 +28,8 @@ services:
     container_name: hmm_grafana
     logging: *default-logging
     environment:
-      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:?set via secrets manager}
-      - GF_SECURITY_ADMIN_PASSWORD__FILE=${GF_SECURITY_ADMIN_PASSWORD__FILE:?mount Grafana admin password secret}
+      - GF_SECURITY_ADMIN_USER=${GF_SECURITY_ADMIN_USER:-grafana-admin}
+      - GF_SECURITY_ADMIN_PASSWORD__FILE=${GF_SECURITY_ADMIN_PASSWORD__FILE:-/run/secrets/grafana_admin_password}
       - GF_AUTH_ANONYMOUS_ENABLED=${GF_AUTH_ANONYMOUS_ENABLED:-false}
       - GF_AUTH_ANONYMOUS_ORG_ROLE=${GF_AUTH_ANONYMOUS_ORG_ROLE:-Viewer}
       - GF_SECURITY_ALLOW_EMBEDDING=false

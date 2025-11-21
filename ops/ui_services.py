@@ -498,7 +498,9 @@ class OpsGovernanceService:
             },
         }
 
-    async def set_trading_enabled(self, enabled: bool) -> dict[str, Any]:
+    async def set_trading_enabled(
+        self, enabled: bool, *, reason: str | None = None
+    ) -> dict[str, Any]:
         with self._lock:
             state = self._load_state()
             state["trading_enabled"] = bool(enabled)
@@ -510,20 +512,28 @@ class OpsGovernanceService:
         if token:
             headers["X-Ops-Token"] = token
 
+        payload = {"enabled": bool(enabled)}
+        if reason:
+            payload["reason"] = reason
+
         try:
             async with httpx.AsyncClient(timeout=6.0) as client:
                 resp = await client.post(
                     f"{endpoint}/ops/trading",
-                    json={"enabled": bool(enabled)},
+                    json=payload,
                     headers=headers or None,
                 )
                 resp.raise_for_status()
         except _REQUEST_ERRORS as exc:
             logger.warning("Engine trading toggle failed: %s", exc)
 
-        return {"trading_enabled": bool(enabled), "ts": _now()}
+        return {"trading_enabled": bool(enabled), "ts": _now(), "reason": reason}
 
-    async def flatten_positions(self, actor: str | None = None) -> dict[str, Any]:
+    async def flatten_positions(
+        self,
+        actor: str | None = None,
+        reason: str | None = None,
+    ) -> dict[str, Any]:
         if self._portfolio_service is None:
             raise PortfolioServiceUnavailableError()
 
@@ -563,6 +573,7 @@ class OpsGovernanceService:
                     "requested": 0,
                     "succeeded": 0,
                     "actor": actor,
+                    "reason": reason,
                 }
 
             flattened: list[dict[str, Any]] = []
@@ -613,6 +624,7 @@ class OpsGovernanceService:
             "requested": len(targets),
             "succeeded": succeeded,
             "actor": actor,
+            "reason": reason,
         }
 
     async def transfer_internal(
