@@ -26,6 +26,10 @@ class Metrics:
     account_equity_usd: float = 0.0
     cash_usd: float = 0.0
     gross_exposure_usd: float = 0.0
+    # NEW: Performance metrics for Allocator
+    win_rate: float = 0.0
+    max_drawdown: float = 0.0
+    total_loss_pct: float = 0.0
 
 
 @dataclass

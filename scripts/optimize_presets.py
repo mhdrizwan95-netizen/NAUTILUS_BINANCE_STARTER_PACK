@@ -192,6 +192,48 @@ MEME_PRESETS = {
     },
 }
 
+# 7. Risk Rails Presets (Dynamic Execution Gating)
+RISK_RAILS_PRESETS = {
+    "conservative": {
+        "description": "Tight limits for low confidence / high volatility",
+        "params": {
+            "min_notional_usdt": 10.0,
+            "max_notional_usdt": 1000.0,
+            "max_orders_per_min": 5,
+            "exposure_cap_symbol_usd": 2000.0,
+        },
+    },
+    "aggressive": {
+        "description": "Loose limits for high confidence / trending markets",
+        "params": {
+            "min_notional_usdt": 10.0,
+            "max_notional_usdt": 10000.0,
+            "max_orders_per_min": 30,
+            "exposure_cap_symbol_usd": 20000.0,
+        },
+    },
+}
+
+# 8. Risk Guardian Presets (Adaptive Account Protection)
+RISK_GUARDIAN_PRESETS = {
+    "panic": {
+        "description": "Crash mode: Tight stops, aggressive de-risking",
+        "params": {
+            "max_daily_loss_usd": 50.0,
+            "cross_health_floor": 1.50,
+            "critical_ratio": 1.05,
+        },
+    },
+    "growth": {
+        "description": "Growth mode: Wider stops, standard health checks",
+        "params": {
+            "max_daily_loss_usd": 500.0,
+            "cross_health_floor": 1.20,
+            "critical_ratio": 1.10,
+        },
+    },
+}
+
 TARGET_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT"]
 
 
@@ -255,6 +297,17 @@ def main():
             register_preset("listing_sniper", symbol, pid, data["params"])
         for pid, data in MEME_PRESETS.items():
             register_preset("meme_coin_sentiment", symbol, pid, data["params"])
+
+    # 7. Register Risk Rails Presets
+    logger.info("--- Registering Risk Rails Presets ---")
+    for symbol in TARGET_SYMBOLS:
+        for pid, data in RISK_RAILS_PRESETS.items():
+            register_preset("risk_rails", symbol, pid, data["params"])
+
+    # 8. Register Risk Guardian Presets (Global)
+    logger.info("--- Registering Risk Guardian Presets ---")
+    for pid, data in RISK_GUARDIAN_PRESETS.items():
+        register_preset("risk_guardian", "GLOBAL", pid, data["params"])
 
     logger.info("Genesis Complete. The Organism has DNA.")
 

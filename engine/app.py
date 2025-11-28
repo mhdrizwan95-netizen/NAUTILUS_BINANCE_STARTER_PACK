@@ -1811,13 +1811,20 @@ async def submit_market_order(
         )
         return JSONResponse(content={"status": "rejected", **err}, status_code=status)
 
-    # Apply venue-suffix to symbol if not present, defaulting to request venue or env VENUE
-    venue = (req.venue or "").upper() or VENUE
-    if "." not in req.symbol:
-        req.symbol = f"{req.symbol}.{venue}"
+        return JSONResponse(content={"status": "rejected", **err}, status_code=status)
 
-    # ——— Existing execution path (left intact) ———
+    # Register pending order to block concurrent execution
+    # Estimate notional: use quote if available, else quantity (assumed 1.0 for lock presence check if price unknown)
+    est_notional = req.quote if req.quote else (req.quantity or 1.0)
+    RAILS.register_pending(req.symbol, float(est_notional))
+
     try:
+        # Apply venue-suffix to symbol if not present, defaulting to request venue or env VENUE
+        venue = (req.venue or "").upper() or VENUE
+        if "." not in req.symbol:
+            req.symbol = f"{req.symbol}.{venue}"
+
+        # ——— Existing execution path (left intact) ———
         if req.quote is not None:
             result = await router.market_quote(
                 req.symbol,
@@ -1907,6 +1914,8 @@ async def submit_market_order(
         append_jsonl("orders.jsonl", resp)
         if idem_key:
             CACHE.set(idem_key, resp)
+        return resp
+
     except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pylint: disable=broad-except
         metrics.orders_rejected.inc()
         _record_venue_error(venue, exc)
@@ -1919,8 +1928,9 @@ async def submit_market_order(
         except _SUPPRESSIBLE_EXCEPTIONS as payload_exc:
             _log_suppressed("engine guard", payload_exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    else:
-        return resp
+
+    finally:
+        RAILS.clear_pending(req.symbol, float(est_notional))
 
 
 @app.post("/orders/limit", response_model=None)
@@ -1957,11 +1967,17 @@ async def submit_limit_order(
         )
         return JSONResponse(content={"status": "rejected", **err}, status_code=status)
 
-    venue = req.symbol.split(".")[1].upper() if "." in req.symbol else VENUE
-    if "." not in req.symbol:
-        req.symbol = f"{req.symbol}.{venue}"
+        return JSONResponse(content={"status": "rejected", **err}, status_code=status)
+
+    # Register pending order
+    est_notional = req.quote if req.quote else (req.quantity or 1.0)
+    RAILS.register_pending(req.symbol, float(est_notional))
 
     try:
+        venue = req.symbol.split(".")[1].upper() if "." in req.symbol else VENUE
+        if "." not in req.symbol:
+            req.symbol = f"{req.symbol}.{venue}"
+
         market_hint = req.market.lower() if isinstance(req.market, str) else None
         if req.quote is not None:
             result = await router.limit_quote(
@@ -2045,6 +2061,8 @@ async def submit_limit_order(
         append_jsonl("orders.jsonl", resp)
         if idem_key:
             CACHE.set(idem_key, resp)
+        return resp
+
     except _SUPPRESSIBLE_EXCEPTIONS as exc:
         metrics.orders_rejected.inc()
         _record_venue_error(venue, exc)
@@ -2056,8 +2074,9 @@ async def submit_limit_order(
         except _SUPPRESSIBLE_EXCEPTIONS as payload_exc:
             _log_suppressed("engine guard", payload_exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    else:
-        return resp
+
+    finally:
+        RAILS.clear_pending(req.symbol, float(est_notional))
 
 
 @app.get("/symbol_info")

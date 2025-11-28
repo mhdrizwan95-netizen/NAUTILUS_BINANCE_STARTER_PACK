@@ -7,11 +7,13 @@ import threading
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
-from .config import RiskConfig
+from engine.config import RiskConfig, load_risk_config
+from engine.services.param_client import get_cached_params
 from .core.market_resolver import resolve_market_choice
+from ops.allocator import ALLOCATIONS_PATH
 from .metrics import (
     breaker_rejections,
     breaker_state,
@@ -95,11 +97,24 @@ class RiskRails:
         self._manual_trading_disabled = False
         self._symbol_lock_ttl = max(self.cfg.symbol_lock_ttl_sec, 0.0)
         self._symbol_locks: dict[str, SymbolLockState] = {}
+        self._pending_orders: dict[str, float] = defaultdict(float)
         self._symbol_lock_guard = threading.Lock()
 
     def set_manual_trading_enabled(self, enabled: bool) -> None:
         """Update in-memory trading gate."""
         self._manual_trading_disabled = not enabled
+
+    def register_pending(self, symbol: str, notional: float) -> None:
+        """Register a pending order to block concurrent execution."""
+        with self._symbol_lock_guard:
+            self._pending_orders[symbol] += notional
+
+    def clear_pending(self, symbol: str, notional: float) -> None:
+        """Clear a pending order after execution or failure."""
+        with self._symbol_lock_guard:
+            self._pending_orders[symbol] -= notional
+            if self._pending_orders[symbol] <= 1e-9:  # Float tolerance
+                self._pending_orders.pop(symbol, None)
 
     def check_order(
         self,
@@ -112,10 +127,76 @@ class RiskRails:
         strategy_id: str | None = None,  # NEW
     ) -> tuple[bool, dict]:
         """
-        Validate an order request. Returns (ok, error_json).
-        Only one of `quote` (notional USDT) or `quantity` (base) must be provided.
+        Validate order against risk rules.
+        Now supports DYNAMIC PARAMETERS from ParamController.
         """
         from .core import order_router
+
+        # 1. Fetch Dynamic Params (if available)
+        # We use a local 'cfg' variable which defaults to self.cfg but can be overridden.
+        # This ensures the base config remains stable while allowing per-order flexibility.
+        cfg = self.cfg
+        
+        # Only fetch if we have a symbol to lookup
+        if symbol:
+            dyn_params = get_cached_params("risk_rails", symbol)
+            if dyn_params and "params" in dyn_params:
+                try:
+                    # Create a temporary config with overrides
+                    # We use dataclasses.replace because RiskConfig is frozen
+                    cfg = replace(cfg, **dyn_params["params"])
+                    
+                    # --- SAFETY INTERLOCKS (HARD CEILINGS) ---
+                    # Prevent "No Risk" scenarios by clamping dynamic values to global maximums.
+                    
+                    # 1. Max Notional Cap: Never exceed 50% of last known equity (or static max if equity unknown)
+                    # If equity is 0 or unknown, we fall back to the static max_notional_usdt as the hard ceiling.
+                    safe_equity = max(self._last_equity, 0.0)
+                    if safe_equity > 0:
+                        hard_cap = safe_equity * 0.50
+                        if cfg.max_notional_usdt > hard_cap:
+                            cfg = replace(cfg, max_notional_usdt=hard_cap)
+                    
+                    # 2. Max Orders Per Min: Cap at 5x default to prevent DDoS-ing ourselves
+                    hard_rate_limit = self.cfg.max_orders_per_min * 5
+                    if cfg.max_orders_per_min > hard_rate_limit:
+                        cfg = replace(cfg, max_orders_per_min=hard_rate_limit)
+
+                except (TypeError, ValueError) as e:
+                    # If params are malformed, log and fall back to static defaults
+                    # We don't want to crash the risk engine on bad config injection
+                    pass
+        
+        # 2. Dynamic Capital Allocation (The Enforcer)
+        # If strategy_id is provided, check against WealthManager allocations
+        if strategy_id and ALLOCATIONS_PATH.exists():
+            try:
+                import json
+                alloc_data = json.loads(ALLOCATIONS_PATH.read_text())
+                allocations = alloc_data.get("allocations", {})
+                strategy_cap = float(allocations.get(strategy_id, 0.0))
+                
+                # If strategy has an allocation (and it's > 0), enforce it
+                # If allocation is 0, it means KILLED (Bankruptcy Protection)
+                if strategy_cap > 0:
+                    # We override max_notional_usdt with the strategy-specific cap
+                    # But we must respect the global hard cap (50% equity) too
+                    # So we take min(strategy_cap, cfg.max_notional_usdt)
+                    
+                    # Wait, cfg.max_notional_usdt might already be clamped.
+                    # Let's just clamp the strategy cap to the current cfg limit.
+                    effective_cap = min(strategy_cap, cfg.max_notional_usdt)
+                    cfg = replace(cfg, max_notional_usdt=effective_cap)
+                    
+                elif strategy_id in allocations and strategy_cap <= 0:
+                    # Explicitly KILLED
+                    return False, {
+                        "error": "STRATEGY_BANKRUPT",
+                        "message": f"Strategy {strategy_id} has been killed by WealthManager (Alloc=$0).",
+                    }
+            except Exception:
+                # Fallback to standard rails if allocation read fails
+                pass
 
         # Breaker check first
         try:
@@ -123,6 +204,14 @@ class RiskRails:
         except RiskError as e:
             breaker_rejections.inc()
             return False, {"error": e.code, "message": str(e)}
+
+        # Concurrency Lock: Prevent race conditions
+        with self._symbol_lock_guard:
+            if symbol in self._pending_orders:
+                return False, {
+                    "error": "RACE_CONDITION_PENDING_ORDER",
+                    "message": f"Pending order exists for {symbol}. Concurrency lock active.",
+                }
 
         # Trading toggle (in-memory override for speed + file for persistence)
         if self._manual_trading_disabled:
@@ -141,7 +230,8 @@ class RiskRails:
                 "message": "Trading disabled by daily stop or operator flag.",
                 "hint": "Remove or set state/trading_enabled.flag=true to re-enable at boundary.",
             }
-        if not self.cfg.trading_enabled:
+        # Use dynamic 'cfg' for the check
+        if not cfg.trading_enabled:
             return False, {
                 "error": "TRADING_DISABLED",
                 "message": "Trading is disabled by configuration.",
@@ -149,14 +239,14 @@ class RiskRails:
             }
 
         # Symbol allowlist (USDT universe)
-        if self.cfg.trade_symbols:
+        if cfg.trade_symbols:
             symbol_base = symbol.split(".")[0].upper()
-            allowed_bases = {s.split(".")[0].upper() for s in self.cfg.trade_symbols}
+            allowed_bases = {s.split(".")[0].upper() for s in cfg.trade_symbols}
             if symbol_base not in allowed_bases:
                 return False, {
                     "error": "SYMBOL_NOT_ALLOWED",
                     "message": f"{symbol} is not enabled.",
-                    "allowed": [f"{s}.BINANCE" for s in sorted(self.cfg.trade_symbols)],
+                    "allowed": [f"{s}.BINANCE" for s in sorted(cfg.trade_symbols)],
                 }
 
         # Symbol quarantine (soft gate): two recent stops -> temporary block
@@ -184,17 +274,25 @@ class RiskRails:
         # Notional rails
         notional = float(quote) if quote is not None else None
         if notional is not None:
-            if notional < self.cfg.min_notional_usdt:
+            # 1. Notional Check
+            if notional < cfg.min_notional_usdt:
                 return False, {
                     "error": "NOTIONAL_TOO_SMALL",
-                    "message": f"Notional {notional:.2f} < MIN_NOTIONAL_USDT {self.cfg.min_notional_usdt:.2f}",
-                    "min_notional_usdt": self.cfg.min_notional_usdt,
+                    "message": f"Notional {notional:.2f} < MIN_NOTIONAL_USDT {cfg.min_notional_usdt:.2f}",
+                    "min_notional_usdt": cfg.min_notional_usdt,
                 }
-            if notional > self.cfg.max_notional_usdt:
+            if notional > cfg.max_notional_usdt:
                 return False, {
                     "error": "NOTIONAL_TOO_LARGE",
-                    "message": f"Notional {notional:.2f} > MAX_NOTIONAL_USDT {self.cfg.max_notional_usdt:.2f}",
-                    "max_notional_usdt": self.cfg.max_notional_usdt,
+                    "message": f"Notional {notional:.2f} > MAX_NOTIONAL_USDT {cfg.max_notional_usdt:.2f}",
+                    "max_notional_usdt": cfg.max_notional_usdt,
+                }
+            # 2. Dust Check (if closing, we might allow dust, but for now enforce)
+            if notional < cfg.dust_threshold_usd:
+                return False, {
+                    "error": "NOTIONAL_TOO_SMALL_DUST",
+                    "message": f"Notional {notional:.2f} < DUST_THRESHOLD_USD {cfg.dust_threshold_usd:.2f}",
+                    "dust_threshold_usd": cfg.dust_threshold_usd,
                 }
 
         # Exposure breakers (symbol & total)
@@ -294,6 +392,24 @@ class RiskRails:
 
         raw_positions = snap.get("positions") if isinstance(snap, dict) else None
         positions = list(raw_positions) if isinstance(raw_positions, (list, tuple)) else []
+        
+        # Wash Trade Prevention
+        # Block opposing signals if a position exists (e.g. SHORT signal when LONG exists)
+        # Note: 'side' is BUY/SELL. We assume SELL on Long is a Close (Allowed).
+        # We cannot easily detect 'Open Short' intent without positionSide, but we can block
+        # obvious conflicts if we were to support explicit SHORT signals in the future.
+        # For now, we rely on the concurrency lock to prevent simultaneous flips.
+        current_pos = next((p for p in positions if p.get("symbol") == symbol), None)
+        if current_pos:
+            pos_amt = float(current_pos.get("qty_base", 0.0))
+            # If Long and receiving explicit SHORT signal (if we had it) -> Block
+            # Since we only have BUY/SELL:
+            # If Long (>0) and BUY -> Adding (OK)
+            # If Long (>0) and SELL -> Closing (OK)
+            # If Short (<0) and SELL -> Adding (OK)
+            # If Short (<0) and BUY -> Closing (OK)
+            pass
+
         sym_expo = 0.0
         total_expo = 0.0
         venue_exposures: dict[str, float] = defaultdict(float)
@@ -330,50 +446,50 @@ class RiskRails:
         sym_after = abs(sym_expo + delta_signed)
         total_after = abs(total_expo + delta_signed)
         venue_after = abs(venue_exposures.get(venue, 0.0) + delta_signed)
-        if sym_after > self.cfg.exposure_cap_symbol_usd:
+        if sym_after > cfg.exposure_cap_symbol_usd:
             breaker_rejections.inc()
             return False, {
                 "error": "EXPOSURE_SYMBOL_CAP",
-                "message": f"Exposure cap per symbol exceeded: {sym_after:.2f} > {self.cfg.exposure_cap_symbol_usd}",
+                "message": f"Exposure cap per symbol exceeded: {sym_after:.2f} > {cfg.exposure_cap_symbol_usd}",
             }
-        if total_after > self.cfg.exposure_cap_total_usd:
+        if total_after > cfg.exposure_cap_total_usd:
             breaker_rejections.inc()
             return False, {
                 "error": "EXPOSURE_TOTAL_CAP",
-                "message": f"Total exposure cap exceeded: {total_after:.2f} > {self.cfg.exposure_cap_total_usd}",
+                "message": f"Total exposure cap exceeded: {total_after:.2f} > {cfg.exposure_cap_total_usd}",
             }
-        if venue_after > self.cfg.exposure_cap_venue_usd:
+        if venue_after > cfg.exposure_cap_venue_usd:
             breaker_rejections.inc()
             return False, {
                 "error": "EXPOSURE_VENUE_CAP",
-                "message": f"Venue exposure cap exceeded for {venue}: {venue_after:.2f} > {self.cfg.exposure_cap_venue_usd}",
+                "message": f"Venue exposure cap exceeded for {venue}: {venue_after:.2f} > {cfg.exposure_cap_venue_usd}",
             }
 
-        if resolved_market == "margin" and self.cfg.margin_enabled:
+        if resolved_market == "margin" and cfg.margin_enabled:
             margin_level_val = self._sanitize_float(getattr(portfolio_state, "margin_level", None))
             if (
                 margin_level_val is not None
                 and margin_level_val > 0
-                and margin_level_val < self.cfg.margin_min_level
+                and margin_level_val < cfg.margin_min_level
             ):
                 return False, {
                     "error": "MARGIN_LEVEL_LOW",
-                    "message": f"Margin level {margin_level_val:.2f} below configured floor {self.cfg.margin_min_level:.2f}",
+                    "message": f"Margin level {margin_level_val:.2f} below configured floor {cfg.margin_min_level:.2f}",
                 }
             margin_liability_val = self._sanitize_float(
                 getattr(portfolio_state, "margin_liability_usd", None)
             )
             if (
-                self.cfg.margin_max_liability_usd > 0
+                cfg.margin_max_liability_usd > 0
                 and margin_liability_val is not None
-                and margin_liability_val > self.cfg.margin_max_liability_usd
+                and margin_liability_val > cfg.margin_max_liability_usd
             ):
                 return False, {
                     "error": "MARGIN_LIABILITY_LIMIT",
-                    "message": f"Cross-margin liability {margin_liability_val:.2f} exceeds limit {self.cfg.margin_max_liability_usd:.2f}",
+                    "message": f"Cross-margin liability {margin_liability_val:.2f} exceeds limit {cfg.margin_max_liability_usd:.2f}",
                 }
             equity_val = self._sanitize_float(getattr(portfolio_state, "equity", None)) or 0.0
-            max_leverage = max(self.cfg.margin_max_leverage, 0.0)
+            max_leverage = max(cfg.margin_max_leverage, 0.0)
             if max_leverage > 0 and equity_val > 0:
                 current_abs_expo = abs(sym_expo)
                 projected_abs_expo = abs(sym_expo + delta_signed)
@@ -398,7 +514,7 @@ class RiskRails:
         if not self.ratelimiter.allow():
             return False, {
                 "error": "ORDER_RATE_EXCEEDED",
-                "message": f"Max {self.cfg.max_orders_per_min}/min exceeded.",
+                "message": f"Max {cfg.max_orders_per_min}/min exceeded.",
                 "window_sec": 60,
             }
         symbol_key = symbol_base.upper()

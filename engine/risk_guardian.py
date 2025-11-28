@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from engine.runtime.config import load_runtime_config
+from engine.services.param_client import get_cached_params
 
 from .metrics import REGISTRY as MET
 
@@ -139,7 +140,46 @@ class RiskGuardian:
         while self._running:
             t0 = time.time()
             try:
+                # 1. Fetch Dynamic Global Params
+                # "RiskGuardian must fetch global params (e.g., max_daily_loss) dynamically."
+                dyn_params = get_cached_params("risk_guardian", "GLOBAL")
+                if dyn_params and "params" in dyn_params:
+                    try:
+                        p = dyn_params["params"]
+                        # GuardianConfig is a standard dataclass (not frozen), so we can update attributes directly.
+                        # We map param names to config attributes if they match.
+                        
+                        # Max Daily Loss
+                        if "max_daily_loss_usd" in p:
+                            new_loss = float(p["max_daily_loss_usd"])
+                            # --- SAFETY INTERLOCK (HARD CEILING) ---
+                            # Clamp to 10% of Equity if known, else trust the param (or static default if param is crazy high?)
+                            # We'll check equity from the snapshot below, but we need to set config now.
+                            # Let's defer clamping until we have the snapshot.
+                            self.cfg.max_daily_loss_usd = new_loss
+                            
+                        # Cross Health Floor
+                        if "cross_health_floor" in p:
+                            self.cfg.cross_health_floor = float(p["cross_health_floor"])
+                            
+                        # Critical Ratio
+                        if "critical_ratio" in p:
+                            self.cfg.critical_ratio = float(p["critical_ratio"])
+                            
+                    except (ValueError, TypeError):
+                        pass
+
                 snap = await order_router.get_account_snapshot()
+                
+                # --- SAFETY INTERLOCK (HARD CEILING APPLICATION) ---
+                # Clamp max_daily_loss_usd to 10% of Equity
+                if snap:
+                    equity = float(snap.get("equity") or snap.get("equity_usd") or 0.0)
+                    if equity > 0:
+                        hard_cap = equity * 0.10
+                        if self.cfg.max_daily_loss_usd > hard_cap:
+                            self.cfg.max_daily_loss_usd = hard_cap
+
                 await self._enforce_daily_stop(order_router)
                 await self._enforce_cross_health(order_router, snap)
                 # Keep portfolio gauges fresh via rails snapshot ingestion

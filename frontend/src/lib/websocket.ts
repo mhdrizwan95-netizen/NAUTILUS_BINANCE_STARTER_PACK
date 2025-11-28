@@ -194,11 +194,11 @@ const isVenueArray = (data: unknown): data is Venue[] => Array.isArray(data);
 const buildWebSocketUrl = (base: string, session: string): string => {
   try {
     const url = new URL(base, base.startsWith("ws") ? undefined : window.location.origin);
-    url.searchParams.set("session", session);
+    url.searchParams.set("token", session);
     return url.toString();
   } catch {
     const delimiter = base.includes("?") ? "&" : "?";
-    return `${base}${delimiter}session=${encodeURIComponent(session)}`;
+    return `${base}${delimiter}token=${encodeURIComponent(session)}`;
   }
 };
 
@@ -242,7 +242,7 @@ export function useWebSocket(): WebSocketHookResult {
 
   const liveDisabled = resolveLiveDisabled();
   const disabledResult: WebSocketHookResult = useMemo(() => {
-    const noop = () => {};
+    const noop = () => { };
     return {
       isConnected: false,
       lastMessage: null,

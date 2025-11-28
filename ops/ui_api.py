@@ -1260,39 +1260,10 @@ async def cc_metrics_summary(
     max_dd = max((float(d.get("max_drawdown", 0.0)) for d in enhanced_data), default=0.0)
 
     # Dev-friendly seeding: if nothing available, provide a small synthetic snapshot
-    if not enhanced_data and not positions:
-        import random
-
-        rnd = random.Random(42)
-        seeded_pnl = round(rnd.uniform(-1500, 2500), 2)
-        seeded_symbols = [
-            {"symbol": "BTCUSDT", "pnl": round(rnd.uniform(-200, 600), 2)},
-            {"symbol": "ETHUSDT", "pnl": round(rnd.uniform(-120, 400), 2)},
-            {"symbol": "BNBUSDT", "pnl": round(rnd.uniform(-80, 220), 2)},
-        ]
-        seeded_returns = [rnd.gauss(0.0005, 0.01) for _ in range(60)]
-        # Create a synthetic equity-by-strategy series with 2 lines for visuals
-        now = int(time.time())
-        eq_series = []
-        s1, s2 = 10000.0, 10000.0
-        for i in range(60):
-            s1 *= 1 + rnd.gauss(0.0004, 0.006)
-            s2 *= 1 + rnd.gauss(0.0002, 0.008)
-            ts = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - (60 - i) * 3600))
-            eq_series.append({"t": ts, "alpha": round(s1, 2), "beta": round(s2, 2)})
-
-        return {
-            "kpis": {
-                "totalPnl": seeded_pnl,
-                "winRate": 0.57,
-                "sharpe": 0.92,
-                "maxDrawdown": 0.137,
-                "openPositions": 0,
-            },
-            "equityByStrategy": eq_series,
-            "pnlBySymbol": seeded_symbols,
-            "returns": seeded_returns,
-        }
+    # Dev-friendly seeding: if nothing available, provide a small synthetic snapshot
+    # [REMOVED] Fake data generation removed to ensure observability truth
+    # if not enhanced_data and not positions:
+    #     ...
 
     return {
         "kpis": {

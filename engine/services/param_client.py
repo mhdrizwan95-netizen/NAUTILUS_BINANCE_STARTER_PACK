@@ -296,97 +296,109 @@ def update_param_features(strategy: str, instrument: str, features: dict[str, fl
     client.update_features(strategy, instrument, features)
 
 
-def update_context(strategy_name: str, symbol: str, features: dict[str, float]) -> None:
-    """Standardized helper to report market context features to the ParamController."""
-    update_param_features(strategy_name, symbol, features)
+def update_context(strategy: str, instrument: str, features: dict[str, float]) -> None:
+    """Helper to push features to the bridge."""
+    client = get_param_client()
+    if client:
+        client.update_features(strategy, instrument, features)
 
 
-def apply_dynamic_config(strategy_instance: Any, symbol: str) -> None:
+def apply_dynamic_config(strategy_instance: Any, symbol: str) -> bool:
     """
-    Universal helper to fetch and apply dynamic parameters to a strategy instance.
-
-    Args:
-        strategy_instance: The strategy object (must have .name or .cfg).
-        symbol: The symbol to fetch params for.
+    Universal adapter to inject Bandit parameters into any Strategy instance.
+    1. Fetches params from ParamController.
+    2. Overrides matching attributes in strategy_instance.cfg (handling Frozen dataclasses).
     """
+    # Normalize names
+    strat_name = getattr(strategy_instance, "name", "strategy")
+
+    # Infer strategy name from class if needed (e.g. TrendStrategyModule -> trend_strategy)
+    if not hasattr(strategy_instance, "name"):
+        cls_name = strategy_instance.__class__.__name__
+        if "Trend" in cls_name:
+            strat_name = "trend_strategy"
+        elif "Scalp" in cls_name:
+            strat_name = "scalp_strategy"
+        elif "Momentum" in cls_name:
+            strat_name = "momentum_strategy"
+        elif "Scanner" in cls_name:
+            strat_name = "symbol_scanner"
+
+    # Fetch from Bandit
+    data = get_cached_params(strat_name, symbol)
+    if not data or "params" not in data:
+        return False
+
+    new_params = data["params"]
+    if not new_params:
+        return False
+
+    # Priority 1: Update self._params (TrendStrategy pattern)
+    if hasattr(strategy_instance, "_params") and hasattr(strategy_instance._params, "update"):
+        try:
+            strategy_instance._params.update(**new_params)
+            _LOGGER.info(
+                f"[{strat_name.upper()}] Applied dynamic params for {symbol}: {list(new_params.keys())}"
+            )
+            return True
+        except Exception as e:
+            _LOGGER.warning(f"Failed to apply dynamic config to {strat_name}: {e}")
+            return False
+
+    # Priority 2: Update self.cfg (Standard pattern)
+    cfg = getattr(strategy_instance, "cfg", None)
+    if not cfg:
+        return False
+
+    applied = False
     try:
-        # Determine strategy name
-        strat_name = getattr(strategy_instance, "name", None)
-        if not strat_name:
-            strat_name = strategy_instance.__class__.__name__.replace("Strategy", "").lower()
-
-        # Fetch params
-        dyn = get_cached_params(strat_name, symbol)
-        if not dyn:
-            return
-
-        params = dyn.get("params", {})
-        if not params:
-            return
-
-        # Apply params
-        # Priority 1: Update self._params (TrendStrategy pattern)
-        if hasattr(strategy_instance, "_params") and hasattr(strategy_instance._params, "update"):
-            strategy_instance._params.update(**params)
-            return
-
-        # Priority 2: Update self.cfg (Standard pattern)
-        if hasattr(strategy_instance, "cfg"):
-            cfg = strategy_instance.cfg
-            updates = {}
-            updated_keys = []
-
-            for key, value in params.items():
-                if hasattr(cfg, key):
-                    # Type safe update if possible
-                    current_val = getattr(cfg, key)
-                    try:
-                        # Cast to existing type
-                        target_type = type(current_val)
-                        if target_type == bool:
-                            # Handle bool specially because bool("False") is True
-                            if str(value).lower() in ("false", "0", "no", "off"):
-                                new_val = False
-                            else:
-                                new_val = True
+        updates = {}
+        for k, v in new_params.items():
+            if hasattr(cfg, k):
+                # Type safe update if possible
+                current_val = getattr(cfg, k)
+                try:
+                    # Cast to existing type
+                    target_type = type(current_val)
+                    if target_type == bool:
+                        # Handle bool specially because bool("False") is True
+                        if str(v).lower() in ("false", "0", "no", "off"):
+                            new_val = False
                         else:
-                            new_val = target_type(value)
+                            new_val = True
+                    else:
+                        new_val = target_type(v)
 
-                        updates[key] = new_val
-                        updated_keys.append(f"{key}={new_val}")
-                    except (ValueError, TypeError):
-                        pass
+                    updates[k] = new_val
+                except (ValueError, TypeError):
+                    pass
 
-            if updates:
-                from dataclasses import is_dataclass, replace
+        if updates:
+            from dataclasses import is_dataclass, replace
 
-                if is_dataclass(cfg):
-                    # Handle frozen dataclasses by replacing the object
-                    try:
-                        new_cfg = replace(cfg, **updates)
-                        strategy_instance.cfg = new_cfg
-                    except Exception:
-                        # Fallback for non-frozen or other issues
-                        for k, v in updates.items():
-                            setattr(cfg, k, v)
-                else:
-                    # Standard object
-                    for k, v in updates.items():
-                        setattr(cfg, k, v)
+            if is_dataclass(cfg):
+                # Handle frozen dataclasses by replacing the object
+                new_cfg = replace(cfg, **updates)
+                strategy_instance.cfg = new_cfg
+                applied = True
+            else:
+                # Standard object
+                for k, v in updates.items():
+                    setattr(cfg, k, v)
+                applied = True
 
-                if hasattr(strategy_instance, "_log"):
-                    strategy_instance._log.info(
-                        f"[{strat_name.upper()}] Dynamic Config Applied: {', '.join(updated_keys)}"
-                    )
-                elif hasattr(strategy_instance, "log"):
-                    strategy_instance.log.info(
-                        f"[{strat_name.upper()}] Dynamic Config Applied: {', '.join(updated_keys)}"
-                    )
+    except Exception as e:
+        _LOGGER.warning(f"Failed to apply dynamic config to {strat_name}: {e}")
 
-    except Exception:
-        pass  # Fail safe
+    if applied:
+        _LOGGER.info(
+            f"[{strat_name.upper()}] Applied dynamic params for {symbol}: {list(new_params.keys())}"
+        )
+
+    return applied
 
 
+# UPDATE EXPORTS
 __all__ = [
     "ParamControllerBridge",
     "ParamOutcomeTracker",
@@ -394,6 +406,6 @@ __all__ = [
     "get_param_client",
     "get_cached_params",
     "update_param_features",
-    "update_context",
-    "apply_dynamic_config",
+    "update_context",  # <--- ADDED
+    "apply_dynamic_config",  # <--- ADDED
 ]
