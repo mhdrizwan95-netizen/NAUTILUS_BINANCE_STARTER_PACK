@@ -1,62 +1,111 @@
-/* Cyberpunk Theme Overrides - Inspired by pnl_dashboard.html */
+/* ========================================
+   NAUTILUS CYBERPUNK DESIGN SYSTEM
+   Sci-Fi Ops Center Theme (from pnl_dashboard.html)
+   ======================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
 :root {
   /* Cyberpunk Color Palette */
-  --cyber-bg-start: #0f0f23;
-  --cyber-bg-mid: #1a1a2e;
-  --cyber-bg-end: #16213e;
-  --cyber-text: #e0e6ff;
-  --cyber-text-dim: #b0b7bf;
-  --cyber-accent: #00ff9d; /* Neon Green */
-  --cyber-negative: #ff6b6b; /* Neon Red */
-  --cyber-neutral: #ffd93d; /* Yellow */
-  --cyber-glass-bg: rgba(255, 255, 255, 0.05);
-  --cyber-glass-border: rgba(255, 255, 255, 0.1);
-  --cyber-glass-blur: blur(10px);
+  --color-neon-green: #00ff9d;
+  --color-neon-red: #ff6b6b;
+  --color-neon-blue: #00d3ff;
+  --color-neon-yellow: #ffd93d;
+
+  /* Background Gradient (Deep Blue) */
+  --bg-gradient: linear-gradient(135deg, #0f0f23 0%, #1a1a2e 50%, #16213e 100%);
+
+  /* Glass Panel System */
+  --glass-bg: rgba(255, 255, 255, 0.05);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-blur: 12px;
+
+  /* Text Colors */
+  --text-primary: #e0e6ff;
+  --text-secondary: #b0b7bf;
+  --text-dim: #6b7280;
 }
 
-/* Global Background Gradient */
+/* Global Reset & Base */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
 body {
-  background: linear-gradient(135deg, var(--cyber-bg-start) 0%, var(--cyber-bg-mid) 50%, var(--cyber-bg-end) 100%) !important;
-  color: var(--cyber-text) !important;
+  background: var(--bg-gradient);
+  background-attachment: fixed;
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   min-height: 100vh;
+  overflow-x: hidden;
 }
 
-/* Glass Panel Effect */
-.glass-panel {
-  background: var(--cyber-glass-bg);
-  backdrop-filter: var(--cyber-glass-blur);
-  -webkit-backdrop-filter: var(--cyber-glass-blur);
-  border: 1px solid var(--cyber-glass-border);
+/* Typography - Monospace for Numbers */
+.font-mono,
+.value,
+[data-value] {
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Glass Panel Utility */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
   border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.glass-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(var(--glass-blur));
+  -webkit-backdrop-filter: blur(var(--glass-blur));
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+/* Neon Accent Colors */
+.cyber-positive,
+.neon-green {
+  color: var(--color-neon-green) !important;
+}
+
+.cyber-negative,
+.neon-red {
+  color: var(--color-neon-red) !important;
+}
+
+.cyber-neutral,
+.neon-blue {
+  color: var(--color-neon-blue) !important;
+}
+
+.neon-yellow {
+  color: var(--color-neon-yellow) !important;
 }
 
 /* Neon Glow Effect */
 .neon-glow {
-  text-shadow: 0 0 10px var(--cyber-accent), 0 0 20px var(--cyber-accent), 0 0 30px var(--cyber-accent);
+  text-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor;
 }
 
-/* Positive/Negative Value Colors */
-.cyber-positive {
-  color: var(--cyber-accent) !important;
-}
-
-.cyber-negative {
-  color: var(--cyber-negative) !important;
-}
-
-.cyber-neutral {
-  color: var(--cyber-neutral) !important;
-}
-
-/* Pulse Animation for Connection Status */
+/* Pulse Animation */
 @keyframes cyber-pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
     transform: scale(1);
   }
+
   50% {
     opacity: 0.6;
-    transform: scale(1.2);
+    transform: scale(1.15);
   }
 }
 
@@ -64,49 +113,44 @@ body {
   animation: cyber-pulse 2s ease-in-out infinite;
 }
 
-/* Override Tailwind zinc colors with cyberpunk theme */
-.bg-zinc-900 {
-  background-color: var(--cyber-glass-bg) !important;
+/* Glass Background Variables for Cyberpunk Components */
+.cyber-glass-bg {
+  background-color: var(--glass-bg);
 }
 
-.bg-zinc-900\/70,
-.bg-zinc-900\/60,
-.bg-zinc-900\/40 {
-  background: var(--cyber-glass-bg) !important;
-  backdrop-filter: var(--cyber-glass-blur);
-  -webkit-backdrop-filter: var(--cyber-glass-blur);
+.cyber-glass-border {
+  border-color: var(--glass-border);
 }
 
-.border-zinc-800,
-.border-zinc-800\/70,
-.border-zinc-800\/60,
-.border-zinc-800\/40 {
-  border-color: var(--cyber-glass-border) !important;
+.cyber-text {
+  color: var(--text-primary);
 }
 
-.text-zinc-100 {
-  color: var(--cyber-text) !important;
+.cyber-text-dim {
+  color: var(--text-secondary);
 }
 
-.text-zinc-500 {
-  color: var(--cyber-text-dim) !important;
+/* Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
 }
 
-/* Enhance emerald (green) to use cyber accent */
-.text-emerald-400 {
-  color: var(--cyber-accent) !important;
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.02);
 }
 
-.bg-emerald-400 {
-  background-color: var(--cyber-accent) !important;
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 255, 157, 0.3);
+  border-radius: 4px;
 }
 
-/* Red to cyber negative */
-.text-red-400 {
-  color: var(--cyber-negative) !important;
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 255, 157, 0.5);
 }
 
-/* Add subtle glow to metric values */
-.font-mono.text-base {
-  text-shadow: 0 0 8px currentColor;
+/* Selection */
+::selection {
+  background: rgba(0, 255, 157, 0.3);
+  color: white;
 }
