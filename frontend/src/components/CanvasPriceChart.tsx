@@ -64,7 +64,8 @@ export function CanvasPriceChart({ data, symbol, height = 400 }: CanvasPriceChar
         });
 
         // Add candlestick series
-        const candlestickSeries = chart.addCandlestickSeries({
+        const candlestickSeries = chart.addSeries({
+            type: 'Candlestick',
             upColor: '#00ff9d', // Neon green
             downColor: '#ff6b6b', // Neon red
             borderUpColor: '#00ff9d',
@@ -94,7 +95,13 @@ export function CanvasPriceChart({ data, symbol, height = 400 }: CanvasPriceChar
     // Update data when it changes
     useEffect(() => {
         if (seriesRef.current && data.length > 0) {
-            seriesRef.current.setData(data);
+            // Cast timestamps to Time type (seconds)
+            const formattedData = data.map(candle => ({
+                ...candle,
+                time: (candle.time / 1000) as any, // Convert ms to seconds and cast
+            }));
+
+            seriesRef.current.setData(formattedData);
 
             // Fit content to visible range
             if (chartRef.current) {

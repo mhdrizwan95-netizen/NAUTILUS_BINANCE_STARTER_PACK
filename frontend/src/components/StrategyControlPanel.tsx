@@ -1,4 +1,3 @@
-```
 /**
  * Strategy Control Panel - The Control Room
  * 
@@ -22,8 +21,8 @@ export function StrategyControlPanel() {
 
     const handleHotSwap = async (strategyName: string) => {
         // In production: POST to /api/strategy/promote
-        console.log(`Hot - swapping strategy: ${ strategyName } `);
-        alert(`Hot - swap initiated for ${ strategyName }`);
+        console.log(`Hot-swapping strategy: ${strategyName}`);
+        alert(`Hot-swap initiated for ${strategyName}`);
     };
 
     const handleFlattenAll = async () => {
@@ -191,8 +190,8 @@ function DynamicConfigForm({ strategyName }: { strategyName: string }) {
 
     const handleSubmit = async () => {
         // In production: POST to /api/strategy/{name}/config
-        console.log(`Updating config for ${ strategyName }: `, config);
-        alert(`Configuration updated for ${ strategyName }`);
+        console.log(`Updating config for ${strategyName}:`, config);
+        alert(`Configuration updated for ${strategyName}`);
     };
 
     return (
