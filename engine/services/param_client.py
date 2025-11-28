@@ -296,6 +296,97 @@ def update_param_features(strategy: str, instrument: str, features: dict[str, fl
     client.update_features(strategy, instrument, features)
 
 
+def update_context(strategy_name: str, symbol: str, features: dict[str, float]) -> None:
+    """Standardized helper to report market context features to the ParamController."""
+    update_param_features(strategy_name, symbol, features)
+
+
+def apply_dynamic_config(strategy_instance: Any, symbol: str) -> None:
+    """
+    Universal helper to fetch and apply dynamic parameters to a strategy instance.
+
+    Args:
+        strategy_instance: The strategy object (must have .name or .cfg).
+        symbol: The symbol to fetch params for.
+    """
+    try:
+        # Determine strategy name
+        strat_name = getattr(strategy_instance, "name", None)
+        if not strat_name:
+            strat_name = strategy_instance.__class__.__name__.replace("Strategy", "").lower()
+
+        # Fetch params
+        dyn = get_cached_params(strat_name, symbol)
+        if not dyn:
+            return
+
+        params = dyn.get("params", {})
+        if not params:
+            return
+
+        # Apply params
+        # Priority 1: Update self._params (TrendStrategy pattern)
+        if hasattr(strategy_instance, "_params") and hasattr(strategy_instance._params, "update"):
+            strategy_instance._params.update(**params)
+            return
+
+        # Priority 2: Update self.cfg (Standard pattern)
+        if hasattr(strategy_instance, "cfg"):
+            cfg = strategy_instance.cfg
+            updates = {}
+            updated_keys = []
+
+            for key, value in params.items():
+                if hasattr(cfg, key):
+                    # Type safe update if possible
+                    current_val = getattr(cfg, key)
+                    try:
+                        # Cast to existing type
+                        target_type = type(current_val)
+                        if target_type == bool:
+                            # Handle bool specially because bool("False") is True
+                            if str(value).lower() in ("false", "0", "no", "off"):
+                                new_val = False
+                            else:
+                                new_val = True
+                        else:
+                            new_val = target_type(value)
+
+                        updates[key] = new_val
+                        updated_keys.append(f"{key}={new_val}")
+                    except (ValueError, TypeError):
+                        pass
+
+            if updates:
+                from dataclasses import is_dataclass, replace
+
+                if is_dataclass(cfg):
+                    # Handle frozen dataclasses by replacing the object
+                    try:
+                        new_cfg = replace(cfg, **updates)
+                        strategy_instance.cfg = new_cfg
+                    except Exception:
+                        # Fallback for non-frozen or other issues
+                        for k, v in updates.items():
+                            setattr(cfg, k, v)
+                else:
+                    # Standard object
+                    for k, v in updates.items():
+                        setattr(cfg, k, v)
+
+                if hasattr(strategy_instance, "_log"):
+                    strategy_instance._log.info(
+                        f"[{strat_name.upper()}] Dynamic Config Applied: {', '.join(updated_keys)}"
+                    )
+                elif hasattr(strategy_instance, "log"):
+                    strategy_instance.log.info(
+                        f"[{strat_name.upper()}] Dynamic Config Applied: {', '.join(updated_keys)}"
+                    )
+
+    except Exception:
+        pass  # Fail safe
+
+
 __all__ = [
     "ParamControllerBridge",
     "ParamOutcomeTracker",
@@ -303,4 +394,6 @@ __all__ = [
     "get_param_client",
     "get_cached_params",
     "update_param_features",
+    "update_context",
+    "apply_dynamic_config",
 ]

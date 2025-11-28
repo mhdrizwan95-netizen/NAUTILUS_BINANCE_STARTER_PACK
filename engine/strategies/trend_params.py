@@ -28,6 +28,7 @@ class TrendParams:
     atr_stop_mult: float
     atr_target_mult: float
     cooldown_bars: int
+    rsi_length: int
 
     @classmethod
     def from_config(cls, cfg) -> TrendParams:
@@ -44,6 +45,7 @@ class TrendParams:
             atr_stop_mult=cfg.atr_stop_mult,
             atr_target_mult=cfg.atr_target_mult,
             cooldown_bars=cfg.cooldown_bars,
+            rsi_length=cfg.primary.rsi_length,
         )
 
     def to_dict(self) -> dict:

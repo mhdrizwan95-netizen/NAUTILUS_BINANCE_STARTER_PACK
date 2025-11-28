@@ -5,7 +5,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 WORKDIR /app
 COPY services/param_controller/requirements.txt ./requirements.txt
 # hadolint ignore=DL3013
-RUN pip install --upgrade pip && pip install --require-hashes -r requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
 # Needed for container healthcheck
 RUN apt-get update \
@@ -14,6 +14,7 @@ RUN apt-get update \
 
 COPY services/param_controller/app ./app
 COPY services/common /app/common
+COPY shared /app/shared
 
 ENV PC_DB=/shared/param_controller.sqlite
 

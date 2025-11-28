@@ -262,6 +262,29 @@ class TrendStrategyModule:
         if self._state[base] == "FLAT" and now < self._cooldown_until.get(base, 0.0):
             return None
 
+        # --- Dynamic Parameter Adaptation (Micro Brain) ---
+        # --- Dynamic Parameter Adaptation (Micro Brain) ---
+        try:
+            from engine.services.param_client import apply_dynamic_config, update_context
+
+            # 1. Calculate Features
+            feats = {}
+            regime_info = policy_hmm.get_regime(base)
+            if regime_info:
+                feats["hmm_bull"] = float(regime_info.get("p_bull", 0.0))
+                feats["hmm_bear"] = float(regime_info.get("p_bear", 0.0))
+
+            # 2. Update Context
+            update_context("trend_strategy", base, feats)
+
+            # 3. Apply Dynamic Config
+            apply_dynamic_config(self, base)
+
+        except ImportError:
+            pass
+        except Exception:
+            pass  # Fail safe
+
         snap = self._build_snapshot(base)
         if snap is None:
             return None
@@ -512,7 +535,7 @@ class TrendStrategyModule:
             "secondary_slow": _sma(secondary_closes, int(self._params.secondary_slow)),
             "regime_fast": _sma(regime_closes, int(self._params.regime_fast)),
             "regime_slow": _sma(regime_closes, int(self._params.regime_slow)),
-            "rsi_primary": _rsi(primary_closes, self.cfg.primary.rsi_length),
+            "rsi_primary": _rsi(primary_closes, int(self._params.rsi_length)),
             "atr": _atr(primary, self.cfg.atr_length),
         }
         atr_val = snapshot["atr"]

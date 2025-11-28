@@ -212,6 +212,20 @@ class ListingSniper:
         if not tickers:
             return
 
+        # --- Dynamic Parameter Adaptation (Universal) ---
+        try:
+            from engine.services.param_client import apply_dynamic_config
+
+            # Fetch params for the first ticker or a generic "LISTING" symbol
+            # Since listing sniper is event driven, we might want to fetch params for the specific symbol
+            # inside the loop, but fetching once here for general config is also good.
+            # Let's do it inside the loop for symbol specific overrides.
+            pass
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
         for raw_symbol in tickers:
             symbol = raw_symbol.upper()
             if not symbol.endswith("USDT"):
@@ -221,6 +235,17 @@ class ListingSniper:
                 continue
 
             self._seen_ids.add(key)
+
+            # --- Dynamic Parameter Adaptation (Universal) ---
+            try:
+                from engine.services.param_client import apply_dynamic_config
+
+                apply_dynamic_config(self, symbol)
+            except ImportError:
+                pass
+            except Exception:
+                pass
+
             self._record_announcement(symbol, announced_at, go_live_at)
             opportunity = ListingOpportunity(
                 symbol=symbol,

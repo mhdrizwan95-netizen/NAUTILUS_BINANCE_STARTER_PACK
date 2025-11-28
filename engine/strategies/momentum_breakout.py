@@ -240,6 +240,24 @@ class MomentumBreakout:
         client = self.router.exchange_client()
         if client is None or not hasattr(client, "klines"):
             return None
+
+        # --- Dynamic Parameter Adaptation (Universal) ---
+        try:
+            from engine.services.param_client import apply_dynamic_config, update_context
+
+            # 1. Update Context (Simple features available before full kline analysis)
+            # We can't easily get volatility without klines, so we might skip context update
+            # or just report what we have (e.g. cooldown status).
+            # For now, let's just fetch params.
+
+            # 2. Apply Dynamic Config
+            apply_dynamic_config(self, symbol)
+
+        except ImportError:
+            pass
+        except Exception:
+            pass  # Fail safe
+
         limit = max(
             self.cfg.lookback_bars + self.cfg.volume_baseline_window + self.cfg.volume_window + 5,
             self.cfg.atr_length + 5,

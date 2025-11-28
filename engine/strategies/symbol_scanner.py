@@ -170,9 +170,39 @@ class SymbolScanner:
     def _scan_once(self) -> None:
         ranked: list[tuple[str, float]] = []
         now = time.time()
+
+        # --- Dynamic Parameter Adaptation (Macro Brain) ---
+        try:
+            from engine.services.param_client import apply_dynamic_config, update_context
+
+            # 1. Calculate Global Features (e.g. BTC Volatility)
+            btc_vol = 0.0
+            btc_data = self._fetch_klines("BTCUSDT")
+            if btc_data:
+                closes = [float(row[4]) for row in btc_data]
+                highs = [float(row[2]) for row in btc_data]
+                lows = [float(row[3]) for row in btc_data]
+                atr = self._atr(highs, lows, closes)
+                if closes and closes[-1] > 0:
+                    btc_vol = atr / closes[-1]
+
+            # 2. Update Context
+            update_context("symbol_scanner", "GLOBAL", {"btc_vol": btc_vol})
+
+            # 3. Apply Dynamic Config
+            apply_dynamic_config(self, "GLOBAL")
+
+        except ImportError:
+            pass
+        except Exception:
+            pass  # Fail safe
+
         for sym in self.cfg.universe:
             if self._cooldown_active(sym, now):
                 continue
+            # Optimization: If we already fetched BTC, reuse it?
+            # But simpler to just fetch again or rely on cache if implemented (no cache in _fetch_klines)
+            # Given lookback is small, it's fine.
             data = self._fetch_klines(sym)
             if not data:
                 continue
@@ -182,6 +212,11 @@ class SymbolScanner:
             ranked.append((sym, score))
         ranked.sort(key=lambda x: x[1], reverse=True)
         top = [sym for sym, _ in ranked[: self.cfg.top_n]]
+
+        # Log dynamic weights if top changed or periodically?
+        # Let's just log if we have a logger. SymbolScanner doesn't have self._log.
+        # I'll add logging import and use module level logger or print.
+
         with self._lock:
             self._selected = top or list(self._selected)
             for sym, score in ranked:

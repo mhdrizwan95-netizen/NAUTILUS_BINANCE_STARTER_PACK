@@ -251,6 +251,16 @@ class MemeCoinSentiment:
             self._record_event("unknown", "no_symbol")
             return
 
+        # --- Dynamic Parameter Adaptation (Universal) ---
+        try:
+            from engine.services.param_client import apply_dynamic_config
+
+            apply_dynamic_config(self, symbol)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+
         now = self.clock.time()
         if now < self._global_lock_until:
             self._record_event(symbol, "global_lock")

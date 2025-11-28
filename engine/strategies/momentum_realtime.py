@@ -179,6 +179,26 @@ class MomentumStrategyModule:
             if allowed is not None and base not in allowed:
                 return None
 
+        # --- Dynamic Parameter Adaptation (Universal) ---
+        try:
+            from engine.services.param_client import apply_dynamic_config, update_context
+
+            # 1. Update Context
+            # Simple features we can calculate cheaply
+            ctx = {}
+            if self._windows[base]:
+                # Calculate simple volatility or spread if possible?
+                # For now just empty context or basic info
+                pass
+
+            # 2. Apply Dynamic Config
+            apply_dynamic_config(self, base)
+
+        except ImportError:
+            pass
+        except Exception:
+            pass  # Fail safe
+
         now = ts if ts is not None else self._clock.time()
         window = self._windows[base]
         vol = float(volume or 0.0)

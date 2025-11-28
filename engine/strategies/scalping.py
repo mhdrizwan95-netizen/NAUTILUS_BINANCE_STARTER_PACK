@@ -341,6 +341,32 @@ class ScalpStrategyModule:
         if len(window) < self.cfg.min_ticks:
             return None
 
+        # --- Dynamic Parameter Adaptation (Universal) ---
+        try:
+            from engine.services.param_client import apply_dynamic_config, update_context
+
+            # 1. Update Context
+            # Calculate simple features for context
+            prices = [p for _, p in window]
+            low = min(prices)
+            high = max(prices)
+            span = high - low
+            range_bps = (span / price) * 10_000.0 if price > 0 else 0.0
+
+            ctx = {
+                "range_bps": range_bps,
+                "spread_bp": self._books[base].spread_bp if base in self._books else 0.0,
+            }
+            update_context("scalp_strategy", base, ctx)
+
+            # 2. Apply Dynamic Config
+            apply_dynamic_config(self, base)
+
+        except ImportError:
+            pass
+        except Exception:
+            pass  # Fail safe
+
         prices = [p for _, p in window]
         low = min(prices)
         high = max(prices)
