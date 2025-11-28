@@ -47,6 +47,7 @@ from ops.middleware.control_guard import (
     TokenOnlyGuard,
 )
 from ops.prometheus import get_or_create_counter
+from engine.services.telemetry_broadcaster import BROADCASTER
 
 logger = logging.getLogger(__name__)
 
@@ -1762,3 +1763,21 @@ __all__ = [
     # "ws_trades", # Removed
     # "ws_events", # Removed
 ]
+@router.websocket("/ws/telemetry")
+async def telemetry_websocket(websocket: WebSocket):
+    """Real-time telemetry stream for the dashboard."""
+    await websocket.accept()
+    queue = await BROADCASTER.subscribe()
+    try:
+        while True:
+            payload = await queue.get()
+            await websocket.send_json(payload)
+    except WebSocketDisconnect:
+        BROADCASTER.unsubscribe(queue)
+    except Exception as e:
+        logger.error(f"Telemetry WS error: {e}")
+        BROADCASTER.unsubscribe(queue)
+        try:
+            await websocket.close()
+        except:
+            pass

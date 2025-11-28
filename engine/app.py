@@ -77,7 +77,10 @@ from engine.services.param_client import (
 )
 from engine.services.price_bridge import PriceBridge
 from engine.state import SnapshotStore
+from engine.state import SnapshotStore
 from engine.universe import configured_universe, last_prices
+from engine.core.binance_user_stream import BinanceUserStream
+from engine.services.telemetry_broadcaster import BROADCASTER
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 from shared.time_guard import check_clock_skew
 
@@ -600,7 +603,20 @@ async def wallet_balance_worker() -> None:
         await asyncio.sleep(period)
 
 
-portfolio = Portfolio()
+def _broadcast_telemetry(snapshot: dict[str, Any]) -> None:
+    payload = {
+        "type": "account_update",
+        "data": snapshot,
+        "ts": time.time()
+    }
+    # Fire and forget broadcast
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(BROADCASTER.broadcast(payload))
+    except RuntimeError:
+        pass
+
+portfolio = Portfolio(on_update=_broadcast_telemetry)
 router = OrderRouterExt(rest_client, portfolio, venue=VENUE)
 order_router = router
 try:
@@ -2754,6 +2770,116 @@ async def _subscribe_governance_hooks() -> None:
         BUS.subscribe("governance.action", _on_governance_action)
     except _SUPPRESSIBLE_EXCEPTIONS as exc:
         _log_suppressed("engine guard", exc)
+
+
+_user_stream: BinanceUserStream | None = None
+
+@app.on_event("startup")
+async def _start_user_stream() -> None:
+    """Start the Binance User Data Stream for real-time telemetry."""
+    global _user_stream
+    if IS_EXPORTER:
+        return
+    
+    if not (settings.api_key and settings.api_secret):
+        _startup_logger.warning("User Stream skipped: missing API credentials")
+        return
+
+    async def on_account_update(data: dict) -> None:
+        try:
+            balances = {}
+            # data['a']['B'] is list of balances
+            # 'wb' = Wallet Balance
+            for bal in data.get("a", {}).get("B", []):
+                asset = bal.get("a")
+                try:
+                    balances[asset] = float(bal.get("wb", 0.0))
+                except (ValueError, TypeError):
+                    pass
+            if balances:
+                portfolio.sync_wallet(balances)
+        except Exception as e:
+            _app_logger.error(f"UserStream account update error: {e}")
+
+    async def on_order_update(data: dict) -> None:
+        try:
+            o = data.get("o", {})
+            status = o.get("X")
+            if status in ("FILLED", "PARTIALLY_FILLED"):
+                symbol = o.get("s")
+                side = o.get("S")
+                price = float(o.get("L", 0.0)) # Last filled price
+                qty = float(o.get("l", 0.0)) # Last filled qty
+                fee = float(o.get("n", 0.0)) # Commission
+                fee_asset = o.get("N")
+                
+                # Simple fee estimation (assume USDT or ignore for now if not)
+                fee_usd = fee if fee_asset == "USDT" else 0.0 
+                
+                portfolio.apply_fill(
+                    symbol=symbol,
+                    side=side,
+                    quantity=qty,
+                    price=price,
+                    fee_usd=fee_usd,
+                    venue="BINANCE",
+                    market="futures" # Assuming futures stream
+                )
+        except Exception as e:
+            _app_logger.error(f"UserStream order update error: {e}")
+
+    _user_stream = BinanceUserStream(
+        on_account_update=on_account_update,
+        on_order_update=on_order_update
+    )
+    asyncio.create_task(_user_stream.run())
+
+
+@app.on_event("startup")
+async def _start_telemetry_watchdog() -> None:
+    """Monitor telemetry latency and alert if stale."""
+    if IS_EXPORTER:
+        return
+
+    async def watchdog() -> None:
+        while True:
+            await asyncio.sleep(10)
+            if _user_stream:
+                lag = time.time() - _user_stream.last_event_ts
+                if lag > 60:
+                    _app_logger.error(f"CRITICAL: Telemetry Stale! Lag: {lag:.1f}s")
+                    RAILS.set_circuit_breaker(True, f"Telemetry Lag {lag:.1f}s")
+                    try:
+                        BUS.publish("alert.telemetry", {"type": "TELEMETRY_DISCONNECTED", "lag": lag})
+                    except:
+                        pass
+                else:
+                    # Reset if recovered
+                    RAILS.set_circuit_breaker(False)
+
+    asyncio.create_task(watchdog())
+
+
+@app.on_event("startup")
+async def _start_fee_manager() -> None:
+    """Start BNB auto-topup daemon for fee discounts."""
+    if IS_EXPORTER:
+        return
+
+    try:
+        from engine.ops.fee_manager import FeeManager, load_fee_manager_config
+
+        config = load_fee_manager_config()
+        if not config.enabled:
+            _app_logger.info("[FeeManager] Disabled via config")
+            return
+
+        manager = FeeManager(portfolio, ROUTER, config=config)
+        asyncio.create_task(manager.run())
+        _app_logger.info("[FeeManager] Started")
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        _app_logger.warning("[FeeManager] Failed to start: %s", exc)
+
 
 
 async def _refresh_binance_futures_snapshot() -> None:

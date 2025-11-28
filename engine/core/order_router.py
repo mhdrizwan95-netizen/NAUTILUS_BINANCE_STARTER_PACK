@@ -313,17 +313,21 @@ class OrderRouter:
 
             base_currency = "USDT" if self._venue == "BINANCE" else "USD"
 
+            # NEW: Build multi-currency balances dict
+            balance_dict = {}
             if balances:
-                # Set cash/equity from matching currency balance
                 for bal in balances:
                     asset = bal.get("asset")
+                    if not asset:
+                        continue
                     free = float(bal.get("free", 0.0))
                     locked = float(bal.get("locked", 0.0))
                     total = free + locked
-                    if asset and asset.upper() in {base_currency, "USD", "USDT"}:
-                        self._portfolio.state.cash = total
-                        self._portfolio.state.equity = total
-                        break
+                    if total > 0:  # Only include non-zero balances
+                        balance_dict[asset.upper()] = total
+                
+                # Call sync_wallet with all balances
+                self._portfolio.sync_wallet(balance_dict)
                 self._balances = balances
 
             if futures_positions:
@@ -332,14 +336,15 @@ class OrderRouter:
                 except _ACCOUNT_ERRORS as exc:
                     _log_suppressed("order_router", exc)
 
+            # Fallback for futures-only accounts with no balances list
             if not balances:
                 try:
                     wallet = float(
                         account.get("totalWalletBalance") or account.get("availableBalance") or 0.0
                     )
                     if wallet:
-                        self._portfolio.state.cash = wallet
-                        self._portfolio.state.equity = wallet
+                        # Set as USDT for futures
+                        self._portfolio.sync_wallet({base_currency: wallet})
                 except _ACCOUNT_ERRORS as exc:
                     _log_suppressed("order_router", exc)
 

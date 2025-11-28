@@ -99,6 +99,17 @@ class RiskRails:
         self._symbol_locks: dict[str, SymbolLockState] = {}
         self._pending_orders: dict[str, float] = defaultdict(float)
         self._symbol_lock_guard = threading.Lock()
+        self._external_breaker_active = False
+        self._external_breaker_reason = ""
+
+    def set_circuit_breaker(self, active: bool, reason: str = "") -> None:
+        """Manually trip or reset the circuit breaker."""
+        self._external_breaker_active = active
+        self._external_breaker_reason = reason
+        if active:
+            logger.warning(f"[RISK] External Circuit Breaker TRIPPED: {reason}")
+        else:
+            logger.info("[RISK] External Circuit Breaker RESET")
 
     def set_manual_trading_enabled(self, enabled: bool) -> None:
         """Update in-memory trading gate."""
@@ -131,6 +142,13 @@ class RiskRails:
         Now supports DYNAMIC PARAMETERS from ParamController.
         """
         from .core import order_router
+
+        # 0. Check External Circuit Breaker
+        if self._external_breaker_active:
+            return False, {
+                "error": "CIRCUIT_BREAKER",
+                "message": f"Circuit breaker active: {self._external_breaker_reason}",
+            }
 
         # 1. Fetch Dynamic Params (if available)
         # We use a local 'cfg' variable which defaults to self.cfg but can be overridden.

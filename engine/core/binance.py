@@ -849,6 +849,49 @@ class BinanceREST:
             self._log_suppressed("book_ticker", exc)
             return {}
 
+    async def convert_dust(self, assets: list[str]) -> dict[str, Any]:
+        """Convert small balances (dust) to BNB via POST /sapi/v1/asset/dust.
+        
+        Args:
+            assets: List of asset symbols to convert (e.g. ['SHIB', 'DOGE'])
+            
+        Returns:
+            Response dict with conversion details
+        """
+        if not assets:
+            return {}
+        
+        # Dust conversion is a spot SAPI endpoint
+        base_url = self._spot_base
+        settings = self._settings
+        
+        params = {
+            "asset": ",".join(assets),  # Comma-separated list
+            "timestamp": _now_ms(),
+            "recvWindow": settings.recv_window,
+        }
+        params["signature"] = self._sign(params)
+        
+        try:
+            async with httpx.AsyncClient(
+                base_url=base_url,
+                timeout=settings.timeout,
+                headers={"X-MBX-APIKEY": settings.api_key},
+            ) as client:
+                path = "/sapi/v1/asset/dust"
+                self._log_request("POST", path, data=params)
+                r = await client.post(path, data=params)
+            r.raise_for_status()
+            return r.json()
+        except httpx.HTTPStatusError as exc:
+            status, body = self._error_details(exc)
+            raise BinanceAPIResponseError(
+                operation="convert_dust", status=status, body=body
+            ) from exc
+        except BINANCE_DATA_ERRORS as exc:
+            self._log_suppressed("convert_dust", exc)
+            return {}
+
     async def my_trades_since(
         self, symbol: str, start_ms: int, *, market: str | None = None
     ) -> list[dict[str, Any]]:

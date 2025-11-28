@@ -4,10 +4,11 @@ import logging
 import math
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 _LOGGER = logging.getLogger(__name__)
 _METRIC_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError)
+from engine.config import QUOTE_CCY
 
 
 def _log_suppressed(context: str, exc: Exception) -> None:
@@ -40,7 +41,7 @@ class Position:
 
 @dataclass
 class PortfolioState:
-    cash: float = 0.0
+    balances: dict[str, float] = field(default_factory=dict)  # Multi-currency: {"USDT": 1000, "BNB": 2.5}
     equity: float = 0.0
     exposure: float = 0.0
     realized: float = 0.0
@@ -50,11 +51,22 @@ class PortfolioState:
     ts: float = field(default_factory=time.time)
     margin_level: float = 0.0
     margin_liability_usd: float = 0.0
-    wallet_breakdown: dict[str, Any] = field(default_factory=dict)
+    wallet_breakdown: dict[str, Any] = field(default_factory=dict)  # Deprecated, use balances
+
+    @property
+    def cash(self) -> float:
+        """Backward compatibility: returns balance in quote currency (USDT)."""
+        return self.balances.get(QUOTE_CCY, 0.0)
+
+    @cash.setter
+    def cash(self, value: float) -> None:
+        """Backward compatibility: sets balance in quote currency."""
+        self.balances[QUOTE_CCY] = value
 
     def snapshot(self) -> dict:
         return {
-            "cash": self.cash,
+            "cash": self.cash,  # Backward compatibility
+            "balances": dict(self.balances),  # New: multi-currency balances
             "equity": self.equity,
             "exposure": self.exposure,
             "pnl": {
@@ -75,12 +87,19 @@ class PortfolioState:
 class Portfolio:
     """Simple FIFO portfolio accounting for spot symbols."""
 
-    def __init__(self, starting_cash: float = 0.0) -> None:
-        self._state = PortfolioState(cash=starting_cash, equity=starting_cash)
+    def __init__(self, starting_cash: float = 0.0, on_update: Callable[[dict], Any] | None = None) -> None:
+        # Initialize with starting cash in quote currency
+        initial_balances = {QUOTE_CCY: starting_cash} if starting_cash > 0 else {}
+        self._state = PortfolioState(balances=initial_balances, equity=starting_cash)
+        self._on_update = on_update
 
     @property
     def state(self) -> PortfolioState:
         return self._state
+
+    def get_balance(self, asset: str) -> float:
+        """Get balance for a specific asset (e.g., 'USDT', 'BNB', 'FDUSD')."""
+        return self._state.balances.get(asset.upper(), 0.0)
 
     # Provide snapshot method for reconciliation/persistence shims
     def snapshot(self) -> dict:
@@ -199,3 +218,17 @@ class Portfolio:
         self._state.unrealized = unrealized
         self._state.equity = self._state.cash + unrealized
         self._state.ts = time.time()
+        if self._on_update:
+            try:
+                self._on_update(self._state.snapshot())
+            except Exception:
+                pass
+
+    def sync_wallet(self, balances: dict[str, float]) -> None:
+        """Update wallet balances from authoritative source (e.g. REST/WS)."""
+        # Update balances dict
+        self._state.balances = {k.upper(): v for k, v in balances.items()}
+        # Also update deprecated wallet_breakdown for compatibility
+        self._state.wallet_breakdown = balances.copy()
+        self._recalculate()
+

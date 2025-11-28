@@ -342,6 +342,50 @@ class GovernanceDaemon:
         except _PUBLISH_ERRORS:
             logging.debug("[GOV] notify publish failed", exc_info=True)
 
+    async def _execute_dust_sweep(self) -> None:
+        """Convert small balances (dust) to BNB for account hygiene."""
+        try:
+            # Get current balances from portfolio
+            balances = self.portfolio.state.balances
+            
+            # Identify dust assets (< $1 USD value)
+            dust_assets = []
+            for asset, amount in balances.items():
+                if asset == "BNB" or amount == 0:
+                    continue  # Don't convert BNB or zero balances
+                
+                # Get price for this asset (try common pairs)
+                try:
+                    if asset in {"USDT", "FDUSD", "BUSD", "USDC"}:
+                        # Stablecoins worth ~$1
+                        value_usd = amount
+                    else:
+                        # Try to get price vs USDT
+                        price = await self.binance_client.ticker_price(f"{asset}USDT", market="spot")
+                        value_usd = amount * price
+                    
+                    if value_usd < 1.0:
+                        dust_assets.append(asset)
+                        logging.debug(f"[Hygiene] Dust found: {asset} = {amount} (${value_usd:.4f})")
+                
+                except Exception:
+                    # If we can't get price, skip this asset
+                    continue
+            
+            if not dust_assets:
+                logging.debug("[Hygiene] No dust to convert")
+                return
+            
+            # Convert dust to BNB
+            logging.info(f"[Hygiene] Converting dust: {dust_assets} -> BNB")
+            result = await self.binance_client.convert_dust(dust_assets)
+            
+            if result.get("totalTransfered"):
+                logging.info(f"[Hygiene] ✅ Converted dust to {result.get('totalTransfered')} BNB")
+            
+        except Exception as exc:
+            logging.warning(f"[Hygiene] Dust sweep failed: {exc}", exc_info=True)
+
     def _is_on_cooldown(self, action: str, cooldown_seconds: int) -> bool:
         """Check if action is still on cooldown."""
         if cooldown_seconds == 0:
