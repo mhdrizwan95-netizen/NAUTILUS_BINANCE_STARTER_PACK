@@ -5,8 +5,8 @@
  */
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef } from 'react';
-import { useRecentTrades } from '@/lib/tradingStore';
-import { cn } from '@/lib/utils';
+import { useRecentTrades } from '../lib/tradingStore';
+import { cn } from '../lib/utils';
 
 export function VirtualizedTradeLog({ limit = 10000 }: { limit?: number }) {
     const trades = useRecentTrades(limit);
