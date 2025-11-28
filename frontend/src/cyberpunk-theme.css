@@ -1,0 +1,112 @@
+/* Cyberpunk Theme Overrides - Inspired by pnl_dashboard.html */
+:root {
+  /* Cyberpunk Color Palette */
+  --cyber-bg-start: #0f0f23;
+  --cyber-bg-mid: #1a1a2e;
+  --cyber-bg-end: #16213e;
+  --cyber-text: #e0e6ff;
+  --cyber-text-dim: #b0b7bf;
+  --cyber-accent: #00ff9d; /* Neon Green */
+  --cyber-negative: #ff6b6b; /* Neon Red */
+  --cyber-neutral: #ffd93d; /* Yellow */
+  --cyber-glass-bg: rgba(255, 255, 255, 0.05);
+  --cyber-glass-border: rgba(255, 255, 255, 0.1);
+  --cyber-glass-blur: blur(10px);
+}
+
+/* Global Background Gradient */
+body {
+  background: linear-gradient(135deg, var(--cyber-bg-start) 0%, var(--cyber-bg-mid) 50%, var(--cyber-bg-end) 100%) !important;
+  color: var(--cyber-text) !important;
+  min-height: 100vh;
+}
+
+/* Glass Panel Effect */
+.glass-panel {
+  background: var(--cyber-glass-bg);
+  backdrop-filter: var(--cyber-glass-blur);
+  -webkit-backdrop-filter: var(--cyber-glass-blur);
+  border: 1px solid var(--cyber-glass-border);
+  border-radius: 12px;
+}
+
+/* Neon Glow Effect */
+.neon-glow {
+  text-shadow: 0 0 10px var(--cyber-accent), 0 0 20px var(--cyber-accent), 0 0 30px var(--cyber-accent);
+}
+
+/* Positive/Negative Value Colors */
+.cyber-positive {
+  color: var(--cyber-accent) !important;
+}
+
+.cyber-negative {
+  color: var(--cyber-negative) !important;
+}
+
+.cyber-neutral {
+  color: var(--cyber-neutral) !important;
+}
+
+/* Pulse Animation for Connection Status */
+@keyframes cyber-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.6;
+    transform: scale(1.2);
+  }
+}
+
+.cyber-pulse {
+  animation: cyber-pulse 2s ease-in-out infinite;
+}
+
+/* Override Tailwind zinc colors with cyberpunk theme */
+.bg-zinc-900 {
+  background-color: var(--cyber-glass-bg) !important;
+}
+
+.bg-zinc-900\/70,
+.bg-zinc-900\/60,
+.bg-zinc-900\/40 {
+  background: var(--cyber-glass-bg) !important;
+  backdrop-filter: var(--cyber-glass-blur);
+  -webkit-backdrop-filter: var(--cyber-glass-blur);
+}
+
+.border-zinc-800,
+.border-zinc-800\/70,
+.border-zinc-800\/60,
+.border-zinc-800\/40 {
+  border-color: var(--cyber-glass-border) !important;
+}
+
+.text-zinc-100 {
+  color: var(--cyber-text) !important;
+}
+
+.text-zinc-500 {
+  color: var(--cyber-text-dim) !important;
+}
+
+/* Enhance emerald (green) to use cyber accent */
+.text-emerald-400 {
+  color: var(--cyber-accent) !important;
+}
+
+.bg-emerald-400 {
+  background-color: var(--cyber-accent) !important;
+}
+
+/* Red to cyber negative */
+.text-red-400 {
+  color: var(--cyber-negative) !important;
+}
+
+/* Add subtle glow to metric values */
+.font-mono.text-base {
+  text-shadow: 0 0 8px currentColor;
+}

@@ -2,6 +2,7 @@ import { createRoot } from "react-dom/client";
 
 import { App } from "./App.tsx";
 import "./index.css";
+import "./cyberpunk-theme.css";
 import { AppErrorBoundary } from "./components/ErrorBoundary";
 import { QueryProvider } from "./components/QueryProvider";
 import {

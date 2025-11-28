@@ -75,7 +75,7 @@ export function TopHUD({
     <motion.div
       initial={{ opacity: 0, y: -20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="px-6 py-3 bg-zinc-900/70 backdrop-blur-xl border-b border-zinc-800/40 shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
+      className="px-6 py-3 glass-panel border-b shadow-[0_10px_30px_rgba(0,0,0,0.35)]"
     >
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
@@ -87,16 +87,16 @@ export function TopHUD({
           </div>
           <div className="space-y-1">
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-semibold tracking-tight text-zinc-100">NAUTILUS</h1>
+              <h1 className="text-lg font-semibold tracking-tight neon-glow">NAUTILUS</h1>
               {dryRunMode && (
                 <Badge className="bg-amber-500/20 text-amber-200 border border-amber-400/30">
                   DRY RUN
                 </Badge>
               )}
               {isConnected ? (
-                <Wifi className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+                <Wifi className="h-4 w-4 cyber-positive cyber-pulse" aria-hidden="true" />
               ) : (
-                <WifiOff className="h-4 w-4 text-red-400" aria-hidden="true" />
+                <WifiOff className="h-4 w-4 cyber-negative" aria-hidden="true" />
               )}
             </div>
             <p className="text-xs tracking-[0.3em] text-zinc-500">TERMINAL</p>
