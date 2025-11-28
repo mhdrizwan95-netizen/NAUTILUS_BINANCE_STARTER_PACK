@@ -188,17 +188,17 @@ export function useWebSocket(): WebSocketHookResult {
       wsSession,
     );
 
-    if (!managerRef.current.isConnected) {
-      managerRef.current.connect();
-    }
-
-    return () => {
-      // Don't disconnect on unmount - keep connection alive
-      // managerRef.current?.disconnect();
+    const buildWebSocketUrl = (base: string, session: string): string => {
+      try {
+        const url = new URL(base, base.startsWith("ws") ? undefined : window.location.origin);
+        // FIX: Use 'token' instead of 'session' to match Python ops_auth
+        url.searchParams.set("token", session);
+        return url.toString();
+      } catch {
+        const delimiter = base.includes("?") ? "&" : "?";
+        return `${base}${delimiter}token=${encodeURIComponent(session)}`;
+      }
     };
-  }, [handleConnect, handleDisconnect, handleError, handleMessage, opsToken, wsSession]);
-
-  const sendMessage = useCallback((message: OutgoingMessage) => {
     managerRef.current?.sendMessage(message);
   }, []);
 
