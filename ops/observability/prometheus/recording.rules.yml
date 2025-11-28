@@ -1,0 +1,59 @@
+# Prometheus Recording Rules for Diamond Tier Dashboard
+
+groups:
+  - name: trading_performance
+    interval: 5s
+    rules:
+      # Net PnL (Realized - Fees)
+      - record: trading:net_pnl_usd
+        expr: |
+          (
+            sum(pnl_realized_total) 
+            - sum(fees_paid_total)
+          ) or vector(0)
+      
+      # Equity aggregation
+      - record: trading:equity_usd
+        expr: |
+          sum(equity_usd) or vector(0)
+      
+      # Realized PnL aggregation
+      - record: trading:pnl_realized_usd
+        expr: |
+          sum(pnl_realized_total) or vector(0)
+      
+      # Exposure aggregation
+      - record: trading:exposure_usd
+        expr: |
+          sum(exposure_usd) or vector(0)
+      
+      # Order rate (1m)
+      - record: trading:orders_rate_1m
+        expr: |
+          sum(rate(orders_submitted_total[1m])) or vector(0)
+      
+      # Submit latency p95
+      - record: trading:submit_latency_p95_ms
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(submit_to_ack_ms_bucket[1m])) by (le)
+          ) or vector(0)
+      
+      # Fill latency p95
+      - record: trading:fill_latency_p95_ms
+        expr: |
+          histogram_quantile(0.95, 
+            sum(rate(submit_to_fill_ms_bucket[1m])) by (le)
+          ) or vector(0)
+      
+      # Liquidation risk (as percentage)
+      - record: trading:liquidation_risk_pct
+        expr: |
+          (
+            sum(maint_margin_usd) / sum(equity_usd)
+          ) * 100 or vector(0)
+      
+      # Total fees (cumulative)
+      - record: trading:fees_total_usd
+        expr: |
+          sum(fees_paid_total) or vector(0)

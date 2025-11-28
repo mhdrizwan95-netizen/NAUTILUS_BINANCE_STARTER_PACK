@@ -1,0 +1,413 @@
+{
+    "diamondTierPanels": [
+        {
+            "id": 1000,
+            "type": "row",
+            "title": "Trading Health",
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 70
+            }
+        },
+        {
+            "id": 1001,
+            "type": "gauge",
+            "title": "System Heartbeat",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 0,
+                "y": 71
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": "ws_message_gap_seconds"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "s",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "orange",
+                                "value": 1
+                            },
+                            {
+                                "color": "red",
+                                "value": 5
+                            }
+                        ]
+                    },
+                    "min": 0,
+                    "max": 10
+                }
+            },
+            "options": {
+                "showThresholdLabels": true,
+                "showThresholdMarkers": true
+            }
+        },
+        {
+            "id": 1002,
+            "type": "bargauge",
+            "title": "Liquidation Risk",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 6,
+                "w": 8,
+                "x": 8,
+                "y": 71
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": "(sum(maint_margin_usd) / sum(equity_usd)) * 100"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "percent",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "green",
+                                "value": null
+                            },
+                            {
+                                "color": "yellow",
+                                "value": 50
+                            },
+                            {
+                                "color": "orange",
+                                "value": 75
+                            },
+                            {
+                                "color": "red",
+                                "value": 90
+                            }
+                        ]
+                    },
+                    "min": 0,
+                    "max": 100
+                }
+            },
+            "options": {
+                "displayMode": "gradient",
+                "orientation": "horizontal",
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ]
+                }
+            }
+        },
+        {
+            "id": 1010,
+            "type": "row",
+            "title": "Performance & Cost",
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 77
+            }
+        },
+        {
+            "id": 1011,
+            "type": "stat",
+            "title": "Fees Paid",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 4,
+                "w": 6,
+                "x": 0,
+                "y": 78
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": "sum(increase(fees_paid_total[$__range]))"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currencyUSD",
+                    "color": {
+                        "mode": "fixed",
+                        "fixedColor": "red"
+                    }
+                }
+            },
+            "options": {
+                "reduceOptions": {
+                    "calcs": [
+                        "lastNotNull"
+                    ]
+                },
+                "text": {
+                    "titleSize": 18,
+                    "valueSize": 32
+                }
+            }
+        },
+        {
+            "id": 1012,
+            "type": "timeseries",
+            "title": "Net PnL (After Fees)",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 18,
+                "x": 6,
+                "y": 78
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": "trading:net_pnl_usd",
+                    "legendFormat": "Net PnL (Realized - Fees)"
+                },
+                {
+                    "refId": "B",
+                    "expr": "trading:pnl_realized_usd",
+                    "legendFormat": "Gross PnL (Realized)"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "currencyUSD",
+                    "custom": {
+                        "drawStyle": "line",
+                        "lineInterpolation": "smooth",
+                        "lineWidth": 2,
+                        "fillOpacity": 10,
+                        "gradientMode": "opacity"
+                    },
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {
+                                "color": "red",
+                                "value": null
+                            },
+                            {
+                                "color": "green",
+                                "value": 0
+                            }
+                        ]
+                    }
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byName",
+                            "options": "Gross PnL (Realized)"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.fillOpacity",
+                                "value": 0
+                            },
+                            {
+                                "id": "custom.lineStyle",
+                                "value": {
+                                    "dash": [
+                                        10,
+                                        5
+                                    ],
+                                    "fill": "dash"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                        "lastNotNull",
+                        "delta"
+                    ]
+                }
+            }
+        },
+        {
+            "id": 1020,
+            "type": "row",
+            "title": "Strategy Internals",
+            "collapsed": false,
+            "gridPos": {
+                "h": 1,
+                "w": 24,
+                "x": 0,
+                "y": 86
+            }
+        },
+        {
+            "id": 1021,
+            "type": "heatmap",
+            "title": "Execution Latency Distribution",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 0,
+                "y": 87
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": "sum(rate(submit_to_ack_ms_bucket[$__rate_interval])) by (le)",
+                    "format": "heatmap",
+                    "legendFormat": "{{le}}"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "hideFrom": {
+                            "tooltip": false,
+                            "viz": false,
+                            "legend": false
+                        },
+                        "scaleDistribution": {
+                            "type": "linear"
+                        }
+                    }
+                }
+            },
+            "options": {
+                "calculate": false,
+                "cellGap": 2,
+                "color": {
+                    "mode": "scheme",
+                    "scheme": "Spectral",
+                    "fill": "dark-red",
+                    "scale": "exponential",
+                    "exponent": 0.5
+                },
+                "yAxis": {
+                    "axisPlacement": "left",
+                    "reverse": false,
+                    "unit": "ms"
+                },
+                "legend": {
+                    "show": true
+                },
+                "tooltip": {
+                    "show": true,
+                    "yHistogram": false
+                }
+            }
+        },
+        {
+            "id": 1022,
+            "type": "timeseries",
+            "title": "ML Confidence vs Signal",
+            "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus"
+            },
+            "gridPos": {
+                "h": 8,
+                "w": 12,
+                "x": 12,
+                "y": 87
+            },
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": "strategy_confidence",
+                    "legendFormat": "Confidence ({{strategy}})"
+                },
+                {
+                    "refId": "B",
+                    "expr": "strategy_signal",
+                    "legendFormat": "Signal ({{strategy}})"
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "custom": {
+                        "drawStyle": "line",
+                        "lineInterpolation": "smooth",
+                        "lineWidth": 2,
+                        "fillOpacity": 0,
+                        "showPoints": "never"
+                    },
+                    "unit": "short",
+                    "min": -1,
+                    "max": 1
+                },
+                "overrides": [
+                    {
+                        "matcher": {
+                            "id": "byFrameRefID",
+                            "options": "B"
+                        },
+                        "properties": [
+                            {
+                                "id": "custom.axisPlacement",
+                                "value": "right"
+                            },
+                            {
+                                "id": "custom.lineWidth",
+                                "value": 3
+                            },
+                            {
+                                "id": "custom.lineStyle",
+                                "value": {
+                                    "dash": [
+                                        5,
+                                        10
+                                    ],
+                                    "fill": "dash"
+                                }
+                            }
+                        ]
+                    }
+                ]
+            },
+            "options": {
+                "legend": {
+                    "displayMode": "table",
+                    "placement": "bottom",
+                    "calcs": [
+                        "mean",
+                        "lastNotNull"
+                    ]
+                }
+            }
+        }
+    ]
+}
