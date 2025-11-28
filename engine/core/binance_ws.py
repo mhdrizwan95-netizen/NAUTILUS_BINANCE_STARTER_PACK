@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
+try:
+    import orjson as json
+except ImportError:
+    import json  # Fallback
 import logging
 import math
 import os

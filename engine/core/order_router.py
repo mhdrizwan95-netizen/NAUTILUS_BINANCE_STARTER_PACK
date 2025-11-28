@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import json
+try:
+    import orjson as json
+except ImportError:
+    import json
 import logging
 import math
 import os

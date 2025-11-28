@@ -13,6 +13,11 @@ from urllib.parse import urlencode
 
 import httpx
 
+try:
+    import orjson as json
+except ImportError:
+    import json  # Fallback to standard json
+
 from engine.config import get_settings
 
 

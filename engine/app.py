@@ -1,4 +1,12 @@
+"""FastAPI application for trading engine."""
 from __future__ import annotations
+
+# Install high-performance event loop BEFORE any asyncio imports
+try:
+    import uvloop
+    uvloop.install()
+except ImportError:
+    pass  # Fallback to standard asyncio
 
 import asyncio
 import hashlib
@@ -2881,12 +2889,34 @@ async def _start_fee_manager() -> None:
         _app_logger.warning("[FeeManager] Failed to start: %s", exc)
 
 
+@app.on_event("startup")
+async def _start_watchdog() -> None:
+    """Start engine health watchdog for self-healing."""
+    if IS_EXPORTER:
+        return
+
+    try:
+        from engine.ops.watchdog import get_watchdog
+
+        watchdog = get_watchdog()
+        watchdog.start()
+        _app_logger.info("[Watchdog] Self-healing watchdog started")
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        _app_logger.warning("[Watchdog] Failed to start: %s", exc)
+
+
 
 async def _refresh_binance_futures_snapshot() -> None:
     """Single refresh tick for Binance futures accounts."""
     global _price_map, _basis_cache, _snapshot_counter
 
     try:
+        # Heartbeat for watchdog
+        try:
+            from engine.ops.watchdog import get_watchdog
+            get_watchdog().heartbeat()
+        except Exception:
+            pass
         _refresh_logger.debug("refresh tick")
     except _SUPPRESSIBLE_EXCEPTIONS as exc:
         _log_suppressed("engine guard", exc)
