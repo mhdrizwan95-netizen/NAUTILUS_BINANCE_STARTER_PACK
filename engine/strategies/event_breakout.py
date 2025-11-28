@@ -141,6 +141,17 @@ class EventBreakout:
         sym = (evt.get("symbol") or "").upper()
         if not sym:
             return
+            
+        # --- Dynamic Parameter Adaptation (Universal) ---
+        try:
+            from engine.services.param_client import apply_dynamic_config, update_context
+            update_context(sym, {"strategy": "event_breakout", "event_type": evt.get("type", "unknown")})
+            apply_dynamic_config(self, sym)
+        except ImportError:
+            pass
+        except Exception:
+            pass
+            
         # Denylist enforcement (early exit)
         now = float(self.clock.time())
         # expire temp denies

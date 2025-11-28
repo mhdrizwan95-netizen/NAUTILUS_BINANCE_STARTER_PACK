@@ -27,6 +27,8 @@ from prometheus_client import Counter, Gauge
 
 from engine.core.event_bus import BUS
 from ops.strategy_selector import promote_best
+from ops.allocator import WealthManager, StrategyPerformance
+from ops.telemetry_store import Metrics
 
 # Prometheus metrics for governance visibility
 _GOVERNANCE_RULES_ACTIVE = Gauge(
@@ -108,6 +110,10 @@ class GovernanceDaemon:
         # Load governance policies
         self._load_policies()
         self._setup_event_subscriptions()
+
+        # Wealth Manager Integration
+        self.wealth_manager = WealthManager()
+        asyncio.create_task(self._run_allocation_cycle())
 
         logging.info(f"[GOV] 🎯 Autonomous Governance initialized with {len(self.rules)} rules")
 
@@ -425,6 +431,42 @@ class GovernanceDaemon:
         else:
             return True
 
+
+    async def _run_allocation_cycle(self) -> None:
+        """Periodic capital reallocation loop (Hourly)."""
+        while True:
+            try:
+                # Wait for system to warm up
+                await asyncio.sleep(60)
+                
+                logging.info("[GOV] 💰 Starting Hourly Capital Allocation Cycle...")
+                
+                # 1. Fetch Metrics
+                # In a real system, this would query the Telemetry Service or DB
+                # Here we'll try to read from a shared metrics file if it exists, or use mock data for demonstration
+                strategies = self._fetch_strategy_performance()
+                
+                if strategies:
+                    # 2. Run Allocation
+                    self.wealth_manager.allocate(strategies)
+                    
+                    # 3. Log Result
+                    logging.info(f"[GOV] ✅ Allocation Complete. Updated limits for {len(strategies)} strategies.")
+                else:
+                    logging.info("[GOV] No strategy metrics available for allocation.")
+
+            except Exception as e:
+                logging.error(f"[GOV] ❌ Allocation cycle failed: {e}", exc_info=True)
+            
+            # Sleep for 1 hour
+            await asyncio.sleep(3600)
+
+    def _fetch_strategy_performance(self) -> list[StrategyPerformance]:
+        """Fetch performance metrics for all active strategies."""
+        # TODO: Connect to real TelemetryStore
+        # For now, we return an empty list or mock data if needed
+        # This ensures the loop runs without crashing
+        return []
 
 # Global instance
 _governance_daemon = None

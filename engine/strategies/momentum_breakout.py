@@ -249,6 +249,10 @@ class MomentumBreakout:
             # We can't easily get volatility without klines, so we might skip context update
             # or just report what we have (e.g. cooldown status).
             # For now, let's just fetch params.
+            
+            # Note: We don't have klines yet, so we can't push volatility.
+            # But we can push symbol info.
+            update_context(symbol, {"strategy": "momentum_breakout"})
 
             # 2. Apply Dynamic Config
             apply_dynamic_config(self, symbol)
@@ -297,6 +301,25 @@ class MomentumBreakout:
         volume_boost = (
             baseline_vol > 0 and (recent_vol / baseline_vol) >= self.cfg.volume_multiplier
         )
+        
+        # --- Late Context Update (Post-Calculation) ---
+        try:
+            from engine.services.param_client import update_context
+            # Now we have volatility and volume info
+            # Simple volatility proxy: (High - Low) / Close
+            volatility = (max(highs[-5:]) - min(lows[-5:])) / price if price > 0 else 0.0
+            vol_spike = (recent_vol / baseline_vol) if baseline_vol > 0 else 1.0
+            
+            update_context(symbol, {
+                "volatility": volatility,
+                "volume_spike": vol_spike,
+                "breakout_detected": breakout
+            })
+        except ImportError:
+            pass
+        except Exception:
+            pass
+            
         notional_recent = sum(qvols[-self.cfg.volume_window :])
         if notional_recent < self.cfg.min_quote_volume_usd:
             momentum_breakout_candidates_total.labels(symbol, "BINANCE", "low_volume").inc()

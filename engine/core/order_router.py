@@ -430,6 +430,88 @@ class OrderRouter:
 
             t0 = time.time()
 
+            # --- Adaptive Execution (The Sniper) ---
+            # If in CHOP regime, try Maker (Post-Only) to save fees.
+            try:
+                from engine.strategies.policy_hmm import get_regime
+                regime_data = get_regime(symbol)
+                if regime_data and regime_data.get("regime") == "CHOP":
+                    # Try to get BBO for Maker Price
+                    maker_price = 0.0
+                    try:
+                        ticker = await client.book_ticker(base) if hasattr(client, "book_ticker") else {}
+                        if side == "BUY":
+                            maker_price = float(ticker.get("bidPrice", 0.0))
+                        else:
+                            maker_price = float(ticker.get("askPrice", 0.0))
+                    except Exception as e:
+                        pass
+
+                    if maker_price > 0 and submit_limit:
+                        _LOGGER.info(f"[SNIPER] 🎯 {symbol} in CHOP regime -> Attempting MAKER (Post-Only) @ {maker_price}")
+                        try:
+                            # Post-Only (GTX)
+                            res = await submit_limit(
+                                symbol=base,
+                                side=side,
+                                quantity=float(qty),
+                                price=float(maker_price),
+                                time_in_force="GTX"
+                            )
+                            # If successful, handle fill emission and return
+                            # Note: We duplicate the post-processing logic here or let it fall through?
+                            # It's cleaner to let it fall through if we can structure it, but we have return res.
+                            # Let's duplicate the metric/fill logic for now or wrap it.
+                            # Actually, let's just set a flag 'executed' and skip the Taker block.
+                            # But the Taker block has the 'res =' assignment.
+                            
+                            # Let's just return here after doing the standard post-processing.
+                            # We need to copy the post-processing code or refactor.
+                            # Refactoring is risky. Let's copy the essential post-processing.
+                            
+                            t1 = time.time()
+                            try:
+                                REGISTRY["submit_to_ack_ms"].observe((t1 - t0) * 1000.0)
+                            except _METRIC_ERRORS as exc:
+                                _log_suppressed("order_router.metrics.submit_to_ack", exc)
+
+                            fee_bps = load_fee_config(venue).maker_bps # Use Maker BPS!
+                            filled_qty = float(res.get("executedQty") or res.get("filled_qty_base") or 0.0)
+                            avg_price = float(res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", 0.0) or 0.0)
+                            fill_notional = abs(filled_qty) * avg_price
+                            fee = (fee_bps / 10_000.0) * fill_notional
+                            
+                            res.setdefault("filled_qty_base", filled_qty)
+                            if avg_price:
+                                res.setdefault("avg_fill_price", avg_price)
+                            res["maker_bps"] = fee_bps # Note: maker_bps
+                            if submit_market_hint:
+                                res.setdefault("market", submit_market_hint)
+
+                            try:
+                                if filled_qty > 0 and (avg_price or fill_notional > 0):
+                                    px_fill = avg_price if avg_price else (fill_notional / max(filled_qty, 1e-12))
+                                    symbol_key = symbol if "." in symbol else f"{base}.{venue}"
+                                    self._portfolio.apply_fill(
+                                        symbol_key, side, abs(filled_qty), px_fill, float(fee), venue=venue, market=submit_market_hint
+                                    )
+                                    st = self._portfolio.state
+                                    update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
+                            except _ROUTE_ERRORS as exc:
+                                _log_suppressed("order_router.apply_fill", exc)
+
+                            await self._maybe_emit_fill(res, symbol, side, venue=venue, intent="SNIPER_MAKER")
+                            return res
+
+                        except (httpx.HTTPStatusError, TypeError, ValueError) as e:
+                            _LOGGER.warning(f"[SNIPER] Maker order failed: {e}. Falling back to Taker.")
+                            # Fallback to Taker
+                            pass
+            except ImportError:
+                pass
+            except Exception as e:
+                _LOGGER.debug(f"[SNIPER] Logic failed: {e}")
+
             # Try Limit IOC first
             if submit_limit:
                 call_kwargs = {

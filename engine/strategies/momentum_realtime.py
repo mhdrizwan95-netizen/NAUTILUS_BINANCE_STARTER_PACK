@@ -185,11 +185,13 @@ class MomentumStrategyModule:
 
             # 1. Update Context
             # Simple features we can calculate cheaply
-            ctx = {}
+            ctx = {"strategy": "momentum_realtime"}
             if self._windows[base]:
                 # Calculate simple volatility or spread if possible?
                 # For now just empty context or basic info
                 pass
+            
+            update_context(base, ctx)
 
             # 2. Apply Dynamic Config
             apply_dynamic_config(self, base)
@@ -251,6 +253,19 @@ class MomentumStrategyModule:
                 pct_move_up * 100.0 if pct_move_up >= pct_move_down else -pct_move_down * 100.0
             )
         except _SUPPRESSIBLE_EXCEPTIONS:
+            pass
+            
+        # --- Late Context Update (Post-Calculation) ---
+        try:
+            from engine.services.param_client import update_context
+            update_context(base, {
+                "volume_ratio": volume_ratio if math.isfinite(volume_ratio) else 0.0,
+                "pct_move_up": pct_move_up,
+                "pct_move_down": pct_move_down
+            })
+        except ImportError:
+            pass
+        except Exception:
             pass
 
         if now < self._cooldown_until.get(base, 0.0):

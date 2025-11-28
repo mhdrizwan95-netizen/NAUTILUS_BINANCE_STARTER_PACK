@@ -316,10 +316,14 @@ async def list_all_testnet_pairs() -> list[str]:
 @dataclass(frozen=True)
 class VenueFeeConfig:
     taker_bps: float
+    maker_bps: float
 
 
 def load_fee_config(venue: str) -> VenueFeeConfig:
-    return VenueFeeConfig(taker_bps=_as_float(os.getenv(f"{venue}_TAKER_BPS"), 10.0))
+    return VenueFeeConfig(
+        taker_bps=_as_float(os.getenv(f"{venue}_TAKER_BPS"), 10.0),
+        maker_bps=_as_float(os.getenv(f"{venue}_MAKER_BPS"), 0.0),
+    )
 
 
 @dataclass(frozen=True)
