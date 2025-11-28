@@ -1536,7 +1536,7 @@ manager = ConnectionManager()
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     # Validate session
-    session = websocket.query_params.get("session")
+    session = websocket.query_params.get("token")
     if not _validate_ws_session(session):
         await websocket.close(code=4401)
         return
@@ -1559,6 +1559,28 @@ async def websocket_endpoint(websocket: WebSocket):
         manager.disconnect(websocket)
     except _SUPPRESSIBLE_EXCEPTIONS:
         manager.disconnect(websocket)
+
+
+# Telemetry Bridge: BROADCASTER -> ConnectionManager
+async def _telemetry_bridge():
+    """Forward internal engine telemetry to WebSocket clients."""
+    queue = await BROADCASTER.subscribe()
+    try:
+        while True:
+            payload = await queue.get()
+            channel = payload.get("type", "unknown")
+            data = payload.get("data", {})
+            # Broadcast to specific channel
+            await manager.broadcast(channel, data)
+            queue.task_done()
+    except asyncio.CancelledError:
+        BROADCASTER.unsubscribe(queue)
+
+# Start bridge on startup
+@router.on_event("startup")
+async def start_bridge():
+    loop = asyncio.get_running_loop()
+    loop.create_task(_telemetry_bridge())
 
 
 # ... (keeping existing code)
