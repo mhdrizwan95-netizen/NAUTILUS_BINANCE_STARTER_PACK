@@ -201,3 +201,16 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
         meta["param_instrument"] = selection.get("instrument") or instrument
         meta["param_params"] = params
     return side, float(quote), meta
+
+
+# Wire hot-reload subscription
+try:
+    from engine.core.event_bus import BUS
+
+    async def _handle_promotion(event: dict) -> None:
+        reload_model(event)
+
+    BUS.subscribe("model.promoted", _handle_promotion)
+    print("[HMM] Wired hot-reload subscription.")
+except Exception as e:
+    print(f"[HMM] Failed to wire hot-reload: {e}")
