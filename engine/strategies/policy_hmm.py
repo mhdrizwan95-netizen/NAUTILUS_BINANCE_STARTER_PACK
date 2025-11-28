@@ -8,9 +8,11 @@ from collections import defaultdict, deque
 from pathlib import Path
 
 from ..config import load_strategy_config
+from ..services.param_client import get_cached_params, update_param_features
 from .calibration import adjust_confidence, adjust_quote, cooldown_scale
 
 S = load_strategy_config()
+PARAM_STRATEGY = "hmm"
 
 # Default directional prior used by consumers that need a quick mapping from
 # discrete HMM state → directional bias.
@@ -71,6 +73,16 @@ def _features(sym: str) -> list[float] | None:
     return feats
 
 
+def _feature_payload(feats: list[float]) -> dict[str, float]:
+    return {
+        "ret": float(feats[0]),
+        "vol": float(feats[1]),
+        "dev_vwap": float(feats[2]),
+        "zscore": float(feats[3]),
+        "vol_spike": float(feats[4]),
+    }
+
+
 def ingest_tick(sym: str, price: float, volume: float = 1.0) -> None:
     _prices[sym].append(float(price))
     _vols[sym].append(float(volume))
@@ -97,16 +109,58 @@ def model():
     return _model
 
 
-def decide(sym: str) -> tuple[str, float, dict] | None:
-    """Return (side, quote_usdt, meta) or None if no action."""
-    # cooldown
-    now = time.time()
-    dynamic_cooldown = max(1.0, S.cooldown_sec * cooldown_scale(sym))
-    if now - _last_signal_ts[sym] < dynamic_cooldown:
-        return None
+def reload_model(event: dict | None = None) -> None:
+    """Clear the cached model to force a reload on next access."""
+    global _model
+    print(f"[HMM] Reloading model due to event: {event}")
+    _model = None
 
+
+def get_regime(sym: str) -> dict | None:
+    """Return HMM regime info (probs, confidence) without trading logic."""
     feats = _features(sym)
     if not feats:
+        return None
+    try:
+        probs = model().predict_proba([feats])[0]
+    except Exception:
+        return None
+
+    base_conf = float(max(probs))
+    adj_conf = adjust_confidence(sym, base_conf)
+    p_bull, p_bear = probs[0], probs[1]
+    p_chop = probs[2] if len(probs) >= 3 else 0.0
+
+    regime = "CHOP"
+    if p_bull > p_bear and p_bull > p_chop:
+        regime = "BULL"
+    elif p_bear > p_bull and p_bear > p_chop:
+        regime = "BEAR"
+
+    return {
+        "regime": regime,
+        "conf": adj_conf,
+        "probs": probs.tolist(),
+        "p_bull": p_bull,
+        "p_bear": p_bear,
+        "p_chop": p_chop,
+    }
+
+
+def decide(sym: str) -> tuple[str, float, dict] | None:
+    """Return (side, quote_usdt, meta) or None if no action."""
+    now = time.time()
+    instrument = sym.split(".")[0].upper()
+    feats = _features(sym)
+    if not feats:
+        return None
+    feature_payload = _feature_payload(feats)
+    update_param_features(PARAM_STRATEGY, instrument, feature_payload)
+    selection = get_cached_params(PARAM_STRATEGY, instrument) or {}
+    params = selection.get("params", {})
+    cooldown_setting = float(params.get("cooldown_sec") or S.cooldown_sec)
+    dynamic_cooldown = max(1.0, cooldown_setting * cooldown_scale(sym))
+    if now - _last_signal_ts[sym] < dynamic_cooldown:
         return None
 
     probs = model().predict_proba([feats])[0]  # e.g., [p_bull, p_bear, p_chop]
@@ -121,7 +175,7 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
     # Get current market price for reference (used in meta, not required for decision)
     px = 0.0
 
-    quote = adjust_quote(sym, S.quote_usdt)
+    quote = adjust_quote(sym, float(params.get("quote_usdt") or S.quote_usdt))
     # vol-scaled sizing (example): smaller size when vola high
     # Here kept simple; robust sizing can use realized vola bins
     if p_bull > p_bear and p_bull > p_chop:
@@ -139,4 +193,11 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
         "conf": adj_conf,
         "cooldown": dynamic_cooldown,
     }
+    if selection:
+        meta["param_config_id"] = selection.get("config_id")
+        meta["preset_id"] = selection.get("preset_id")
+        meta["param_features"] = selection.get("features") or feature_payload
+        meta["param_strategy"] = selection.get("strategy") or PARAM_STRATEGY
+        meta["param_instrument"] = selection.get("instrument") or instrument
+        meta["param_params"] = params
     return side, float(quote), meta

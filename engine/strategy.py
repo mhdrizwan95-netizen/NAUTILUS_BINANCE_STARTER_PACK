@@ -65,6 +65,22 @@ if SymbolScanner and load_symbol_scanner_config:
     except _SUPPRESSIBLE_EXCEPTIONS:
         SYMBOL_SCANNER = None
 
+
+def _risk_release_handler(evt: dict[str, Any]) -> None:
+    symbol = str(evt.get("symbol") or evt.get("strategy_symbol") or "")
+    if not symbol:
+        return
+    try:
+        RAILS.release_symbol_lock(symbol)
+    except Exception:  # pragma: no cover - defensive
+        logger.debug("risk release handler suppressed", exc_info=True)
+
+
+try:
+    BUS.subscribe("trade.fill", _risk_release_handler)
+except _SUPPRESSIBLE_EXCEPTIONS:  # pragma: no cover
+    logger.warning("Failed to subscribe risk release handler", exc_info=True)
+
 TREND_CFG = None
 TREND_MODULE: TrendStrategyModule | None = None
 try:
@@ -304,6 +320,14 @@ try:
 except _SUPPRESSIBLE_EXCEPTIONS:
     logging.getLogger(__name__).warning(
         "Failed to subscribe strategy to market.book", exc_info=True
+    )
+
+
+try:
+    BUS.subscribe("model.promoted", policy_hmm.reload_model)
+except _SUPPRESSIBLE_EXCEPTIONS:
+    logging.getLogger(__name__).warning(
+        "Failed to subscribe strategy to model.promoted", exc_info=True
     )
 
 

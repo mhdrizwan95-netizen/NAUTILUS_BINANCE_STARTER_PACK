@@ -7,6 +7,7 @@ import threading
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from .config import RiskConfig
@@ -73,6 +74,13 @@ class OrderRateLimiter:
         return True
 
 
+@dataclass
+class SymbolLockState:
+    side: Side
+    expires_at: float
+    strategy_id: str  # NEW: Owner of the lock
+
+
 class RiskRails:
     def __init__(self, cfg: RiskConfig):
         self.cfg = cfg
@@ -84,6 +92,14 @@ class RiskRails:
         self._equity_breaker_active = False
         self._equity_breaker_until = 0.0
         self._last_equity = 0.0
+        self._manual_trading_disabled = False
+        self._symbol_lock_ttl = max(self.cfg.symbol_lock_ttl_sec, 0.0)
+        self._symbol_locks: dict[str, SymbolLockState] = {}
+        self._symbol_lock_guard = threading.Lock()
+
+    def set_manual_trading_enabled(self, enabled: bool) -> None:
+        """Update in-memory trading gate."""
+        self._manual_trading_disabled = not enabled
 
     def check_order(
         self,
@@ -93,6 +109,7 @@ class RiskRails:
         quote: float | None,
         quantity: float | None,
         market: str | None = None,
+        strategy_id: str | None = None,  # NEW
     ) -> tuple[bool, dict]:
         """
         Validate an order request. Returns (ok, error_json).
@@ -107,8 +124,18 @@ class RiskRails:
             breaker_rejections.inc()
             return False, {"error": e.code, "message": str(e)}
 
+        # Trading toggle (in-memory override for speed + file for persistence)
+        if self._manual_trading_disabled:
+            return False, {
+                "error": "TRADING_DISABLED",
+                "message": "Trading disabled by in-memory safety gate.",
+                "hint": "Restart or set manual override to true.",
+            }
+
         # Trading toggle (single source of truth: flag file overrides config)
         if _trading_disabled_via_flag():
+            # Sync in-memory state to match file if file says disabled
+            self._manual_trading_disabled = True
             return False, {
                 "error": "TRADING_DISABLED",
                 "message": "Trading disabled by daily stop or operator flag.",
@@ -374,8 +401,63 @@ class RiskRails:
                 "message": f"Max {self.cfg.max_orders_per_min}/min exceeded.",
                 "window_sec": 60,
             }
+        symbol_key = symbol_base.upper()
+        ok_lock, holder_side = self._acquire_symbol_lock(symbol_key, side, strategy_id)
+        if not ok_lock:
+            return False, {
+                "error": "SYMBOL_LOCKED",
+                "message": (
+                    f"{symbol_key} locked by {holder_side or 'other strategy'}; "
+                    f"wait up to {self._symbol_lock_ttl:.1f}s for release."
+                ),
+            }
 
         return True, {}
+
+    def _acquire_symbol_lock(
+        self, symbol: str, side: Side, strategy_id: str | None
+    ) -> tuple[bool, str | None]:
+        if self._symbol_lock_ttl <= 0:
+            return True, None
+        now = time.time()
+        key = symbol.upper()
+        desired_side = side.upper()
+        with self._symbol_lock_guard:
+            state = self._symbol_locks.get(key)
+            if state and state.expires_at <= now:
+                self._symbol_locks.pop(key, None)
+                state = None
+
+            # If locked, check ownership
+            if state:
+                # If same strategy, allow extension/re-entry (even if side flips? No, usually side flip implies close first)
+                # But for now, let's enforce side consistency or ownership
+                if strategy_id and state.strategy_id == strategy_id:
+                    # Same owner, update TTL
+                    state.expires_at = now + self._symbol_lock_ttl
+                    # If side flips, we update it (assuming strategy knows what it's doing, e.g. SAR)
+                    state.side = desired_side
+                    return True, None
+
+                # Different owner or no ID provided -> Conflict
+                return False, f"{state.strategy_id} ({state.side})"
+
+            # Not locked, acquire
+            self._symbol_locks[key] = SymbolLockState(
+                desired_side, now + self._symbol_lock_ttl, strategy_id or "unknown"
+            )
+            return True, None
+
+    def release_symbol_lock(self, symbol: str) -> None:
+        if self._symbol_lock_ttl <= 0:
+            return
+        if not symbol:
+            return
+        key = symbol.split(".")[0].upper()
+        with self._symbol_lock_guard:
+            state = self._symbol_locks.get(key)
+            if state:
+                self._symbol_locks.pop(key, None)
 
     class SnapshotMetricsState:
         __slots__ = ("breaker_active", "breaker_payload")
@@ -404,7 +486,7 @@ class RiskRails:
                 "pnl": {"unrealized": 120.0},
                 "positions": [
                     {
-                        "symbol": "PI_XBTUSD.KRAKEN",
+                        "symbol": "BTCUSDT.BINANCE",
                         "qty_base": 0.5,
                         "last_price_quote": 42_000.0
                     }

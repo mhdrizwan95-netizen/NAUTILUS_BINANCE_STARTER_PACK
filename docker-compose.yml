@@ -43,7 +43,7 @@ x-engine-common: &engine_common
     ENGINE_POLL_SEC: ${ENGINE_POLL_SEC:-2}
   healthcheck:
     # Lightweight health; avoid hitting account endpoints
-    test: ["CMD", "sh", "-lc", "curl -fsS http://localhost:8003/health >/dev/null"]
+    test: [ "CMD", "sh", "-lc", "curl -fsS http://localhost:8003/health >/dev/null" ]
     interval: 30s
     timeout: 5s
     retries: 10
@@ -78,7 +78,9 @@ services:
     volumes:
       - ./engine/state:/app/engine/state:rw
       - ./engine/logs:/app/engine/logs:rw
+      - ./engine/logs:/app/engine/logs:rw
       - ./data:/app/data:rw
+      - ml_models_volume:/app/engine/models:ro
     ports:
       - "9103:8003"
     networks:
@@ -98,19 +100,23 @@ services:
       - GOVERNANCE_POLICY=/app/engine/policies.yaml
       - BINANCE_MODE=${BINANCE_MODE}
       - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
-      - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com}  # Explicitly set for futures
+      - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com} # Explicitly set for futures
       - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
       - TRADE_SYMBOLS=${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
-      - BINANCE_API_TIMEOUT=15       # more tolerant to slow networks
-      - BINANCE_RECV_WINDOW=60000    # tolerant to clock skew
+      - BINANCE_API_TIMEOUT=15 # more tolerant to slow networks
+      - BINANCE_RECV_WINDOW=60000 # tolerant to clock skew
       - ENGINE_PORT=8003
       - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
+      - PARAM_CONTROLLER_URL=http://param_controller:8002
+      - HMM_MODEL_PATH=/app/engine/models/current/hmm_model.pkl
     volumes:
       - ./engine/state:/app/engine/state:rw
       - ./engine/logs:/app/engine/logs:rw
+      - ./engine/logs:/app/engine/logs:rw
       - ./data:/app/data:rw
+      - ml_models_volume:/app/engine/models:ro
     ports:
       - "8003:8003"
     networks:
@@ -119,7 +125,7 @@ services:
       /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 1024
     healthcheck:
       # Prefer cheap readiness endpoint to avoid transient timeouts
-      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 10 http://localhost:8003/readyz >/dev/null"]
+      test: [ "CMD", "sh", "-lc", "curl -fsS --max-time 10 http://localhost:8003/readyz >/dev/null" ]
       interval: 15s
       timeout: 8s
       retries: 10
@@ -128,7 +134,7 @@ services:
   strategy_runtime:
     <<: *engine_common
     container_name: hmm_strategy_runtime
-    profiles: ["strategy-runtime"]
+    profiles: [ "strategy-runtime" ]
     env_file: .env
     environment:
       - ROLE=strategy_runtime
@@ -143,33 +149,32 @@ services:
     command: >
       /usr/bin/tini -- python -m engine.runtime.service
     healthcheck:
-      test: ["CMD", "sh", "-lc", "pgrep -f engine.runtime.service >/dev/null"]
+      test: [ "CMD", "sh", "-lc", "pgrep -f engine.runtime.service >/dev/null" ]
       interval: 20s
       timeout: 5s
       retries: 3
 
-
-# Legacy single-engine service for backward compatibility (commented out)
-# engine:
-#   <<: *engine_common
-#   container_name: hmm_engine
-#   command: >
-#     /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1
-#   environment:
-#     <<: *env_common
-#     BINANCE_MODE: ${BINANCE_MODE:-demo}
-#     BINANCE_API_KEY: ${DEMO_API_KEY_SPOT}
-#     BINANCE_API_SECRET: ${DEMO_API_SECRET_SPOT}
-#     DEMO_SPOT_BASE: ${DEMO_SPOT_BASE}
-#     DEMO_USDM_BASE: ${DEMO_USDM_BASE}
-#     DEMO_COINM_BASE: ${DEMO_COINM_BASE}
-#     BINANCE_SPOT_BASE: ${BINANCE_SPOT_BASE}
-#     BINANCE_RECV_WINDOW: ${BINANCE_RECV_WINDOW}
-#     BINANCE_API_TIMEOUT: ${BINANCE_API_TIMEOUT}
-#     ENGINE_PORT: 8003
-#   ports:
-#     - "8003:8003"
-#     - "9103:9103"
+  # Legacy single-engine service for backward compatibility (commented out)
+  # engine:
+  #   <<: *engine_common
+  #   container_name: hmm_engine
+  #   command: >
+  #     /usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1
+  #   environment:
+  #     <<: *env_common
+  #     BINANCE_MODE: ${BINANCE_MODE:-demo}
+  #     BINANCE_API_KEY: ${DEMO_API_KEY_SPOT}
+  #     BINANCE_API_SECRET: ${DEMO_API_SECRET_SPOT}
+  #     DEMO_SPOT_BASE: ${DEMO_SPOT_BASE}
+  #     DEMO_USDM_BASE: ${DEMO_USDM_BASE}
+  #     DEMO_COINM_BASE: ${DEMO_COINM_BASE}
+  #     BINANCE_SPOT_BASE: ${BINANCE_SPOT_BASE}
+  #     BINANCE_RECV_WINDOW: ${BINANCE_RECV_WINDOW}
+  #     BINANCE_API_TIMEOUT: ${BINANCE_API_TIMEOUT}
+  #     ENGINE_PORT: 8003
+  #   ports:
+  #     - "8003:8003"
+  #     - "9103:9103"
 
   ops:
     build:
@@ -177,8 +182,7 @@ services:
       dockerfile: Dockerfile
     container_name: hmm_ops
     command: >
-      /usr/bin/tini -- uvicorn ops.ops_api:APP
-      --host 0.0.0.0 --port 8002 --workers ${OPS_WORKERS:-2}
+      /usr/bin/tini -- uvicorn ops.ops_api:APP --host 0.0.0.0 --port 8002 --workers ${OPS_WORKERS:-2}
     logging: *default-logging
     environment:
       <<: *env_common
@@ -216,7 +220,7 @@ services:
       - "${OPS_PORT:-8002}:8002"
     healthcheck:
       # Allow for engine proxy call in /readyz (httpx default 5s) and avoid false timeouts
-      test: ["CMD-SHELL", "curl -fsS --max-time 8 http://127.0.0.1:8002/readyz | grep -q '\"ok\":true'"]
+      test: [ "CMD-SHELL", "curl -fsS --max-time 8 http://127.0.0.1:8002/readyz | grep -q '\"ok\":true'" ]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -362,7 +366,7 @@ services:
       context: .
       dockerfile: ops/Dockerfile
     container_name: hmm_slip_trainer
-    profiles: ["labs"]  # optional training job
+    profiles: [ "labs" ] # optional training job
     command: >
       sh -c "python - <<'PY'\nfrom ops.slip_model import train_from_parquet; train_from_parquet()\nPY"
     volumes:
@@ -378,7 +382,7 @@ services:
     image: nautilus_data_ingester:local
     container_name: hmm_data_ingester
     logging: *default-logging
-    profiles: ["ml"]
+    profiles: [ "ml" ]
     environment:
       - LEDGER_DB=/ml/manifest.sqlite
       - DATA_LANDING=/ml/incoming
@@ -393,7 +397,7 @@ services:
       - "8013:8001"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 5 http://localhost:8001/health >/dev/null"]
+      test: [ "CMD", "sh", "-lc", "curl -fsS --max-time 5 http://localhost:8001/health >/dev/null" ]
       interval: 20s
       timeout: 8s
       retries: 5
@@ -407,7 +411,7 @@ services:
     image: nautilus_ml_service:local
     container_name: hmm_ml_service
     logging: *default-logging
-    profiles: ["ml"]
+    profiles: [ "ml" ]
     env_file:
       - .env
     environment:
@@ -428,7 +432,7 @@ services:
     ports:
       - "8015:8000"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -444,7 +448,7 @@ services:
       ml_service:
         condition: service_healthy
     logging: *default-logging
-    profiles: ["ml"]
+    profiles: [ "ml" ]
     env_file:
       - .env
     environment:
@@ -457,7 +461,7 @@ services:
       - DELETE_AFTER_PROCESS=true
       - LOG_LEVEL=INFO
       - RETRAIN_CRON=0 */6 * * *
-    command: ["python", "-m", "app.scheduler"]
+    command: [ "python", "-m", "app.scheduler" ]
     volumes:
       - ml_data_volume:/ml
       - ml_models_volume:/models
@@ -472,7 +476,7 @@ services:
     image: nautilus_param_controller:local
     container_name: hmm_param_controller
     logging: *default-logging
-    profiles: ["ml"]
+    profiles: [ "ml" ]
     # Runs as non-root by default; image entrypoint chowns /shared on start
     environment:
       - PC_DB=/shared/param_controller.sqlite
@@ -482,7 +486,7 @@ services:
       - "8016:8002"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "sh", "-lc", "curl -fsS --max-time 5 http://localhost:8002/health >/dev/null"]
+      test: [ "CMD", "sh", "-lc", "curl -fsS --max-time 5 http://localhost:8002/health >/dev/null" ]
       interval: 20s
       timeout: 8s
       retries: 5
@@ -496,7 +500,7 @@ services:
     image: nautilus_backtest_runner:local
     container_name: hmm_backtest_runner
     logging: *default-logging
-    profiles: ["ml"]
+    profiles: [ "ml" ]
     env_file:
       - .env
     environment:
@@ -520,7 +524,7 @@ services:
     volumes:
       - backtest_research_volume:/research
       - ./backtests/results:/results
-    command: ["run"]
+    command: [ "run" ]
     restart: unless-stopped
     networks:
       - trading_net
@@ -529,8 +533,8 @@ services:
     image: alpine:3.20
     container_name: hmm_research_scrubber
     logging: *default-logging
-    profiles: ["ml"]
-    command: ["/bin/sh","-c","crond -f -l 2"]
+    profiles: [ "ml" ]
+    command: [ "/bin/sh", "-c", "crond -f -l 2" ]
     volumes:
       - backtest_research_volume:/research
       - ./ops/research_purge.cron:/etc/crontabs/root:ro
@@ -545,7 +549,7 @@ services:
     image: nautilus_data_backfill:local
     container_name: hmm_data_backfill
     logging: *default-logging
-    profiles: ["ml"]
+    profiles: [ "ml" ]
     env_file:
       - .env
     environment:
@@ -556,7 +560,7 @@ services:
       - START_TS=0
       - END_TS=0
       - SLEEP_MS=500
-    command: ["python", "-m", "app.backfill"]
+    command: [ "python", "-m", "app.backfill" ]
     volumes:
       - ml_data_volume:/ml
     depends_on:
@@ -564,6 +568,44 @@ services:
         condition: service_started
     networks:
       - trading_net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: hmm_prometheus
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+    networks:
+      - trading_net
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: hmm_grafana
+    user: "472"
+    depends_on:
+      - prometheus
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    env_file:
+      - .env
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+    networks:
+      - trading_net
+    restart: unless-stopped
 
 networks:
   trading_net:
@@ -575,3 +617,5 @@ volumes:
   ml_models_volume:
   ml_shared_volume:
   backtest_research_volume:
+  prometheus_data:
+  grafana_data:

@@ -27,11 +27,6 @@ DEFAULT_SPECS = {
     "BNBUSDT": SymbolSpec(min_qty=0.01, step_size=0.01, min_notional=5.0),
 }
 
-DEFAULT_KRAKEN_SPECS = {
-    "PI_XBTUSD": SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0),
-    "PI_ETHUSD": SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0),
-}
-
 # Load from JSON if available, otherwise use defaults
 SPECS_FILE = Path(__file__).parent / "venue_specs.json"
 SPECS = {
@@ -41,7 +36,6 @@ SPECS = {
         "AAPL": SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=1.0),
         "MSFT": SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=1.0),
     },
-    "KRAKEN": {},
 }
 
 if SPECS_FILE.exists():
@@ -64,11 +58,7 @@ if not SPECS["BINANCE"]:
 if "BINANCE_MARGIN" not in SPECS:
     SPECS["BINANCE_MARGIN"] = SPECS["BINANCE"]
 
-if not SPECS["KRAKEN"]:
-    SPECS["KRAKEN"] = DEFAULT_KRAKEN_SPECS.copy()
-
 # simple fee schedule (bps)
 FEES_TAKER_BPS = {
     "BINANCE": 10.0,  # 0.10% taker default; override from env if needed
-    "KRAKEN": 5.0,  # 0.05% taker default for Kraken futures (override via env)
 }

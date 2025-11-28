@@ -169,8 +169,6 @@ Located in `ops/observability/`:
 3. Prometheus (http://localhost:9090) scrapes:
    - `hmm_ops:8002`
    - `engine_binance:8003`
-   - `engine_bybit:8003`
-   - `engine_ibkr:8003`
    - `ml_service:8010` (optional)
 4. Grafana (http://localhost:3000, admin/admin) auto-loads the “HMM • Trading Overview” dashboard from `grafana/dashboards/hmm_trading_overview.json`.
 
@@ -200,7 +198,7 @@ State & Logs:
     data/processed/m19/metrics_snapshot.json (input KPIs)
 
 Final ops checklist
-	•	`docker compose ps` — confirm `hmm_engine_*` and `hmm_ops` are healthy.
+	•	`docker compose ps` — confirm `hmm_engine_binance` and `hmm_ops` are healthy.
 	•	Ensure `./data` remains mounted for snapshots, lineage, and calibration artifacts.
 	•	`curl http://localhost:8002/metrics` — verify Prometheus exposition for collectors.
 	•	If observability is enabled, check Grafana’s “HMM • Trading Overview” dashboard loads without scrape errors.

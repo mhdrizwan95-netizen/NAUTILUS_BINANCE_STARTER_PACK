@@ -72,11 +72,6 @@ from ops.ui_api import (
     KillSwitchReasonRequired,
     broadcast_account,
     cc_health,
-    ws_account,
-    ws_events,
-    ws_orders,
-    ws_price,
-    ws_trades,
 )
 from ops.ui_api import router as ui_router
 from ops.ui_services import (

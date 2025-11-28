@@ -10,10 +10,14 @@ import type {
 } from "../types/trading";
 
 export const venues: Venue[] = [
-  { id: "binance", name: "Binance", type: "crypto", status: "connected", latency: 12 },
-  { id: "bybit", name: "Bybit", type: "crypto", status: "connected", latency: 18 },
-  { id: "ibkr", name: "IBKR", type: "equities", status: "connected", latency: 45 },
-  { id: "oanda", name: "OANDA", type: "fx", status: "degraded", latency: 89 },
+  { id: "binance_spot", name: "Binance Spot", type: "crypto", status: "connected", latency: 12 },
+  {
+    id: "binance_futures",
+    name: "Binance Futures",
+    type: "crypto",
+    status: "connected",
+    latency: 18,
+  },
 ];
 
 export const strategies: Strategy[] = [

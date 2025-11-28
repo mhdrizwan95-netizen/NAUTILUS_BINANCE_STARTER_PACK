@@ -9,8 +9,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import httpx
-
 try:
     from binance.error import BinanceAPIException, BinanceRequestException
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
@@ -44,13 +42,23 @@ class BinanceVenue:
         return self._c.get_last_price(clean_symbol)
 
     def place_market_order(
-        self, *, symbol: str, side: str, quote: float | None, quantity: float | None
+        self,
+        *,
+        symbol: str,
+        side: str,
+        quote: float | None,
+        quantity: float | None,
+        client_order_id: str | None = None,
     ) -> dict[str, Any]:
         """Place market order via Binance. Supports both quote and quantity."""
         clean_symbol = symbol.split(".")[0] if "." in symbol else symbol
 
         result = self._c.place_market_order(
-            symbol=clean_symbol, side=side, quote=quote, quantity=quantity
+            symbol=clean_symbol,
+            side=side,
+            quote=quote,
+            quantity=quantity,
+            client_order_id=client_order_id,
         )
 
         # Add venue info
@@ -59,32 +67,15 @@ class BinanceVenue:
 
     def account_snapshot(self) -> dict[str, Any]:
         """Binance account snapshot."""
-        try:
-            return self._c.account_snapshot()
-        except (*BINANCE_ERRORS, httpx.HTTPError, ValueError, KeyError) as exc:
-            _log_suppressed("account snapshot failed", exc)
-        return {
-            "venue": self.VENUE,
-            "equity_usd": None,
-            "cash_usd": None,
-            "pnl": {"realized": None, "unrealized": None},
-        }
+        return self._c.account_snapshot()
 
     def positions(self) -> list[dict[str, Any]]:
         """Binance positions."""
-        try:
-            return self._c.positions()
-        except (*BINANCE_ERRORS, httpx.HTTPError, ValueError, KeyError) as exc:
-            _log_suppressed("positions fetch failed", exc)
-        return []
+        return self._c.positions()
 
     def list_open_orders(self) -> list[dict[str, Any]]:
         """List open orders for Binance reconciliation."""
-        try:
-            orders = self._c.get_open_orders()
-        except (*BINANCE_ERRORS, httpx.HTTPError, ValueError, KeyError) as exc:
-            _log_suppressed("list open orders failed", exc)
-            return []
+        orders = self._c.get_open_orders()
         return [
             {
                 "order_id": str(o["orderId"]),

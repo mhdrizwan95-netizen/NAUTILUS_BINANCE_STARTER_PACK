@@ -87,7 +87,7 @@ const generateMockTrades = () => [
     price: 45000,
     pnl: 750,
     strategyId: "hmm",
-    venueId: "binance",
+    venueId: "binance_spot",
   },
   {
     id: "trade-2",
@@ -98,7 +98,7 @@ const generateMockTrades = () => [
     price: 2900,
     pnl: -200,
     strategyId: "meanrev",
-    venueId: "bybit",
+    venueId: "binance_futures",
   },
 ];
 
@@ -127,7 +127,7 @@ const generateMockHealth = () => ({
       queue: 2,
     },
     {
-      name: "Bybit",
+      name: "Binance Futures",
       status: "ok" as const,
       latencyMs: 52,
       queue: 1,

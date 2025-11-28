@@ -5,6 +5,7 @@ import inspect
 import json
 import logging
 import math
+import os
 import time
 from time import time as _now
 from typing import Any, Literal
@@ -29,6 +30,15 @@ _LOGGER = logging.getLogger(__name__)
 _ACCOUNT_ERRORS: tuple[type[Exception], ...] = (ValueError, TypeError, KeyError)
 _METRIC_ERRORS: tuple[type[Exception], ...] = (ValueError, RuntimeError)
 _CLIENT_ERRORS: tuple[type[Exception], ...] = (httpx.HTTPError, RuntimeError, ValueError)
+_ROUTER: OrderRouter | None = None
+
+
+def portfolio_snapshot() -> dict:
+    """Module-level shim for strategies."""
+    if _ROUTER:
+        return _ROUTER.portfolio_snapshot()
+    return {}
+
 
 try:
     from engine.adapters.common import VenueRejected  # type: ignore[import-not-found]
@@ -44,6 +54,16 @@ _NETWORK_ERRORS = (httpx.HTTPError, asyncio.TimeoutError, ConnectionError)
 _PARSE_ERRORS = (ValueError, KeyError, json.JSONDecodeError)
 _ROUTE_ERRORS = _NETWORK_ERRORS + _PARSE_ERRORS + (RuntimeError, VenueRejected)
 _DATA_ERRORS = _PARSE_ERRORS + (AttributeError, TypeError)
+_IOC_TOLERANCE_BPS = float(os.getenv("IOC_TOLERANCE_BPS", os.getenv("MARKET_TOLERANCE_BPS", "5")))
+
+
+def _compute_limit_from_mark(mark: float, side: str) -> float:
+    tol = max(_IOC_TOLERANCE_BPS, 0.0) / 10_000.0
+    if tol == 0:
+        return mark
+    if side.upper() == "BUY":
+        return mark * (1.0 + tol)
+    return mark * (1.0 - tol)
 
 
 class MissingVenueClientError(ValueError):
@@ -243,6 +263,9 @@ class OrderRouter:
             _CLIENTS["BINANCE"] = default_client
         self.snapshot_loaded = False  # NEW
         self._last_snapshot: dict | None = None
+        global _ROUTER
+        if _ROUTER is None:
+            _ROUTER = self
 
     def _split_symbol(self, symbol: str) -> tuple[str, str]:
         base = symbol.split(".")[0].upper()
@@ -263,8 +286,6 @@ class OrderRouter:
             )
         elif venue == "BINANCE" and spec is None:
             spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
-        elif venue == "KRAKEN" and spec is None:
-            spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
         return spec, base, venue
 
     def round_step(self, symbol: str, qty: float) -> float:
@@ -370,29 +391,78 @@ class OrderRouter:
                 orders_rejected.inc()
                 raise MinNotionalViolationError(float(quote), float(spec.min_notional))
 
-            submit = getattr(client, "submit_market_quote", None)
-            if submit is None:
+            # Active Slippage: Use Limit IOC instead of Market
+            submit_limit = getattr(client, "submit_limit_order", None)
+            submit_market = getattr(client, "submit_market_quote", None)
+
+            # Fallback to market if limit not available (unlikely for Binance)
+            if submit_limit is None and submit_market is None:
                 qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
                 return await self.market_quantity(symbol, side, qty, market=market_hint)
 
             margin_market = "margin" if venue == "BINANCE_MARGIN" else None
-            submit_market = market_hint or margin_market
+            submit_market_hint = market_hint or margin_market
+
+            # Calculate Limit Price for IOC
+            px = await self.get_last_price(symbol)
+            if px is None or px <= 0:
+                # Fallback to market if price unavailable
+                if submit_market:
+                    return await submit_market(
+                        symbol=base, side=side, quote=float(quote), market=submit_market_hint
+                    )
+                raise NoPriceAvailableError(symbol)
+
+            limit_px = _compute_limit_from_mark(px, side)
+
+            # Convert quote to quantity for Limit Order
+            # We need quantity for Limit Order, but we have quote (notional)
+            # We can use _quote_to_quantity helper
+            try:
+                qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
+            except (QuantityTooSmallError, SymbolSpecMissingError, NoPriceAvailableError):
+                # If we can't calc qty, try market quote if available
+                if submit_market:
+                    return await submit_market(
+                        symbol=base, side=side, quote=float(quote), market=submit_market_hint
+                    )
+                raise
 
             t0 = time.time()
-            call_kwargs = {"symbol": base, "side": side, "quote": float(quote)}
-            if submit_market is not None:
-                call_kwargs["market"] = submit_market
-            try:
-                res = await submit(**call_kwargs)
-            except TypeError:
-                call_kwargs.pop("market", None)
-                res = await submit(**call_kwargs)
-            except httpx.HTTPStatusError as e:
-                code = e.response.status_code if e.response is not None else 0
-                if code in (400, 415, 422):
-                    qty = await self._quote_to_quantity(symbol, side, quote, market=submit_market)
-                    return await self.market_quantity(symbol, side, qty, market=submit_market)
-                raise
+
+            # Try Limit IOC first
+            if submit_limit:
+                call_kwargs = {
+                    "symbol": base,
+                    "side": side,
+                    "quantity": float(qty),
+                    "price": float(limit_px),
+                    "time_in_force": "IOC",
+                }
+                if submit_market_hint is not None:
+                    call_kwargs["market"] = submit_market_hint
+
+                try:
+                    res = await submit_limit(**call_kwargs)
+                except (httpx.HTTPStatusError, TypeError) as e:
+                    # Fallback to market on failure
+                    _LOGGER.warning(
+                        "[ORDER_ROUTER] Limit IOC failed, falling back to Market: %s", e
+                    )
+                    if submit_market:
+                        res = await submit_market(
+                            symbol=base, side=side, quote=float(quote), market=submit_market_hint
+                        )
+                    else:
+                        raise
+            elif submit_market:
+                # Fallback if no submit_limit
+                res = await submit_market(
+                    symbol=base, side=side, quote=float(quote), market=submit_market_hint
+                )
+            else:
+                raise ClientMissingMethodError("submit_limit_order or submit_market_quote")
+
             t1 = time.time()
 
             try:
@@ -405,16 +475,22 @@ class OrderRouter:
             avg_price = float(
                 res.get("avg_fill_price") or res.get("fills", [{}])[0].get("price", 0.0) or 0.0
             )
-            fill_notional = (
-                abs(filled_qty) * avg_price if (filled_qty and avg_price) else float(quote)
-            )
+            # For IOC, fill might be partial or zero.
+            # If zero fill, we might want to consider it a "rejection" or just a zero fill.
+            # The original code calculated fill_notional from quote if filled_qty was missing?
+            # No, "abs(filled_qty) * avg_price if (filled_qty and avg_price) else float(quote)"
+            # Wait, if it was a market order, it assumed full fill?
+            # For IOC, we must rely on actual fills.
+
+            fill_notional = abs(filled_qty) * avg_price
+
             fee = (fee_bps / 10_000.0) * fill_notional
             res.setdefault("filled_qty_base", filled_qty)
             if avg_price:
                 res.setdefault("avg_fill_price", avg_price)
             res["taker_bps"] = fee_bps
-            if submit_market:
-                res.setdefault("market", submit_market)
+            if submit_market_hint:
+                res.setdefault("market", submit_market_hint)
 
             try:
                 if filled_qty > 0 and (avg_price or fill_notional > 0):
@@ -427,14 +503,14 @@ class OrderRouter:
                         px,
                         float(fee),
                         venue=venue,
-                        market=submit_market,
+                        market=submit_market_hint,
                     )
                     st = self._portfolio.state
                     update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
             except _ROUTE_ERRORS as exc:
                 _log_suppressed("order_router.apply_fill", exc)
 
-            await self._maybe_emit_fill(res, symbol, side, venue=venue, intent="")
+            await self._maybe_emit_fill(res, symbol, side, venue=venue, intent="IOC")
             return res
 
         qty = await self._quote_to_quantity(symbol, side, quote, market=market_hint)
@@ -675,8 +751,6 @@ class OrderRouter:
             spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
         elif venue in {"BINANCE", "BINANCE_MARGIN"} and spec is None:
             spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
-        elif venue == "KRAKEN" and spec is None:
-            spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
         if spec is None:
             raise SymbolSpecMissingError(venue, base)
 
@@ -684,10 +758,7 @@ class OrderRouter:
             raise SymbolSpecMissingError(venue, base)
 
         raw_qty = float(quote) / float(px)
-        if venue == "KRAKEN":
-            qty = _round_step_up(raw_qty, spec.step_size)
-        else:
-            qty = _round_step(raw_qty, spec.step_size)
+        qty = _round_step(raw_qty, spec.step_size)
         if qty <= 0:
             raise QuantityTooSmallError(qty, spec.min_qty if spec else 0.0)
         return qty
@@ -780,8 +851,6 @@ async def _place_market_order_async_core(
         spec = SymbolSpec(min_qty=1.0, step_size=1.0, min_notional=ibkr_min_notional_usd())
     elif venue in {"BINANCE", "BINANCE_MARGIN"} and spec is None:
         spec = SymbolSpec(min_qty=0.00001, step_size=0.00001, min_notional=5.0)
-    elif venue == "KRAKEN" and spec is None:
-        spec = SymbolSpec(min_qty=0.1, step_size=0.1, min_notional=10.0)
 
     if spec is None:
         raise SymbolSpecMissingError(venue, base)
@@ -792,6 +861,7 @@ async def _place_market_order_async_core(
 
     # Attempt to refine specs from live exchange filters
     filt = None
+    tick_size = 0.0
     exchange_filter = getattr(client, "exchange_filter", None)
     if exchange_filter is not None:
         try:
@@ -804,21 +874,16 @@ async def _place_market_order_async_core(
         step_size = float(getattr(filt, "step_size", step_size) or step_size)
         min_qty = float(getattr(filt, "min_qty", min_qty) or min_qty)
         min_notional = float(getattr(filt, "min_notional", min_notional) or min_notional)
+        tick_size = float(getattr(filt, "tick_size", tick_size) or tick_size)
 
     # Quote→qty or direct qty; IBKR requires integer shares
     did_round = False
     if quote is not None and (quantity is None or quantity == 0):
         raw_qty = float(quote) / float(px)
-        if venue == "KRAKEN":
-            quantity = _round_step_up(raw_qty, step_size)
-        else:
-            quantity = _round_step(raw_qty, step_size)
+        quantity = _round_step(raw_qty, step_size)
         did_round = quantity != raw_qty
     elif quantity is not None:
-        if venue == "KRAKEN":
-            quantity = _round_step_up(float(quantity), step_size)
-        else:
-            quantity = _round_step(float(quantity), step_size)
+        quantity = _round_step(float(quantity), step_size)
         did_round = True
 
     if did_round:
@@ -855,60 +920,36 @@ async def _place_market_order_async_core(
             fee = (fee_cfg.bps / 10_000.0) * fill_notional
     else:
         clean_symbol = base
-        if venue == "KRAKEN":
-            slip = 0.002
-            limit_price = px * (1 + slip) if side.upper() == "BUY" else px * (1 - slip)
-            limit_price = max(limit_price, 0.0)
-            submit = getattr(client, "submit_limit_order", None)
-            if submit is None:
-                submit = getattr(client, "submit_market_order", None)
-            if submit is None:
-                raise ClientMissingMethodError("submit_limit_order")
-            t0 = time.time()
-            res = await submit(
-                symbol=clean_symbol,
-                side=side,
-                quantity=float(quantity),
-                price=limit_price,
-                time_in_force="IOC",
-            )
-            t1 = time.time()
-        elif quote is not None and (quantity is None or quantity == 0):
-            submit = getattr(client, "submit_market_quote", None)
-            if submit is None:
-                raise ClientMissingMethodError("submit_market_quote")
-            t0 = time.time()
-            call_kwargs = {"symbol": clean_symbol, "side": side, "quote": quote}
-            if market_hint is not None:
-                call_kwargs["market"] = market_hint
-            try:
-                res = await submit(**call_kwargs)
-            except TypeError:
-                call_kwargs.pop("market", None)
-                res = await submit(**call_kwargs)
-            t1 = time.time()
-        else:
-            submit = getattr(client, "submit_market_order", None)
-            if submit is None:
-                submit = getattr(client, "place_market_order", None)
-            if submit is None:
-                raise ClientMissingMethodError("submit_market_order")
-            t0 = time.time()
-            call_kwargs = {
-                "symbol": clean_symbol,
-                "side": side,
-                "quantity": float(quantity),
-            }
-            if market_hint is not None:
-                call_kwargs["market"] = market_hint
-            try:
-                res = submit(**call_kwargs)
-            except TypeError:
-                call_kwargs.pop("market", None)
-                res = submit(**call_kwargs)
-            if hasattr(res, "__await__"):
-                res = await res
-            t1 = time.time()
+        import uuid
+
+        client_order_id = f"nautilus_{uuid.uuid4().hex[:20]}"
+        limit_price = _round_tick(_compute_limit_from_mark(float(px), side), tick_size or 0.0)
+        limit_price = max(limit_price, 1e-9)
+        submit = getattr(client, "submit_limit_order", None)
+        if submit is None:
+            raise ClientMissingMethodError("submit_limit_order")
+        t0 = time.time()
+        call_kwargs = {
+            "symbol": clean_symbol,
+            "side": side,
+            "quantity": float(quantity_val),
+            "price": float(limit_price),
+            "time_in_force": "IOC",
+            "client_order_id": client_order_id,
+        }
+        if market_hint is not None:
+            call_kwargs["market"] = market_hint
+        res = await _submit_with_retry(
+            submit,
+            call_kwargs,
+            client,
+            clean_symbol,
+            client_order_id,
+            market_hint,
+        )
+        if market_hint:
+            res.setdefault("market", market_hint)
+        t1 = time.time()
 
         # Futures API commonly reports NEW+executedQty=0 even when filled; quickly re-query
         try:
@@ -988,16 +1029,10 @@ async def _place_market_order_async_core(
         last_px = float(px)
         avg_px = float(res.get("avg_fill_price") or last_px)
         slip_bps = abs(avg_px - last_px) / max(last_px, 1e-12) * 10_000.0
-        is_fut = (
-            venue.upper() == "BINANCE"
-            and (
-                (market_hint == "futures")
-                or (
-                    market_hint is None
-                    and os.getenv("BINANCE_MODE", "").lower().startswith("futures")
-                )
-            )
-        ) or venue.upper() == "KRAKEN"
+        is_fut = venue.upper() == "BINANCE" and (
+            (market_hint == "futures")
+            or (market_hint is None and os.getenv("BINANCE_MODE", "").lower().startswith("futures"))
+        )
         cap = cap_fut if is_fut else cap_spot
         if slip_bps > cap:
             logging.getLogger(__name__).warning(
@@ -1034,18 +1069,80 @@ async def _place_market_order_async_core(
     return res
 
 
+async def _submit_with_retry(
+    submit_callable,
+    call_kwargs: dict[str, Any],
+    client,
+    symbol: str,
+    client_order_id: str,
+    market_hint: str | None,
+) -> dict[str, Any]:
+    stripped_kwargs = dict(call_kwargs)
+    type_error_handled = False
+    for attempt in range(3):
+        try:
+            res = submit_callable(**stripped_kwargs)
+            if hasattr(res, "__await__"):
+                res = await res
+            return res
+        except TypeError:
+            if not type_error_handled:
+                stripped_kwargs.pop("client_order_id", None)
+                if "market" in stripped_kwargs:
+                    stripped_kwargs.pop("market")
+                type_error_handled = True
+                continue
+            raise
+        except httpx.HTTPStatusError as exc:
+            code = exc.response.status_code if exc.response is not None else 0
+            if code == 504:
+                _LOGGER.warning(
+                    "[ORDER_ROUTER] 504 Gateway Timeout for %s (attempt %d). Checking orphan...",
+                    symbol,
+                    attempt + 1,
+                )
+                await asyncio.sleep(1.0)
+                status = await _recover_orphan_order(client, symbol, client_order_id, market_hint)
+                if status:
+                    _LOGGER.info("[ORDER_ROUTER] Orphan order recovered for %s", symbol)
+                    return status
+                if attempt == 2:
+                    raise
+                continue
+            raise
+    raise RuntimeError("order submission failed")
+
+
+async def _recover_orphan_order(
+    client,
+    symbol: str,
+    client_order_id: str,
+    market_hint: str | None,
+) -> dict[str, Any] | None:
+    status_fn = getattr(client, "order_status", None)
+    if status_fn is None:
+        return None
+    params = {"symbol": symbol}
+    if client_order_id:
+        params["client_order_id"] = client_order_id
+    if market_hint:
+        params["market"] = market_hint
+    try:
+        status = status_fn(**params)
+        if hasattr(status, "__await__"):
+            status = await status
+        if status and status.get("orderId"):
+            return status
+    except Exception as exc:  # pragma: no cover - best effort
+        _LOGGER.warning("[ORDER_ROUTER] Orphan check failed: %s", exc)
+    return None
+
+
 def _round_step(value: float, step: float) -> float:
     if step <= 0:
         return value
     factor = 1 / step
     return round(value * factor) / factor
-
-
-def _round_step_up(value: float, step: float) -> float:
-    if step <= 0:
-        return value
-    factor = 1 / step
-    return math.ceil(value * factor) / factor
 
 
 async def _resolve_last_price(

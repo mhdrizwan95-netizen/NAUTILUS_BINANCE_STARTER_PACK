@@ -43,7 +43,7 @@ feeds:
         ttl_sec: 300
 
   binance_listings:
-    type: binance_announcements
+    type: binance_listings
     enabled: true
     poll_interval: 60
     priority: 0.92

@@ -65,7 +65,6 @@ def on_binance_listing(router):
     HALF_MIN = int(_as_float(os.getenv("EVENT_BREAKOUT_HALF_SIZE_MINUTES", "5"), 5))
 
     allowed_sources = {
-        "binance_announcements",
         "binance_listings",
         "listing_sniper_bridge",
     }

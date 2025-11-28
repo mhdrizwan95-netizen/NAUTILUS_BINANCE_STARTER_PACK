@@ -38,10 +38,6 @@ Try `make help` for the legacy targets while the new lifecycle gets folded into 
 |---------|-----------|------------|------------|-------|
 | Binance trader engine | `hmm_engine_binance` | `8003` | `engine/app.py` | Live trading API; honors `TRADING_ENABLED`, risk rails, and optional scheduler. |
 | Binance exporter | `hmm_engine_binance_exporter` | `9103` | `engine/app.py` | Read-only replica that streams metrics without order flow. |
-| Kraken trader engine | `hmm_engine_kraken` | `8006` | `engine/app.py` | Futures execution via `engine/core/kraken.py`; uses USD quote currency. |
-| Kraken exporter | `hmm_engine_kraken_exporter` | `9105` | `engine/app.py` | Mirrors Kraken portfolio state for safe scraping. |
-| IBKR engine (optional) | `hmm_engine_ibkr` | `8005` | `engine/app.py` + `engine/connectors/ibkr_client.py` | Requires TWS / IB Gateway connectivity; converts quote → quantity internally. |
-| Bybit stub | `hmm_engine_bybit` | `8004`, `9104` | `engine/app.py` | Uses generic engine plumbing; venue-specific adapter still TODO. |
 | Ops API & dashboards | `hmm_ops` | `8002`, `9102` | `ops/ops_api.py` | Aggregates engine metrics, strategy routing, capital governance endpoints, SSE/WebSocket feeds. |
 | Universe service | `hmm_universe` | `8009` | `universe/service.py` | Maintains tradable symbol set and exposes Prometheus gauges. |
 | Situations service | `hmm_situations` | `8011` | `situations/service.py` | Pattern matcher with feedback loop, exposes `/metrics`. |
@@ -146,7 +142,7 @@ docker compose -f docker-compose.yml -f compose.autotrain.yml -f compose.backfil
 The services share the `/data`, `/models`, and `/shared` volumes declared in the overlays,
 so ledger state, model registries, and backtest artifacts stay consistent between runs.
 
-Enable the built‑in MA+HMM scheduler by setting `STRATEGY_ENABLED=true` (and flip `STRATEGY_DRY_RUN=false` once comfortable). To exercise the Kraken venue, populate `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`, and set `KRAKEN_MODE=testnet|live`. IBKR connectivity requires `ib_insync` and a reachable TWS/Gateway; see `engine/connectors/ibkr_client.py`.
+Enable the built‑in MA+HMM scheduler by setting `STRATEGY_ENABLED=true` (and flip `STRATEGY_DRY_RUN=false` once comfortable). Populate the Binance API credentials (`BINANCE_API_KEY`, `BINANCE_API_SECRET`) or demo keys before taking the guard rails off; Binance is now the only supported venue.
 
 See docs/FEATURE_FLAGS.md for the one‑page index of important environment flags.
 
@@ -180,7 +176,7 @@ The starter pack does **not** ship a production-grade backtest harness yet. Earl
 | Path | Purpose |
 |------|---------|
 | `engine/` | Execution service: FastAPI app, order router, risk rails, metrics, persistence, reconciliation. |
-| `engine/core/` | Venue adapters (`binance.py`, `kraken.py`, `ibkr_client.py`), portfolio accounting, strategy scheduler, alert daemon. |
+| `engine/core/` | Binance venue adapter (`binance.py`), portfolio accounting, strategy scheduler, alert daemon. |
 | `engine/strategies/` | Unified strategy implementations (MA+HMM policy, ensemble fusion, trend, scalping, momentum, listing sniper, meme sentiment, airdrop promo, symbol scanner). |
 | `engine/guards/` | Depeg & Funding guards (halt/trim/hedge on adverse conditions). |
 | `engine/execution/` | Per‑symbol execution overrides (auto size‑cutback & mute). |
@@ -197,12 +193,11 @@ The starter pack does **not** ship a production-grade backtest harness yet. Earl
 ## Observability & Metrics
 
 - Every service exposes `/metrics`; engine counters and gauges live in `engine/metrics.py`.
-- Strategy telemetry: `strategy_ticks_total`, `strategy_tick_to_order_latency_ms`, `strategy_cooldown_window_seconds`
-- Risk & health: `venue_exposure_usd`, `risk_equity_buffer_usd`, `risk_equity_drawdown_pct`, `risk_depeg_active`, `health_state`
-- Event Breakout KPIs: `event_bo_*` (plans/trades/skips/trail). Dashboards:
-  - `ops/observability/grafana/dashboards/event_breakout_kpis.json`
-  - `ops/observability/grafana/dashboards/slippage_heatmap.json`
-- `Makefile` carries helper targets (`make validate-obs`, `make smoke-prom`) to confirm scrape status and rule correctness.
+- **Primary command centre**: Grafana dashboard `Command Center v2` (`ops/observability/grafana/dashboards/command_center_v2.json`), auto-provisioned under folder “HMM”.
+  - Panels cover health (`health_state`, `engine_component_uptime_seconds`), risk (`venue_exposure_usd`, `risk_equity_drawdown_pct`), trading (`orders_*`, `fees_paid_total`), latency (`http_request_latency_seconds`, `ws_message_gap_seconds`), strategy/situations, and ops/governance (`control_actions_total`, `idempotency_*`).
+- Supporting dashboards: `command_center.json` (legacy), `venue_binance.json`, `trend_strategy_ops.json`, `event_breakout_kpis.json`, `slippage_heatmap.json`.
+- Prometheus scrape/rules live under `ops/observability/prometheus/`; helper targets (`make validate-obs`, `make smoke-prom`) confirm scrape status and rule correctness.
+- Optional external UIs can consume the same Ops API, but running Prometheus + Grafana is sufficient for day-to-day operations.
 
 See docs/OBSERVABILITY.md for quick queries and panel descriptions.
 
@@ -212,6 +207,13 @@ Quick queries:
 curl -sG --data-urlencode 'query=rate(strategy_ticks_total{venue="binance"}[1m])' http://localhost:9090/api/v1/query | jq
 curl -sG --data-urlencode 'query=histogram_quantile(0.95, rate(strategy_tick_to_order_latency_ms_bucket[5m]))' http://localhost:9090/api/v1/query | jq
 ```
+
+### Quick start: Grafana-only command centre
+
+1. Export env vars (`source .env` or `.env.dryrun.live`) to configure OPS/engine credentials.
+2. Launch the trading stack in dry-run or live mode (`make autopilot` or `make dry-run`).
+3. Bring up Prometheus + Grafana (`make autopilot-observe`).
+4. Open http://localhost:3000 → folder “HMM” → **Command Center v2**. No bespoke web UI is required; all control actions can be issued via the Ops API and observed via Grafana.
 
 ## Strategy & Modules
 

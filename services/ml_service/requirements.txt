@@ -12,3 +12,4 @@ watchdog>=4.0
 APScheduler>=3.10
 python-jose[cryptography]>=3.3
 loguru>=0.7
+PyJWT>=2.8.0

@@ -74,8 +74,6 @@ echo
 
 check "Recording rule: orders_rate_1m"             'trading:orders_rate_1m'
 check "Raw metric: exposure_usd"                   'exposure_usd'
-check_optional_for_job "Raw metric: equity_usd for engine_ibkr (job filter)" 'equity_usd{job="engine_ibkr"}' 'engine_ibkr'
-check_optional_for_job "Raw metric: equity_usd for engine_kraken (job filter)" 'equity_usd{job="engine_kraken"}' 'engine_kraken'
 check "Recording rule: realized pnl aggregate"     'trading:pnl_realized_usd'
 check "Aggregate exposure by job (sum)"            'sum by(job) (exposure_usd)'
 check "Governance stat: max notional"              'max_notional_usdt'

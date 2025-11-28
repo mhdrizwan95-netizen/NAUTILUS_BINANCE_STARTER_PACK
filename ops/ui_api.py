@@ -46,6 +46,7 @@ from ops.middleware.control_guard import (
     IdempotentGuard,
     TokenOnlyGuard,
 )
+from ops.prometheus import get_or_create_counter
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,11 @@ CONTROL_AUDIT_PATH = Path("ops/logs/control_actions.jsonl")
 _WS_SESSIONS: dict[str, float] = {}
 _WS_SESSION_LOCK = RLock()
 _WS_SESSION_TTL_SEC = float(os.getenv("OPS_WS_SESSION_TTL", "900"))
+CONTROL_ACTIONS_COUNTER = get_or_create_counter(
+    "control_actions_total",
+    "Control-plane actions grouped by outcome",
+    labelnames=("action", "result"),
+)
 
 
 class ConfigPatch(BaseModel):
@@ -275,6 +281,7 @@ def _record_control_action(
     idempotency_key: str,
     payload: dict[str, Any],
     result: dict[str, Any],
+    outcome: str = "ok",
 ) -> None:
     try:
         CONTROL_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -291,6 +298,10 @@ def _record_control_action(
             handle.write(json.dumps(entry) + "\n")
     except _SUPPRESSIBLE_EXCEPTIONS:
         # Audit logging best-effort; avoid interrupting control flow
+        pass
+    try:
+        CONTROL_ACTIONS_COUNTER.labels(action=action, result=outcome).inc()
+    except ValueError:
         pass
 
 
@@ -1482,87 +1493,290 @@ async def cc_health(state: StateDep) -> Any:
     return {"venues": out}
 
 
-_price_peers: set[WebSocket] = set()
-_account_peers: set[WebSocket] = set()
-_orders_peers: set[WebSocket] = set()
-_trades_peers: set[WebSocket] = set()
-_events_peers: set[WebSocket] = set()
+# ... (keeping imports)
+from fastapi import (
+    APIRouter,
+    Depends,
+    Header,
+    Query,
+)
+
+# ... (keeping other imports)
+
+# [REMOVED] Randomness imports
+# import random (removed)
+
+# ... (keeping existing code up to _WS_SESSIONS)
 
 
-async def _guard_ws(websocket: WebSocket) -> None:
-    if _validate_ws_session(websocket.query_params.get("session")):
+# Unified WebSocket Manager
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+        self.subscriptions: dict[str, set[WebSocket]] = {
+            "metrics": set(),
+            "performances": set(),
+            "venues": set(),
+            "prices": set(),
+            "account": set(),
+            "orders": set(),
+            "trades": set(),
+            "events": set(),
+        }
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+        for channel in self.subscriptions:
+            if websocket in self.subscriptions[channel]:
+                self.subscriptions[channel].remove(websocket)
+
+    async def subscribe(self, websocket: WebSocket, channels: list[str]):
+        for channel in channels:
+            if channel in self.subscriptions:
+                self.subscriptions[channel].add(websocket)
+
+    async def broadcast(self, channel: str, message: dict):
+        if channel not in self.subscriptions:
+            return
+
+        # Wrap in standard envelope
+        payload = {"type": channel, "data": message, "timestamp": int(time.time() * 1000)}
+
+        to_remove = []
+        for connection in self.subscriptions[channel]:
+            try:
+                await connection.send_json(payload)
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                to_remove.append(connection)
+
+        for dead in to_remove:
+            self.disconnect(dead)
+
+
+manager = ConnectionManager()
+
+
+@router.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    # Validate session
+    session = websocket.query_params.get("session")
+    if not _validate_ws_session(session):
+        await websocket.close(code=4401)
         return
-    await websocket.close(code=4401)
-    raise WebSocketDisconnect()
 
-
-async def _ws_keep(websocket: WebSocket, peers: set[WebSocket]) -> None:
-    await websocket.accept()
-    peers.add(websocket)
+    await manager.connect(websocket)
     try:
         while True:
-            await asyncio.sleep(60.0)
+            data = await websocket.receive_json()
+            msg_type = data.get("type")
+
+            if msg_type == "subscribe":
+                channels = data.get("channels", [])
+                await manager.subscribe(websocket, channels)
+            elif msg_type == "heartbeat":
+                await websocket.send_json(
+                    {"type": "heartbeat", "timestamp": int(time.time() * 1000)}
+                )
+
     except WebSocketDisconnect:
-        pass
-    finally:
-        peers.discard(websocket)
+        manager.disconnect(websocket)
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        manager.disconnect(websocket)
 
 
-async def _broadcast(peers: set[WebSocket], message: dict[str, Any]) -> None:
-    dead: list[WebSocket] = []
-    for ws in list(peers):
+# ... (keeping existing code)
+
+
+# [MODIFIED] Remove randomness from cc_strategies_list
+@router.get("/strategies")
+async def cc_strategies_list(
+    state: StateDep,
+    cursor: str | None = Query(None),
+    limit: int = Query(DEFAULT_PAGE_LIMIT, ge=1, le=MAX_PAGE_LIMIT),
+) -> Any:
+    """Return strategy cards with paramsSchema and current params for the UI."""
+    gov = await state["strategy"].list()
+    params_store = _load_params()
+
+    items = []
+    for entry in gov.get("strategies", []):
+        sid = entry.get("id")
+        schema = _load_strategy_schema(sid)
+        params = params_store.get(sid, {})
         try:
-            await ws.send_json(message)
+            uni = await state["scanner"].universe(sid)
+            symbols = uni.get("symbols", [])
         except _SUPPRESSIBLE_EXCEPTIONS:
-            dead.append(ws)
-    for ws in dead:
-        peers.discard(ws)
+            symbols = []
+
+        # [CHANGED] No fake performance data
+        perf = {"pnl": 0.0}
+
+        items.append(
+            {
+                "id": sid,
+                "name": sid,
+                "kind": "strategy",
+                "status": "running" if entry.get("enabled") else "stopped",
+                "symbols": symbols,
+                "paramsSchema": schema,
+                "params": params,
+                "performance": perf,
+            }
+        )
+
+    items.sort(key=lambda entry: entry.get("id", ""))
+    return _paginate_items(items, cursor, limit)
 
 
+# ... (keeping existing code)
+
+
+# [MODIFIED] Remove randomness from cc_metrics_summary
+@router.get("/metrics/summary")
+async def cc_metrics_summary(
+    state: StateDep,
+    from_: str | None = None,
+    to: str | None = None,
+    strategies: list[str] | None = None,
+    symbols: list[str] | None = None,
+) -> Any:
+    enhanced_data, snap, _context = await _collect_metrics_bundle(state)
+    positions = snap.get("positions") or []
+    open_positions = len(positions)
+
+    pnl_by_symbol: dict[str, float] = {}
+    for p in positions:
+        sym = p.get("symbol") or p.get("product") or "UNKNOWN"
+        pnl_val = float(p.get("pnl") or p.get("unrealizedPnl") or p.get("unrealized_pnl") or 0.0)
+        pnl_by_symbol[sym] = pnl_by_symbol.get(sym, 0.0) + pnl_val
+
+    total_realized = sum(float(d.get("pnl_realized_total", 0.0)) for d in enhanced_data)
+    total_unrealized = sum(float(d.get("pnl_unrealized_total", 0.0)) for d in enhanced_data)
+    total_pnl = total_realized + total_unrealized
+    win_rate = pnl.calculate_overall_win_rate(enhanced_data) if enhanced_data else 0.0
+    sharpe = pnl.calculate_portfolio_sharpe(enhanced_data) if enhanced_data else 0.0
+    max_dd = max((float(d.get("max_drawdown", 0.0)) for d in enhanced_data), default=0.0)
+
+    # [CHANGED] No random seeding if empty
+
+    return {
+        "kpis": {
+            "totalPnl": round(total_pnl, 2),
+            "winRate": float(win_rate),
+            "sharpe": float(sharpe),
+            "maxDrawdown": float(max_dd),
+            "openPositions": int(open_positions),
+        },
+        "equityByStrategy": [],
+        "pnlBySymbol": [
+            {"symbol": k, "pnl": round(v, 2)} for k, v in sorted(pnl_by_symbol.items())
+        ],
+        "returns": [],
+    }
+
+
+# ... (keeping existing code)
+
+
+# [MODIFIED] Remove randomness from cc_trades_recent
+@router.get("/trades/recent")
+async def cc_trades_recent(
+    cursor: str | None = Query(None),
+    limit: int = Query(100, ge=1, le=MAX_PAGE_LIMIT),
+) -> Any:
+    rows = list(RECENT_TRADES)
+    # [CHANGED] No dev seeding
+
+    sanitized = []
+    for idx, r in enumerate(rows):
+        timestamp = r.get("time") or r.get("timestamp") or int(time.time() * 1000)
+        symbol = r.get("symbol") or "UNKNOWN"
+        entry = {
+            "id": r.get("id") or f"trade-{timestamp}-{symbol}-{idx}",
+            "time": timestamp,
+            "timestamp": timestamp,
+            "symbol": symbol,
+            "side": (r.get("side") or "buy").lower(),
+            "quantity": float(r.get("qty") or r.get("quantity") or 0),
+            "price": float(r.get("price") or 0),
+            "pnl": r.get("pnl"),
+        }
+        sanitized.append(entry)
+    sanitized.sort(key=lambda item: item.get("timestamp") or 0, reverse=True)
+    return _paginate_items(sanitized, cursor, limit)
+
+
+# [MODIFIED] Remove randomness from cc_alerts
+@router.get("/alerts")
+async def cc_alerts(
+    cursor: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=MAX_PAGE_LIMIT),
+) -> Any:
+    rows = list(ALERTS_FEED)
+    # [CHANGED] No dev seeding
+
+    normalized = []
+    for idx, row in enumerate(rows):
+        timestamp = row.get("time") or row.get("timestamp") or int(time.time() * 1000)
+        level = (row.get("level") or row.get("type") or "info").lower()
+        normalized.append(
+            {
+                "id": row.get("id") or f"alert-{timestamp}-{idx}",
+                "time": timestamp,
+                "timestamp": timestamp,
+                "type": level,
+                "message": row.get("text") or row.get("message") or "",
+            }
+        )
+
+    normalized.sort(key=lambda item: item.get("timestamp", 0), reverse=True)
+    return _paginate_items(normalized, cursor, limit)
+
+
+# ... (keeping existing code)
+
+
+# [NEW] Price Ingestion Endpoint
+@router.post("/events/price")
+async def post_price_event(
+    item: dict[str, Any],
+    _auth: AuthDep,
+) -> Any:
+    # item expected to be { "symbol": "BTCUSDT", "price": 123.45, "time": ... }
+    await manager.broadcast("prices", item)
+    return {"ok": True}
+
+
+# [MODIFIED] Update broadcast functions to use manager
 async def broadcast_price(message: dict[str, Any]) -> None:
-    await _broadcast(_price_peers, message)
+    await manager.broadcast("prices", message)
 
 
 async def broadcast_account(message: dict[str, Any]) -> None:
-    await _broadcast(_account_peers, message)
+    await manager.broadcast("account", message)
 
 
 async def broadcast_order(message: dict[str, Any]) -> None:
-    await _broadcast(_orders_peers, message)
+    await manager.broadcast("orders", message)
 
 
 async def broadcast_trade(message: dict[str, Any]) -> None:
-    await _broadcast(_trades_peers, message)
+    await manager.broadcast("trades", message)
 
 
 async def broadcast_event(message: dict[str, Any]) -> None:
-    await _broadcast(_events_peers, message)
+    await manager.broadcast("events", message)
 
 
-async def ws_price(websocket: WebSocket) -> None:
-    await _guard_ws(websocket)
-    await _ws_keep(websocket, _price_peers)
-
-
-async def ws_account(websocket: WebSocket) -> None:
-    await _guard_ws(websocket)
-    await _ws_keep(websocket, _account_peers)
-
-
-async def ws_orders(websocket: WebSocket) -> None:
-    await _guard_ws(websocket)
-    await _ws_keep(websocket, _orders_peers)
-
-
-async def ws_trades(websocket: WebSocket) -> None:
-    await _guard_ws(websocket)
-    await _ws_keep(websocket, _trades_peers)
-
-
-async def ws_events(websocket: WebSocket) -> None:
-    await _guard_ws(websocket)
-    await _ws_keep(websocket, _events_peers)
-
+# [REMOVED] Old individual WS endpoints and peer sets
+# _price_peers, _account_peers, etc. removed
+# ws_price, ws_account, etc. removed
 
 __all__ = [
     "router",
@@ -1571,9 +1785,9 @@ __all__ = [
     "broadcast_order",
     "broadcast_trade",
     "broadcast_event",
-    "ws_price",
-    "ws_account",
-    "ws_orders",
-    "ws_trades",
-    "ws_events",
+    # "ws_price", # Removed
+    # "ws_account", # Removed
+    # "ws_orders", # Removed
+    # "ws_trades", # Removed
+    # "ws_events", # Removed
 ]

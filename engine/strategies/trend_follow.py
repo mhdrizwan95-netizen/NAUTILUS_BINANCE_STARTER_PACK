@@ -14,6 +14,7 @@ from engine.config.env import env_bool, env_float, env_int, env_str
 from engine.core.market_resolver import resolve_market_choice
 from engine.universe.effective import StrategyUniverse
 
+from . import policy_hmm
 from .trend_params import TrendAutoTuner, TrendParams
 
 _SUPPRESSIBLE_EXCEPTIONS = (
@@ -285,6 +286,24 @@ class TrendStrategyModule:
                 quote = self._quote_size(price)
                 if quote <= 0:
                     return None
+
+                # HMM Gating
+                regime_info = policy_hmm.get_regime(base)
+                if regime_info:
+                    regime = regime_info.get("regime", "CHOP")
+                    conf = regime_info.get("conf", 0.0)
+                    meta["hmm_regime"] = regime
+                    meta["hmm_conf"] = conf
+
+                    # If Bearish, skip Longs
+                    if regime == "BEAR" and conf > 0.5:
+                        return None
+
+                    # If Choppy, reduce size
+                    if regime == "CHOP":
+                        quote *= 0.5
+                        meta["hmm_throttle"] = 0.5
+
                 self._state[base] = "LONG_ACTIVE"
                 self._entry_quote[base] = quote
                 self._entry_price[base] = price

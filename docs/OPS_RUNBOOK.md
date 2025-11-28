@@ -6,10 +6,10 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 
 | Check | Command / Location | Pass Criteria |
 |-------|--------------------|---------------|
-| Engine & exporter metrics | `make smoke-exporter` | `equity_usd`, `cash_usd`, `market_value_usd`, `metrics_heartbeat`, `risk_equity_buffer_usd`, `kraken_equity_usd` return non-empty values and residual ≈ 0. |
-| Prometheus scrape status | `make smoke-prom` or `http://localhost:9090/targets` | `engine_binance`, `engine_kraken`, `ops`, and exporters show `health: "up"`. |
+| Engine & exporter metrics | `make smoke-exporter` | `equity_usd`, `cash_usd`, `market_value_usd`, `metrics_heartbeat`, `risk_equity_buffer_usd` return non-empty values and residual ≈ 0. |
+| Prometheus scrape status | `make smoke-prom` or `http://localhost:9090/targets` | `engine_binance`, `ops`, and exporters show `health: "up"`. |
 | Ops API status | `curl http://localhost:8002/status | jq` | `{"trading_enabled": true}` (or expected value) and balances populated. |
-| Grafana dashboards | `http://localhost:3000` (Command Center) | Panels update, no `No data` warnings, metrics heartbeat < 60s. |
+| Grafana dashboards | `http://localhost:3000` (Command Center v2) | Panels update, no `No data` warnings, metrics heartbeat < 60s. |
 | Trend dashboards | `Trend Strategy Ops` | `trend_follow_*` counters move when signals fire, `symbol_scanner_score` shows current shortlist. |
 | Executor health (if enabled) | `docker compose logs -f executor` | No repeated retry loops or venue errors. |
 | Universe/Situations services | `curl http://localhost:8009/health`, `curl http://localhost:8011/health` | Return `{"ok": true}`. |
@@ -33,6 +33,40 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 | Flip feature flags | Edit `.env` and restart or export env in compose overrides | Start modules in dry-run where available; validate metrics first. |
 | Force trend auto-tune reset | Delete `data/runtime/trend_auto_tune.json` and restart engine | Only do this if the state file is corrupt or you want to revert to env defaults. |
 | Re-scan symbols manually | `touch data/runtime/symbol_scanner_state.json` then restart engine or call scanner control endpoint (TBD) | Scanner automatically runs every `SYMBOL_SCANNER_INTERVAL_SEC`; manual reset forces a fresh shortlist. |
+
+### Operating without a custom UI
+
+Grafana **Command Center v2** is the canonical cockpit. Execute actions via the Ops API directly and watch the “Control & Governance Actions” panel (fed by `control_actions_total{action,result}`) for confirmation.
+
+Pause trading:
+
+```bash
+curl -X POST http://localhost:8002/api/ops/kill-switch \
+  -H "X-Ops-Token: ${OPS_API_TOKEN}" \
+  -H "Idempotency-Key: pause-$(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":false,"reason":"maintenance window"}'
+```
+
+Resume trading:
+
+```bash
+curl -X POST http://localhost:8002/api/ops/kill-switch \
+  -H "X-Ops-Token: ${OPS_API_TOKEN}" \
+  -H "Idempotency-Key: resume-$(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled":true,"reason":"ready"}'
+```
+
+Flatten exposure:
+
+```bash
+curl -X POST http://localhost:8002/api/ops/flatten \
+  -H "X-Ops-Token: ${OPS_API_TOKEN}" \
+  -H "Idempotency-Key: flatten-$(uuidgen)" \
+  -H "Content-Type: application/json" \
+  -d '{"reason":"flatten before deploy"}'
+```
 
 ### External Feed Observability
 
@@ -100,8 +134,8 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 
 ### Circuit breaker tripped
 1. Alerts trigger when `venue_error_rate_pct` or `risk_equity_floor_breach` flips to 1.
-2. Confirm via `/metrics` and engine logs; inspect `risk_equity_buffer_usd`, `risk_equity_drawdown_pct`, `venue_exposure_usd{venue="kraken"}`.
-3. Pause trading (`/kill`), investigate upstream API (Binance/Kraken) or account equity changes.
+2. Confirm via `/metrics` and engine logs; inspect `risk_equity_buffer_usd`, `risk_equity_drawdown_pct`, `venue_exposure_usd{venue="binance"}`.
+3. Pause trading (`/kill`), investigate upstream API (Binance) or account equity changes.
 4. Once stable, clear venue breaker by calling `RiskRails.record_result(True)` or restart; equity breaker auto-resets after `EQUITY_COOLDOWN_SEC` once buffer > 0.
 5. Resume trading gradually (lower `MAX_NOTIONAL_USDT`, adjust strategy weights) and monitor buffer/drawdown gauges.
 
@@ -124,7 +158,7 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 1. `reconcile_lag_seconds` > acceptable threshold or equities mismatch.
 2. Run `curl -X POST http://localhost:8003/reconcile/manual`.
 3. Inspect `engine/logs/orders.jsonl` for missing fills.
-4. If still mismatch, export account snapshot manually (Binance/Kraken API) and adjust `engine/state/portfolio.json` before restart.
+4. If still mismatch, export account snapshot manually (Binance API) and adjust `engine/state/portfolio.json` before restart.
 
 ### Portfolio drift after restart
 1. Compare `engine/state/portfolio.json` to account snapshot.
@@ -161,7 +195,15 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
   curl -fsS -G --data-urlencode 'query=histogram_quantile(0.5, rate(strategy_tick_to_order_latency_ms_bucket[5m]))' http://localhost:9090/api/v1/query
   ```
 
-- **Event Breakout KPIs**: import `ops/observability/grafana/dashboards/event_breakout_kpis.json` and `slippage_heatmap.json`; keep `EVENT_BREAKOUT_METRICS=true`.
+### Dashboard map
+
+- **Primary command centre**: Grafana `Command Center v2`
+  - File: `ops/observability/grafana/dashboards/command_center_v2.json`
+  - Folder: Grafana → “HMM”
+- Supporting dashboards:
+  - `command_center.json` (legacy)
+  - `venue_binance.json`, `trend_strategy_ops.json`
+  - `event_breakout_kpis.json`, `slippage_heatmap.json` (enable `EVENT_BREAKOUT_METRICS=true`)
 
 ## Backups & Compliance
 

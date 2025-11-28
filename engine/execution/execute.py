@@ -157,12 +157,15 @@ class StrategyExecutor:
         if eff_dry is None:
             eff_dry = self._default_dry_run
 
+        tag = str(signal.get("tag") or signal.get("strategy") or self._source)
+
         ok, err = self._risk.check_order(
             symbol=symbol,
             side=side,  # type: ignore[arg-type]
             quote=None if quote is None else float(quote),
             quantity=None if quantity is None else float(quantity),
             market=market_hint,
+            strategy_id=tag,
         )
         if not ok:
             metrics.orders_rejected.inc()

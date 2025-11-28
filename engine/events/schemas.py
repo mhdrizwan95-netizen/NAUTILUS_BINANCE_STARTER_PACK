@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 class ExternalEvent(BaseModel):
     """Normalized envelope for external (off-tick) signals."""
 
-    source: str = Field(..., description="Producer identifier, e.g. binance_announcements")
+    source: str = Field(..., description="Producer identifier, e.g. binance_listings")
     payload: dict[str, Any] = Field(default_factory=dict, description="Raw event payload")
     id: str | None = Field(default=None, description="Stable identifier for idempotency")
     ts: datetime = Field(

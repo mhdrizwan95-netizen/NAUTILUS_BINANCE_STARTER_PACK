@@ -1,0 +1,1252 @@
+{
+  "id": null,
+  "uid": "hmm-command-center-v2",
+  "title": "Command Center v2",
+  "tags": [
+    "hmm",
+    "command",
+    "primary"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5s",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ],
+    "time_options": [
+      "1h",
+      "3h",
+      "6h",
+      "12h",
+      "24h"
+    ]
+  },
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "venue",
+        "label": "Venue",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(venue_exposure_usd, \"venue\")",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "symbol",
+        "label": "Symbol",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(exposure_usd, \"symbol\")",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "feed",
+        "label": "External Feed",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(external_feed_events_total, \"source\")",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        }
+      },
+      {
+        "name": "job",
+        "label": "Job",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "query": "label_values(up, \"job\")",
+        "refresh": 1,
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "range_s",
+        "type": "constant",
+        "label": "range_s",
+        "query": "${__range_s}"
+      },
+      {
+        "name": "rate_interval",
+        "type": "constant",
+        "label": "rate_interval",
+        "query": "${__rate_interval}"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "System / Service Health",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "id": 2,
+      "type": "state-timeline",
+      "title": "Core Services Up",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 1
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=~\"$job\"}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "right"
+        }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Component Uptime (s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(engine_component_uptime_seconds)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 60
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "type": "state-timeline",
+      "title": "Breaker State",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 6,
+        "y": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (job) (breaker_state{job=~\"$job\"})",
+          "legendFormat": "{{job}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Health State",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 5,
+        "w": 9,
+        "x": 15,
+        "y": 7
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (job) (health_state{job=~\"$job\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "OK",
+                  "color": "green"
+                },
+                "1": {
+                  "text": "Degraded",
+                  "color": "yellow"
+                },
+                "2": {
+                  "text": "Halted",
+                  "color": "red"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Venue Error Rate (%)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (job) (venue_error_rate_pct{job=~\"$job\"})",
+          "legendFormat": "{{job}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Venue Error Count (5m)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (venue) (increase(engine_venue_errors_total{venue=~\"$venue\"}[$rate_interval]))",
+          "legendFormat": "{{venue}}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Data Freshness (s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 24,
+        "x": 0,
+        "y": 19
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "time() - mark_time_epoch{job=~\"$job\"}",
+          "legendFormat": "mark {{job}}"
+        },
+        {
+          "refId": "B",
+          "expr": "time() - ops_portfolio_last_refresh_epoch",
+          "legendFormat": "portfolio"
+        },
+        {
+          "refId": "C",
+          "expr": "time() - ops_pnl_last_refresh_epoch",
+          "legendFormat": "pnl"
+        },
+        {
+          "refId": "D",
+          "expr": "time() - ops_exposure_last_refresh_epoch",
+          "legendFormat": "exposure"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "row",
+      "title": "Portfolio & Risk",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Portfolio Equity vs Prev Close",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 0,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "portfolio_equity_usd",
+          "legendFormat": "equity"
+        },
+        {
+          "refId": "B",
+          "expr": "portfolio_equity_prev_close_usd",
+          "legendFormat": "prev close"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Realized vs Unrealized PnL",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 6,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(pnl_realized_total)",
+          "legendFormat": "realized"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(pnl_unrealized_total)",
+          "legendFormat": "unrealized"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "Drawdown & Buffer",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "risk_equity_drawdown_pct",
+          "legendFormat": "drawdown",
+          "format": "time_series"
+        },
+        {
+          "refId": "B",
+          "expr": "risk_equity_buffer_usd",
+          "legendFormat": "buffer"
+        },
+        {
+          "refId": "C",
+          "expr": "risk_equity_floor_breach",
+          "legendFormat": "floor breach"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Venue Exposure (USD)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 32
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (venue) (venue_exposure_usd{venue=~\"$venue\"})",
+          "legendFormat": "{{venue}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "bargauge",
+      "title": "Top Symbol Exposure",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 39
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(20, exposure_usd{symbol=~\"$symbol\"})",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "row",
+      "title": "Trading Activity",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Order Throughput (per min)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 47
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(rate(orders_submitted_total[$rate_interval])) * 60, 0)",
+          "legendFormat": "submitted"
+        },
+        {
+          "refId": "B",
+          "expr": "clamp_min(sum(rate(orders_filled_total[$rate_interval])) * 60, 0)",
+          "legendFormat": "filled"
+        },
+        {
+          "refId": "C",
+          "expr": "clamp_min(sum(rate(orders_rejected_total[$rate_interval])) * 60, 0)",
+          "legendFormat": "rejected"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "type": "stat",
+      "title": "Fill Ratio",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 47
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(rate(orders_filled_total[$rate_interval])) / clamp_min(sum(rate(orders_submitted_total[$rate_interval])), 1), 0)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "stat",
+      "title": "Reject Ratio",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 47
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "clamp_min(sum(rate(orders_rejected_total[$rate_interval])) / clamp_min(sum(rate(orders_submitted_total[$rate_interval])), 1), 0)",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "stat",
+      "title": "Fees Paid (USD)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 54
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "fees_paid_total"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        }
+      }
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "Strategy Orders by Source",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 54
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (source) (rate(strategy_orders_total[$rate_interval]))",
+          "legendFormat": "{{source}}"
+        }
+      ]
+    },
+    {
+      "id": 21,
+      "type": "row",
+      "title": "Latency & Feeds",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 61
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "HTTP Request Latency",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum(rate(http_request_latency_seconds_bucket[$rate_interval])) by (le, service))",
+          "legendFormat": "p50 {{service}}"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_latency_seconds_bucket[$rate_interval])) by (le, service))",
+          "legendFormat": "p95 {{service}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "Order & Signal Latency",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 62
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum(rate(strategy_tick_to_order_latency_ms_bucket[$rate_interval])) by (le))",
+          "legendFormat": "tick→order p95"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum(rate(strategy_signal_latency_seconds_bucket[$rate_interval])) by (le, strategy))",
+          "legendFormat": "signal latency p95 {{strategy}}"
+        },
+        {
+          "refId": "C",
+          "expr": "quantile_over_time(0.95, fill_latency_ms[$rate_interval])",
+          "legendFormat": "fill latency p95"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "External Feed Events",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 69
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(external_feed_events_total{source=~\"$feed\"}[$rate_interval])) by (source)",
+          "legendFormat": "events {{source}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(external_feed_errors_total{source=~\"$feed\"}[$rate_interval])) by (source)",
+          "legendFormat": "errors {{source}}"
+        }
+      ]
+    },
+    {
+      "id": 25,
+      "type": "stat",
+      "title": "External Feed Age",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 12,
+        "y": 69
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(time() - external_feed_last_event_epoch{source=~\"$feed\"})"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "id": 26,
+      "type": "stat",
+      "title": "Screener Latency",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 6,
+        "x": 18,
+        "y": 69
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "scan_latency_ms",
+          "instant": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        }
+      }
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "WS Message Gap",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 76
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (stream, role) (ws_message_gap_seconds)",
+          "legendFormat": "{{stream}}/{{role}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      },
+      "description": "TODO: add ws_message_gap_seconds for other feeds when available"
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "WS Reconnects (rate)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 76
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (stream, role) (rate(engine_ws_reconnects_total[$rate_interval]))",
+          "legendFormat": "{{stream}}/{{role}}"
+        }
+      ],
+      "description": "TODO: extend to capture reconnects for additional WS clients"
+    },
+    {
+      "id": 29,
+      "type": "row",
+      "title": "Strategy / Situations / Universe",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 83
+      }
+    },
+    {
+      "id": 30,
+      "type": "timeseries",
+      "title": "Strategy Confidence",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 84
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (symbol) (strategy_confidence{symbol=~\"$symbol\"})",
+          "legendFormat": "{{symbol}}"
+        }
+      ]
+    },
+    {
+      "id": 31,
+      "type": "timeseries",
+      "title": "Strategy Signals Rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 84
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (strategy) (rate(strategy_signals_total[$rate_interval]))",
+          "legendFormat": "{{strategy}}"
+        }
+      ]
+    },
+    {
+      "id": 32,
+      "type": "timeseries",
+      "title": "Trend Signals & Trades",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 91
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (symbol) (rate(trend_follow_signals_total{symbol=~\"$symbol\", venue=~\"$venue\"}[$rate_interval]))",
+          "legendFormat": "signals {{symbol}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (result) (rate(trend_follow_trades_total{symbol=~\"$symbol\", venue=~\"$venue\"}[$rate_interval]))",
+          "legendFormat": "trades {{result}}"
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "type": "table",
+      "title": "Situations Expected Value",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 91
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "situation_ev_mean",
+          "instant": true,
+          "legendFormat": "{{name}}"
+        },
+        {
+          "refId": "B",
+          "expr": "situation_ev_ci_low",
+          "instant": true
+        },
+        {
+          "refId": "C",
+          "expr": "situation_ev_ci_high",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 34,
+      "type": "timeseries",
+      "title": "Universe Size by Bucket",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 98
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "universe_size",
+          "legendFormat": "{{bucket}}"
+        }
+      ]
+    },
+    {
+      "id": 35,
+      "type": "table",
+      "title": "Top Screener Scores",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 98
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "topk(10, screener_score{symbol=~\"$symbol\", side=\"long\"})",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "type": "row",
+      "title": "Ops / Governance / Executor",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 105
+      }
+    },
+    {
+      "id": 37,
+      "type": "timeseries",
+      "title": "Idempotency Activity",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 106
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(idempotency_new_total[$rate_interval])",
+          "legendFormat": "new"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(idempotency_pending_total[$rate_interval])",
+          "legendFormat": "pending"
+        },
+        {
+          "refId": "C",
+          "expr": "rate(idempotency_replays_total[$rate_interval])",
+          "legendFormat": "replays"
+        }
+      ]
+    },
+    {
+      "id": 38,
+      "type": "timeseries",
+      "title": "Control & Governance Actions",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 106
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (action, result) (rate(control_actions_total[$rate_interval]))",
+          "legendFormat": "{{action}} {{result}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (name) (rate(governance_rule_tripped_total[$rate_interval]))",
+          "legendFormat": "rule {{name}}"
+        }
+      ]
+    },
+    {
+      "id": 39,
+      "type": "timeseries",
+      "title": "Automation Actions & Incidents",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 113
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (action) (rate(m19_actions_total[$rate_interval]))",
+          "legendFormat": "action {{action}}"
+        },
+        {
+          "refId": "B",
+          "expr": "sum by (type) (rate(m20_incidents_total[$rate_interval]))",
+          "legendFormat": "incident {{type}}"
+        }
+      ]
+    },
+    {
+      "id": 40,
+      "type": "timeseries",
+      "title": "Executor Health",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 113
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "executor_up",
+          "legendFormat": "up"
+        },
+        {
+          "refId": "B",
+          "expr": "time() - executor_last_ping_epoch",
+          "legendFormat": "ping age"
+        },
+        {
+          "refId": "C",
+          "expr": "engine_snapshot_loaded",
+          "legendFormat": "snapshot loaded"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "id": 41,
+      "type": "timeseries",
+      "title": "Executor Probes",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 120
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(probe_submissions_total[$rate_interval])",
+          "legendFormat": "submitted"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(probe_filled_total[$rate_interval])",
+          "legendFormat": "filled"
+        },
+        {
+          "refId": "C",
+          "expr": "rate(probe_errors_total[$rate_interval])",
+          "legendFormat": "errors"
+        }
+      ]
+    },
+    {
+      "id": 42,
+      "type": "timeseries",
+      "title": "Situation Events Consumed",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 120
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (name) (rate(situation_events_consumed_total[$rate_interval]))",
+          "legendFormat": "{{name}}"
+        }
+      ]
+    }
+  ]
+}

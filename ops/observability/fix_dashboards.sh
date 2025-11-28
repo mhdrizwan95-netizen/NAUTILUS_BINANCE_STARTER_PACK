@@ -17,8 +17,9 @@ fix_dashboard() {
 
     echo "🔍 Scanning: ${file}"
     # Show common mismatches (does not modify)
-    if grep -q 'job=\"engine_\(ibkr\|bybit\)\"' "${file}" 2>/dev/null; then
-        echo "  • Found hardcoded job labels for other venues (engine_ibkr/engine_bybit)."
+    # Legacy venues were removed; surfaces help identify stale labels
+    if grep -q 'job="engine_' "${file}" 2>/dev/null; then
+        echo "  • Found hardcoded engine job labels; ensure they reference hmm_engine_binance.* only."
     fi
     if grep -q '\$venue' "${file}" 2>/dev/null; then
         echo "  • Found templated \$venue; verify your labels match Prometheus jobs."
@@ -39,10 +40,6 @@ fix_dashboard() {
         sed -E \
             -e 's/job="engine_binance"/job="hmm_engine_binance"/g' \
             -e 's/job="engine_binance_exporter"/job="hmm_engine_binance_exporter"/g' \
-            -e 's/job="engine_ibkr"/job="hmm_engine_ibkr"/g' \
-            -e 's/job="engine_ibkr_exporter"/job="hmm_engine_ibkr_exporter"/g' \
-            -e 's/job="engine_bybit"/job="hmm_engine_bybit"/g' \
-            -e 's/job="engine_bybit_exporter"/job="hmm_engine_bybit_exporter"/g' \
             -e 's/\$\{__all_instances\}/\{job=~"hmm_engine_.*"\}/g' \
              < "${file}" > "${output}"
         echo "  ✅ Wrote: ${output} (review before importing to Grafana)"

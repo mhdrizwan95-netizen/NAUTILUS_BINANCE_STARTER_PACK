@@ -8,9 +8,9 @@ This document demonstrates the **fully autonomous, self-improving HMM trading sy
 
 ## 🎯 SYSTEM CAPABILITIES ACHIEVED
 
-### ✅ Phase 1-2: Foundation & Multi-Venue Ops
-- Multi-engine deployment (Binance + Bybit)
-- Cross-venue aggregation APIs
+### ✅ Phase 1-2: Foundation & Venue Ops
+- Hardened Binance deployment (exporter + trader)
+- Aggregation APIs for engine + ops telemetry
 - Risk monitoring with alerts
 - Production deployment configuration
 
@@ -68,17 +68,17 @@ The system **closes the loop** from data ingestion to autonomous model improveme
 export HMM_ENABLED=true
 export STRATEGY_DRY_RUN=true
 export TRADE_SYMBOLS="BTCUSDT,ETHUSDT"
-export ENGINE_ENDPOINTS="http://localhost:8003,http://localhost:8004"
+export ENGINE_ENDPOINTS="http://localhost:8003"
 ```
 
 ### Step 2: Multi-Venue Engine Startup
 ```bash
 # Start observation stack
-docker compose -f ops/docker-compose.yml up -d engine_binance engine_bybit ops dash
+docker compose -f ops/docker-compose.yml up -d engine_binance ops dash
 
-# Verify cross-venue exposure monitoring
-curl http://localhost:8001/aggregate/exposure | jq .
-curl http://localhost:8001/aggregate/health | jq .
+# Verify engine/ops health
+curl http://localhost:8003/health | jq .
+curl http://localhost:8002/status | jq .
 ```
 
 ### Step 3: Autonomous Model Improvement Pipeline
@@ -114,7 +114,7 @@ python scripts/auto_promote_if_better.py --metric sharpe --min-improve 0.05
 
 # 5. Go live with new model (if promoted)
 echo "STRATEGY_DRY_RUN=false" >> .env
-docker compose restart engine_binance engine_bybit
+docker compose restart engine_binance
 ```
 
 ---

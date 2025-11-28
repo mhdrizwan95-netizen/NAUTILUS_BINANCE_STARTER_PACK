@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import queue
 import sqlite3
 import threading
@@ -10,6 +11,9 @@ from typing import Any
 _DB = None
 _LOCK = threading.Lock()
 _Q: queue.Queue[tuple[str, tuple[Any, ...]]] = queue.Queue()
+_RETENTION_MS = 7 * 24 * 60 * 60 * 1000  # seven days in ms
+_CLEANUP_INTERVAL_SEC = 6 * 60 * 60  # sweep every 6 hours
+_LOGGER = logging.getLogger(__name__)
 
 
 def _conn(db_path: str) -> sqlite3.Connection:
@@ -31,6 +35,8 @@ def init(db_path="data/runtime/trades.db", schema="engine/storage/schema.sql"):
     # background flusher
     t = threading.Thread(target=_flush_loop, args=(con,), daemon=True)
     t.start()
+    cleaner = threading.Thread(target=_cleanup_loop, args=(con,), daemon=True)
+    cleaner.start()
 
 
 def _flush_loop(con: sqlite3.Connection):
@@ -56,6 +62,22 @@ def _flush_loop(con: sqlite3.Connection):
 
 def enqueue(sql: str, params: tuple[Any, ...]):
     _Q.put((sql, params))
+
+
+def _cleanup_loop(con: sqlite3.Connection):
+    """Periodically prune old rows and VACUUM to keep disk bounded."""
+    while True:
+        cutoff_ms = int(time.time() * 1000) - _RETENTION_MS
+        try:
+            with _LOCK:
+                con.execute("DELETE FROM orders WHERE ts_update < ?", (cutoff_ms,))
+                con.execute("DELETE FROM fills WHERE ts < ?", (cutoff_ms,))
+                con.execute("DELETE FROM equity_snapshots WHERE ts < ?", (cutoff_ms,))
+                con.commit()
+                con.execute("VACUUM")
+        except sqlite3.Error as exc:
+            _LOGGER.warning("sqlite cleanup failed: %s", exc, exc_info=True)
+        time.sleep(_CLEANUP_INTERVAL_SEC)
 
 
 # convenience wrappers

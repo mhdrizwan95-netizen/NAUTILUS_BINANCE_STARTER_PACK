@@ -213,9 +213,21 @@ class RiskGuardian:
             except _SUPPRESSIBLE_EXCEPTIONS as exc:
                 _log_suppressed("guardian.trading_metric", exc)
             self._paused_until_utc_reset = True
+            self._paused_until_utc_reset = True
             try:
                 from .core.event_bus import publish_risk_event
 
+                # 1. Publish explicit PAUSE action for immediate in-memory gating
+                await publish_risk_event(
+                    "violation",
+                    {
+                        "action": "PAUSE",
+                        "reason": "daily_stop",
+                        "pnl_day": pnl_day,
+                        "limit": self.cfg.max_daily_loss_usd,
+                    },
+                )
+                # 2. Publish informational event
                 await publish_risk_event(
                     "daily_stop",
                     {"pnl_day": pnl_day, "limit": self.cfg.max_daily_loss_usd},
@@ -328,6 +340,24 @@ class RiskGuardian:
                 )
         except _SUPPRESSIBLE_EXCEPTIONS as exc:
             _log_suppressed("guardian.derisk_hard", exc)
+
+        # If critical, also pause trading to prevent further damage
+        if score >= self.cfg.critical_ratio * 1.1:  # Extra buffer before full kill
+            try:
+                from .core.event_bus import publish_risk_event
+
+                if publish_risk_event:
+                    await publish_risk_event(
+                        "violation",
+                        {
+                            "action": "PAUSE",
+                            "reason": "cross_health_critical",
+                            "score": score,
+                        },
+                    )
+                    _write_trading_flag(False)
+            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                _log_suppressed("guardian.derisk_hard_pause", exc)
 
 
 def _safe_float(v) -> float | None:

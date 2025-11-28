@@ -2,7 +2,18 @@
 
 Prometheus/Grafana are provisioned under `ops/observability/`. The engine exposes rich metrics in `engine/metrics.py`.
 
-## Key Dashboards
+## Command Centre
+
+- **Primary surface (canonical)**: Grafana dashboard `Command Center v2`
+  - File: `ops/observability/grafana/dashboards/command_center_v2.json`
+  - Shows health, risk, equity/PnL, trading throughput, latency/feed telemetry, strategy/situations, and ops/governance counters in one place.
+  - Datasource: Prometheus (`ops/observability/prometheus/prometheus.yml`).
+- Supporting dashboards (deep dives):
+  - `command_center.json` (legacy multi-venue view)
+  - `venue_binance.json`, `trend_strategy_ops.json`, `event_breakout_kpis.json`, `slippage_heatmap.json`
+- Optional UI projects (e.g. external “command centre” React apps) may call the same Ops API, but they are **not required** to run this stack. Treat them as integrations maintained in separate repos.
+
+## Key Dashboards (supporting)
 
 - Event Breakout – KPIs: `ops/observability/grafana/dashboards/event_breakout_kpis.json`
   - Open positions, DRY vs LIVE plans, trades, skips by reason, half‑size applied, trail updates, efficiency

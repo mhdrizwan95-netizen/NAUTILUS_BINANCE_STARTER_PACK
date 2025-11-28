@@ -706,7 +706,6 @@ class MacroCalendarConnector(_SeededConnectorMixin, ExternalFeedConnector):
 CONNECTOR_TYPES = {
     "twitter": TwitterFirehoseConnector,
     "twitter_firehose": TwitterFirehoseConnector,
-    "binance_announcements": BinanceListingConnector,
     "binance_listings": BinanceListingConnector,
     "dex_whale": DexWhaleConnector,
     "dex_screener": DexWhaleConnector,

@@ -26,7 +26,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="ml-service (HMM)", version="0.2.0", lifespan=lifespan)
-install_dry_run_guard(app, allow_paths={"/health", "/model"})
+install_dry_run_guard(app, allow_paths={"/health", "/model", "/train"})
 log_dry_run_banner("services.ml_service")
 
 

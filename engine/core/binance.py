@@ -907,6 +907,7 @@ class BinanceREST:
         *,
         reduce_only: bool = False,
         market: str | None = None,
+        client_order_id: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         clean = self._clean_symbol(symbol)
@@ -917,6 +918,9 @@ class BinanceREST:
             "type": "MARKET",
             "recvWindow": settings.recv_window,
         }
+        if client_order_id:
+            base_params["newClientOrderId"] = client_order_id
+
         if market_key == "options":
             base_params["quantity"] = f"{max(quantity, 0.0):.8f}"
         elif market_key == "margin":
@@ -973,6 +977,7 @@ class BinanceREST:
         quote: float,
         *,
         market: str | None = None,
+        client_order_id: str | None = None,
     ) -> dict[str, Any]:
         market_key, base_url, is_futures = self._resolve_market(market)
         clean = self._clean_symbol(symbol)
@@ -983,7 +988,9 @@ class BinanceREST:
                     symbol=f"{clean} options", required=px, provided=quote
                 )
             qty = max(math.floor((float(quote) / float(px)) + 1e-8), 1)
-            return await self.submit_market_order(clean, side, float(qty), market=market_key)
+            return await self.submit_market_order(
+                clean, side, float(qty), market=market_key, client_order_id=client_order_id
+            )
         if is_futures:
             px = await self.ticker_price(clean, market=market_key)
             try:
@@ -1002,7 +1009,9 @@ class BinanceREST:
                 raise BinanceQuoteTooSmallError(
                     symbol=f"{clean} futures", required=min_quote_req, provided=quote
                 )
-            return await self.submit_market_order(clean, side, qty, market=market_key)
+            return await self.submit_market_order(
+                clean, side, qty, market=market_key, client_order_id=client_order_id
+            )
 
         settings = get_settings()
         base_params = {
@@ -1013,6 +1022,8 @@ class BinanceREST:
             "newOrderRespType": self._default_resp_type(market_key),
             "recvWindow": settings.recv_window,
         }
+        if client_order_id:
+            base_params["newClientOrderId"] = client_order_id
         if market_key == "margin":
             base_params["sideEffectType"] = os.getenv(
                 "BINANCE_MARGIN_SIDE_EFFECT", "AUTO_BORROW_REPAY"
@@ -1057,6 +1068,7 @@ class BinanceREST:
         *,
         reduce_only: bool = False,
         market: str | None = None,
+        client_order_id: str | None = None,
     ) -> dict[str, Any]:
         settings = get_settings()
         clean = self._clean_symbol(symbol)
@@ -1083,6 +1095,8 @@ class BinanceREST:
             "newOrderRespType": self._default_resp_type(market_key),
             "recvWindow": settings.recv_window,
         }
+        if client_order_id:
+            base_params["newClientOrderId"] = client_order_id
         if is_futures and reduce_only:
             base_params["reduceOnly"] = "true"
         if market_key == "margin":

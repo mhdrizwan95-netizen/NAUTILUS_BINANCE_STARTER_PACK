@@ -28,8 +28,8 @@ class MarketOrderIn(BaseModel):
     quantity: float | None = Field(None, gt=0)
     venue: str | None = Field(
         None,
-        description="Optional trading venue override, e.g. KRAKEN. "
-        "If omitted the engine falls back to its configured VENUE.",
+        description="Optional trading venue override (default BINANCE). "
+        "Legacy venues have been removed; omit unless explicitly routing to a Binance variant.",
     )
 
     @model_validator(mode="after")

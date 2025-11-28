@@ -31,7 +31,6 @@ Almost every feature is toggleable by env flags, with safe defaults and instant 
 	•	engine/execution/venue_overrides.py — auto size-cutback & scalp-mute (TTL)
 	•	engine/risk/sizer.py — ATR% risk-parity sizer (optional)
 	•	Feeds & Events
-	•	engine/feeds/binance_announcements.py → handler → strategy.event_breakout
 	•	engine/ops/fills_listener.py + engine/core/order_router.py → BUS trade.fill
 	•	Observability
 	•	Prom metrics (see engine/metrics.py)

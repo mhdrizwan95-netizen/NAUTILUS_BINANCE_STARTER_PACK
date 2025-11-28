@@ -58,8 +58,8 @@ describe("App boot flow", () => {
     mockHealth.mockImplementation(() =>
       Promise.resolve({
         venues: [
-          { name: "Binance", status: "ok", latencyMs: 50, queue: 1 },
-          { name: "Bybit", status: "ok", latencyMs: 70, queue: 2 },
+          { name: "Binance Spot", status: "ok", latencyMs: 50, queue: 1 },
+          { name: "Binance Futures", status: "ok", latencyMs: 70, queue: 2 },
         ],
       }),
     );

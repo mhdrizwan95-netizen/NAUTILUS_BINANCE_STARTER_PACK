@@ -33,38 +33,6 @@ groups:
       summary: "Engine {{ $labels.job }} down"
       description: "Target not scraping for 30s (demo tolerant)"
 
-  - alert: KrakenAuthErrorsSpike
-    expr: increase(engine_venue_errors_total{venue="KRAKEN",error="AUTHENTICATION"}[5m]) > 0
-    for: 2m
-    labels: {severity: page}
-    annotations:
-      summary: "Kraken authentication failing"
-      description: "Authentication errors observed in the last 5 minutes"
-
-  - alert: KrakenNoPriceRejections
-    expr: increase(engine_venue_errors_total{venue="KRAKEN",error="NO_PRICE"}[5m]) > 0
-    for: 2m
-    labels: {severity: warn}
-    annotations:
-      summary: "Kraken order rejections due to missing price"
-      description: "NO_PRICE errors surfaced in the last 5 minutes"
-
-  - alert: KrakenSnapshotStalled
-    expr: max_over_time(snapshot_loaded{job=~"engine_kraken.*"}[2m]) == 0
-    for: 2m
-    labels: {severity: page}
-    annotations:
-      summary: "Kraken snapshot stalled"
-      description: "Snapshot gauge has been zero for over 2 minutes"
-
-  - alert: KrakenMarkStale
-    expr: (time() - max_over_time(trading:mark_price_usd{venue="kraken"}[5m])) > 90
-    for: 1m
-    labels: {severity: page}
-    annotations:
-      summary: "Kraken mark price stale (>90s)"
-      description: "No mark_price_usd updates for >90 seconds on {{ $labels.symbol }}"
-
   - alert: ReconcileLag
     expr: reconcile_lag_seconds > 60
     for: 2m

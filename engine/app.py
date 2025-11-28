@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import hmac
-import inspect
 import json
 import logging
 import math
@@ -34,11 +33,15 @@ from starlette.responses import Response
 
 import engine.state as state_mod
 from engine import metrics, strategy
-from engine.compat import init_external_feed_bridge
-from engine.config import QUOTE_CCY, get_settings, load_risk_config, norm_symbol
+from engine.config import (
+    QUOTE_CCY,
+    get_settings,
+    load_risk_config,
+    load_strategy_config,
+    norm_symbol,
+)
 from engine.core import alert_daemon
 from engine.core.binance import BinanceMarginREST, BinanceREST
-from engine.core.binance_ws import BinanceWS
 from engine.core.event_bus import (
     BUS,
     initialize_event_bus,
@@ -47,7 +50,6 @@ from engine.core.event_bus import (
 
 if TYPE_CHECKING:
     from engine.core.alert_daemon import AlertDaemon
-from engine.core.kraken import KrakenREST
 from engine.core.order_router import OrderRouterExt, _MDAdapter, set_exchange_client
 from engine.core.portfolio import Portfolio, Position
 from engine.core.signal_queue import SIGNAL_QUEUE, QueuedEvent
@@ -67,6 +69,13 @@ from engine.ops_auth import require_ops_token
 from engine.reconcile import reconcile_since_snapshot
 from engine.risk import RiskRails
 from engine.runtime import tasks as runtime_tasks
+from engine.services.model_watcher import ModelPromotionWatcher
+from engine.services.param_client import (
+    ParamControllerBridge,
+    bootstrap_param_client,
+    get_param_client,
+)
+from engine.services.price_bridge import PriceBridge
 from engine.state import SnapshotStore
 from engine.universe import configured_universe, last_prices
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
@@ -75,6 +84,7 @@ from shared.time_guard import check_clock_skew
 setup_logging()
 
 SERVICE_NAME = os.getenv("OBS_SERVICE_NAME", "engine")
+_ENGINE_START_TS = time.time()
 _app_logger = logging.getLogger("engine.app")
 _JITTER_RNG = SystemRandom()
 _SafelyResult = TypeVar("_SafelyResult")
@@ -178,6 +188,36 @@ async def _clock_skew_probe() -> None:
     await loop.run_in_executor(None, lambda: check_clock_skew("engine"))
 
 
+@app.on_event("startup")
+async def _bootstrap_services() -> None:
+    # Bootstrap Param Client
+    param_url = os.getenv("PARAM_CONTROLLER_URL", "")
+    if param_url:
+        client = bootstrap_param_client(param_url)
+        if client:
+            await client.start()
+            client.wire_feedback(BUS)
+            _app_logger.info("Param client started and feedback wired")
+
+    # Start PriceBridge
+    ops_url = os.getenv("OPS_BASE", "http://ops:8002")
+    ops_token = os.getenv("OPS_API_TOKEN", "dev-token")
+    global _PRICE_BRIDGE
+    _PRICE_BRIDGE = PriceBridge()
+    await _PRICE_BRIDGE.start()
+
+
+@app.on_event("shutdown")
+async def _shutdown_services() -> None:
+    client = get_param_client()
+    if client:
+        await client.stop()
+
+    global _PRICE_BRIDGE
+    if _PRICE_BRIDGE:
+        await _PRICE_BRIDGE.stop()
+
+
 def _truthy_env(name: str) -> bool:
     return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
@@ -185,7 +225,7 @@ def _truthy_env(name: str) -> bool:
 settings = get_settings()
 ROLE = os.getenv("ROLE", "trader").lower()
 IS_EXPORTER = ROLE == "exporter"
-VENUE = os.getenv("VENUE", "BINANCE").upper()
+VENUE = "BINANCE"
 risk_cfg = load_risk_config()
 RAILS = RiskRails(risk_cfg)
 EXTERNAL_EVENTS_SECRET = os.getenv("EXTERNAL_EVENTS_SECRET", "")
@@ -347,16 +387,11 @@ class _DummyBinanceREST:
         return False
 
 
-RestClient = BinanceREST | KrakenREST | _DummyBinanceREST
+RestClient = BinanceREST | _DummyBinanceREST
 
 rest_client: Any
-if VENUE == "BINANCE":
-    if not settings.api_key or not settings.api_secret:
-        rest_client = _DummyBinanceREST()
-    else:
-        rest_client = BinanceREST()
-elif VENUE == "KRAKEN":
-    rest_client = KrakenREST()
+if not settings.api_key or not settings.api_secret:
+    rest_client = _DummyBinanceREST()
 else:
     rest_client = BinanceREST()
 
@@ -378,78 +413,10 @@ else:
 
 MARGIN_REST = margin_rest_client
 
-if VENUE == "KRAKEN":
-    KRAKEN_REST: KrakenREST | None = cast(KrakenREST | None, rest_client)
-else:
-    KRAKEN_REST = None
-
-
-def _kraken_configured_products() -> list[str]:
-    raw = os.getenv("KRAKEN_TRADED_SYMBOLS") or "PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN"
-    values: list[str] = []
-    for token in raw.split(","):
-        item = token.strip()
-        if not item:
-            continue
-        values.append(item.split(".")[0].strip().upper())
-    if not values:
-        values.append("PI_XBTUSD")
-    return sorted(set(values))
-
-
-def _kraken_symbol_base(symbol: str) -> str:
-    return symbol.split(".")[0].upper()
-
-
-_KRAKEN_PRODUCTS = _kraken_configured_products() if VENUE == "KRAKEN" else []
-_KRAKEN_MARK_WARN_SEC = 5.0
-_KRAKEN_MARK_PAGE_SEC = 15.0
-_KRAKEN_MARK_FORCE_SEC = 60.0
-_kraken_mark_ts: dict[str, float] = {}
-_kraken_mark_alert_state: dict[str, int] = {}
-
-
-async def _kraken_safe_price(symbol: str) -> float | None:
-    if KRAKEN_REST is None:
-        return None
-    result = await KRAKEN_REST.safe_price(symbol)
-    if isinstance(result, (int, float)) and math.isfinite(float(result)):
-        return float(result)
-    return None
-
-
-def _kraken_record_mark(symbol: str, raw_price: float, ts: float) -> None:
-    if VENUE != "KRAKEN":
-        return
-    base = _kraken_symbol_base(symbol)
-    try:
-        price = float(raw_price)
-    except (TypeError, ValueError):
-        return
-    if not math.isfinite(price) or price <= 0.0:
-        return
-    _kraken_mark_ts[base] = ts
-    _kraken_mark_alert_state[base] = 0
-
-    def _apply_mark_metrics() -> None:
-        metrics.mark_price_freshness_sec.labels(symbol=base, venue="kraken").set(0.0)
-        metrics.mark_price_by_symbol.labels(symbol=base).set(price)
-        metrics.MARK_PRICE.labels(symbol=base, venue="kraken").set(price)
-        _price_map[base] = price
-
-    _safely(f"kraken mark metrics ({base})", _apply_mark_metrics)
-    if KRAKEN_REST is not None:
-        _safely(f"kraken cache price ({base})", KRAKEN_REST.cache_price, base, price)
-
-
-def _kraken_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
-    _kraken_record_mark(sym, price, ts)
-
 
 # ---- Binance WebSocket mark handler -----------------------------------------
 _binance_mark_ts: dict[str, float] = {}
 _BINANCE_WS_SYMBOLS: list[str] = []
-_KRAKEN_FETCH_ERRORS = (_httpx.HTTPError, asyncio.TimeoutError, ValueError, RuntimeError, TypeError)
 
 
 def _apply_binance_mark_metrics(base: str, price: float) -> None:
@@ -480,72 +447,6 @@ def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
         source="binance_ws",
         stream="ws",
     )
-
-
-async def _kraken_refresh_mark_prices(now: float) -> None:
-    if VENUE != "KRAKEN":
-        return
-    products = _KRAKEN_PRODUCTS or ["PI_XBTUSD"]
-    for base in products:
-        last_ts = _kraken_mark_ts.get(base)
-        freshness = float("inf") if last_ts is None else max(0.0, now - last_ts)
-        _safely(
-            f"kraken freshness metric ({base})",
-            metrics.mark_price_freshness_sec.labels(symbol=base, venue="kraken").set,
-            freshness,
-        )
-
-        state = _kraken_mark_alert_state.get(base, 0)
-        if freshness >= _KRAKEN_MARK_PAGE_SEC and state < 2:
-            _kraken_risk_logger.error("Kraken mark stale %.1fs (paging) for %s", freshness, base)
-            state = 2
-        elif freshness >= _KRAKEN_MARK_WARN_SEC and state < 1:
-            _kraken_risk_logger.warning("Kraken mark stale %.1fs for %s", freshness, base)
-            state = 1
-        force_rest = freshness >= _KRAKEN_MARK_FORCE_SEC
-        if force_rest and state < 3:
-            _kraken_risk_logger.warning(
-                "Kraken mark stale %.1fs, forcing REST refresh for %s", freshness, base
-            )
-            state = 3
-        _kraken_mark_alert_state[base] = state
-
-        if freshness < _KRAKEN_MARK_WARN_SEC and last_ts is not None:
-            continue
-
-        price: float | None = None
-        try:
-            if force_rest:
-                ticker = getattr(rest_client, "ticker_price", None)
-                if callable(ticker):
-                    candidate = ticker(base)
-                    if inspect.isawaitable(candidate):
-                        candidate = await candidate
-                    if isinstance(candidate, (int, float)) and math.isfinite(float(candidate)):
-                        price = float(candidate)
-            else:
-                price = await _kraken_safe_price(base)
-        except _KRAKEN_FETCH_ERRORS as exc:
-            if force_rest:
-                _kraken_risk_logger.exception("Kraken REST price fetch failed for %s", base)
-            else:
-                _kraken_risk_logger.debug("Kraken safe_price failed for %s: %s", base, exc)
-            price = None
-
-        if isinstance(price, (int, float)) and price > 0.0:
-            _kraken_record_mark(base, float(price), now)
-            continue
-
-        _safely(
-            f"kraken stale mark reset ({base})",
-            metrics.MARK_PRICE.labels(symbol=base, venue="kraken").set,
-            0.0,
-        )
-        _safely(
-            f"kraken stale mark cache ({base})",
-            metrics.mark_price_by_symbol.labels(symbol=base).set,
-            0.0,
-        )
 
 
 async def auto_topup_worker() -> None:
@@ -708,10 +609,11 @@ try:
 except AttributeError as exc:  # pragma: no cover - defensive guard
     _log_suppressed("attach BUS to router", exc)
 startup_lock = asyncio.Lock()
+_PARAM_BRIDGE: ParamControllerBridge | None = None
+_MODEL_WATCHER: ModelPromotionWatcher | None = None
 _refresh_logger = logging.getLogger("engine.refresh")
 _startup_logger = logging.getLogger("engine.startup")
 _persist_logger = logging.getLogger("engine.persistence")
-_kraken_risk_logger = logging.getLogger("engine.kraken.telemetry")
 
 
 store = None
@@ -939,9 +841,6 @@ _basis_cache: dict[str, dict[str, float]] = (
 _last_position_symbols: set[str] = set()
 _price_map: dict[str, float] = {}  # symbol -> markPrice
 _snapshot_counter = 0
-
-_kraken_risk_loop_task: asyncio.Task | None = None
-_kraken_risk_stop_event = asyncio.Event()
 
 
 class ExternalEventRequest(BaseModel):
@@ -1193,6 +1092,67 @@ async def _start_specs_refresh() -> None:
 
 
 @app.on_event("startup")
+async def _start_param_bridge() -> None:
+    """Bootstrap the ParamController bridge for dynamic strategy params."""
+    global _PARAM_BRIDGE
+    base_url = os.getenv("PARAM_CONTROLLER")
+    if not base_url:
+        return
+    strategy_cfg = load_strategy_config()
+    if not getattr(strategy_cfg, "hmm_enabled", False):
+        return
+    risk_cfg = load_risk_config()
+    symbols = [
+        s for s in (risk_cfg.trade_symbols or []) if s and s.strip().upper() not in {"*", "ALL"}
+    ]
+    if not symbols:
+        symbols = ["BTCUSDT"]
+    refresh = float(os.getenv("PARAM_REFRESH_SEC", "45"))
+    client = bootstrap_param_client(base_url, refresh_interval=refresh)
+    if client is None:
+        return
+    for sym in symbols:
+        client.register_symbol("hmm", sym)
+    await client.start()
+    client.wire_feedback(BUS)
+    _PARAM_BRIDGE = client
+    _startup_logger.info("Param controller bridge started for %d symbols", len(symbols))
+
+
+@app.on_event("shutdown")
+async def _stop_param_bridge() -> None:
+    client = get_param_client()
+    if client:
+        await client.stop()
+
+
+@app.on_event("startup")
+async def _start_model_watchdog() -> None:
+    global _MODEL_WATCHER
+    poll = float(os.getenv("MODEL_WATCH_INTERVAL_SEC", "5"))
+    strategy_cfg = load_strategy_config()
+    paths = []
+    active_override = os.getenv("HMM_ACTIVE_MODEL")
+    if active_override:
+        paths.append(Path(active_override))
+    paths.append(Path("engine/models/active_hmm_policy.pkl"))
+    if getattr(strategy_cfg, "hmm_model_path", None):
+        paths.append(Path(strategy_cfg.hmm_model_path))
+    watcher = ModelPromotionWatcher(paths=paths, bus=BUS, poll_interval=poll)
+    await watcher.start()
+    _MODEL_WATCHER = watcher
+    _startup_logger.info("Model promotion watcher armed (paths=%d)", len(paths))
+
+
+@app.on_event("shutdown")
+async def _stop_model_watchdog() -> None:
+    global _MODEL_WATCHER
+    if _MODEL_WATCHER:
+        await _MODEL_WATCHER.stop()
+        _MODEL_WATCHER = None
+
+
+@app.on_event("startup")
 async def _start_auto_topup_loop() -> None:
     if IS_EXPORTER or VENUE != "BINANCE":
         return
@@ -1259,6 +1219,15 @@ _DEX_WATCHER = None
 async def _start_guardian_and_feeds() -> None:
     if IS_EXPORTER:
         return
+
+    # Risk event wiring
+    async def _handle_risk_violation(evt: dict[str, Any]) -> None:
+        if evt.get("action") == "PAUSE":
+            RAILS.set_manual_trading_enabled(False)
+            _startup_logger.critical("Trading PAUSED via EventBus: %s", evt.get("reason"))
+
+    BUS.subscribe("risk.violation", _handle_risk_violation)
+
     # Risk guardian
     try:
         from engine.risk_guardian import RiskGuardian, load_guardian_config
@@ -1343,46 +1312,6 @@ async def _start_guardian_and_feeds() -> None:
                 _startup_logger.info("DEX watcher loop started")
     except _SUPPRESSIBLE_EXCEPTIONS:
         _startup_logger.warning("DEX sniper wiring failed", exc_info=True)
-
-    # Binance announcements poller (publish-only)
-    try:
-        import os
-
-        if os.getenv("ANN_ENABLED", "").lower() in {"1", "true", "yes"}:
-            from engine.feeds.binance_announcements import run as ann_run
-
-            asyncio.create_task(ann_run(), name="binance-announcements")
-            _startup_logger.info("Binance announcements poller started")
-            # Optional: breakout handler wiring
-            if os.getenv("EVENT_BREAKOUT_ENABLED", "").lower() in {"1", "true", "yes"}:
-                from engine.handlers.breakout_handlers import on_binance_listing
-
-                BUS.subscribe("events.external_feed", on_binance_listing(router))
-                _startup_logger.info("Announcement breakout handler wired")
-                # Trailing watcher (only when not dry-run and enabled)
-                if os.getenv("EVENT_BREAKOUT_DRY_RUN", "").lower() not in {
-                    "1",
-                    "true",
-                    "yes",
-                } and os.getenv("EVENT_BREAKOUT_TRAIL_LOOP_ENABLED", "").lower() in {
-                    "1",
-                    "true",
-                    "yes",
-                }:
-                    try:
-                        from engine.strategies.event_breakout_trail import (
-                            EventBreakoutTrailer,
-                        )
-
-                        trailer = EventBreakoutTrailer(router)
-                        asyncio.create_task(trailer.run())
-                        _startup_logger.info("Event breakout trailing watcher started")
-                    except _SUPPRESSIBLE_EXCEPTIONS:
-                        _startup_logger.warning(
-                            "Failed to start event breakout trailer", exc_info=True
-                        )
-    except _SUPPRESSIBLE_EXCEPTIONS:
-        _startup_logger.warning("Announcements poller failed to start", exc_info=True)
 
     # Momentum breakout module
     try:
@@ -1674,6 +1603,13 @@ async def _start_guardian_and_feeds() -> None:
     except _SUPPRESSIBLE_EXCEPTIONS:
         _startup_logger.warning("Funding guard wiring failed", exc_info=True)
 
+    # Subscribe to model promotion events for hot-reload
+    try:
+        BUS.subscribe("model.promoted", strategy.policy_hmm.reload_model)
+        _startup_logger.info("Subscribed to model.promoted event for hot-reload")
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        _startup_logger.warning("Failed to subscribe to model.promoted", exc_info=True)
+
     # Auto cutback/mute overrides (symbol-level execution control)
     try:
         if os.getenv("AUTO_CUTBACK_ENABLED", "").lower() in {"1", "true", "yes"}:
@@ -1764,7 +1700,7 @@ def _startup_load_snapshot_and_reconcile() -> None:
     if api_key and api_secret and api_key not in {"__REQUIRED__", "__PLACEHOLDER__"}:
         try:
             post_reconcile()  # same logic; small universe should be fast
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except (_SUPPRESSIBLE_EXCEPTIONS, _httpx.HTTPStatusError):
             # Non-fatal — engine can still serve, UI can trigger /reconcile manually
             _startup_logger.warning("Initial reconcile on startup failed", exc_info=True)
     else:
@@ -1782,42 +1718,6 @@ def _startup_load_snapshot_and_reconcile() -> None:
 # Run extra startup restoration after startup event
 # Initialize strategy hooks
 momentum_strategy = None
-try:
-    if VENUE == "KRAKEN":
-        from engine import strategy as _strategy_mod
-        from engine.strategies.momentum_15m import (
-            Momentum15mStrategy,
-            load_momentum_15m_config,
-        )
-
-        mom_cfg = load_momentum_15m_config()
-        momentum_strategy = Momentum15mStrategy(router=router, risk=RAILS, cfg=mom_cfg)
-        if momentum_strategy.cfg.enabled:
-            _startup_logger.info(
-                "Momentum15m strategy initialized for Kraken (%s)",
-                momentum_strategy.symbol,
-            )
-        else:
-            _startup_logger.info("Momentum15m strategy loaded but disabled via config")
-        base_symbol = momentum_strategy.symbol.split(".")[0]
-
-        def _momentum_listener(
-            sym: str,
-            price: float,
-            ts: float,
-            *,
-            _base: str = base_symbol,
-            _strategy: Any = momentum_strategy,
-        ) -> None:
-            if sym.split(".")[0].upper() == _base:
-                _strategy.on_tick(sym, price, ts)
-
-        try:
-            _strategy_mod.register_tick_listener(_momentum_listener)
-        except _SUPPRESSIBLE_EXCEPTIONS:
-            _startup_logger.warning("Momentum strategy listener registration failed", exc_info=True)
-except _SUPPRESSIBLE_EXCEPTIONS:
-    _startup_logger.exception("Strategy initialization failed")
 
 
 @app.on_event("shutdown")
@@ -2410,12 +2310,6 @@ async def account_snapshot(force: bool = False) -> dict[str, Any]:
     except _SUPPRESSIBLE_EXCEPTIONS as exc:
         _log_suppressed("engine guard", exc)
 
-    if VENUE == "KRAKEN":
-        try:
-            await rest_client.refresh_portfolio()
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
-            _persist_logger.warning("Failed to refresh Kraken portfolio: %s", exc)
-
     state = portfolio.state
     try:
         metrics.update_portfolio_gauges(
@@ -2558,18 +2452,11 @@ async def health() -> dict[str, Any]:
         _log_suppressed("engine guard", exc)
 
     # Venue-specific labels for health endpoint
-    venue = VENUE.lower()
-    if venue == "kraken":
-        equity_source = "derivatives/api/v3/accounts.totalMarginValue"
-        upnl_source = "derivatives/api/v3/openpositions.unrealizedProfit"
-        price_source = "tickers.last | markPrice | bid/ask"
-        wallet_source = "derivatives/api/v3/accounts.cashBalance"
-    else:
-        # Binance (default)
-        equity_source = "fapi/v2/account.totalMarginBalance"
-        upnl_source = "positionRisk.sum(unRealizedProfit)"
-        price_source = "mark_price/premiumIndex"
-        wallet_source = "fapi/v2/account.totalWalletBalance"
+    # Binance-only health metadata (other venues removed during purge)
+    equity_source = "fapi/v2/account.totalMarginBalance"
+    upnl_source = "positionRisk.sum(unRealizedProfit)"
+    price_source = "mark_price/premiumIndex"
+    wallet_source = "fapi/v2/account.totalWalletBalance"
 
     # Include symbols if unrestricted
     from engine.config import load_risk_config
@@ -2746,8 +2633,6 @@ async def _start_event_bus() -> None:
         _startup_logger.info("Event bus started")
         SIGNAL_QUEUE.start(BUS)
         _startup_logger.info("Signal priority queue dispatcher online")
-        init_external_feed_bridge(BUS)
-        _startup_logger.info("Legacy external event bridge initialized")
     except _SUPPRESSIBLE_EXCEPTIONS:
         _startup_logger.exception("Event bus startup failed")
 
@@ -3010,6 +2895,12 @@ async def _refresh_binance_futures_snapshot() -> None:
     now_ts = time.time()
     metrics.set_core_metric("mark_time_epoch", now_ts)
     metrics.set_core_metric("metrics_heartbeat", now_ts)
+    try:
+        metrics.engine_component_uptime_seconds.labels(component=ROLE).set(
+            now_ts - _ENGINE_START_TS
+        )
+    except ValueError:
+        pass
     _snapshot_counter += 1
     metrics.set_core_metric("snapshot_id", _snapshot_counter)
 
@@ -3155,6 +3046,12 @@ async def _refresh_binance_spot_snapshot() -> None:
 
     metrics.set_core_metric("mark_time_epoch", now_ts)
     metrics.set_core_metric("metrics_heartbeat", now_ts)
+    try:
+        metrics.engine_component_uptime_seconds.labels(component=ROLE).set(
+            now_ts - _ENGINE_START_TS
+        )
+    except ValueError:
+        pass
     _snapshot_counter += 1
     metrics.set_core_metric("snapshot_id", _snapshot_counter)
 
@@ -3188,335 +3085,6 @@ async def _refresh_venue_data() -> None:
             except _SUPPRESSIBLE_EXCEPTIONS as exc:
                 _log_suppressed("engine guard", exc)
         await asyncio.sleep(5)
-
-
-async def _kraken_risk_metrics_loop() -> None:
-    base_interval = max(_safe_float(os.getenv("KRAKEN_RISK_INTERVAL_SEC")) or 5.0, 3.0)
-    min_interval = base_interval
-    max_interval = max(30.0, base_interval * 6.0)
-    backoff_factor = 2.0
-    jitter_pct = 0.2
-    interval = base_interval
-    failure_streak = 0
-    last_snapshot: dict[str, Any] | None = None
-
-    _kraken_risk_stop_event.clear()
-
-    # Prewarm gauges for Grafana legends
-    try:
-        cap_val = max(0.0, float(RAILS.cfg.exposure_cap_venue_usd))
-        metrics.venue_exposure_usd.labels(venue="kraken").set(0.0)
-        metrics.exposure_cap_usd.labels(venue="kraken").set(cap_val)
-        metrics.risk_exposure_headroom_usd.labels(venue="kraken").set(cap_val)
-        metrics.kraken_equity_usd.set(0.0)
-        metrics.kraken_unrealized_usd.set(0.0)
-        metrics.kraken_equity_drawdown_pct.set(0.0)
-        metrics.risk_metrics_freshness_sec.set(0.0)
-        for product in _KRAKEN_PRODUCTS or ["PI_XBTUSD"]:
-            try:
-                metrics.mark_price_freshness_sec.labels(symbol=product, venue="kraken").set(
-                    float("inf")
-                )
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
-                _log_suppressed("engine guard", exc)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
-        _log_suppressed("engine guard", exc)
-
-    while True:
-        tick_start = time.monotonic()
-        snapshot: dict[str, Any] | None = None
-        try:
-            snapshot = await router.get_account_snapshot()
-            if snapshot:
-                last_snapshot = snapshot
-                failure_streak = 0
-                if interval > base_interval:
-                    interval = max(base_interval, interval / backoff_factor)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
-            failure_streak += 1
-            interval = min(max_interval, max(min_interval, interval * backoff_factor))
-            _kraken_risk_logger.warning(
-                "Kraken snapshot fetch failed (streak=%s): %s", failure_streak, exc
-            )
-            snapshot = last_snapshot
-
-        if snapshot is None:
-            try:
-                snapshot = router.portfolio_snapshot()
-            except _SUPPRESSIBLE_EXCEPTIONS:
-                snapshot = None
-
-        snap_dict = snapshot if isinstance(snapshot, dict) else None
-
-        if snap_dict is not None:
-            try:
-                RAILS.refresh_snapshot_metrics(snap_dict, venue="kraken")
-
-                equity_val = _safe_float(snap_dict.get("equity_usd") or snap_dict.get("equity"))
-                if equity_val is not None:
-                    metrics.kraken_equity_usd.set(equity_val)
-                    drawdown_pct = 0.0
-                    compute_dd = getattr(RAILS, "_compute_drawdown_pct", None)
-                    if callable(compute_dd):
-                        try:
-                            drawdown_pct = float(compute_dd(equity_val))
-                        except _SUPPRESSIBLE_EXCEPTIONS as exc:
-                            _log_suppressed("engine guard", exc)
-                    metrics.kraken_equity_drawdown_pct.set(max(0.0, drawdown_pct))
-
-                pnl_raw = snap_dict.get("pnl")
-                pnl_section = pnl_raw if isinstance(pnl_raw, dict) else {}
-                unreal_val = _safe_float(pnl_section.get("unrealized")) or 0.0
-                metrics.kraken_unrealized_usd.set(unreal_val)
-
-                positions = snap_dict.get("positions")
-                if isinstance(positions, list):
-                    now_ts = time.time()
-                    for pos in positions:
-                        try:
-                            sym_raw = pos.get("symbol") or ""
-                            base = _kraken_symbol_base(sym_raw)
-                            last_px = pos.get("last_price_quote")
-                            if last_px is None:
-                                last_px = await _kraken_safe_price(base)
-                            if isinstance(last_px, (int, float)) and last_px > 0.0:
-                                _kraken_record_mark(base, float(last_px), now_ts)
-                        except _SUPPRESSIBLE_EXCEPTIONS as exc:
-                            _log_suppressed("kraken mark refresh", exc)
-                            continue
-
-                snap_ts = None
-                raw_ts = snap_dict.get("ts")
-                raw_ts_ms = snap_dict.get("ts_ms")
-                if isinstance(raw_ts, (int, float)) and math.isfinite(float(raw_ts)):
-                    snap_ts = float(raw_ts)
-                elif isinstance(raw_ts_ms, (int, float)) and math.isfinite(float(raw_ts_ms)):
-                    snap_ts = float(raw_ts_ms) / 1000.0
-                freshness = max(0.0, time.time() - snap_ts) if snap_ts is not None else 0.0
-                metrics.risk_metrics_freshness_sec.set(freshness)
-            except _SUPPRESSIBLE_EXCEPTIONS:
-                _kraken_risk_logger.exception("Failed to update Kraken risk telemetry")
-        else:
-            try:
-                metrics.risk_metrics_freshness_sec.set(float("inf"))
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
-                _log_suppressed("engine guard", exc)
-
-        if VENUE == "KRAKEN":
-            await _kraken_refresh_mark_prices(time.time())
-
-        elapsed = time.monotonic() - tick_start
-        sleep_base = max(0.5, interval - elapsed)
-        jitter = _JITTER_RNG.uniform(1.0 - jitter_pct, 1.0 + jitter_pct)
-        sleep_for = max(0.5, sleep_base) * jitter
-
-        if _kraken_risk_stop_event.is_set():
-            break
-
-        try:
-            await asyncio.wait_for(_kraken_risk_stop_event.wait(), timeout=sleep_for)
-        except TimeoutError:
-            pass
-        except asyncio.CancelledError:
-            raise
-        except _SUPPRESSIBLE_EXCEPTIONS:
-            _kraken_risk_logger.exception("Kraken telemetry wait interrupted")
-
-        if _kraken_risk_stop_event.is_set():
-            break
-
-
-@app.on_event("startup")
-async def _start_kraken_ws() -> None:
-    """Start Kraken WebSocket price feeds for real-time pricing."""
-    if VENUE == "KRAKEN":
-        try:
-            from engine.core.kraken_ws import KrakenWS
-
-            products = _KRAKEN_PRODUCTS or ["PI_XBTUSD"]
-            from engine import strategy as _strategy_mod
-
-            ws = KrakenWS(
-                products=products,
-                portfolio=portfolio,
-                on_price_cb=_strategy_mod.on_tick,
-                rest_client=rest_client,
-                price_hook=_kraken_on_mark,
-            )
-            asyncio.create_task(ws.run())  # fire-and-forget
-            _startup_logger.info(
-                "Kraken websocket price feeds started for products=%s (role=%s)",
-                products,
-                ROLE,
-            )
-        except _SUPPRESSIBLE_EXCEPTIONS:
-            _startup_logger.exception("Kraken websocket startup failed")
-
-
-@app.on_event("startup")
-async def _start_venue_refresh() -> None:
-    """Start background venue data refresh."""
-    if VENUE != "BINANCE":
-        return
-    base_url = settings.api_base or "default"
-    role = "exporter" if IS_EXPORTER else "trader"
-    _refresh_logger.info(
-        "Starting background refresh task venue=%s mode=%s base=%s pid=%s role=%s",
-        VENUE,
-        settings.mode,
-        base_url,
-        os.getpid(),
-        role,
-    )
-    asyncio.create_task(_refresh_venue_data())
-
-
-@app.on_event("startup")
-async def _start_binance_ws() -> None:
-    if VENUE != "BINANCE":
-        return
-    # Feature flag
-    if os.getenv("BINANCE_WS_ENABLED", "true").lower() not in {"1", "true", "yes"}:
-        return
-    # Determine WS base URL
-    if settings.is_futures:
-        if "test" in (settings.mode or ""):
-            ws_base = "wss://stream.binancefuture.com/stream"
-        else:
-            ws_base = "wss://fstream.binance.com/stream"
-    elif (settings.mode or "").startswith("demo") or "test" in (settings.mode or ""):
-        ws_base = "wss://testnet.binance.vision/stream"
-    else:
-        ws_base = "wss://stream.binance.com:9443/stream"
-
-    # Select symbols: prefer configured allowlist; else a small default set
-    try:
-        allowed = configured_universe()
-        bases = [s.split(".")[0].upper() for s in allowed][:100] if allowed else []
-    except _SUPPRESSIBLE_EXCEPTIONS:
-        bases = []
-    if not bases:
-        bases = ["BTCUSDT", "ETHUSDT", "BNBUSDT"]
-
-    role = "exporter" if IS_EXPORTER else "trader"
-    try:
-        from engine import strategy as _strategy_mod
-
-        on_cb = None if IS_EXPORTER else None
-        stream_mode = os.getenv("BINANCE_WS_STREAM", "auto").lower()
-        scalper_module = getattr(_strategy_mod, "SCALP_MODULE", None)
-        if stream_mode == "auto":
-            if settings.is_futures:
-                stream_mode = "mark"
-            elif scalper_module and getattr(scalper_module, "enabled", False):
-                stream_mode = os.getenv("SCALP_WS_STREAM", "aggtrade").lower()
-            else:
-                stream_mode = "miniticker"
-        global _market_data_dispatcher
-        if _market_data_dispatcher is None:
-            _market_data_dispatcher = MarketDataDispatcher(
-                BUS, source="binance_ws", venue="BINANCE"
-            )
-        ws = BinanceWS(
-            symbols=bases,
-            url_base=ws_base,
-            is_futures=settings.is_futures,
-            role=role,
-            on_price_cb=on_cb,
-            price_hook=_binance_on_mark,
-            stream_type=stream_mode,
-            event_callback=_market_data_dispatcher.handle_stream_event,
-        )
-        asyncio.create_task(ws.run())
-        # remember symbols for freshness loop
-        global _BINANCE_WS_SYMBOLS
-        _BINANCE_WS_SYMBOLS = list(bases)
-        _startup_logger.warning(
-            "Binance WS started (%s, futures=%s, symbols=%d, ws_base=%s)",
-            role,
-            settings.is_futures,
-            len(bases),
-            ws_base,
-        )
-    except _SUPPRESSIBLE_EXCEPTIONS:
-        _startup_logger.warning("Binance WS failed to start", exc_info=True)
-
-
-@app.on_event("startup")
-async def _start_market_data_logger() -> None:
-    if os.getenv("MARKET_DATA_LOGGER", "false").lower() not in {"1", "true", "yes"}:
-        return
-    global _market_data_logger
-    if _market_data_logger is not None:
-        return
-    try:
-        rate = float(os.getenv("MARKET_DATA_LOGGER_RATE", "5.0"))
-    except (TypeError, ValueError):
-        rate = 5.0
-    try:
-        _market_data_logger = MarketDataLogger(BUS, sample_rate_hz=rate)
-        _market_data_logger.start()
-        _startup_logger.info("Market data logger subscribed (rate=%.2f Hz)", rate)
-    except _SUPPRESSIBLE_EXCEPTIONS:
-        _startup_logger.warning("Market data logger failed to start", exc_info=True)
-
-
-@app.on_event("startup")
-async def _start_binance_ws_freshness() -> None:
-    if VENUE != "BINANCE":
-        return
-    if os.getenv("BINANCE_WS_ENABLED", "true").lower() not in {"1", "true", "yes"}:
-        return
-
-    async def loop() -> None:
-        while True:
-            now = time.time()
-            try:
-                for base in list(_BINANCE_WS_SYMBOLS) or []:
-                    last_ts = _binance_mark_ts.get(base)
-                    freshness = float("inf") if last_ts is None else max(0.0, now - last_ts)
-                    try:
-                        metrics.mark_price_freshness_sec.labels(symbol=base, venue="binance").set(
-                            freshness
-                        )
-                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
-                        _log_suppressed("engine guard", exc)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
-                _log_suppressed("engine guard", exc)
-            await asyncio.sleep(5)
-
-    try:
-        asyncio.create_task(loop())
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
-        _log_suppressed("engine guard", exc)
-
-
-@app.on_event("startup")
-async def _start_kraken_risk_loop() -> None:
-    if VENUE != "KRAKEN" or IS_EXPORTER:
-        return
-    global _kraken_risk_loop_task
-    if _kraken_risk_loop_task and not _kraken_risk_loop_task.done():
-        return
-    _kraken_risk_loop_task = asyncio.create_task(_kraken_risk_metrics_loop())
-    _kraken_risk_logger.info("Kraken risk telemetry loop scheduled")
-
-
-@app.on_event("shutdown")
-async def _stop_kraken_risk_loop() -> None:
-    global _kraken_risk_loop_task
-    if _kraken_risk_loop_task is None:
-        return
-    _kraken_risk_stop_event.set()
-    _kraken_risk_loop_task.cancel()
-    try:
-        await _kraken_risk_loop_task
-    except asyncio.CancelledError:
-        pass
-    except _SUPPRESSIBLE_EXCEPTIONS:
-        _kraken_risk_logger.exception("Kraken telemetry loop shutdown error")
-    finally:
-        _kraken_risk_loop_task = None
 
 
 @app.on_event("shutdown")

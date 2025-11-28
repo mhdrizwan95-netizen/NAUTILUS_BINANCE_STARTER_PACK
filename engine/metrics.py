@@ -113,6 +113,23 @@ mark_time_epoch = Gauge(
     multiprocess_mode="max",
 )
 health_state = Gauge("health_state", "0=OK,1=DEGRADED,2=HALTED", multiprocess_mode="max")
+engine_component_uptime_seconds = Gauge(
+    "engine_component_uptime_seconds",
+    "Uptime in seconds for critical engine components",
+    ["component"],
+    multiprocess_mode="max",
+)
+engine_ws_reconnects_total = Counter(
+    "engine_ws_reconnects_total",
+    "WebSocket reconnect attempts grouped by stream and role",
+    ["stream", "role"],
+)
+ws_message_gap_seconds = Gauge(
+    "ws_message_gap_seconds",
+    "Seconds between consecutive WebSocket payloads",
+    ["stream", "role"],
+    multiprocess_mode="max",
+)
 
 health_transitions_total = _Counter(
     "health_transitions_total",
@@ -120,6 +137,13 @@ health_transitions_total = _Counter(
     ["from", "to", "reason"],
 )  # type: ignore
 REGISTRY["health_transitions_total"] = health_transitions_total
+REGISTRY.update(
+    {
+        "engine_component_uptime_seconds": engine_component_uptime_seconds,
+        "engine_ws_reconnects_total": engine_ws_reconnects_total,
+        "ws_message_gap_seconds": ws_message_gap_seconds,
+    }
+)
 
 MARK_PRICE = Gauge("mark_price_usd", "Live mark price", ["symbol", "venue"])
 mark_price_freshness_sec = Gauge(
@@ -209,23 +233,6 @@ risk_exposure_headroom_usd = Gauge(
     "risk_exposure_headroom_usd",
     "Remaining venue exposure capacity (USD)",
     ["venue"],
-    multiprocess_mode="max",
-)
-
-# Kraken telemetry
-kraken_equity_usd = Gauge(
-    "kraken_equity_usd",
-    "Kraken account equity from telemetry loop",
-    multiprocess_mode="max",
-)
-kraken_unrealized_usd = Gauge(
-    "kraken_unrealized_usd",
-    "Kraken unrealized PnL from telemetry loop",
-    multiprocess_mode="max",
-)
-kraken_equity_drawdown_pct = Gauge(
-    "kraken_equity_drawdown_pct",
-    "Kraken equity drawdown percent",
     multiprocess_mode="max",
 )
 
@@ -689,9 +696,6 @@ REGISTRY = {
     "risk_equity_drawdown_limit_pct": risk_equity_drawdown_limit_pct,
     "risk_metrics_freshness_sec": risk_metrics_freshness_sec,
     "risk_exposure_headroom_usd": risk_exposure_headroom_usd,
-    "kraken_equity_usd": kraken_equity_usd,
-    "kraken_unrealized_usd": kraken_unrealized_usd,
-    "kraken_equity_drawdown_pct": kraken_equity_drawdown_pct,
 }
 
 # ---- Event Breakout metrics (feature-gated via env) ----

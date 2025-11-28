@@ -199,7 +199,7 @@ class ListingSniper:
         if not self.cfg.enabled:
             return
         source = str(evt.get("source") or "").lower()
-        if source not in {"binance_listings", "binance_announcements"}:
+        if source not in {"binance_listings", "listing_sniper_bridge"}:
             return
 
         payload = evt.get("payload") or {}
@@ -484,7 +484,7 @@ class ListingSniper:
         self._forwarded.add(key)
         try:
             payload = {
-                "source": "binance_announcements",
+                "source": "listing_sniper_bridge",
                 "payload": {
                     "symbol": symbol,
                     "announced_at": int(announced_at * 1000.0),
@@ -500,7 +500,7 @@ class ListingSniper:
                     topic="events.external_feed",
                     data=payload,
                     priority=float(payload.get("priority", 0.8)),
-                    source="binance_announcements",
+                    source="listing_sniper_bridge",
                 )
             )
         except _SUPPRESSIBLE_EXCEPTIONS:

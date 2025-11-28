@@ -25,6 +25,11 @@ class Settings:
 
     def __init__(self) -> None:
         venue = os.getenv("VENUE", "BINANCE").upper()
+        if venue not in {"BINANCE", "IBKR"}:
+            logging.getLogger(__name__).warning(
+                "Unsupported VENUE=%s; defaulting to BINANCE", venue
+            )
+            venue = "BINANCE"
         self.venue = venue
 
         # Initialize defaults for attributes that are populated conditionally.
@@ -47,24 +52,6 @@ class Settings:
             host = os.getenv("IBKR_HOST", "127.0.0.1")
             port = os.getenv("IBKR_PORT", "7497")
             self.base_url = f"{host}:{port}"
-        elif venue == "KRAKEN":
-            # Kraken Futures configuration
-            self.mode = os.getenv("KRAKEN_MODE", "testnet").lower()
-            self.is_futures = True
-            self.base_url = os.getenv("KRAKEN_BASE_URL", "https://demo-futures.kraken.com").rstrip(
-                "/"
-            )
-            # Kraken API credentials (secret provided base64 encoded per Kraken docs)
-            self.api_key = os.getenv("KRAKEN_API_KEY")
-            self.api_secret = os.getenv("KRAKEN_API_SECRET")
-            # Optional websocket endpoints
-            self.ws_url = os.getenv(
-                "KRAKEN_WS_URL",
-                "wss://demo-futures.kraken.com/ws/v1",
-            )
-            # Compatibility aliases so downstream code can reuse attr names
-            self.spot_base = self.base_url
-            self.futures_base = self.base_url
         else:
             # Binance-specific configuration
             mode = os.getenv("BINANCE_MODE", "demo").lower()
@@ -127,22 +114,14 @@ class Settings:
                 if self.is_futures and not self.futures_base:
                     raise MissingFuturesBaseError
 
-        if venue == "KRAKEN":
-            self.recv_window = 0
-            self.timeout = float(
-                os.getenv("KRAKEN_API_TIMEOUT", os.getenv("BINANCE_API_TIMEOUT", "10"))
-            )
-        else:
-            self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
-            self.timeout = float(os.getenv("BINANCE_API_TIMEOUT", "10"))
+        self.recv_window = int(os.getenv("BINANCE_RECV_WINDOW", "5000"))
+        self.timeout = float(os.getenv("BINANCE_API_TIMEOUT", "10"))
         self.trading_enabled = os.getenv("TRADING_ENABLED", "true").lower() not in {
             "0",
             "false",
             "no",
         }
         default_symbols = "BTCUSDT.BINANCE"
-        if venue == "KRAKEN":
-            default_symbols = "PI_XBTUSD.KRAKEN,PI_ETHUSD.KRAKEN"
         trade_symbols_raw = env_str(
             "TRADE_SYMBOLS", GLOBAL_DEFAULTS.get("TRADE_SYMBOLS", default_symbols)
         )
@@ -204,6 +183,7 @@ class RiskConfig:
     min_notional_usdt: float
     max_notional_usdt: float
     max_orders_per_min: int
+    symbol_lock_ttl_sec: float
     trade_symbols: list[str] | None
     dust_threshold_usd: float
     # breakers
@@ -254,6 +234,7 @@ def load_risk_config() -> RiskConfig:
         min_notional_usdt=env_float("MIN_NOTIONAL_USDT", default_min_notional),
         max_notional_usdt=env_float("MAX_NOTIONAL_USDT", RISK_DEFAULTS["MAX_NOTIONAL_USDT"]),
         max_orders_per_min=env_int("MAX_ORDERS_PER_MIN", RISK_DEFAULTS["MAX_ORDERS_PER_MIN"]),
+        symbol_lock_ttl_sec=env_float("SYMBOL_LOCK_TTL_SEC", RISK_DEFAULTS["SYMBOL_LOCK_TTL_SEC"]),
         trade_symbols=trade_symbols,
         dust_threshold_usd=env_float("DUST_THRESHOLD_USD", RISK_DEFAULTS["DUST_THRESHOLD_USD"]),
         exposure_cap_symbol_usd=env_float(

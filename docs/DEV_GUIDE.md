@@ -97,7 +97,7 @@ Common subsets:
 ```bash
 pytest tests/test_strategy.py -k buy
 pytest tests/test_ops_aggregate.py -vv
-pytest tests -k "kraken or binance"
+pytest tests -k "binance"
 ```
 
 Tips:

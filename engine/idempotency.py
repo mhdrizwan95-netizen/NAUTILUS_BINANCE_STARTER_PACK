@@ -1,86 +1,83 @@
-import atexit
 import json
-import os
-import signal
+import logging
+import sqlite3
 import threading
 import time
 from pathlib import Path
 
 _LOCK = threading.Lock()
-
-CACHE_PATH = Path("engine/state/idempotency_cache.json")
+DB_PATH = Path("engine/state/idempotency.sqlite")
 
 
 class IdempotencyCache:
-    """Simple in-memory cache with TTL to deduplicate order requests."""
+    """Persistent SQLite-backed cache to deduplicate order requests."""
 
     def __init__(self, ttl_seconds: int = 600):
         self.ttl = ttl_seconds
-        self.cache: dict[str, tuple[float, dict]] = {}
+        self._init_db()
+
+    def _init_db(self):
+        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with _LOCK:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS idempotency (
+                        key TEXT PRIMARY KEY,
+                        data TEXT,
+                        created_at REAL
+                    )
+                    """
+                )
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_created_at ON idempotency(created_at)")
+                conn.commit()
 
     def get(self, key: str) -> dict | None:
         now = time.time()
+        cutoff = now - self.ttl
         with _LOCK:
-            val = self.cache.get(key)
-            if not val:
-                return None
-            ts, data = val
-            if now - ts > self.ttl:
-                self.cache.pop(key, None)
-                return None
-            return data
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    cursor = conn.execute(
+                        "SELECT data FROM idempotency WHERE key = ? AND created_at > ?",
+                        (key, cutoff),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        return json.loads(row[0])
+            except sqlite3.Error:
+                logging.exception("Idempotency cache read failed")
+        return None
 
     def set(self, key: str, data: dict):
-        with _LOCK:
-            self.cache[key] = (time.time(), data)
-
-    def to_dict(self) -> dict[str, dict]:
-        """Return non-expired entries for persistence."""
         now = time.time()
-        return {
-            k: {"ts": ts, "data": data}
-            for k, (ts, data) in self.cache.items()
-            if now - ts < self.ttl
-        }
+        json_data = json.dumps(data)
+        with _LOCK:
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute(
+                        "INSERT OR REPLACE INTO idempotency (key, data, created_at) VALUES (?, ?, ?)",
+                        (key, json_data, now),
+                    )
+                    conn.commit()
+            except sqlite3.Error:
+                logging.exception("Idempotency cache write failed")
 
-    def load(self):
-        """Load persisted cache on startup."""
-        if not CACHE_PATH.exists():
-            return
-        try:
-            data = json.loads(CACHE_PATH.read_text())
-            now = time.time()
-            for k, v in data.items():
-                ts, data = v["ts"], v["data"]
-                if now - ts < self.ttl:
-                    self.cache[k] = (ts, data)
-        except _CACHE_ERRORS:
-            pass  # Silent failure on load
-
-    def save(self):
-        """Save cache to disk on shutdown."""
-        try:
-            CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            temp = CACHE_PATH.with_suffix(".tmp")
-            with open(temp, "w") as f:
-                json.dump(self.to_dict(), f)
-            os.replace(temp, CACHE_PATH)
-        except _CACHE_ERRORS:
-            pass  # Silent failure on save
+    def cleanup(self):
+        """Remove expired entries."""
+        now = time.time()
+        cutoff = now - self.ttl
+        with _LOCK:
+            try:
+                with sqlite3.connect(DB_PATH) as conn:
+                    conn.execute("DELETE FROM idempotency WHERE created_at <= ?", (cutoff,))
+                    conn.commit()
+            except sqlite3.Error:
+                logging.exception("Idempotency cache cleanup failed")
 
 
 # Global cache
 CACHE = IdempotencyCache()
-CACHE.load()
-
-
-def _flush_cache():
-    CACHE.save()
-
-
-atexit.register(_flush_cache)
-for sig in (signal.SIGINT, signal.SIGTERM):
-    signal.signal(sig, lambda *_: (_flush_cache(), os._exit(0)))
 
 # --- Audit Logging ---
 LOG_DIR = Path("engine/logs")
@@ -92,6 +89,3 @@ def append_jsonl(filename: str, payload: dict):
     with _LOCK:
         with open(path, "a") as f:
             f.write(json.dumps(payload, separators=(",", ":")) + "\n")
-
-
-_CACHE_ERRORS: tuple[type[Exception], ...] = (OSError, ValueError, json.JSONDecodeError)

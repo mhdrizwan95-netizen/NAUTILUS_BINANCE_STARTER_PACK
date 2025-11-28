@@ -5,17 +5,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 # hadolint ignore=DL3008
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
+    ca-certificates \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY services/data_ingester/requirements.txt ./requirements.txt
 # hadolint ignore=DL3013
-RUN pip install --upgrade pip && pip install --require-hashes -r requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY services/data_ingester/app ./app
-COPY services/common /app/common
+COPY services/common /app/services/common
+COPY shared /app/shared
 
 ENV LEDGER_DB=/ml/manifest.sqlite
 ENV DATA_LANDING=/ml/incoming

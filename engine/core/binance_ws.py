@@ -14,9 +14,10 @@ from websockets.exceptions import WebSocketException
 
 from engine.metrics import (
     MARK_PRICE,  # mark_price_usd with venue label
-    REGISTRY,
+    engine_ws_reconnects_total,
     mark_price_by_symbol,  # multiprocess-safe single-label gauge
     mark_price_freshness_sec,
+    ws_message_gap_seconds,
 )
 
 log = logging.getLogger("binance_ws")
@@ -102,7 +103,9 @@ class BinanceWS:
             url,
             len(streams),
         )
+        stream_label = self._resolve_stream_type()
         while True:
+            last_msg_ts = time.time()
             try:
                 async with websockets.connect(
                     url,
@@ -114,6 +117,7 @@ class BinanceWS:
                 ) as ws:
                     log.warning("[WS] Binance WS subscribed (%d streams)", len(streams))
                     backoff = 1.0
+                    last_msg_ts = time.time()
                     async for raw in ws:
                         try:
                             msg = json.loads(raw)
@@ -198,14 +202,26 @@ class BinanceWS:
                         )
                         if event_payload is not None:
                             self._emit_event(event_payload)
+                        try:
+                            now_gap = time.time()
+                            ws_message_gap_seconds.labels(stream=stream_label, role=self.role).set(
+                                now_gap - last_msg_ts
+                            )
+                            last_msg_ts = now_gap
+                        except _PROM_ERRORS as prom_exc:
+                            _log_suppressed("binance_ws.ws_gap_metric", prom_exc)
             except _WS_RUNTIME_ERRORS as exc:
                 log.warning("[WS] Binance WS error: %s", exc)
                 try:
-                    ctr = REGISTRY.get("ws_disconnects_total")
-                    if ctr:
-                        ctr.inc()
-                except _PROM_ERRORS as exc:
-                    _log_suppressed("binance_ws.ws_disconnect_metric", exc)
+                    engine_ws_reconnects_total.labels(stream=stream_label, role=self.role).inc()
+                except _PROM_ERRORS as prom_exc:
+                    _log_suppressed("binance_ws.ws_disconnect_metric", prom_exc)
+                try:
+                    ws_message_gap_seconds.labels(stream=stream_label, role=self.role).set(
+                        time.time() - last_msg_ts
+                    )
+                except _PROM_ERRORS as prom_exc:
+                    _log_suppressed("binance_ws.ws_gap_metric", prom_exc)
                 await asyncio.sleep(backoff)
                 backoff = min(backoff * 2.0, 30.0)
 
