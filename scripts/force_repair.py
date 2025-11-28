@@ -1,4 +1,27 @@
-from __future__ import annotations
+import os
+import sys
+from pathlib import Path
+import math
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+# --- 1. THE PURGE LIST ---
+ZOMBIES = [
+    "engine/dynamic_policy.py",
+    "engine/riskrails_adapter.py",
+    "engine/compat/events_bridge.py",
+    "engine/feeds/binance_announcements.py",
+    "engine/core/kraken.py",
+    "engine/core/kraken_ws.py",
+    "engine/connectors/ibkr_client.py",
+    "engine/adapters/ibkr_hist.py"
+]
+
+# --- 2. THE CODE INJECTIONS ---
+
+# A. Portfolio (Multi-Currency)
+PORTFOLIO_CODE = """from __future__ import annotations
 import logging
 import math
 import time
@@ -140,3 +163,96 @@ class Portfolio:
         self._state.cash = self._state.balances.get("USDT", 0.0)
         self._state.equity = self._state.cash + upl
         self._state.ts = time.time()
+"""
+
+# B. Param Client (Missing Functions)
+PARAM_CLIENT_APPEND = """
+# --- REPAIR INJECTION ---
+def update_context(strategy: str, instrument: str, features: dict[str, float]) -> None:
+    client = get_param_client()
+    if client: client.update_features(strategy, instrument, features)
+
+def apply_dynamic_config(strategy_instance: Any, symbol: str) -> bool:
+    client = get_param_client()
+    if not client: return False
+    
+    strat_name = getattr(strategy_instance, "name", None)
+    if not strat_name:
+        cls_name = strategy_instance.__class__.__name__
+        if "Trend" in cls_name: strat_name = "trend_strategy"
+        elif "Scalp" in cls_name: strat_name = "scalp_strategy"
+        elif "Momentum" in cls_name: strat_name = "momentum_strategy"
+        elif "Scanner" in cls_name: strat_name = "symbol_scanner"
+        else: strat_name = "strategy"
+
+    data = client.get_params(strat_name, symbol)
+    if not data or "params" not in data: return False
+
+    cfg = getattr(strategy_instance, "cfg", None)
+    if not cfg: return False
+
+    try:
+        from dataclasses import replace, is_dataclass
+        if is_dataclass(cfg):
+            updates = {k: v for k, v in data["params"].items() if hasattr(cfg, k)}
+            if updates:
+                strategy_instance.cfg = replace(cfg, **updates)
+                _LOGGER.info(f"[{strat_name.upper()}] Applied dynamic params for {symbol}")
+                return True
+    except Exception as e:
+        _LOGGER.warning(f"Dynamic config apply failed: {e}")
+    return False
+
+__all__.extend(["update_context", "apply_dynamic_config"])
+"""
+
+def run_repair():
+    print("🔧 STARTING ANTIGRAVITY REPAIR PROTOCOL...")
+    
+    # 1. Purge Zombies
+    print("💀 Purging Zombie Code...")
+    for z in ZOMBIES:
+        p = Path(z)
+        if p.exists():
+            p.unlink()
+            print(f"   - Deleted {z}")
+        else:
+            print(f"   - Already gone: {z}")
+            
+    # 2. Overwrite Portfolio
+    print("💰 Upgrading Portfolio to Multi-Asset...")
+    with open("engine/core/portfolio.py", "w") as f:
+        f.write(PORTFOLIO_CODE)
+        
+    # 3. Patch Param Client
+    print("🧠 Patching ParamClient Brain...")
+    pc_path = Path("engine/services/param_client.py")
+    if pc_path.exists():
+        content = pc_path.read_text()
+        if "apply_dynamic_config" not in content:
+            with open(pc_path, "a") as f:
+                f.write(PARAM_CLIENT_APPEND)
+            print("   - Injected missing helper functions.")
+        else:
+            print("   - ParamClient already patched.")
+    else:
+        print(f"   - WARNING: {pc_path} does not exist!")
+            
+    # 4. Fix Frontend
+    print("🖥️ Fixing Frontend Handshake...")
+    ws_path = Path("frontend/src/lib/websocket.ts")
+    if ws_path.exists():
+        content = ws_path.read_text()
+        if 'searchParams.set("session"' in content:
+            new_content = content.replace('searchParams.set("session"', 'searchParams.set("token"')
+            ws_path.write_text(new_content)
+            print("   - Swapped 'session' -> 'token'")
+        else:
+            print("   - Frontend already fixed.")
+    else:
+        print(f"   - WARNING: {ws_path} does not exist!")
+
+    print("✅ REPAIR COMPLETE. NOW RUN VERIFICATION.")
+
+if __name__ == "__main__":
+    run_repair()
