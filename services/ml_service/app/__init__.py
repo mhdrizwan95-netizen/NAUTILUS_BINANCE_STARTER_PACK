@@ -1,3 +1,0 @@
-"""
-ML service application package.
-"""

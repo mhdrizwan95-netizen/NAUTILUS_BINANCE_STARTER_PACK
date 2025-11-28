@@ -27,6 +27,7 @@ from .strategies.scalp.brackets import ScalpBracketManager
 from .strategies.scalping import ScalpStrategyModule, load_scalp_config
 from .strategies.trend_follow import TrendStrategyModule, load_trend_config
 from .telemetry.publisher import record_tick_latency
+from .services.telemetry_broadcaster import BROADCASTER
 
 _SUPPRESSIBLE_EXCEPTIONS = (
     AttributeError,
@@ -656,6 +657,28 @@ def on_tick(
     try:
         metrics.strategy_confidence.labels(symbol=base, venue=venue).set(conf_to_emit)
     except _SUPPRESSIBLE_EXCEPTIONS:
+        pass
+
+    # Broadcast Strategy Performance
+    try:
+        perf_payload = {
+            "type": "strategy.performance",
+            "data": [{
+                "id": f"{base}-{venue}-ensemble",
+                "name": "Ensemble Strategy" if fused else "MA Crossover",
+                "symbol": qualified,
+                "pnl_realized": 0.0,  # TODO: Fetch from Portfolio
+                "pnl_unrealized": 0.0,
+                "position_size": 0.0,
+                "confidence": conf_to_emit,
+                "signal": signal_value,
+                "status": "active"
+            }],
+            "ts": time.time()
+        }
+        loop = asyncio.get_running_loop()
+        loop.create_task(BROADCASTER.broadcast(perf_payload))
+    except (RuntimeError, ImportError):
         pass
 
     if signal_side:

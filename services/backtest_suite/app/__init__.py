@@ -1,3 +1,0 @@
-"""
-Backtest suite service package.
-"""

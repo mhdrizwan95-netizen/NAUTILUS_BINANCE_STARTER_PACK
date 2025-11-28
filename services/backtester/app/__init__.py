@@ -1,3 +1,0 @@
-"""
-Backtester application package.
-"""

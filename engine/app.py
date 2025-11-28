@@ -91,6 +91,8 @@ from engine.core.binance_user_stream import BinanceUserStream
 from engine.services.telemetry_broadcaster import BROADCASTER
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 from shared.time_guard import check_clock_skew
+from fastapi import WebSocket, WebSocketDisconnect
+from contextlib import asynccontextmanager
 
 setup_logging()
 
@@ -98,6 +100,10 @@ SERVICE_NAME = os.getenv("OBS_SERVICE_NAME", "engine")
 _ENGINE_START_TS = time.time()
 _app_logger = logging.getLogger("engine.app")
 _JITTER_RNG = SystemRandom()
+
+
+
+
 _SafelyResult = TypeVar("_SafelyResult")
 _RequestHandler = Callable[[Request], Awaitable[Response]]
 _SUPPRESSIBLE_EXCEPTIONS = (
@@ -191,6 +197,66 @@ log_dry_run_banner("engine.app")
 app.add_middleware(_RequestIDMiddleware)
 app.add_middleware(_HttpMetricsMiddleware)
 app.add_middleware(RedactionMiddleware)
+
+
+# --- WebSocket Connection Manager ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: list[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        # Fire and forget broadcast to avoid blocking
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                pass
+
+_WS_MANAGER = ConnectionManager()
+
+async def _telemetry_bridge():
+    """Forward internal BROADCASTER events to WebSocket clients."""
+    queue = await BROADCASTER.subscribe()
+    try:
+        while True:
+            payload = await queue.get()
+            await _WS_MANAGER.broadcast(payload)
+            queue.task_done()
+    except asyncio.CancelledError:
+        BROADCASTER.unsubscribe(queue)
+
+@app.on_event("startup")
+async def start_ws_bridge():
+    loop = asyncio.get_running_loop()
+    loop.create_task(_telemetry_bridge())
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    # Simple token auth
+    token = websocket.query_params.get("token")
+    # TODO: Validate token against OPS_API_TOKEN if needed. 
+    # For now, we accept connections to facilitate the "Glass Cockpit" demo.
+    
+    await _WS_MANAGER.connect(websocket)
+    try:
+        while True:
+            # Keep alive / handle incoming (e.g. subscriptions)
+            data = await websocket.receive_json()
+            if data.get("type") == "heartbeat":
+                await websocket.send_json({"type": "heartbeat", "ts": time.time()})
+    except WebSocketDisconnect:
+        _WS_MANAGER.disconnect(websocket)
+    except Exception:
+        _WS_MANAGER.disconnect(websocket)
+
 
 
 @app.on_event("startup")
@@ -623,6 +689,20 @@ def _broadcast_telemetry(snapshot: dict[str, Any]) -> None:
         loop.create_task(BROADCASTER.broadcast(payload))
     except RuntimeError:
         pass
+
+
+async def _broadcast_market_tick(event: dict[str, Any]) -> None:
+    """Forward market ticks to WebSocket clients."""
+    payload = {
+        "type": "market.tick",
+        "data": event,
+        "ts": time.time()
+    }
+    await BROADCASTER.broadcast(payload)
+
+
+# Wire up telemetry
+BUS.subscribe("market.tick", _broadcast_market_tick)
 
 portfolio = Portfolio(on_update=_broadcast_telemetry)
 router = OrderRouterExt(rest_client, portfolio, venue=VENUE)

@@ -1,3 +1,0 @@
-"""
-Parameter controller service package.
-"""

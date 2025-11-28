@@ -36,9 +36,9 @@ Try `make help` for the legacy targets while the new lifecycle gets folded into 
 
 | Service | Container | Host Ports | Definition | Notes |
 |---------|-----------|------------|------------|-------|
-| Binance trader engine | `hmm_engine_binance` | `8003` | `engine/app.py` | Live trading API; honors `TRADING_ENABLED`, risk rails, and optional scheduler. |
+| Binance trader engine | `hmm_engine_binance` | `8003` | `engine/app.py` | Live trading API; hosts **WebSocket Telemetry** (`/ws`); honors `TRADING_ENABLED`. |
 | Binance exporter | `hmm_engine_binance_exporter` | `9103` | `engine/app.py` | Read-only replica that streams metrics without order flow. |
-| Ops API & dashboards | `hmm_ops` | `8002`, `9102` | `ops/ops_api.py` | Aggregates engine metrics, strategy routing, capital governance endpoints, SSE/WebSocket feeds. |
+| Ops API & dashboards | `hmm_ops` | `8002`, `9102` | `ops/ops_api.py` | Aggregates metrics, strategy routing, governance. **Legacy WS removed**. |
 | Universe service | `hmm_universe` | `8009` | `universe/service.py` | Maintains tradable symbol set and exposes Prometheus gauges. |
 | Situations service | `hmm_situations` | `8011` | `situations/service.py` | Pattern matcher with feedback loop, exposes `/metrics`. |
 | Screener service | `hmm_screener` | `8010` | `screener/service.py` | Computes alpha features, posts hits to situations. |
@@ -95,6 +95,7 @@ flowchart LR
     Events --> Risk
     Risk --> Router --> Exchange[(Venue)] -->|fills| Port
     Port --> Grafana[(Prometheus/Grafana)]
+    Engine -->|WebSocket (8003)| Frontend[(Glass Cockpit)]
 ```
 
 Tick data drives the systematic stack, while external services publish structured payloads to `events.external_feed`. Every strategy funnels through `RiskRails` before orders leave the engine.
@@ -229,18 +230,13 @@ curl -sG --data-urlencode 'query=histogram_quantile(0.95, rate(strategy_tick_to_
 - **Airdrop & Promotion Watcher** — `engine/strategies/airdrop_promo.py`. Captures exchange promo events and opportunistic rebates. Flags: `AIRDROP_PROMO_ENABLED`, `AIRDROP_PROMO_SOURCES`, `AIRDROP_PROMO_MAX_NOTIONAL_USD`.
 - **Symbol Scanner** — `engine/strategies/symbol_scanner.py`. Maintains a rolling shortlist of eligible symbols; controlled via `SYMBOL_SCANNER_*`.
 
+### Dynamic Parameter Optimization
+The system now features a **Governance Daemon** and **Param Controller** loop:
+1.  **Governance**: `ops/governance.py` runs hourly allocation cycles, adjusting capital based on strategy performance (Sharpe/Sortino).
+2.  **Param Controller**: `services/param_controller` uses Multi-Armed Bandits to dynamically select optimal strategy parameters (e.g., lookback windows, stop-loss multipliers) based on recent market regimes.
+3.  **HMM Hot-Reload**: The ML Service (`services/ml_service`) retrains Hidden Markov Models periodically and hot-reloads them into the Engine without downtime.
+
 All strategies respect the global allowlist (`TRADE_SYMBOLS`) unless a module-specific `*_SYMBOLS` override is provided. The EventBus handles fan-out; synchronous handlers run in a thread pool sized by `EVENTBUS_MAX_WORKERS` so blocking operations cannot freeze the loop.
-
-The MA+HMM ensemble uses a shared calibration profile so backtests and live trading stay aligned. Create/adjust `engine/models/hmm_calibration.json` (or `HMM_CALIBRATION_PATH`) with per-symbol overrides:
-
-```json
-{
-  "*": {"confidence_gain": 1.0, "quote_multiplier": 1.0, "cooldown_scale": 1.0},
-  "BTCUSDT": {"confidence_gain": 1.15, "quote_multiplier": 0.75, "cooldown_scale": 0.8}
-}
-```
-
-`policy_hmm.py` and the ensemble apply these factors live; the file reloads every ~60s.
 
 Supporting modules (enable with flags):
 
@@ -260,8 +256,3 @@ To profile end‑to‑end: target median `strategy_tick_to_order_latency_ms` < 1
  - hmm_operator_handbook.md — strategy‑operator playbook and ML service notes
 
 Keep documentation up to date when adding venues, strategies, or governance features—this README should always describe what actually runs in `docker-compose.yml`.
-
-### Trend auto-tune + symbol scanner
-- Enable the adaptive trend module with `TREND_ENABLED=true` (keep `TREND_DRY_RUN=true` until you are ready to fire orders). Flip `TREND_AUTO_TUNE_ENABLED=true` to let it log every trade to `data/runtime/trend_auto_tune.json`, monitor rolling win-rate, and gently adjust RSI windows, ATR stop/target multiples, and cooldown bars (knobs: `TREND_AUTO_TUNE_MIN_TRADES`, `..._INTERVAL`, `..._STOP_MIN/MAX`, `..._WIN_LOW/HIGH`). Logs show `[TREND-AUTO] params=...` when an adjustment happens.
-- Switch on `SYMBOL_SCANNER_ENABLED=true` to let the symbol scanner periodically rank the configured universe (`SYMBOL_SCANNER_UNIVERSE`) using momentum/ATR/liquidity filters. Only the top `SYMBOL_SCANNER_TOP_N` symbols are routed into the trend module; the shortlist persists to `data/runtime/symbol_scanner_state.json` and exposes Prometheus metrics (`symbol_scanner_score`, `symbol_scanner_selected_total`).
-- Leave both flags off to fall back to the global `TRADE_SYMBOLS` allowlist (or allow-all `*`).

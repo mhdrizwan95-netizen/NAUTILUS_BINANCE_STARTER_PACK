@@ -1,3 +1,0 @@
-"""
-Data ingester service package.
-"""

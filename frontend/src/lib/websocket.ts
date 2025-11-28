@@ -9,9 +9,11 @@ import { useTradingStore, type PriceTick } from "./tradingStore";
 export function useWebSocket(): WebSocketHookResult {
   // ... (existing checks)
 
-  // Use High-Performance Trading Store
-  const updatePrices = useTradingStore((state) => state.updatePrices);
-  const setPortfolio = useTradingStore((state) => state.setPortfolio);
+  // Use environment variable or default to localhost:8003 (Engine)
+  const baseUrl = import.meta.env?.VITE_WS_URL ?? "ws://localhost:8003/ws";
+  const url = new URL(baseUrl);
+  url.searchParams.set("token", session);
+  const wsUrl = url.toString();
   const updateStrategy = useTradingStore((state) => state.updateStrategy);
   const updateVenue = useTradingStore((state) => state.updateVenue);
   const setSystemHealth = useTradingStore((state) => state.setSystemHealth);

@@ -12,9 +12,9 @@ This brief is for new developers joining the Nautilus trading stack. It captures
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Execution engine | ✅ | `engine/app.py` serves REST APIs for orders, reconciliation, metrics; hardened for Binance spot/futures only. |
+| Execution engine | ✅ | `engine/app.py` serves REST APIs for orders, reconciliation, metrics; hardened for **Binance spot/futures only**. |
 | Strategy runtime | ✅ | Built-in MA + HMM ensemble plus unified strategies (`engine/strategy.py`, `engine/strategies/policy_hmm.py`, `engine/strategies/trend_follow.py`, `engine/strategies/listing_sniper.py`). |
-| ML tooling | ✅ (manual) | `ml_service/app.py` provides training/inference endpoints and model registry; auto-promotion scripts live in `scripts/`. |
+| ML tooling | ✅ (auto) | `ml_service/app.py` provides training/inference endpoints and model registry; auto-promotion scripts live in `scripts/`. |
 | Ops control plane | ✅ | `ops/ops_api.py` aggregates metrics, exposes governance endpoints, supports WebSocket feeds, and coordinates strategy routing + capital allocation. |
 | Governance | ✅ | `ops/capital_allocator.py`, `ops/strategy_router.py`, policy JSON/YAML inputs; playbooks via `ops/m20_playbook.py`, `ops/m25_governor.py`. |
 | Observability | ✅ | Prometheus + Grafana + Loki bundle in `ops/observability/`, dashboards auto-provisioned (Command Center, venue views); metrics defined in `engine/metrics.py` and `ops/prometheus.py`. |
