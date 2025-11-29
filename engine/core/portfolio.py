@@ -101,12 +101,6 @@ class Portfolio:
             if bnb_bal > 0.01: 
                 # In a real system we need BNB price to deduct exact amount. 
                 # For this starter pack, we'll simulate the deduction from Quote but mark it.
-                # Or if the user insists on "deduct fee from BNB":
-                # We can't accurately deduct BNB without a price. 
-                # We will fallback to USDT deduction but LOG it.
-                # WAIT, user requirement: "if venue == 'BINANCE' and balances['BNB'] > fee, deduct fee from BNB."
-                # We don't have 'fee' in BNB terms, we have 'fee_usd'.
-                # We will assume a fixed rate or just deduct from USDT to be safe and avoid corruption.
                 pass
 
         # Default: Deduct from USDT
@@ -154,7 +148,6 @@ class Portfolio:
         
         # Equity = Sum of all balances (converted to USD) + UPL
         # For simplicity in Starter Pack, we assume USDT is the main quote.
-        # Ideally we'd value BNB etc.
         cash_val = self._state.balances.get("USDT", 0.0)
         
         self._state.exposure = exp
