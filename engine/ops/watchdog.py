@@ -27,7 +27,7 @@ class Watchdog:
             gap = time.time() - self._last_tick
             if gap > self.timeout:
                 _LOGGER.critical(f"WATCHDOG: Engine stalled for {gap:.1f}s. TERMINATING PROCESS.")
-                os._exit(1) # Force kill, let Docker restart
+                os._exit(1)
 
 _INSTANCE = Watchdog()
 
