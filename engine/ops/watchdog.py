@@ -1,3 +1,4 @@
+
 import time
 import os
 import threading
@@ -26,10 +27,8 @@ class Watchdog:
             time.sleep(5)
             gap = time.time() - self._last_tick
             if gap > self.timeout:
-                _LOGGER.critical(f"WATCHDOG: Engine stalled for {gap:.1f}s. TERMINATING PROCESS.")
+                _LOGGER.critical(f"WATCHDOG: Engine stalled for {gap:.1f}s. SUICIDE.")
                 os._exit(1)
 
 _INSTANCE = Watchdog()
-
-def get_watchdog():
-    return _INSTANCE
+def get_watchdog(): return _INSTANCE

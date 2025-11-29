@@ -1,4 +1,16 @@
-from __future__ import annotations
+import os
+import re
+from pathlib import Path
+import math
+import time
+from dataclasses import dataclass, field
+from typing import Any
+
+print("🔧 STARTING SYSTEM RESTORATION...")
+
+# --- TASK 1: UPGRADE PORTFOLIO (Multi-Asset) ---
+print("💰 Upgrading Portfolio to Binance-Native...")
+portfolio_code = """from __future__ import annotations
 import logging
 import math
 import time
@@ -137,3 +149,106 @@ class Portfolio:
         self._state.cash = self._state.balances.get("USDT", 0.0)
         self._state.equity = self._state.cash + upl
         self._state.ts = time.time()
+"""
+with open("engine/core/portfolio.py", "w") as f:
+    f.write(portfolio_code)
+
+# --- TASK 2: FIX FRONTEND HANDSHAKE ---
+print("🖥️ Fixing Frontend Authentication...")
+ws_path = Path("frontend/src/lib/websocket.ts")
+if ws_path.exists():
+    content = ws_path.read_text()
+    if 'searchParams.set("session"' in content:
+        content = content.replace('searchParams.set("session"', 'searchParams.set("token"')
+        ws_path.write_text(content)
+        print("   - Fixed 'session' -> 'token'")
+    else:
+        print("   - Frontend already correct.")
+
+# --- TASK 3: WIRE HMM HOT-RELOAD ---
+print("🧠 Wiring HMM Hot-Reload...")
+hmm_path = Path("engine/strategies/policy_hmm.py")
+if hmm_path.exists():
+    content = hmm_path.read_text()
+    if "BUS.subscribe" not in content:
+        wiring = """
+# --- Auto-Wiring ---
+try:
+    from engine.core.event_bus import BUS
+    async def _on_promote(e): reload_model(e)
+    BUS.subscribe("model.promoted", _on_promote)
+except ImportError: pass
+"""
+        with open(hmm_path, "a") as f:
+            f.write(wiring)
+        print("   - Subscription added.")
+    else:
+        print("   - HMM already wired.")
+
+# --- TASK 4: CREATE WATCHDOG ---
+print("🐕 Creating Watchdog...")
+watchdog_code = """
+import time
+import os
+import threading
+import logging
+
+_LOGGER = logging.getLogger("engine.watchdog")
+
+class Watchdog:
+    def __init__(self, timeout=30):
+        self.timeout = timeout
+        self._last_tick = time.time()
+        self._running = False
+
+    def heartbeat(self):
+        self._last_tick = time.time()
+
+    def start(self):
+        if self._running: return
+        self._running = True
+        t = threading.Thread(target=self._monitor, daemon=True, name="watchdog")
+        t.start()
+
+    def _monitor(self):
+        _LOGGER.info("Watchdog started.")
+        while True:
+            time.sleep(5)
+            gap = time.time() - self._last_tick
+            if gap > self.timeout:
+                _LOGGER.critical(f"WATCHDOG: Engine stalled for {gap:.1f}s. SUICIDE.")
+                os._exit(1)
+
+_INSTANCE = Watchdog()
+def get_watchdog(): return _INSTANCE
+"""
+Path("engine/ops").mkdir(parents=True, exist_ok=True)
+with open("engine/ops/watchdog.py", "w") as f:
+    f.write(watchdog_code)
+
+# --- TASK 5: CLEAN DOCKER (Diet) ---
+print("🐳 Sanitizing Docker Compose...")
+try:
+    import yaml
+    with open("docker-compose.yml", "r") as f:
+        dc = yaml.safe_load(f)
+    
+    services = dc.get("services", {})
+    keep = {
+        "engine_binance", "engine_binance_exporter", "ops", 
+        "ml_service", "ml_scheduler", "param_controller", "data_ingester",
+        "universe", "situations", "screener", "prometheus", "grafana"
+    }
+    
+    to_delete = [s for s in services if s not in keep]
+    for s in to_delete:
+        del services[s]
+        print(f"   - Removed service: {s}")
+        
+    with open("docker-compose.yml", "w") as f:
+        yaml.dump(dc, f, sort_keys=False)
+        
+except ImportError:
+    print("⚠️  PyYAML not found. Skipping Docker cleanup. Install PyYAML to fix.")
+
+print("✅ RESTORATION COMPLETE.")
