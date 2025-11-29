@@ -1,4 +1,18 @@
-from __future__ import annotations
+import os
+import sys
+from pathlib import Path
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+def restore_code():
+    logger.info("🚀 STARTING CODE RESTORATION PROTOCOL...")
+
+    # --- 1. PORTFOLIO RESTORATION ---
+    logger.info("💰 Restoring Portfolio (Multi-Asset)...")
+    portfolio_content = """from __future__ import annotations
 import logging
 import math
 import time
@@ -162,3 +176,91 @@ class Portfolio:
         self._state.cash = cash_val
         self._state.equity = cash_val + upl
         self._state.ts = time.time()
+"""
+    with open("engine/core/portfolio.py", "w") as f:
+        f.write(portfolio_content)
+    logger.info("   - Portfolio updated.")
+
+    # --- 2. FRONTEND RESTORATION ---
+    logger.info("🖥️ Restoring Frontend Auth...")
+    ws_path = Path("frontend/src/lib/websocket.ts")
+    if ws_path.exists():
+        content = ws_path.read_text()
+        if 'searchParams.set("session"' in content:
+            content = content.replace('searchParams.set("session"', 'searchParams.set("token"')
+            ws_path.write_text(content)
+            logger.info("   - Websocket auth fixed (session -> token).")
+        else:
+            logger.info("   - Websocket auth already correct.")
+    else:
+        logger.error("   - frontend/src/lib/websocket.ts NOT FOUND!")
+
+    # --- 3. HMM WIRING ---
+    logger.info("🧠 Wiring HMM Hot-Reload...")
+    hmm_path = Path("engine/strategies/policy_hmm.py")
+    if hmm_path.exists():
+        content = hmm_path.read_text()
+        if "BUS.subscribe" not in content:
+            wiring_block = """
+# --- Auto-Wiring ---
+try:
+    from engine.core.event_bus import BUS
+    async def _on_promote(e): reload_model(e)
+    BUS.subscribe("model.promoted", _on_promote)
+except ImportError: pass
+"""
+            with open(hmm_path, "a") as f:
+                f.write(wiring_block)
+            logger.info("   - HMM wiring appended.")
+        else:
+            logger.info("   - HMM already wired.")
+    else:
+        logger.error("   - engine/strategies/policy_hmm.py NOT FOUND!")
+
+    # --- 4. WATCHDOG CREATION ---
+    logger.info("🐕 Creating Watchdog...")
+    watchdog_content = """import time
+import os
+import threading
+import logging
+
+_LOGGER = logging.getLogger("engine.watchdog")
+
+class Watchdog:
+    def __init__(self, timeout=30):
+        self.timeout = timeout
+        self._last_tick = time.time()
+        self._running = False
+
+    def heartbeat(self):
+        self._last_tick = time.time()
+
+    def start(self):
+        if self._running: return
+        self._running = True
+        t = threading.Thread(target=self._monitor, daemon=True, name="watchdog")
+        t.start()
+
+    def _monitor(self):
+        _LOGGER.info("Watchdog started.")
+        while True:
+            time.sleep(5)
+            gap = time.time() - self._last_tick
+            if gap > self.timeout:
+                _LOGGER.critical(f"WATCHDOG: Engine stalled for {gap:.1f}s. TERMINATING PROCESS.")
+                os._exit(1) # Force kill, let Docker restart
+
+_INSTANCE = Watchdog()
+
+def get_watchdog():
+    return _INSTANCE
+"""
+    Path("engine/ops").mkdir(parents=True, exist_ok=True)
+    with open("engine/ops/watchdog.py", "w") as f:
+        f.write(watchdog_content)
+    logger.info("   - Watchdog created.")
+
+    logger.info("✅ CODE RESTORATION COMPLETE.")
+
+if __name__ == "__main__":
+    restore_code()

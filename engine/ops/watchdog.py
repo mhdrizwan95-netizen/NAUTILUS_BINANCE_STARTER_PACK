@@ -1,91 +1,35 @@
-"""
-Watchdog - Self-Healing Mechanism for Engine Health Monitoring.
-
-Monitors the engine's event loop heartbeat and triggers process suicide
-if the engine becomes frozen (zombie state). Docker restart policy handles
-automatic recovery.
-"""
-from __future__ import annotations
-
-import logging
+import time
 import os
 import threading
-import time
+import logging
 
-_LOGGER = logging.getLogger(__name__)
+_LOGGER = logging.getLogger("engine.watchdog")
 
-
-class EngineWatchdog:
-    """Monitors engine health and triggers suicide if frozen."""
-
-    def __init__(self, freeze_threshold_seconds: float = 30.0):
-        self.freeze_threshold = freeze_threshold_seconds
-        self.last_tick_time = time.time()
+class Watchdog:
+    def __init__(self, timeout=30):
+        self.timeout = timeout
+        self._last_tick = time.time()
         self._running = False
-        self._thread: threading.Thread | None = None
 
-    def heartbeat(self) -> None:
-        """Called by the engine to signal it's alive."""
-        self.last_tick_time = time.time()
+    def heartbeat(self):
+        self._last_tick = time.time()
 
-    def start(self) -> None:
-        """Start the watchdog monitoring thread."""
-        if self._running:
-            _LOGGER.warning("[Watchdog] Already running")
-            return
-
+    def start(self):
+        if self._running: return
         self._running = True
-        self._thread = threading.Thread(target=self._monitor_loop, daemon=True, name="WatchdogThread")
-        self._thread.start()
-        _LOGGER.info(f"[Watchdog] Started (freeze threshold: {self.freeze_threshold}s)")
+        t = threading.Thread(target=self._monitor, daemon=True, name="watchdog")
+        t.start()
 
-    def stop(self) -> None:
-        """Stop the watchdog (for graceful shutdown)."""
-        self._running = False
-        if self._thread:
-            self._thread.join(timeout=2.0)
-        _LOGGER.info("[Watchdog] Stopped")
+    def _monitor(self):
+        _LOGGER.info("Watchdog started.")
+        while True:
+            time.sleep(5)
+            gap = time.time() - self._last_tick
+            if gap > self.timeout:
+                _LOGGER.critical(f"WATCHDOG: Engine stalled for {gap:.1f}s. TERMINATING PROCESS.")
+                os._exit(1) # Force kill, let Docker restart
 
-    def _monitor_loop(self) -> None:
-        """Background thread that monitors heartbeat."""
-        while self._running:
-            try:
-                time.sleep(5.0)  # Check every 5 seconds
-                
-                if not self._running:
-                    break
-                
-                lag = time.time() - self.last_tick_time
-                
-                if lag > self.freeze_threshold:
-                    # Engine is frozen - trigger suicide
-                    _LOGGER.critical(
-                        f"[Watchdog] 🚨 ENGINE FROZEN! No heartbeat for {lag:.1f}s. "
-                        f"Triggering suicide. Docker will restart."
-                    )
-                    
-                    # Give logger time to flush
-                    time.sleep(0.5)
-                    
-                    # Hard exit - Docker restart policy takes over
-                    os._exit(1)
-                
-                elif lag > self.freeze_threshold * 0.5:
-                    # Warning: approaching freeze threshold
-                    _LOGGER.warning(f"[Watchdog] ⚠️ Slow heartbeat: {lag:.1f}s lag")
-            
-            except Exception as exc:
-                _LOGGER.error(f"[Watchdog] Monitor error: {exc}", exc_info=True)
+_INSTANCE = Watchdog()
 
-
-# Global singleton
-_WATCHDOG: EngineWatchdog | None = None
-
-
-def get_watchdog() -> EngineWatchdog:
-    """Get or create the global watchdog instance."""
-    global _WATCHDOG
-    if _WATCHDOG is None:
-        freeze_threshold = float(os.getenv("WATCHDOG_FREEZE_THRESHOLD_SEC", "30.0"))
-        _WATCHDOG = EngineWatchdog(freeze_threshold_seconds=freeze_threshold)
-    return _WATCHDOG
+def get_watchdog():
+    return _INSTANCE
