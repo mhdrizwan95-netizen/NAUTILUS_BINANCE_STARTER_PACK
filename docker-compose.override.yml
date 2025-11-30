@@ -1,22 +1,13 @@
 services:
   ops:
     healthcheck:
-      # Use python in the container to ping /readyz
-      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8002/readyz', timeout=3); sys.exit(0)"]
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8002/readyz',
+        timeout=3); sys.exit(0)
       interval: 10s
       timeout: 3s
       retries: 10
       start_period: 10s
-
-  executor:
-    environment:
-      - DRY_RUN=true
-      # Override with gentler pacing to prevent request storms
-      - EXEC_INTERVAL_SEC=10
-      - EXEC_JITTER=0.35
-      - PROBE_COOLDOWN_SEC=15
-      - MAX_PARALLEL_ORDERS=1
-      - MAX_ORDERS_PER_MIN=6
-      - RETRY_BASE_MS=500
-      - RETRY_BACKOFF=2.0
-      - RETRY_MAX_SEC=20
