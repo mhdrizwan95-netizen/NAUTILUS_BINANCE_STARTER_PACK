@@ -98,20 +98,21 @@ class Portfolio:
         if "." not in symbol_key and venue: symbol_key = f"{symbol_key}.{venue.upper()}"
         
         pos = self._state.positions.setdefault(symbol_key, Position(symbol=symbol_key, venue=venue or "", market=market or "spot"))
+        
         prev_qty = pos.quantity
         new_qty = prev_qty + qty
         
         realized = 0.0
-        if (prev_qty > 0 > qty) or (prev_qty < 0 < qty):
+        if (prev_qty > 0 > qty) or (prev_qty < 0 < qty): # Closing
             closed = min(abs(prev_qty), abs(qty))
             realized = (price - pos.avg_price) * closed if prev_qty > 0 else (pos.avg_price - price) * closed
             self._state.realized += realized
             self._state.balances["USDT"] = self._state.balances.get("USDT", 0.0) + realized
 
         if new_qty != 0:
-            if (prev_qty == 0) or (prev_qty * qty > 0):
+            if (prev_qty == 0) or (prev_qty * qty > 0): # Opening
                 pos.avg_price = (pos.avg_price * abs(prev_qty) + price * abs(qty)) / abs(new_qty)
-            elif (prev_qty > 0 > new_qty) or (prev_qty < 0 < new_qty):
+            elif (prev_qty > 0 > new_qty) or (prev_qty < 0 < new_qty): # Flip
                 pos.avg_price = price
         else:
             pos.avg_price = 0.0

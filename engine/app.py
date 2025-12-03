@@ -2962,7 +2962,7 @@ async def _start_fee_manager() -> None:
             _app_logger.info("[FeeManager] Disabled via config")
             return
 
-        manager = FeeManager(portfolio, ROUTER, config=config)
+        manager = FeeManager(portfolio, router, config=config)
         asyncio.create_task(manager.run())
         _app_logger.info("[FeeManager] Started")
     except _SUPPRESSIBLE_EXCEPTIONS as exc:

@@ -3,8 +3,9 @@
  * 
  * Overlay equity curves and drill down into specific trades
  */
-import { useState } from 'react';
 import { TrendingUp } from 'lucide-react';
+import { useState } from 'react';
+
 import { cn } from '../lib/utils';
 
 interface BacktestRun {

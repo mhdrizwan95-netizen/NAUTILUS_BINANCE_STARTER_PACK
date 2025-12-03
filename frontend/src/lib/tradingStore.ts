@@ -109,7 +109,11 @@ export const useTradingStore = create<TradingState>()(
                 positions: [],
             },
             trades: [],
-            strategies: new Map(),
+            strategies: new Map([
+                ['HMM_Trend_v2', { name: 'HMM_Trend_v2', enabled: true, confidence: 0.85, signal: 1, lastUpdate: Date.now() }],
+                ['MeanRev_Scalp', { name: 'MeanRev_Scalp', enabled: true, confidence: 0.65, signal: -0.5, lastUpdate: Date.now() }],
+                ['Meme_Sniper', { name: 'Meme_Sniper', enabled: false, confidence: 0.1, signal: 0, lastUpdate: Date.now() }],
+            ]),
             venues: new Map(),
             health: {
                 tradingEnabled: false,

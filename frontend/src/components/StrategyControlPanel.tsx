@@ -3,8 +3,9 @@
  * 
  * Dynamic strategy management, hot-swap, and emergency controls
  */
-import { useState } from 'react';
 import { AlertTriangle, Power, RefreshCw, Zap, Settings } from 'lucide-react';
+import { useState } from 'react';
+
 import { useAllStrategies } from '../lib/tradingStore';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -118,13 +119,20 @@ export function StrategyControlPanel() {
     );
 }
 
+interface Strategy {
+    name: string;
+    enabled: boolean;
+    confidence: number;
+    signal: number;
+}
+
 function StrategyCard({
     strategy,
     onHotSwap,
     onSelect,
     isSelected,
 }: {
-    strategy: any;
+    strategy: Strategy;
     onHotSwap: () => void;
     onSelect: () => void;
     isSelected: boolean;
@@ -136,6 +144,13 @@ function StrategyCard({
                 isSelected && 'border-2 border-cyber-accent'
             )}
             onClick={onSelect}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                    onSelect();
+                }
+            }}
         >
             <div className="flex items-start justify-between mb-3">
                 <div className="flex-1">

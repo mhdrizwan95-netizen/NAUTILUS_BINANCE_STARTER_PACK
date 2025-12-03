@@ -5,6 +5,7 @@
  */
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef } from 'react';
+
 import { useRecentTrades } from '../lib/tradingStore';
 import { cn } from '../lib/utils';
 

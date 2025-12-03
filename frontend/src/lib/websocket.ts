@@ -2,87 +2,318 @@ import { useEffect, useRef, useCallback, useState, useMemo, useSyncExternalStore
 import { useShallow } from "zustand/react/shallow";
 
 import { issueWebsocketSession } from "./api";
-import { useTradingStore, type PriceTick } from "./tradingStore";
+import { useAppStore, useRealTimeActions } from "./store";
+import { wsGetSnapshot, wsSetState, wsSubscribe } from "./wsStore";
+import type { GlobalMetrics, StrategyPerformance, Venue } from "../types/trading";
 
-// ... (imports)
+type OutgoingMessage = Record<string, unknown>;
+
+const wsDevLog = (...args: unknown[]) => {
+  if (import.meta.env.DEV) {
+    console.warn(...args);
+  }
+};
+
+export interface WebSocketMessage<T = unknown> {
+  type: string;
+  data: T;
+  timestamp: number;
+}
+
+export interface WebSocketHookResult {
+  isConnected: boolean;
+  lastMessage: WebSocketMessage | null;
+  sendMessage: (message: OutgoingMessage) => void;
+  reconnect: () => void;
+}
+
+class WebSocketManager {
+  private ws: WebSocket | null = null;
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 1000; // Start with 1 second
+  private maxReconnectDelay = 30000; // Max 30 seconds
+  private heartbeatInterval: number | null = null;
+  private heartbeatTimeout: number | null = null;
+  private url: string;
+  private onMessage: (message: WebSocketMessage) => void;
+  private onConnect: () => void;
+  private onDisconnect: () => void;
+  private onError: (error: Event) => void;
+
+  constructor(
+    url: string,
+    onMessage: (message: WebSocketMessage) => void,
+    onConnect: () => void,
+    onDisconnect: () => void,
+    onError: (error: Event) => void,
+  ) {
+    this.url = url;
+    this.onMessage = onMessage;
+    this.onConnect = onConnect;
+    this.onDisconnect = onDisconnect;
+    this.onError = onError;
+  }
+
+  connect(): void {
+    if (this.ws?.readyState === WebSocket.OPEN) return;
+
+    try {
+      this.ws = new WebSocket(this.url);
+
+      this.ws.onopen = () => {
+        wsDevLog("WebSocket connected");
+        this.reconnectAttempts = 0;
+        this.reconnectDelay = 1000;
+        this.startHeartbeat();
+        this.onConnect();
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const parsed = JSON.parse(event.data) as Partial<WebSocketMessage>;
+          if (!parsed || typeof parsed.type !== "string") {
+            throw new Error("Malformed message");
+          }
+          const message: WebSocketMessage = {
+            type: parsed.type,
+            data: parsed.data ?? null,
+            timestamp: parsed.timestamp ?? Date.now(),
+          };
+          // Clear heartbeat timeout on ack
+          if (message.type === "heartbeat" && this.heartbeatTimeout) {
+            clearTimeout(this.heartbeatTimeout);
+            this.heartbeatTimeout = null;
+          }
+          this.onMessage(message);
+        } catch (error) {
+          console.error("Failed to parse WebSocket message:", error);
+        }
+      };
+
+      this.ws.onclose = (event) => {
+        wsDevLog("WebSocket disconnected:", event.code, event.reason);
+        this.stopHeartbeat();
+        this.onDisconnect();
+        this.handleReconnect(event);
+      };
+
+      this.ws.onerror = (error) => {
+        console.error("WebSocket error:", error);
+        this.onError(error);
+      };
+    } catch (error) {
+      console.error("Failed to create WebSocket connection:", error);
+      this.handleReconnect();
+    }
+  }
+
+  disconnect(): void {
+    if (this.ws) {
+      this.ws.close(1000, "Client disconnect");
+      this.ws = null;
+    }
+    this.stopHeartbeat();
+  }
+
+  sendMessage(message: OutgoingMessage): void {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    } else {
+      console.warn("WebSocket is not connected. Message not sent:", message);
+    }
+  }
+
+  private startHeartbeat(): void {
+    // Send heartbeat every 30 seconds
+    this.heartbeatInterval = window.setInterval(() => {
+      this.sendMessage({ type: "heartbeat", timestamp: Date.now() });
+
+      // Set timeout for heartbeat response
+      this.heartbeatTimeout = window.setTimeout(() => {
+        console.warn("Heartbeat timeout - reconnecting...");
+        this.disconnect();
+        this.connect();
+      }, 10000); // 10 second timeout
+    }, 30000);
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+    }
+    if (this.heartbeatTimeout) {
+      clearTimeout(this.heartbeatTimeout);
+      this.heartbeatTimeout = null;
+    }
+  }
+
+  private handleReconnect(event?: CloseEvent): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error("Max reconnection attempts reached", event?.code ?? "");
+      return;
+    }
+
+    this.reconnectAttempts++;
+    const backoff = Math.min(
+      this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      this.maxReconnectDelay,
+    );
+    const jitter = Math.floor(Math.random() * 500);
+    const delay = backoff + jitter;
+
+    wsDevLog(
+      `Attempting to reconnect in ${delay}ms (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+      event?.code ?? "",
+    );
+
+    window.setTimeout(() => {
+      this.connect();
+    }, delay);
+  }
+
+  get isConnected(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN;
+  }
+}
+
+// Global WebSocket manager instance
+let wsManager: WebSocketManager | null = null;
+let currentUrl: string | null = null;
+let liveDisabledOverride: boolean | null = null;
+
+const isGlobalMetricsPayload = (data: unknown): data is GlobalMetrics =>
+  typeof data === "object" && data !== null;
+
+const isStrategyPerformanceArray = (data: unknown): data is StrategyPerformance[] =>
+  Array.isArray(data);
+
+const isVenueArray = (data: unknown): data is Venue[] => Array.isArray(data);
+
+const buildWebSocketUrl = (base: string, session: string): string => {
+  try {
+    const url = new URL(base, base.startsWith("ws") ? undefined : window.location.origin);
+    // FIXED: use 'token' instead of 'session' to match backend expectations
+    url.searchParams.set("token", session);
+    return url.toString();
+  } catch {
+    const delimiter = base.includes("?") ? "&" : "?";
+    // FIXED: use 'token' here as well
+    return `${base}${delimiter}token=${encodeURIComponent(session)}`;
+  }
+};
+
+export const __setLiveDisabledOverride = (value: boolean | null) => {
+  liveDisabledOverride = value;
+};
+
+const resolveLiveDisabled = (): boolean => {
+  if (liveDisabledOverride !== null) {
+    return liveDisabledOverride;
+  }
+  return (import.meta.env?.VITE_LIVE_OFF ?? "false") === "true";
+};
+
+export function initializeWebSocket(
+  onMessage: (message: WebSocketMessage) => void,
+  onConnect: () => void,
+  onDisconnect: () => void,
+  onError: (error: Event) => void,
+  session: string,
+): WebSocketManager {
+  // Use environment variable or default to dynamic hostname:8003
+  // This ensures it works for localhost, LAN IP, or Public IP automatically.
+  const getEngineUrl = () => {
+    const host = window.location.hostname;
+    return `ws://${host}:8003/ws`;
+  };
+  const baseUrl = import.meta.env?.VITE_WS_URL ?? getEngineUrl();
+  const wsUrl = buildWebSocketUrl(baseUrl, session);
+
+  if (!wsManager || currentUrl !== wsUrl) {
+    wsManager?.disconnect();
+    wsManager = new WebSocketManager(wsUrl, onMessage, onConnect, onDisconnect, onError);
+    currentUrl = wsUrl;
+  }
+
+  return wsManager;
+}
 
 export function useWebSocket(): WebSocketHookResult {
-  // ... (existing checks)
+  const isTestMode =
+    (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") ||
+    (typeof import.meta !== "undefined" && import.meta.env?.VITE_DISABLE_WS === "1") ||
+    (typeof globalThis !== "undefined" &&
+      Boolean((globalThis as { __NAUTILUS_DISABLE_WS__?: boolean }).__NAUTILUS_DISABLE_WS__));
 
-  // Use environment variable or default to localhost:8003 (Engine)
-  const baseUrl = import.meta.env?.VITE_WS_URL ?? "ws://localhost:8003/ws";
-  const url = new URL(baseUrl);
-  url.searchParams.set("token", session);
-  const wsUrl = url.toString();
-  const updateStrategy = useTradingStore((state) => state.updateStrategy);
-  const updateVenue = useTradingStore((state) => state.updateVenue);
-  const setSystemHealth = useTradingStore((state) => state.setSystemHealth);
+  const liveDisabled = resolveLiveDisabled();
+  const disabledResult: WebSocketHookResult = useMemo(() => {
+    const noop = () => { };
+    return {
+      isConnected: false,
+      lastMessage: null,
+      sendMessage: noop,
+      reconnect: noop,
+    } satisfies WebSocketHookResult;
+  }, []);
 
+  if (liveDisabled || isTestMode) {
+    return disabledResult;
+  }
+
+  const { updateGlobalMetrics, updatePerformances, updateVenues, updateRealTimeData } =
+    useRealTimeActions();
+  const [opsToken, opsActor] = useAppStore(
+    useShallow((state) => [state.opsAuth.token, state.opsAuth.actor] as const),
+  );
   const managerRef = useRef<WebSocketManager | null>(null);
+  const actionsRef = useRef({
+    updateGlobalMetrics,
+    updatePerformances,
+    updateVenues,
+    updateRealTimeData,
+  });
+  const [wsSession, setWsSession] = useState<string | null>(null);
+  const lastCredentialsRef = useRef<string | null>(null);
+  const sessionRequestInFlight = useRef(false);
+  const lastSessionFailureRef = useRef<number>(0);
 
-  // Batching Refs
-  const priceBufferRef = useRef<PriceTick[]>([]);
-  const batchTimeoutRef = useRef<number | null>(null);
-
-  const flushBatch = useCallback(() => {
-    if (priceBufferRef.current.length > 0) {
-      updatePrices(priceBufferRef.current);
-      priceBufferRef.current = [];
-    }
-    batchTimeoutRef.current = null;
-  }, [updatePrices]);
+  // Update actions ref when they change
+  actionsRef.current = {
+    updateGlobalMetrics,
+    updatePerformances,
+    updateVenues,
+    updateRealTimeData,
+  };
 
   const handleMessage = useCallback((message: WebSocketMessage) => {
     wsSetState({ lastMessage: message });
 
+    // Handle different message types using the current actions
     switch (message.type) {
-      case "market.tick":
-        // High-frequency data: Batch it
-        if (message.data && typeof message.data === 'object') {
-          const tick = message.data as any;
-          priceBufferRef.current.push({
-            symbol: tick.symbol,
-            price: tick.price,
-            volume: tick.volume || 0,
-            timestamp: tick.ts * 1000
-          });
-
-          if (!batchTimeoutRef.current) {
-            batchTimeoutRef.current = window.setTimeout(flushBatch, 50); // 50ms throttle (20fps)
-          }
+      case "metrics":
+        if (isGlobalMetricsPayload(message.data)) {
+          actionsRef.current.updateGlobalMetrics(message.data);
         }
         break;
-
-      case "account_update":
-        // Medium-frequency: Direct update
-        if (message.data) {
-          setPortfolio(message.data as any);
+      case "performances":
+        if (isStrategyPerformanceArray(message.data)) {
+          actionsRef.current.updatePerformances(message.data);
         }
         break;
-
-      case "strategy.performance":
-        if (Array.isArray(message.data)) {
-          message.data.forEach((strat: any) => {
-            updateStrategy(strat.name, strat);
-          });
+      case "venues":
+        if (isVenueArray(message.data)) {
+          actionsRef.current.updateVenues(message.data);
         }
         break;
-
-      case "venue.status":
-        if (message.data) {
-          const venue = message.data as any;
-          updateVenue(venue.name, venue);
-        }
-        break;
-
       case "heartbeat":
+        // Heartbeat response - connection is healthy
         break;
-
       default:
-        // wsDevLog("Unhandled WebSocket message:", message);
-        break;
+        wsDevLog("Unhandled WebSocket message:", message);
     }
-  }, [flushBatch, setPortfolio, updateStrategy, updateVenue]);
+  }, []); // No dependencies - use actionsRef instead
 
   const handleConnect = useCallback(() => {
     wsDevLog("WebSocket connected - subscribing to real-time data");
@@ -188,17 +419,17 @@ export function useWebSocket(): WebSocketHookResult {
       wsSession,
     );
 
-    const buildWebSocketUrl = (base: string, session: string): string => {
-      try {
-        const url = new URL(base, base.startsWith("ws") ? undefined : window.location.origin);
-        // FIX: Use 'token' instead of 'session' to match Python ops_auth
-        url.searchParams.set("token", session);
-        return url.toString();
-      } catch {
-        const delimiter = base.includes("?") ? "&" : "?";
-        return `${base}${delimiter}token=${encodeURIComponent(session)}`;
-      }
+    if (!managerRef.current.isConnected) {
+      managerRef.current.connect();
+    }
+
+    return () => {
+      // Don't disconnect on unmount - keep connection alive
+      // managerRef.current?.disconnect();
     };
+  }, [handleConnect, handleDisconnect, handleError, handleMessage, opsToken, wsSession]);
+
+  const sendMessage = useCallback((message: OutgoingMessage) => {
     managerRef.current?.sendMessage(message);
   }, []);
 

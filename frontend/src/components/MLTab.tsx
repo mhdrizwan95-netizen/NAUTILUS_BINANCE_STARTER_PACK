@@ -3,8 +3,9 @@
  * 
  * Shows HMM regime probabilities, feature importance, and model status
  */
-import { useState } from 'react';
 import { Activity, Brain, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { useState } from 'react';
+
 import { useAllStrategies } from '../lib/tradingStore';
 import { cn } from '../lib/utils';
 

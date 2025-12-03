@@ -1,0 +1,32 @@
+
+> Nautilus Trading Command Center@0.1.0 lint
+> ESLINT_USE_FLAT_CONFIG=false eslint -c .eslintrc.cjs "src/**/*.{ts,tsx}" --max-warnings=0
+
+
+/home/mrzlen/NAUTILUS_BINANCE_STARTER_PACK/frontend/src/components/BacktestingComparison.tsx
+  85:25  error  A form label must have accessible text  jsx-a11y/label-has-associated-control
+
+/home/mrzlen/NAUTILUS_BINANCE_STARTER_PACK/frontend/src/components/CanvasPriceChart.tsx
+  102:47  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/mrzlen/NAUTILUS_BINANCE_STARTER_PACK/frontend/src/components/StrategyControlPanel.tsx
+   25:9   warning  Unexpected console statement. Only these console methods are allowed: warn, error                                                                                                                  no-console
+   31:9   warning  Unexpected console statement. Only these console methods are allowed: warn, error                                                                                                                  no-console
+  128:15  error    Unexpected any. Specify a different type                                                                                                                                                           @typescript-eslint/no-explicit-any
+  134:9   error    Visible, non-interactive elements with click handlers must have at least one keyboard listener                                                                                                     jsx-a11y/click-events-have-key-events
+  134:9   error    Avoid non-native interactive elements. If using native HTML is not possible, add an appropriate role and support for tabbing, mouse, keyboard, and touch inputs to an interactive content element  jsx-a11y/no-static-element-interactions
+  194:9   warning  Unexpected console statement. Only these console methods are allowed: warn, error                                                                                                                  no-console
+
+/home/mrzlen/NAUTILUS_BINANCE_STARTER_PACK/frontend/src/components/tabs/MLTab.tsx
+    7:1   error  `lucide-react` import should occur before import of `react`  import/order
+  211:27  error  Unexpected any. Specify a different type                     @typescript-eslint/no-explicit-any
+
+/home/mrzlen/NAUTILUS_BINANCE_STARTER_PACK/frontend/src/components/ui/GlassCard.tsx
+  1:8   error    No default export found in imported module "react"                                                                                     import/default
+  5:34  warning  Caution: `React` also has a named export `HTMLAttributes`. Check if you meant to write `import {HTMLAttributes} from 'react'` instead  import/no-named-as-default-member
+
+✖ 12 problems (8 errors, 4 warnings)
+  1 error and 0 warnings potentially fixable with the `--fix` option.
+
+(node:1911926) ESLintRCWarning: You are using an eslintrc configuration file, which is deprecated and support will be removed in v10.0.0. Please migrate to an eslint.config.js file. See https://eslint.org/docs/latest/use/configure/migration-guide for details. An eslintrc configuration file is used because you have the ESLINT_USE_FLAT_CONFIG environment variable set to false. If you want to use an eslint.config.js file, remove the environment variable. If you want to find the location of the eslintrc configuration file, use the --debug flag.
+(Use `node --trace-warnings ...` to show where the warning was created)

@@ -1,13 +1,15 @@
 /**
- * ML Tab - "THE BRAIN" - Real-Time HMM Visualization
+ * ML Tab - "THE NEURAL LINK" - Real-Time HMM Visualization
  * 
  * Shows real-time regime probabilities, feature importance, and canary model status
  */
+import { Brain, Activity, Layers } from 'lucide-react';
 import { useState, useEffect } from 'react';
-import { Brain, Activity, TrendingUp, GitBranch } from 'lucide-react';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { useAllStrategies } from '../../lib/tradingStore';
+import type { SVGProps } from 'react';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
+
 import { cn } from '../../lib/utils';
+import { GlassCard } from '../ui/GlassCard';
 
 interface RegimeProbability {
     timestamp: number;
@@ -23,14 +25,11 @@ interface FeatureImportance {
 }
 
 export function MLTab() {
-    const strategies = useAllStrategies();
-    const hmmStrategy = strategies.find((s) => s.name.includes('hmm'));
-
     // Real-time regime probability stream (last 30 minutes)
     const [regimeHistory, setRegimeHistory] = useState<RegimeProbability[]>([]);
 
     // Feature importance data
-    const [features, setFeatures] = useState<FeatureImportance[]>([
+    const [features] = useState<FeatureImportance[]>([
         { name: 'Volatility', importance: 0.35, currentValue: 0.15 },
         { name: 'Z-Score', importance: 0.28, currentValue: 1.2 },
         { name: 'Return', importance: 0.20, currentValue: 0.02 },
@@ -40,6 +39,19 @@ export function MLTab() {
 
     // Simulated real-time data stream
     useEffect(() => {
+        // Initial data
+        const initialHistory = [];
+        const now = Date.now();
+        for (let i = 0; i < 50; i++) {
+            initialHistory.push({
+                timestamp: now - (50 - i) * 10000,
+                bull: 0.3 + Math.random() * 0.2,
+                bear: 0.2 + Math.random() * 0.1,
+                chop: 0.2 + Math.random() * 0.3,
+            });
+        }
+        setRegimeHistory(initialHistory);
+
         const interval = setInterval(() => {
             const now = Date.now();
             const newPoint: RegimeProbability = {
@@ -54,7 +66,7 @@ export function MLTab() {
                 // Keep last 30 minutes (180 points @ 10s intervals)
                 return updated.slice(-180);
             });
-        }, 10000); // Update every 10 seconds
+        }, 2000); // Update every 2 seconds for demo
 
         return () => clearInterval(interval);
     }, []);
@@ -70,188 +82,149 @@ export function MLTab() {
         : 'UNKNOWN';
 
     return (
-        <div className="p-6 space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <Brain className="h-8 w-8 cyber-positive" />
+        <div className="p-8 space-y-8 min-h-screen flex flex-col max-w-[1920px] mx-auto w-full bg-deep-space text-zinc-100 font-header pb-20">
+
+            {/* HEADER: Model Status */}
+            <div className="grid grid-cols-4 gap-6 shrink-0">
+                <GlassCard className="flex items-center gap-4 p-6 bg-white/5">
+                    <Brain className="h-8 w-8 text-neon-cyan" />
                     <div>
-                        <h2 className="text-2xl font-bold neon-glow cyber-positive">THE BRAIN</h2>
-                        <p className="text-sm cyber-text-dim">HMM Model Intelligence Core</p>
+                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Model Version</div>
+                        <div className="text-xl font-data font-bold text-white">v2.1.0-RC3</div>
                     </div>
-                </div>
+                </GlassCard>
 
-                {/* Canary Status */}
-                <div className="glass px-6 py-3">
-                    <div className="flex items-center gap-3">
-                        <GitBranch className="h-5 w-5 neon-blue" />
-                        <div>
-                            <div className="text-xs cyber-text-dim">Production Model</div>
-                            <div className="font-mono font-bold cyber-positive">v1.2.3</div>
-                        </div>
-                        <div className="w-px h-8 bg-white/10 mx-2" />
-                        <div>
-                            <div className="text-xs cyber-text-dim">Candidate</div>
-                            <div className="font-mono font-bold neon-yellow">v1.3.0-rc1</div>
-                        </div>
+                <GlassCard className="flex items-center gap-4 p-6 bg-white/5">
+                    <ClockIcon className="h-8 w-8 text-neon-amber" />
+                    <div>
+                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Last Trained</div>
+                        <div className="text-xl font-data font-bold text-white">4h 12m ago</div>
                     </div>
-                </div>
-            </div>
+                </GlassCard>
 
-            {/* Current Regime Status */}
-            <div className="glass p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold cyber-text">Current Market Regime</h3>
-                    <div className="flex items-center gap-2">
-                        <Activity className="h-4 w-4 cyber-positive cyber-pulse" />
-                        <span className="text-xs cyber-text-dim">Live</span>
+                <GlassCard className="flex items-center gap-4 p-6 bg-white/5">
+                    <Activity className="h-8 w-8 text-neon-green" />
+                    <div>
+                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Accuracy (24h)</div>
+                        <div className="text-xl font-data font-bold text-neon-green">68.4%</div>
                     </div>
-                </div>
+                </GlassCard>
 
-                <div className="grid grid-cols-4 gap-6">
-                    <div className="col-span-1">
+                <GlassCard className="flex items-center gap-4 p-6 bg-white/5">
+                    <Layers className="h-8 w-8 text-neon-blue" />
+                    <div>
+                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Current Regime</div>
                         <div className={cn(
-                            'text-5xl font-bold font-mono neon-glow',
-                            dominantRegime === 'BULL' ? 'cyber-positive' :
-                                dominantRegime === 'BEAR' ? 'cyber-negative' : 'neon-yellow'
+                            "text-xl font-data font-bold",
+                            dominantRegime === 'BULL' ? "text-neon-green" :
+                                dominantRegime === 'BEAR' ? "text-neon-red" : "text-neon-amber"
                         )}>
                             {dominantRegime}
                         </div>
-                        <div className="text-sm cyber-text-dim mt-2">
-                            Confidence: {currentRegime ? (Math.max(currentRegime.bull, currentRegime.bear, currentRegime.chop) * 100).toFixed(1) : 0}%
-                        </div>
                     </div>
-
-                    {currentRegime && (
-                        <>
-                            <ProbabilityBar label="Bull" value={currentRegime.bull} color="cyber-positive" />
-                            <ProbabilityBar label="Bear" value={currentRegime.bear} color="cyber-negative" />
-                            <ProbabilityBar label="Chop" value={currentRegime.chop} color="neon-yellow" />
-                        </>
-                    )}
-                </div>
+                </GlassCard>
             </div>
 
-            {/* Regime Probability Stream (Real-Time Chart) */}
-            <div className="glass p-6">
-                <h3 className="text-lg font-semibold cyber-text mb-4">Regime Probability Stream (30min)</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                    <LineChart data={regimeHistory.map(p => ({
-                        time: new Date(p.timestamp).toLocaleTimeString(),
-                        Bull: (p.bull * 100).toFixed(1),
-                        Bear: (p.bear * 100).toFixed(1),
-                        Chop: (p.chop * 100).toFixed(1),
-                    }))}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                        <XAxis
-                            dataKey="time"
-                            stroke="#b0b7bf"
-                            style={{ fontSize: '12px' }}
-                        />
-                        <YAxis
-                            stroke="#b0b7bf"
-                            style={{ fontSize: '12px' }}
-                            domain={[0, 100]}
-                        />
-                        <Tooltip
-                            contentStyle={{
-                                background: 'rgba(15, 15, 35, 0.95)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                borderRadius: '8px'
-                            }}
-                        />
-                        <Legend />
-                        <Line
-                            type="monotone"
-                            dataKey="Bull"
-                            stroke="#00ff9d"
-                            strokeWidth={2}
-                            dot={false}
-                        />
-                        <Line
-                            type="monotone"
-                            dataKey="Bear"
-                            stroke="#ff6b6b"
-                            strokeWidth={2}
-                            dot={false}
-                        />
-                        <Line
-                            type="monotone"
-                            dataKey="Chop"
-                            stroke="#ffd93d"
-                            strokeWidth={2}
-                            dot={false}
-                        />
-                    </LineChart>
-                </ResponsiveContainer>
+            {/* MAIN ROW: Regime Stream & Features */}
+            <div className="grid grid-cols-12 gap-8 h-[450px]">
+
+                {/* Market Regime Probability Stream */}
+                <GlassCard title="Market Regime Probability Stream" neonAccent="cyan" className="col-span-8 flex flex-col">
+                    <div className="flex-1 w-full h-full min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={regimeHistory}>
+                                <defs>
+                                    <linearGradient id="colorBull" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#00ff9d" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#00ff9d" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="colorBear" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#ff6b6b" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#ff6b6b" stopOpacity={0} />
+                                    </linearGradient>
+                                    <linearGradient id="colorChop" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#ffd93d" stopOpacity={0.3} />
+                                        <stop offset="95%" stopColor="#ffd93d" stopOpacity={0} />
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                <XAxis dataKey="timestamp" tickFormatter={(t) => new Date(t).toLocaleTimeString()} stroke="#52525b" fontSize={12} />
+                                <YAxis stroke="#52525b" fontSize={12} domain={[0, 1]} />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }}
+                                    itemStyle={{ color: '#f4f4f5' }}
+                                    labelStyle={{ color: '#a1a1aa' }}
+                                    labelFormatter={(t) => new Date(t).toLocaleTimeString()}
+                                />
+                                <Legend />
+                                <Area type="monotone" dataKey="bull" stackId="1" stroke="#00ff9d" fill="url(#colorBull)" name="Bull" />
+                                <Area type="monotone" dataKey="chop" stackId="1" stroke="#ffd93d" fill="url(#colorChop)" name="Chop" />
+                                <Area type="monotone" dataKey="bear" stackId="1" stroke="#ff6b6b" fill="url(#colorBear)" name="Bear" />
+                            </AreaChart>
+                        </ResponsiveContainer>
+                    </div>
+                </GlassCard>
+
+                {/* Feature Importance */}
+                <GlassCard title="Feature Importance" neonAccent="blue" className="col-span-4 flex flex-col">
+                    <div className="flex-1 w-full h-full min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <BarChart data={features} layout="vertical" margin={{ left: 40 }}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" horizontal={false} />
+                                <XAxis type="number" domain={[0, 0.5]} stroke="#52525b" fontSize={12} />
+                                <YAxis dataKey="name" type="category" stroke="#52525b" fontSize={12} width={80} />
+                                <Tooltip
+                                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                                    contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }}
+                                />
+                                <Bar dataKey="importance" fill="#4361ee" radius={[0, 4, 4, 0]} barSize={20} />
+                            </BarChart>
+                        </ResponsiveContainer>
+                    </div>
+                </GlassCard>
             </div>
 
-            {/* Feature Importance Bar Chart */}
-            <div className="glass p-6">
-                <h3 className="text-lg font-semibold cyber-text mb-4">Feature Importance (Decision Drivers)</h3>
-                <ResponsiveContainer width="100%" height={250}>
-                    <BarChart
-                        data={features}
-                        layout="vertical"
-                        margin={{ left: 80 }}
-                    >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.1)" />
-                        <XAxis
-                            type="number"
-                            domain={[0, 1]}
-                            stroke="#b0b7bf"
-                            style={{ fontSize: '12px' }}
-                        />
-                        <YAxis
-                            type="category"
-                            dataKey="name"
-                            stroke="#b0b7bf"
-                            style={{ fontSize: '12px' }}
-                        />
-                        <Tooltip
-                            contentStyle={{
-                                background: 'rgba(15, 15, 35, 0.95)',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                borderRadius: '8px'
-                            }}
-                            formatter={(value: any) => (value * 100).toFixed(1) + '%'}
-                        />
-                        <Bar
-                            dataKey="importance"
-                            fill="url(#colorGradient)"
-                            radius={[0, 8, 8, 0]}
-                        />
-                        <defs>
-                            <linearGradient id="colorGradient" x1="0" y1="0" x2="1" y2="0">
-                                <stop offset="0%" stopColor="#00ff9d" stopOpacity={0.8} />
-                                <stop offset="100%" stopColor="#00d3ff" stopOpacity={0.8} />
-                            </linearGradient>
-                        </defs>
-                    </BarChart>
-                </ResponsiveContainer>
+            {/* BOTTOM ROW: Canary Model Comparison */}
+            <div className="grid grid-cols-1 gap-8 h-[400px]">
+                <GlassCard title="Canary Model Performance vs Production" neonAccent="amber" className="flex flex-col">
+                    <div className="flex-1 w-full h-full min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <LineChart data={regimeHistory}>
+                                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                                <XAxis dataKey="timestamp" tickFormatter={(t) => new Date(t).toLocaleTimeString()} stroke="#52525b" fontSize={12} />
+                                <YAxis stroke="#52525b" fontSize={12} />
+                                <Tooltip
+                                    contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }}
+                                    labelFormatter={(t) => new Date(t).toLocaleTimeString()}
+                                />
+                                <Legend />
+                                <Line type="monotone" dataKey="bull" stroke="#00ff9d" strokeWidth={2} dot={false} name="Prod v2.1 (PnL)" />
+                                <Line type="monotone" dataKey="chop" stroke="#ffd93d" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Canary v2.2 (Shadow)" />
+                            </LineChart>
+                        </ResponsiveContainer>
+                    </div>
+                </GlassCard>
             </div>
         </div>
     );
 }
 
-function ProbabilityBar({ label, value, color }: { label: string; value: number; color: string }) {
+function ClockIcon(props: SVGProps<SVGSVGElement>) {
     return (
-        <div>
-            <div className="flex justify-between items-center mb-2">
-                <span className="text-sm cyber-text-dim">{label}</span>
-                <span className={cn('text-lg font-mono font-bold', color)}>
-                    {(value * 100).toFixed(1)}%
-                </span>
-            </div>
-            <div className="h-4 bg-white/5 rounded-full overflow-hidden">
-                <div
-                    className={cn('h-full transition-all duration-500', color)}
-                    style={{
-                        width: `${value * 100}%`,
-                        background: `linear-gradient(90deg, currentColor, transparent)`
-                    }}
-                />
-            </div>
-        </div>
+        <svg
+            {...props}
+            xmlns="http://www.w3.org/2000/svg"
+            width="24"
+            height="24"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+        </svg>
     );
 }

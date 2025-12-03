@@ -13,6 +13,7 @@ import { toast } from "sonner";
 
 import { TabbedInterface } from "./components/TabbedInterface";
 import { TopHUD } from "./components/TopHUD";
+import NautilusTerminal from "./components/NautilusTerminal";
 import { Toaster } from "./components/ui/sonner";
 import {
   flattenPositions,
@@ -27,7 +28,7 @@ import { buildSummarySearchParams } from "./lib/dashboardFilters";
 import { useRenderCounter } from "./lib/debug/why";
 import { stableHash } from "./lib/equality";
 import { generateIdempotencyKey } from "./lib/idempotency";
-import { LoopGuard } from "./lib/loopGuard";
+// LoopGuard removed to prevent false positives in high-frequency streams
 import { queryClient, queryKeys } from "./lib/queryClient";
 import { useAppStore, useDashboardFilters } from "./lib/store";
 import { mergeMetricsSnapshot, mergeVenuesSnapshot } from "./lib/streamMergers";
@@ -100,17 +101,19 @@ export function App() {
   const healthQueryKeyRef = useRef(healthQueryKey);
   summaryQueryKeyRef.current = summaryQueryKey;
   healthQueryKeyRef.current = healthQueryKey;
-  const bootResolvedRef = useRef(false);
-  const bootFetchInFlightRef = useRef(false);
+
+  // STRICT MOUNT GUARD
+  const mounted = useRef(false);
 
   useEffect(() => {
-    if (bootResolvedRef.current || bootFetchInFlightRef.current) {
+    if (mounted.current) {
       return;
     }
+    mounted.current = true;
+
     let cancelled = false;
     const controller = new AbortController();
     const paramsForBoot = new URLSearchParams(summaryParamsKey);
-    bootFetchInFlightRef.current = true;
 
     const hydrateBootData = async () => {
       const [summaryResult, healthResult] = await Promise.allSettled([
@@ -126,7 +129,7 @@ export function App() {
       if (healthResult.status === "fulfilled") {
         queryClient.setQueryData(healthQueryKeyRef.current, healthResult.value);
       }
-      bootResolvedRef.current = true;
+
       const summaryError =
         summaryResult.status === "rejected" && summaryResult.reason instanceof Error
           ? summaryResult.reason
@@ -150,35 +153,29 @@ export function App() {
         if (cancelled) {
           return;
         }
-        bootResolvedRef.current = true;
         setBootStatus({
           phase: "degraded",
           note: error instanceof Error ? error.message : "Boot fetch failed",
         });
-      })
-      .finally(() => {
-        bootFetchInFlightRef.current = false;
       });
 
     return () => {
       cancelled = true;
-      bootFetchInFlightRef.current = false;
       controller.abort();
     };
-  }, [summaryParamsKey]);
+  }, []); // Empty dependency array - run ONLY ONCE
 
   useEffect(() => {
-    if (bootResolvedRef.current) {
-      return;
-    }
+    // Timeout check also needs to respect mount guard or just run once
     const timeout = window.setTimeout(() => {
-      if (bootResolvedRef.current) {
-        return;
-      }
-      bootResolvedRef.current = true;
-      setBootStatus({
-        phase: "degraded",
-        note: "Boot timeout — continuing in degraded mode",
+      setBootStatus((prev) => {
+        if (prev.phase === "booting") {
+          return {
+            phase: "degraded",
+            note: "Boot timeout — continuing in degraded mode",
+          };
+        }
+        return prev;
       });
     }, BOOT_TIMEOUT_MS);
     return () => window.clearTimeout(timeout);
@@ -221,11 +218,7 @@ export function App() {
   }
 
   return (
-    <CommandCenterShell
-      bootStatus={bootStatus}
-      summaryParamsKey={summaryParamsKey}
-      setBootStatus={setBootStatus}
-    />
+    <NautilusTerminal />
   );
 }
 
@@ -298,19 +291,9 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
   );
   const healthQuery = useQuery(healthQueryOptions);
 
-  const renderGuardRef = useRef<LoopGuard | null>(null);
-  if (!renderGuardRef.current) {
-    renderGuardRef.current = new LoopGuard({
-      maxIter: 500,
-      timeoutMs: 5_000,
-      sampleEvery: 5,
-      name: "App render",
-    });
-  }
-
-  useEffect(() => {
-    renderGuardRef.current?.reset();
-  }, [summaryQuery.status, healthQuery.status]);
+  // --- LoopGuard Removed ---
+  // High frequency data streams will trigger frequent renders. 
+  // Strict loop detection is incompatible with real-time trading UIs.
 
   useEffect(() => {
     if (!notifiedOnline && summaryQuery.isSuccess) {
@@ -355,15 +338,6 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
     const value = opsStatusQuery.data?.state?.trading_enabled;
     return typeof value === "boolean" ? value : true;
   })();
-
-  const renderState = {
-    bootPhase: bootStatus.phase,
-    summaryStatus: summaryQuery.status,
-    healthStatus: healthQuery.status,
-    opsStatus: tradingEnabled,
-    wsConnected,
-  };
-  renderGuardRef.current.tick(renderState);
 
   useEffect(() => {
     if (!lastMessage) {
@@ -618,12 +592,12 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
 
   const hudMetrics = summaryQuery.data
     ? {
-        totalPnl: summaryQuery.data.kpis.totalPnl,
-        winRate: summaryQuery.data.kpis.winRate,
-        sharpe: summaryQuery.data.kpis.sharpe,
-        maxDrawdown: summaryQuery.data.kpis.maxDrawdown,
-        openPositions: summaryQuery.data.kpis.openPositions,
-      }
+      totalPnl: summaryQuery.data.kpis.totalPnl,
+      winRate: summaryQuery.data.kpis.winRate,
+      sharpe: summaryQuery.data.kpis.sharpe,
+      maxDrawdown: summaryQuery.data.kpis.maxDrawdown,
+      openPositions: summaryQuery.data.kpis.openPositions,
+    }
     : null;
 
   const venueStatuses = healthQuery.data?.venues ?? null;

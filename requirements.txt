@@ -1716,3 +1716,6 @@ xgboost==2.1.1 \
     --hash=sha256:deef471e8d353afa99e5cc0e2af7d99ace7013f40684fcf3eed9124de033265d \
     --hash=sha256:fcf8413f3c621e97fdaaa45abb7ae808319c88eff5447328eff14c419c7c6ae0
     # via nautilus-hmm-binance (pyproject.toml)
+nvidia-nccl-cu12==2.28.9 \
+    --hash=sha256:485776daa8447da5da39681af455aa3b2c2586ddcf4af8772495e7c532c7e5ab
+    # via xgboost

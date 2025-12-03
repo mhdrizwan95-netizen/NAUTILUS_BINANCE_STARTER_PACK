@@ -3,8 +3,8 @@
  * 
  * Shows submit_to_ack latency patterns over time
  */
-import { useEffect, useRef } from 'react';
 import { Activity } from 'lucide-react';
+import { useEffect, useRef } from 'react';
 
 interface LatencyBucket {
     time: number;

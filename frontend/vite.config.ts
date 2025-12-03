@@ -1,6 +1,7 @@
 import dotenv from "dotenv";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
+import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 
 dotenv.config({ path: "../.env", override: false });
@@ -8,7 +9,7 @@ dotenv.config({ path: "../.env", override: false });
 const DRY_RUN_DEFAULT = process.env.DRY_RUN ?? "1";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), tailwindcss()],
   define: {
     "import.meta.env.VITE_DRY_RUN": JSON.stringify(DRY_RUN_DEFAULT),
   },
@@ -27,7 +28,7 @@ export default defineConfig({
     open: true,
     proxy: {
       "/api": {
-        target: "http://localhost:8002",
+        target: "http://100.82.18.76:8002",
         changeOrigin: true,
       },
     },

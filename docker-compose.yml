@@ -11,14 +11,13 @@ x-engine-common:
   build: &id002
     context: .
     dockerfile: Dockerfile
-  command: '/usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port ${ENGINE_PORT:-8003}
-    --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
+  command: '/usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port ${ENGINE_PORT:-8003} --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
 
     '
   logging: *id001
   dns: &id003
-  - 1.1.1.1
-  - 8.8.8.8
+    - 1.1.1.1
+    - 8.8.8.8
   environment:
     PYTHONPATH: /app
     PROMETHEUS_MULTIPROC_DIR: /tmp/prom_multiproc
@@ -41,90 +40,88 @@ x-engine-common:
     ENGINE_POLL_SEC: ${ENGINE_POLL_SEC:-2}
   healthcheck: &id004
     test:
-    - CMD
-    - sh
-    - -lc
-    - curl -fsS http://localhost:8003/health >/dev/null
+      - CMD
+      - sh
+      - -lc
+      - curl -fsS http://localhost:8003/health >/dev/null
     interval: 30s
     timeout: 5s
     retries: 10
     start_period: 20s
   depends_on: &id005 []
   tmpfs: &id006
-  - /tmp/prom_multiproc:rw,uid=1000,gid=1000,mode=1777
+    - /tmp/prom_multiproc:rw,uid=1000,gid=1000,mode=1777
 services:
   engine_binance_exporter:
     build: *id002
-    command: '/usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers
-      1 --timeout-keep-alive 10 --limit-concurrency 256
+    command: '/usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 256
 
       '
     logging: *id001
     dns: *id003
     environment:
-    - ROLE=exporter
-    - VENUE=BINANCE
-    - TRADING_ENABLED=false
-    - GOVERNANCE_POLICY=/app/engine/policies.yaml
-    - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
-    - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com}
-    - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
-    - BINANCE_API_KEY=${BINANCE_API_KEY}
-    - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-    - TRADE_SYMBOLS=${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
-    - BINANCE_API_TIMEOUT=15
-    - BINANCE_RECV_WINDOW=60000
-    - ENGINE_PORT=8003
-    - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
-    - OPS_API_TOKEN=${OPS_API_TOKEN:-}
-    - OPS_API_TOKEN_FILE=${OPS_API_TOKEN_FILE:-}
+      - ROLE=exporter
+      - VENUE=BINANCE
+      - TRADING_ENABLED=false
+      - GOVERNANCE_POLICY=/app/engine/policies.yaml
+      - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
+      - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com}
+      - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - TRADE_SYMBOLS=${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
+      - BINANCE_API_TIMEOUT=15
+      - BINANCE_RECV_WINDOW=60000
+      - ENGINE_PORT=8003
+      - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
+      - OPS_API_TOKEN=${OPS_API_TOKEN:-}
+      - OPS_API_TOKEN_FILE=${OPS_API_TOKEN_FILE:-}
     healthcheck: *id004
     depends_on: *id005
     tmpfs: *id006
     container_name: hmm_engine_binance_exporter
     env_file: .env
     volumes:
-    - ./engine/state:/app/engine/state:rw
-    - ./engine/logs:/app/engine/logs:rw
-    - ./engine/logs:/app/engine/logs:rw
-    - ./data:/app/data:rw
-    - ml_models_volume:/app/engine/models:ro
+      - ./engine/state:/app/engine/state:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./data:/app/data:rw
+      - ml_models_volume:/app/engine/models:ro
     ports:
-    - 9103:8003
+      - 9103:8003
     networks:
-    - trading_net
+      - trading_net
   engine_binance:
     build: *id002
-    command: '/usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers
-      1 --timeout-keep-alive 10 --limit-concurrency 1024
+    command: '/usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 1024
 
       '
     logging: *id001
     dns: *id003
     environment:
-    - TRADING_ENABLED=false
-    - ROLE=trader
-    - VENUE=BINANCE
-    - GOVERNANCE_POLICY=/app/engine/policies.yaml
-    - BINANCE_MODE=${BINANCE_MODE}
-    - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
-    - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com}
-    - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
-    - BINANCE_API_KEY=${BINANCE_API_KEY}
-    - BINANCE_API_SECRET=${BINANCE_API_SECRET}
-    - TRADE_SYMBOLS=${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
-    - BINANCE_API_TIMEOUT=15
-    - BINANCE_RECV_WINDOW=60000
-    - ENGINE_PORT=8003
-    - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
-    - PARAM_CONTROLLER_URL=http://param_controller:8002
-    - HMM_MODEL_PATH=/app/engine/models/current/hmm_model.pkl
+      - TRADING_ENABLED=false
+      - ROLE=trader
+      - VENUE=BINANCE
+      - GOVERNANCE_POLICY=/app/engine/policies.yaml
+      - BINANCE_MODE=${BINANCE_MODE}
+      - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
+      - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com}
+      - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
+      - BINANCE_API_KEY=${BINANCE_API_KEY}
+      - BINANCE_API_SECRET=${BINANCE_API_SECRET}
+      - TRADE_SYMBOLS=${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
+      - BINANCE_API_TIMEOUT=15
+      - BINANCE_RECV_WINDOW=60000
+      - ENGINE_PORT=8003
+      - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
+      - PARAM_CONTROLLER_URL=http://param_controller:8002
+      - HMM_MODEL_PATH=/app/engine/models/current/hmm_model.pkl
     healthcheck:
       test:
-      - CMD
-      - sh
-      - -lc
-      - curl -fsS --max-time 10 http://localhost:8003/readyz >/dev/null
+        - CMD
+        - sh
+        - -lc
+        - curl -fsS --max-time 10 http://localhost:8003/readyz >/dev/null
       interval: 15s
       timeout: 8s
       retries: 10
@@ -134,22 +131,21 @@ services:
     container_name: hmm_engine_binance
     env_file: .env
     volumes:
-    - ./engine/state:/app/engine/state:rw
-    - ./engine/logs:/app/engine/logs:rw
-    - ./engine/logs:/app/engine/logs:rw
-    - ./data:/app/data:rw
-    - ml_models_volume:/app/engine/models:ro
+      - ./engine/state:/app/engine/state:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./engine/logs:/app/engine/logs:rw
+      - ./data:/app/data:rw
+      - ml_models_volume:/app/engine/models:ro
     ports:
-    - 8003:8003
+      - 8003:8003
     networks:
-    - trading_net
+      - trading_net
   ops:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: hmm_ops
-    command: '/usr/bin/tini -- uvicorn ops.ops_api:APP --host 0.0.0.0 --port 8002
-      --workers ${OPS_WORKERS:-2}
+    command: '/usr/bin/tini -- uvicorn ops.ops_api:APP --host 0.0.0.0 --port 8002 --workers ${OPS_WORKERS:-2}
 
       '
     logging: *id001
@@ -177,13 +173,13 @@ services:
       UI_METRICS_SOURCE: direct
       HMM_URL: http://ml_service:8000
     volumes:
-    - ./data:/app/data:rw
+      - ./data:/app/data:rw
     ports:
-    - ${OPS_PORT:-8002}:8002
+      - ${OPS_PORT:-8002}:8002
     healthcheck:
       test:
-      - CMD-SHELL
-      - curl -fsS --max-time 8 http://127.0.0.1:8002/readyz | grep -q '"ok":true'
+        - CMD-SHELL
+        - curl -fsS --max-time 8 http://127.0.0.1:8002/readyz | grep -q '"ok":true'
       interval: 15s
       timeout: 10s
       retries: 10
@@ -192,54 +188,51 @@ services:
       engine_binance:
         condition: service_healthy
     networks:
-    - trading_net
+      - trading_net
     tmpfs:
-    - /tmp/prom_multiproc:rw,uid=1000,gid=1000,mode=1777
+      - /tmp/prom_multiproc:rw,uid=1000,gid=1000,mode=1777
   universe:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: hmm_universe
     logging: *id001
-    command: '/usr/bin/tini -- uvicorn universe.service:APP --host 0.0.0.0 --port
-      8009
+    command: '/usr/bin/tini -- uvicorn universe.service:APP --host 0.0.0.0 --port 8009
 
       '
     ports:
-    - 8009:8009
+      - 8009:8009
     networks:
-    - trading_net
+      - trading_net
   situations:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: hmm_situations
     logging: *id001
-    command: '/usr/bin/tini -- uvicorn situations.service:APP --host 0.0.0.0 --port
-      8011
+    command: '/usr/bin/tini -- uvicorn situations.service:APP --host 0.0.0.0 --port 8011
 
       '
     ports:
-    - 8011:8011
+      - 8011:8011
     networks:
-    - trading_net
+      - trading_net
   screener:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: hmm_screener
     logging: *id001
-    command: '/usr/bin/tini -- uvicorn screener.service:APP --host 0.0.0.0 --port
-      8010
+    command: '/usr/bin/tini -- uvicorn screener.service:APP --host 0.0.0.0 --port 8010
 
       '
     ports:
-    - 8010:8010
+      - 8010:8010
     depends_on:
-    - universe
-    - situations
+      - universe
+      - situations
     networks:
-    - trading_net
+      - trading_net
   data_ingester:
     build:
       context: .
@@ -248,31 +241,31 @@ services:
     container_name: hmm_data_ingester
     logging: *id001
     profiles:
-    - ml
+      - ml
     environment:
-    - LEDGER_DB=/ml/manifest.sqlite
-    - DATA_LANDING=/ml/incoming
-    - EXCHANGE=binance
-    - SYMBOLS=BTC/USDT,ETH/USDT
-    - TIMEFRAME=1m
-    - BATCH_LIMIT=1000
-    - START_TS=0
+      - LEDGER_DB=/ml/manifest.sqlite
+      - DATA_LANDING=/ml/incoming
+      - EXCHANGE=binance
+      - SYMBOLS=BTC/USDT,ETH/USDT
+      - TIMEFRAME=1m
+      - BATCH_LIMIT=1000
+      - START_TS=0
     volumes:
-    - ml_data_volume:/ml
+      - ml_data_volume:/ml
     ports:
-    - 8013:8001
+      - 8013:8001
     restart: unless-stopped
     healthcheck:
       test:
-      - CMD
-      - sh
-      - -lc
-      - curl -fsS --max-time 5 http://localhost:8001/health >/dev/null
+        - CMD
+        - sh
+        - -lc
+        - curl -fsS --max-time 5 http://localhost:8001/health >/dev/null
       interval: 20s
       timeout: 8s
       retries: 5
     networks:
-    - trading_net
+      - trading_net
   ml_service:
     build:
       context: .
@@ -281,39 +274,39 @@ services:
     container_name: hmm_ml_service
     logging: *id001
     profiles:
-    - ml
+      - ml
     env_file:
-    - .env
+      - .env
     environment:
-    - DATA_DIR=/ml/data
-    - MODEL_DIR=/models
-    - REGISTRY_DIR=/models/registry
-    - CURRENT_SYMLINK=/models/current
-    - LEDGER_DB=/ml/manifest.sqlite
-    - EXACTLY_ONCE=true
-    - DELETE_AFTER_PROCESS=true
-    - LOG_LEVEL=INFO
+      - DATA_DIR=/ml/data
+      - MODEL_DIR=/models
+      - REGISTRY_DIR=/models/registry
+      - CURRENT_SYMLINK=/models/current
+      - LEDGER_DB=/ml/manifest.sqlite
+      - EXACTLY_ONCE=true
+      - DELETE_AFTER_PROCESS=true
+      - LOG_LEVEL=INFO
     depends_on:
       data_ingester:
         condition: service_started
     volumes:
-    - ml_data_volume:/ml
-    - ml_models_volume:/models
+      - ml_data_volume:/ml
+      - ml_models_volume:/models
     ports:
-    - 8015:8000
+      - 8015:8000
     healthcheck:
       test:
-      - CMD
-      - curl
-      - -fsS
-      - http://localhost:8000/health
+        - CMD
+        - curl
+        - -fsS
+        - http://localhost:8000/health
       interval: 30s
       timeout: 5s
       retries: 5
       start_period: 20s
     restart: unless-stopped
     networks:
-    - trading_net
+      - trading_net
   ml_scheduler:
     image: nautilus_ml_service:local
     container_name: hmm_ml_scheduler
@@ -322,29 +315,29 @@ services:
         condition: service_healthy
     logging: *id001
     profiles:
-    - ml
+      - ml
     env_file:
-    - .env
+      - .env
     environment:
-    - DATA_DIR=/ml/data
-    - MODEL_DIR=/models
-    - REGISTRY_DIR=/models/registry
-    - CURRENT_SYMLINK=/models/current
-    - LEDGER_DB=/ml/manifest.sqlite
-    - EXACTLY_ONCE=true
-    - DELETE_AFTER_PROCESS=true
-    - LOG_LEVEL=INFO
-    - RETRAIN_CRON=0 */6 * * *
+      - DATA_DIR=/ml/data
+      - MODEL_DIR=/models
+      - REGISTRY_DIR=/models/registry
+      - CURRENT_SYMLINK=/models/current
+      - LEDGER_DB=/ml/manifest.sqlite
+      - EXACTLY_ONCE=true
+      - DELETE_AFTER_PROCESS=true
+      - LOG_LEVEL=INFO
+      - RETRAIN_CRON=0 */6 * * *
     command:
-    - python
-    - -m
-    - app.scheduler
+      - python
+      - -m
+      - app.scheduler
     volumes:
-    - ml_data_volume:/ml
-    - ml_models_volume:/models
+      - ml_data_volume:/ml
+      - ml_models_volume:/models
     restart: unless-stopped
     networks:
-    - trading_net
+      - trading_net
   param_controller:
     build:
       context: .
@@ -353,60 +346,60 @@ services:
     container_name: hmm_param_controller
     logging: *id001
     profiles:
-    - ml
+      - ml
     environment:
-    - PC_DB=/shared/param_controller.sqlite
+      - PC_DB=/shared/param_controller.sqlite
     volumes:
-    - ml_shared_volume:/shared
+      - ml_shared_volume:/shared
     ports:
-    - 8016:8002
+      - 8016:8002
     restart: unless-stopped
     healthcheck:
       test:
-      - CMD
-      - sh
-      - -lc
-      - curl -fsS --max-time 5 http://localhost:8002/health >/dev/null
+        - CMD
+        - sh
+        - -lc
+        - curl -fsS --max-time 5 http://localhost:8002/health >/dev/null
       interval: 20s
       timeout: 8s
       retries: 5
     networks:
-    - trading_net
+      - trading_net
   prometheus:
     image: prom/prometheus:latest
     container_name: hmm_prometheus
     volumes:
-    - ./prometheus:/etc/prometheus
-    - prometheus_data:/prometheus
+      - ./prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
     command:
-    - --config.file=/etc/prometheus/prometheus.yml
-    - --storage.tsdb.path=/prometheus
-    - --web.console.libraries=/usr/share/prometheus/console_libraries
-    - --web.console.templates=/usr/share/prometheus/consoles
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
     ports:
-    - 9090:9090
+      - 9090:9090
     networks:
-    - trading_net
+      - trading_net
     restart: unless-stopped
   grafana:
     image: grafana/grafana:latest
     container_name: hmm_grafana
     user: '472'
     depends_on:
-    - prometheus
+      - prometheus
     ports:
-    - 3000:3000
+      - 3000:3000
     volumes:
-    - grafana_data:/var/lib/grafana
-    - ./grafana/provisioning:/etc/grafana/provisioning
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
     env_file:
-    - .env
+      - .env
     environment:
-    - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
-    - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
-    - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
     networks:
-    - trading_net
+      - trading_net
     restart: unless-stopped
 networks:
   trading_net:

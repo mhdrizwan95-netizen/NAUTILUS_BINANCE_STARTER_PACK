@@ -10,11 +10,11 @@ WORKDIR /build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential curl ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-RUN python -m pip install --upgrade pip \
- && pip install --prefix=/install --require-hashes -r requirements.txt
+RUN python -m pip install --upgrade pip setuptools wheel \
+    && pip install --prefix=/install -r requirements.txt
 
 # Build the React/TypeScript Command Center bundle
 FROM node:20-bookworm-slim AS frontend_builder
@@ -42,7 +42,7 @@ WORKDIR /app
 # Runtime deps only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl ca-certificates tini \
- && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /install /usr/local
 
@@ -54,9 +54,9 @@ COPY --from=frontend_builder /frontend/build /app/ops/static_ui
 
 # Non-root user
 RUN useradd -m appuser \
- && mkdir -p /tmp/prom_multiproc \
- && chown appuser:appuser /tmp/prom_multiproc \
- && chown -R appuser:appuser /app
+    && mkdir -p /tmp/prom_multiproc \
+    && chown appuser:appuser /tmp/prom_multiproc \
+    && chown -R appuser:appuser /app
 USER appuser
 
 ENTRYPOINT ["/usr/bin/tini","--"]

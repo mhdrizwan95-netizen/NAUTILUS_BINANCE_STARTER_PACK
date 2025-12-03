@@ -3,7 +3,8 @@
  * 
  * Uses Lightweight Charts (TradingView) for smooth rendering of 100k+ candlesticks
  */
-import { createChart, ColorType, IChartApi, ISeriesApi } from 'lightweight-charts';
+import type { IChartApi, ISeriesApi, Time } from 'lightweight-charts';
+import { createChart, ColorType, CandlestickSeries } from 'lightweight-charts';
 import { useEffect, useRef } from 'react';
 
 interface Candle {
@@ -64,8 +65,7 @@ export function CanvasPriceChart({ data, symbol, height = 400 }: CanvasPriceChar
         });
 
         // Add candlestick series
-        const candlestickSeries = chart.addSeries({
-            type: 'Candlestick',
+        const candlestickSeries = chart.addSeries(CandlestickSeries, {
             upColor: '#00ff9d', // Neon green
             downColor: '#ff6b6b', // Neon red
             borderUpColor: '#00ff9d',
@@ -98,7 +98,7 @@ export function CanvasPriceChart({ data, symbol, height = 400 }: CanvasPriceChar
             // Cast timestamps to Time type (seconds)
             const formattedData = data.map(candle => ({
                 ...candle,
-                time: (candle.time / 1000) as any, // Convert ms to seconds and cast
+                time: (candle.time / 1000) as Time, // Convert ms to seconds and cast
             }));
 
             seriesRef.current.setData(formattedData);
