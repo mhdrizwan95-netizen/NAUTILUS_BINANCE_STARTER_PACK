@@ -10,6 +10,7 @@ import { useAllStrategies } from '../lib/tradingStore';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { Switch } from './ui/switch';
+import { startStrategy, stopStrategy, updateStrategy, flattenPositions } from '../lib/api';
 
 interface StrategyConfig {
     [key: string]: string | number | boolean;
@@ -21,16 +22,40 @@ export function StrategyControlPanel() {
     const [showFlattenConfirm, setShowFlattenConfirm] = useState(false);
 
     const handleHotSwap = async (strategyName: string) => {
-        // In production: POST to /api/strategy/promote
-        console.log(`Hot-swapping strategy: ${strategyName}`);
-        alert(`Hot-swap initiated for ${strategyName}`);
+        try {
+            await startStrategy(strategyName);
+            // In a real app, you might want to refresh the strategy list or show a toast
+            console.log(`Strategy ${strategyName} started`);
+        } catch (error) {
+            console.error(`Failed to start strategy ${strategyName}:`, error);
+            alert(`Failed to start strategy: ${error}`);
+        }
     };
 
     const handleFlattenAll = async () => {
-        // In production: POST to /api/control/flatten
-        console.log('FLATTEN ALL initiated');
-        alert('EMERGENCY FLATTEN: Closing all positions');
-        setShowFlattenConfirm(false);
+        try {
+            await flattenPositions({}, "emergency_button");
+            console.log('FLATTEN ALL initiated');
+            alert('EMERGENCY FLATTEN: Closing all positions');
+        } catch (error) {
+            console.error('Failed to flatten positions:', error);
+            alert(`Failed to flatten positions: ${error}`);
+        } finally {
+            setShowFlattenConfirm(false);
+        }
+    };
+
+    const handleToggleStrategy = async (strategyName: string, enabled: boolean) => {
+        try {
+            if (enabled) {
+                await startStrategy(strategyName);
+            } else {
+                await stopStrategy(strategyName);
+            }
+        } catch (error) {
+            console.error(`Failed to toggle strategy ${strategyName}:`, error);
+            alert(`Failed to toggle strategy: ${error}`);
+        }
     };
 
     return (
@@ -92,9 +117,10 @@ export function StrategyControlPanel() {
                     <StrategyCard
                         key={strategy.name}
                         strategy={strategy}
-                        onHotSwap={() => handleHotSwap(strategy.name)}
-                        onSelect={() => setSelectedStrategy(strategy.name)}
-                        isSelected={selectedStrategy === strategy.name}
+                        onHotSwap={() => handleHotSwap(strategy.id)}
+                        onSelect={() => setSelectedStrategy(strategy.id)}
+                        onToggle={(enabled) => handleToggleStrategy(strategy.id, enabled)}
+                        isSelected={selectedStrategy === strategy.id}
                     />
                 ))}
 
@@ -120,6 +146,7 @@ export function StrategyControlPanel() {
 }
 
 interface Strategy {
+    id: string;
     name: string;
     enabled: boolean;
     confidence: number;
@@ -130,11 +157,13 @@ function StrategyCard({
     strategy,
     onHotSwap,
     onSelect,
+    onToggle,
     isSelected,
 }: {
     strategy: Strategy;
     onHotSwap: () => void;
     onSelect: () => void;
+    onToggle: (enabled: boolean) => void;
     isSelected: boolean;
 }) {
     return (
@@ -156,7 +185,11 @@ function StrategyCard({
                 <div className="flex-1">
                     <h4 className="font-semibold text-cyber-text">{strategy.name}</h4>
                     <div className="flex items-center gap-2 mt-1">
-                        <Switch checked={strategy.enabled} />
+                        <Switch
+                            checked={strategy.enabled}
+                            onCheckedChange={(checked) => onToggle(checked)}
+                            onClick={(e) => e.stopPropagation()}
+                        />
                         <span className="text-xs text-cyber-text-dim">
                             {strategy.enabled ? 'Enabled' : 'Disabled'}
                         </span>
@@ -204,9 +237,14 @@ function DynamicConfigForm({ strategyName }: { strategyName: string }) {
     });
 
     const handleSubmit = async () => {
-        // In production: POST to /api/strategy/{name}/config
-        console.log(`Updating config for ${strategyName}:`, config);
-        alert(`Configuration updated for ${strategyName}`);
+        try {
+            await updateStrategy(strategyName, config);
+            console.log(`Updating config for ${strategyName}:`, config);
+            alert(`Configuration updated for ${strategyName}`);
+        } catch (error) {
+            console.error(`Failed to update config for ${strategyName}:`, error);
+            alert(`Failed to update config: ${error}`);
+        }
     };
 
     return (

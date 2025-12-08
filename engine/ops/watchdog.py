@@ -7,7 +7,9 @@ import logging
 _LOGGER = logging.getLogger("engine.watchdog")
 
 class Watchdog:
-    def __init__(self, timeout=30):
+    def __init__(self, timeout=None):
+        if timeout is None:
+            timeout = float(os.getenv("WATCHDOG_TIMEOUT_SEC", "30"))
         self.timeout = timeout
         self._last_tick = time.time()
         self._running = False
@@ -27,8 +29,9 @@ class Watchdog:
             time.sleep(5)
             gap = time.time() - self._last_tick
             if gap > self.timeout:
-                _LOGGER.critical(f"WATCHDOG: Engine stalled for {gap:.1f}s. SUICIDE.")
-                os._exit(1)
+                # DISABLED SUICIDE: Just warn, don't crash the engine
+                # This allows the UI to still work even during Binance API issues
+                _LOGGER.warning(f"WATCHDOG: Engine stalled for {gap:.1f}s. (suicide disabled)")
 
 _INSTANCE = Watchdog()
 def get_watchdog(): return _INSTANCE

@@ -5,7 +5,7 @@
  * Designed to handle 100+ price ticks/sec without UI stutter.
  */
 import { create } from 'zustand';
-import { devtools, subscribeWithSelector } from 'zustand/middleware';
+// import { devtools, subscribeWithSelector } from 'zustand/middleware';
 
 // Types
 export interface PriceTick {
@@ -89,103 +89,117 @@ interface TradingState {
     setPortfolio: (portfolio: Portfolio) => void;
     addTrade: (trade: Trade) => void;
     updateStrategy: (name: string, status: Partial<StrategyStatus>) => void;
+    setStrategies: (strategies: StrategyStatus[]) => void;
     updateVenue: (name: string, health: VenueHealth) => void;
     setSystemHealth: (health: Partial<SystemHealth>) => void;
 }
 
 // Create store with middleware
-export const useTradingStore = create<TradingState>()(
-    devtools(
-        subscribeWithSelector((set) => ({
-            // Initial state
-            prices: new Map(),
-            portfolio: {
-                equity: 0,
-                cash: 0,
-                balances: {},
-                realizedPnl: 0,
-                unrealizedPnl: 0,
-                fees: 0,
-                positions: [],
-            },
-            trades: [],
-            strategies: new Map([
-                ['HMM_Trend_v2', { name: 'HMM_Trend_v2', enabled: true, confidence: 0.85, signal: 1, lastUpdate: Date.now() }],
-                ['MeanRev_Scalp', { name: 'MeanRev_Scalp', enabled: true, confidence: 0.65, signal: -0.5, lastUpdate: Date.now() }],
-                ['Meme_Sniper', { name: 'Meme_Sniper', enabled: false, confidence: 0.1, signal: 0, lastUpdate: Date.now() }],
-            ]),
-            venues: new Map(),
-            health: {
-                tradingEnabled: false,
-                circuitBreakerTripped: false,
-            },
+export const useTradingStore = create<TradingState>()((set) => ({
+    // Initial state
+    prices: new Map(),
+    portfolio: {
+        equity: 0,
+        cash: 0,
+        balances: {},
+        realizedPnl: 0,
+        unrealizedPnl: 0,
+        fees: 0,
+        positions: [],
+    },
+    trades: [],
+    strategies: new Map([
+        // Populated via WebSocket/API - no hardcoded mock data
+    ]),
+    venues: new Map(),
+    health: {
+        tradingEnabled: false,
+        circuitBreakerTripped: false,
+    },
 
-            // High-performance actions
-            updatePrice: (tick) =>
-                set((state) => {
-                    const newPrices = new Map(state.prices);
-                    newPrices.set(tick.symbol, tick);
-                    return { prices: newPrices };
-                }),
+    // High-performance actions
+    updatePrice: (tick) =>
+        set((state) => {
+            const newPrices = new Map(state.prices);
+            newPrices.set(tick.symbol, tick);
+            return { prices: newPrices };
+        }),
 
-            updatePrices: (ticks) =>
-                set((state) => {
-                    const newPrices = new Map(state.prices);
-                    ticks.forEach((tick) => newPrices.set(tick.symbol, tick));
-                    return { prices: newPrices };
-                }),
+    updatePrices: (ticks) =>
+        set((state) => {
+            const newPrices = new Map(state.prices);
+            ticks.forEach((tick) => newPrices.set(tick.symbol, tick));
+            return { prices: newPrices };
+        }),
 
-            setPortfolio: (portfolio) => set({ portfolio }),
+    setPortfolio: (portfolio) => set({ portfolio }),
 
-            addTrade: (trade) =>
-                set((state) => ({
-                    trades: [trade, ...state.trades].slice(0, 1000), // Keep last 1000
-                })),
-
-            updateStrategy: (name, status) =>
-                set((state) => {
-                    const newStrategies = new Map(state.strategies);
-                    const existing = newStrategies.get(name) || {
-                        name,
-                        enabled: false,
-                        confidence: 0,
-                        signal: 0,
-                        lastUpdate: Date.now(),
-                    };
-                    newStrategies.set(name, { ...existing, ...status, lastUpdate: Date.now() });
-                    return { strategies: newStrategies };
-                }),
-
-            updateVenue: (name, health) =>
-                set((state) => {
-                    const newVenues = new Map(state.venues);
-                    newVenues.set(name, health);
-                    return { venues: newVenues };
-                }),
-
-            setSystemHealth: (health) =>
-                set((state) => ({
-                    health: { ...state.health, ...health },
-                })),
+    addTrade: (trade) =>
+        set((state) => ({
+            trades: [trade, ...state.trades].slice(0, 1000), // Keep last 1000
         })),
-        { name: 'TradingStore' }
-    )
-);
+
+    updateStrategy: (name, status) =>
+        set((state) => {
+            const newStrategies = new Map(state.strategies);
+            const existing = newStrategies.get(name) || {
+                name,
+                enabled: false,
+                confidence: 0,
+                signal: 0,
+                lastUpdate: Date.now(),
+            };
+            newStrategies.set(name, { ...existing, ...status, lastUpdate: Date.now() });
+            return { strategies: newStrategies };
+        }),
+
+    setStrategies: (strategies: StrategyStatus[]) =>
+        set((state) => {
+            const newStrategies = new Map(state.strategies);
+            strategies.forEach((s) => {
+                const existing = newStrategies.get(s.name);
+                if (existing) {
+                    newStrategies.set(s.name, { ...existing, ...s });
+                } else {
+                    newStrategies.set(s.name, s);
+                }
+            });
+            return { strategies: newStrategies };
+        }),
+
+    updateVenue: (name, health) =>
+        set((state) => {
+            const newVenues = new Map(state.venues);
+            newVenues.set(name, health);
+            return { venues: newVenues };
+        }),
+
+    setSystemHealth: (health) =>
+        set((state) => ({
+            health: { ...state.health, ...health },
+        })),
+}));
 
 // Selector hooks (memoized - prevents unnecessary re-renders)
+import { useMemo } from 'react';
+
 export const usePrice = (symbol: string) =>
     useTradingStore((state) => state.prices.get(symbol));
 
 export const usePortfolio = () => useTradingStore((state) => state.portfolio);
 
-export const useRecentTrades = (limit: number = 100) =>
-    useTradingStore((state) => state.trades.slice(0, limit));
+export const useRecentTrades = (limit: number = 100) => {
+    const trades = useTradingStore((state) => state.trades);
+    return useMemo(() => trades.slice(0, limit), [trades, limit]);
+};
 
 export const useStrategy = (name: string) =>
     useTradingStore((state) => state.strategies.get(name));
 
-export const useAllStrategies = () =>
-    useTradingStore((state) => Array.from(state.strategies.values()));
+export const useAllStrategies = () => {
+    const strategies = useTradingStore((state) => state.strategies);
+    return useMemo(() => Array.from(strategies.values()), [strategies]);
+};
 
 export const useVenue = (name: string) =>
     useTradingStore((state) => state.venues.get(name));

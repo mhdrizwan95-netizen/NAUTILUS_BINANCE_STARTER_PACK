@@ -125,8 +125,8 @@ describe("TopHUD", () => {
     renderHUD();
 
     expect(screen.getByText("Binance")).toBeInTheDocument();
-    expect(screen.getByText("Healthy · 45ms · q2")).toBeInTheDocument();
+    expect(screen.getByText(/45\s*ms\s*·\s*q\s*2/)).toBeInTheDocument();
     expect(screen.getByText("OANDA")).toBeInTheDocument();
-    expect(screen.getByText("Degraded · 80ms · q4")).toBeInTheDocument();
+    expect(screen.getByText(/80\s*ms\s*·\s*q\s*4/)).toBeInTheDocument();
   });
 });

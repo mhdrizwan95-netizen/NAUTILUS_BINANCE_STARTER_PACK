@@ -62,17 +62,17 @@ describe("websocket utilities", () => {
 
     const { initializeWebSocket } = await import("./websocket");
     const manager = initializeWebSocket(
-      () => {},
-      () => {},
-      () => {},
-      () => {},
+      () => { },
+      () => { },
+      () => { },
+      () => { },
       "ops-token-123",
     );
 
     manager.connect();
 
     expect(sockets).toHaveLength(1);
-    expect(sockets[0]).toContain("session=ops-token-123");
+    expect(sockets[0]).toContain("token=ops-token-123");
     expect(sockets[0].startsWith("ws://localhost:8002/ws")).toBe(true);
   });
 

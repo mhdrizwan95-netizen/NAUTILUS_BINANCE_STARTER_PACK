@@ -5,7 +5,7 @@
 feeds:
   twitter_firehose:
     type: twitter_firehose
-    enabled: true
+    enabled: false
     poll_interval: 8
     priority: 0.97
     bearer_token: ${TWITTER_BEARER_TOKEN}
@@ -44,7 +44,7 @@ feeds:
 
   binance_listings:
     type: binance_listings
-    enabled: true
+    enabled: false
     poll_interval: 60
     priority: 0.92
     rss_url: "https://www.binance.com/bapi/composite/v1/public/cms/article/list/query?type=1&pageSize=30"
@@ -62,7 +62,7 @@ feeds:
 
   dex_whale:
     type: dex_whale
-    enabled: true
+    enabled: false
     poll_interval: 20
     priority: 0.88
     chains: ["eth", "bsc", "base", "solana", "ton"]
@@ -88,7 +88,7 @@ feeds:
 
   macro_calendar:
     type: macro_calendar
-    enabled: true
+    enabled: false
     poll_interval: 3600
     priority: 0.5
     lookahead_hours: 96

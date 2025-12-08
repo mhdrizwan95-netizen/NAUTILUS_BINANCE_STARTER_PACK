@@ -1,274 +1,225 @@
 /**
  * Dashboard Tab - "THE COCKPIT" - High-Density Mission Control
  * 
- * CSS Grid layout with Health Matrix, Active Strategies, and Live Order Feed
+ * Real-time dashboard showing portfolio metrics, active strategies, and live trades.
+ * Consumes data from Zustand stores which are populated via WebSocket/API.
  */
-import { useVirtualizer } from '@tanstack/react-virtual';
-import { Activity, Zap, Wifi, TrendingUp, TrendingDown, DollarSign } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
-import { LineChart, Line, ResponsiveContainer, YAxis, AreaChart, Area } from 'recharts';
-
+import { useRealTimeData } from '../../lib/store';
+import { usePortfolio, useRecentTrades, useAllStrategies, useSystemHealth, useTotalPnl } from '../../lib/tradingStore';
 import { cn } from '../../lib/utils';
 import { GlassCard } from '../ui/GlassCard';
 
-// Mock Data Interfaces
-interface Order {
-  id: string;
-  symbol: string;
-  side: 'BUY' | 'SELL';
-  quantity: number;
-  price: number;
-  status: 'FILLED' | 'NEW' | 'CANCELED';
-  timestamp: number;
-  fee: number;
-}
-
-interface StrategyCard {
+// Unified strategy item type for display
+interface StrategyDisplayItem {
   name: string;
-  status: 'active' | 'paused' | 'error';
-  pnl: number;
-  pnlHistory: number[];
-  allocation: number;
+  status: string;
+  confidence?: number;
+  signal?: number;
+  pnl?: number;
+  pnlHistory?: number[];
 }
 
 export function DashboardTab() {
-  // State
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [strategies, setStrategies] = useState<StrategyCard[]>([]);
-  const [equityHistory, setEquityHistory] = useState<{ time: number; value: number }[]>([]);
+  // Real-time Data from stores (populated by WebSocket)
+  const { globalMetrics, performances, venues } = useRealTimeData();
+  const portfolio = usePortfolio();
+  const recentTrades = useRecentTrades(50);
+  const strategies = useAllStrategies();
+  const systemHealth = useSystemHealth();
+  const totalPnl = useTotalPnl();
 
-  // Vitals
-  const [netEquity] = useState(10450.20);
-  const [dailyPnL] = useState(2.4);
-  const [marginUsage] = useState(45);
-  const [latency] = useState(32);
+  // Derived Vitals
+  const netEquity = portfolio.equity || 0;
+  const dailyPnL = totalPnl || globalMetrics?.totalPnL || 0;
+  const latency = venues.find(v => v.name === 'BINANCE')?.latency ||
+    (venues.find(v => v.status === 'connected')?.latency) || 0;
+  const isOnline = venues.some(v => v.status === 'connected');
+  const tradingEnabled = systemHealth.tradingEnabled;
 
-  // Initialize Mock Data
-  useEffect(() => {
-    // Strategies
-    setStrategies([
-      { name: 'HMM_Trend_v2', status: 'active', pnl: 1250.50, pnlHistory: Array(20).fill(0).map(() => Math.random() * 100), allocation: 0.4 },
-      { name: 'MeanRev_Scalp', status: 'active', pnl: -45.20, pnlHistory: Array(20).fill(0).map(() => Math.random() * -50), allocation: 0.3 },
-      { name: 'Meme_Sniper', status: 'paused', pnl: 0, pnlHistory: Array(20).fill(0), allocation: 0.1 },
-    ]);
-
-    // Equity History
-    const history = [];
-    let val = 10000;
-    for (let i = 0; i < 50; i++) {
-      val += (Math.random() - 0.4) * 100;
-      history.push({ time: i, value: val });
-    }
-    setEquityHistory(history);
-
-    // Orders
-    const newOrders: Order[] = Array.from({ length: 50 }).map((_, i) => ({
-      id: `ord_${i}`,
-      symbol: Math.random() > 0.5 ? 'BTCUSDT' : 'ETHUSDT',
-      side: Math.random() > 0.5 ? 'BUY' : 'SELL',
-      quantity: Math.random() * 2,
-      price: 40000 + Math.random() * 1000,
-      status: 'FILLED',
-      timestamp: Date.now() - i * 60000,
-      fee: Math.random() * 5,
+  // Strategies Data - unify different data sources
+  const strategyItems: StrategyDisplayItem[] = strategies.length > 0
+    ? strategies.map(s => ({
+      name: s.name,
+      status: s.enabled ? 'active' : 'inactive',
+      confidence: s.confidence,
+      signal: s.signal,
+    }))
+    : performances.map(p => ({
+      name: p.strategyId,
+      status: 'active',
+      pnl: p.metrics?.pnl || 0,
+      pnlHistory: p.metrics?.sparkline || [],
     }));
-    setOrders(newOrders);
-  }, []);
 
-  // Virtualization for Order Feed
-  const parentRef = useRef<HTMLDivElement>(null);
-  const rowVirtualizer = useVirtualizer({
-    count: orders.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => 40,
-    overscan: 5,
-  });
+  // Format helpers
+  const formatUsd = (val: number) =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2 }).format(val);
+
+  const formatPnl = (val: number) => {
+    const formatted = formatUsd(Math.abs(val));
+    return val >= 0 ? `+${formatted}` : `-${formatted}`;
+  };
 
   return (
-    <div className="p-8 space-y-8 min-h-screen flex flex-col max-w-[1920px] mx-auto w-full bg-deep-space text-zinc-100 font-header pb-20">
+    <div className="flex flex-col !gap-6 w-full">
 
-      {/* TOP HUD */}
-      <div className="grid grid-cols-5 gap-6">
-        <GlassCard className="flex items-center justify-between p-6 bg-white/5">
-          <div>
-            <div className="text-xs text-zinc-400 uppercase tracking-wider">Net Equity</div>
-            <div className="text-xl font-data font-bold text-white">${netEquity.toLocaleString()}</div>
+      {/* HEADER: Key Metrics */}
+      <div className="grid grid-cols-4 !gap-4">
+        <GlassCard className="flex items-center !gap-4 !p-4" neonAccent="cyan">
+          <div className="!h-10 !w-10 rounded-lg bg-cyan-500/20 flex items-center justify-center">
+            <span className="text-cyan-400 !text-lg">💰</span>
           </div>
-          <DollarSign className="w-5 h-5 text-neon-green" />
+          <div>
+            <div className="!text-xs text-zinc-400 uppercase tracking-wider">Net Equity</div>
+            <div className="!text-lg font-mono font-bold text-zinc-100">{formatUsd(netEquity)}</div>
+          </div>
         </GlassCard>
 
-        <GlassCard className="flex items-center justify-between p-6 bg-white/5">
+        <GlassCard className="flex items-center !gap-4 !p-4" neonAccent={dailyPnL >= 0 ? "green" : "red"}>
+          <div className={cn(
+            "!h-10 !w-10 rounded-lg flex items-center justify-center",
+            dailyPnL >= 0 ? "bg-emerald-500/20" : "bg-red-500/20"
+          )}>
+            <span className={dailyPnL >= 0 ? "text-emerald-400" : "text-red-400"}>📈</span>
+          </div>
           <div>
-            <div className="text-xs text-zinc-400 uppercase tracking-wider">24h PnL</div>
-            <div className={cn("text-xl font-data font-bold", dailyPnL >= 0 ? "text-neon-green" : "text-neon-red")}>
-              {dailyPnL >= 0 ? "+" : ""}{dailyPnL}%
+            <div className="!text-xs text-zinc-400 uppercase tracking-wider">Daily P&L</div>
+            <div className={cn(
+              "!text-lg font-mono font-bold",
+              dailyPnL >= 0 ? "text-emerald-400" : "text-red-400"
+            )}>
+              {formatPnl(dailyPnL)}
             </div>
           </div>
-          {dailyPnL >= 0 ? <TrendingUp className="w-5 h-5 text-neon-green" /> : <TrendingDown className="w-5 h-5 text-neon-red" />}
         </GlassCard>
 
-        <GlassCard className="flex items-center justify-between p-6 bg-white/5">
+        <GlassCard className="flex items-center !gap-4 !p-4" neonAccent={isOnline ? "green" : "red"}>
+          <div className={cn(
+            "!h-10 !w-10 rounded-lg flex items-center justify-center",
+            isOnline ? "bg-emerald-500/20" : "bg-red-500/20"
+          )}>
+            <span className={isOnline ? "text-emerald-400" : "text-red-400"}>📡</span>
+          </div>
           <div>
-            <div className="text-xs text-zinc-400 uppercase tracking-wider">Margin Usage</div>
-            <div className={cn("text-xl font-data font-bold", marginUsage > 80 ? "text-neon-red" : "text-neon-cyan")}>
-              {marginUsage}%
+            <div className="!text-xs text-zinc-400 uppercase tracking-wider">Status</div>
+            <div className={cn(
+              "!text-lg font-mono font-bold",
+              isOnline ? "text-emerald-400" : "text-red-400"
+            )}>
+              {isOnline ? 'Connected' : 'Offline'}
             </div>
+            {latency > 0 && <div className="!text-xs text-zinc-500">{latency}ms</div>}
           </div>
-          <Activity className="w-5 h-5 text-neon-cyan" />
         </GlassCard>
 
-        <GlassCard className="flex items-center justify-between p-6 bg-white/5">
+        <GlassCard className="flex items-center !gap-4 !p-4" neonAccent={tradingEnabled ? "green" : "amber"}>
+          <div className={cn(
+            "!h-10 !w-10 rounded-lg flex items-center justify-center",
+            tradingEnabled ? "bg-emerald-500/20" : "bg-amber-500/20"
+          )}>
+            <span className={tradingEnabled ? "text-emerald-400" : "text-amber-400"}>⚡</span>
+          </div>
           <div>
-            <div className="text-xs text-zinc-400 uppercase tracking-wider">API Latency</div>
-            <div className="text-xl font-data font-bold text-neon-amber">{latency}ms</div>
-          </div>
-          <Zap className="w-5 h-5 text-neon-amber" />
-        </GlassCard>
-
-        <GlassCard className="flex items-center justify-between p-6 bg-white/5">
-          <div>
-            <div className="text-xs text-zinc-400 uppercase tracking-wider">System Status</div>
-            <div className="text-xl font-data font-bold text-neon-green">ONLINE</div>
-          </div>
-          <Wifi className="w-5 h-5 text-neon-green" />
-        </GlassCard>
-      </div>
-
-      {/* MAIN ROW: Equity Curve & Liquidation */}
-      <div className="grid grid-cols-12 gap-8 h-[450px]">
-
-        {/* Total Equity & PnL Curve */}
-        <GlassCard title="Real-Time PnL Curve" neonAccent="blue" className="col-span-9 flex flex-col">
-          <div className="flex-1 w-full h-full min-h-0">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={equityHistory}>
-                <defs>
-                  <linearGradient id="colorEquity" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="#4361ee" stopOpacity={0.3} />
-                    <stop offset="95%" stopColor="#4361ee" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <YAxis domain={['auto', 'auto']} hide />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke="#4361ee"
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#colorEquity)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </GlassCard>
-
-        {/* Liquidation Thermometer */}
-        <GlassCard title="Liquidation Risk" neonAccent={marginUsage > 80 ? "red" : "green"} className="col-span-3 flex flex-col items-center justify-center relative">
-          <div className="w-16 h-72 bg-zinc-800/50 rounded-full relative overflow-hidden border border-white/5">
-            <div
-              className={cn(
-                "absolute bottom-0 left-0 right-0 transition-all duration-500 ease-out",
-                marginUsage > 80 ? "bg-neon-red box-glow-red" : "bg-neon-green box-glow-green"
-              )}
-              style={{ height: `${marginUsage}%` }}
-            />
-            {/* Ticks */}
-            <div className="absolute inset-0 flex flex-col justify-between py-4 pointer-events-none">
-              {[...Array(10)].map((_, i) => (
-                <div key={i} className="w-full h-px bg-black/20" />
-              ))}
+            <div className="!text-xs text-zinc-400 uppercase tracking-wider">Trading</div>
+            <div className={cn(
+              "!text-lg font-mono font-bold",
+              tradingEnabled ? "text-emerald-400" : "text-amber-400"
+            )}>
+              {tradingEnabled ? 'ENABLED' : 'DISABLED'}
             </div>
-          </div>
-          <div className="mt-6 text-center">
-            <div className="text-3xl font-data font-bold text-white">{marginUsage}%</div>
-            <div className="text-xs text-zinc-500 uppercase tracking-wider mt-1">Margin Used</div>
           </div>
         </GlassCard>
       </div>
 
-      {/* BOTTOM ROW: Strategies & Feed */}
-      <div className="grid grid-cols-12 gap-8">
+      {/* MAIN ROW: Strategies & Trades */}
+      <div className="grid grid-cols-2 !gap-6">
 
         {/* Active Strategies */}
-        <div className="col-span-4 flex flex-col gap-6">
-          {strategies.map(strategy => (
-            <GlassCard key={strategy.name} className="p-6" neonAccent={strategy.pnl >= 0 ? "green" : "red"}>
-              <div className="flex justify-between items-start mb-4">
-                <div>
-                  <div className="font-bold text-white text-lg">{strategy.name}</div>
-                  <div className={cn("text-xs uppercase tracking-wider mt-1", strategy.status === 'active' ? "text-neon-green" : "text-zinc-500")}>
-                    {strategy.status}
-                  </div>
-                </div>
-                <div className={cn("font-data font-bold text-xl", strategy.pnl >= 0 ? "text-neon-green" : "text-neon-red")}>
-                  {strategy.pnl >= 0 ? "+" : ""}{strategy.pnl.toFixed(2)}
-                </div>
-              </div>
-              <div className="h-16 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={strategy.pnlHistory.map((v, i) => ({ i, v }))}>
-                    <Line type="monotone" dataKey="v" stroke={strategy.pnl >= 0 ? "#00ff9d" : "#ff6b6b"} strokeWidth={2} dot={false} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </GlassCard>
-          ))}
-        </div>
-
-        {/* Recent Fills (Feed) */}
-        <GlassCard title="Live Order Feed" neonAccent="cyan" className="col-span-8 flex flex-col h-[600px]">
-          <div className="grid grid-cols-6 gap-4 px-6 py-3 text-xs font-bold text-zinc-500 border-b border-white/5 uppercase tracking-wider shrink-0">
-            <div>Time</div>
-            <div>Symbol</div>
-            <div className="text-right">Side</div>
-            <div className="text-right">Qty</div>
-            <div className="text-right">Price</div>
-            <div className="text-right">Fee</div>
-          </div>
-
-          <div ref={parentRef} className="flex-1 overflow-auto min-h-0">
-            <div
-              style={{
-                height: `${rowVirtualizer.getTotalSize()}px`,
-                width: '100%',
-                position: 'relative',
-              }}
-            >
-              {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                const order = orders[virtualRow.index];
-                return (
-                  <div
-                    key={order.id}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: `${virtualRow.size}px`,
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                    className="grid grid-cols-6 gap-4 px-6 items-center text-sm border-b border-white/5 hover:bg-white/5 transition-colors"
-                  >
-                    <div className="text-zinc-500 font-mono text-xs">
-                      {new Date(order.timestamp).toLocaleTimeString()}
-                    </div>
-                    <div className="text-white font-semibold">{order.symbol}</div>
-                    <div className={cn(
-                      'text-right font-mono font-bold',
-                      order.side === 'BUY' ? 'text-neon-green' : 'text-neon-red'
-                    )}>
-                      {order.side}
-                    </div>
-                    <div className="text-right font-mono text-zinc-300">{order.quantity.toFixed(4)}</div>
-                    <div className="text-right font-mono text-zinc-300">${order.price.toFixed(2)}</div>
-                    <div className="text-right font-mono text-zinc-500">${order.fee.toFixed(2)}</div>
-                  </div>
-                );
-              })}
+        <GlassCard title="Active Strategies" neonAccent="cyan">
+          {strategyItems.length === 0 ? (
+            <div className="text-zinc-500 !text-sm !py-6 text-center">
+              No active strategies. Waiting for data...
             </div>
-          </div>
+          ) : (
+            <div className="!space-y-2">
+              {strategyItems.map((s, i) => (
+                <div key={i} className="flex items-center justify-between !py-2 border-b border-white/5 last:border-0">
+                  <div className="flex items-center !gap-3">
+                    <div className={cn(
+                      "!w-2 !h-2 rounded-full",
+                      s.status === 'active' ? "bg-emerald-400" : "bg-zinc-600"
+                    )} />
+                    <span className="text-zinc-200 font-medium">{s.name}</span>
+                  </div>
+                  <div className="text-zinc-400 !text-sm font-mono">
+                    {s.confidence !== undefined ? `${(s.confidence * 100).toFixed(0)}%` :
+                      s.pnl !== undefined ? (
+                        <span className={s.pnl >= 0 ? "text-emerald-400" : "text-red-400"}>
+                          {formatPnl(s.pnl)}
+                        </span>
+                      ) : '—'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </GlassCard>
+
+        {/* Recent Trades */}
+        <GlassCard title="Recent Trades" neonAccent="blue">
+          {recentTrades.length === 0 ? (
+            <div className="text-zinc-500 !text-sm !py-6 text-center">
+              No recent trades. Waiting for fills...
+            </div>
+          ) : (
+            <div className="!space-y-2 !max-h-[250px] overflow-y-auto">
+              {recentTrades.slice(0, 10).map((trade, i) => (
+                <div key={i} className="flex items-center justify-between !py-2 border-b border-white/5 last:border-0">
+                  <div className="flex items-center !gap-2">
+                    <span className={cn(
+                      "!text-xs !px-2 !py-0.5 rounded font-medium",
+                      trade.side === 'BUY' ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
+                    )}>
+                      {trade.side}
+                    </span>
+                    <span className="text-zinc-200">{trade.symbol}</span>
+                  </div>
+                  <div className="text-zinc-400 !text-sm font-mono">
+                    {trade.quantity.toFixed(4)} @ {trade.price.toFixed(2)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </GlassCard>
       </div>
+
+      {/* BOTTOM ROW: Open Positions */}
+      {portfolio.positions.length > 0 && (
+        <GlassCard title="Open Positions" neonAccent="green">
+          <div className="!space-y-2">
+            {portfolio.positions.map((pos, i) => (
+              <div key={i} className="flex items-center justify-between !py-2 border-b border-white/5 last:border-0">
+                <div className="text-zinc-200 font-medium">{pos.symbol}</div>
+                <div className="flex items-center !gap-6">
+                  <span className={cn(
+                    "!text-sm font-mono",
+                    pos.quantity > 0 ? "text-emerald-400" : "text-red-400"
+                  )}>
+                    {pos.quantity > 0 ? 'LONG' : 'SHORT'} {Math.abs(pos.quantity).toFixed(4)}
+                  </span>
+                  <span className={cn(
+                    "font-mono font-medium",
+                    pos.unrealizedPnl >= 0 ? "text-emerald-400" : "text-red-400"
+                  )}>
+                    {formatPnl(pos.unrealizedPnl)}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </GlassCard>
+      )}
     </div>
   );
 }

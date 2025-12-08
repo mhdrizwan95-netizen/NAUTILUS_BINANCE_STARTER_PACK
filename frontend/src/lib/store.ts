@@ -86,8 +86,8 @@ const defaultState: AppState = {
     notificationsEnabled: true,
   },
   opsAuth: {
-    token: "",
-    actor: "",
+    token: "dev-token",
+    actor: "dev-user",
   },
   realTimeData: {
     globalMetrics: null,
@@ -292,19 +292,19 @@ const shouldPersist = () =>
 
 const storeInitializer = shouldPersist()
   ? persist(createAppStore, {
-      name: "nautilus-app-store",
-      storage: createJSONStorage(() => localStorage),
-      // Only persist preferences and UI state, not real-time data
-      partialize: (state) => ({
-        preferences: state.preferences,
-        ui: {
-          sidebarOpen: state.ui.sidebarOpen,
-          activeTab: state.ui.activeTab,
-          dashboardFilters: state.ui.dashboardFilters,
-          pagination: state.ui.pagination,
-        },
-      }),
-    })
+    name: "nautilus-app-store",
+    storage: createJSONStorage(() => localStorage),
+    // Only persist preferences and UI state, not real-time data
+    partialize: (state) => ({
+      preferences: state.preferences,
+      ui: {
+        sidebarOpen: state.ui.sidebarOpen,
+        activeTab: state.ui.activeTab,
+        dashboardFilters: state.ui.dashboardFilters,
+        pagination: state.ui.pagination,
+      },
+    }),
+  })
   : createAppStore;
 
 if (!shouldPersist()) {

@@ -29,46 +29,13 @@ export function MLTab() {
     const [regimeHistory, setRegimeHistory] = useState<RegimeProbability[]>([]);
 
     // Feature importance data
-    const [features] = useState<FeatureImportance[]>([
-        { name: 'Volatility', importance: 0.35, currentValue: 0.15 },
-        { name: 'Z-Score', importance: 0.28, currentValue: 1.2 },
-        { name: 'Return', importance: 0.20, currentValue: 0.02 },
-        { name: 'VWAP Dev', importance: 0.12, currentValue: -0.01 },
-        { name: 'Volume Spike', importance: 0.05, currentValue: 0.8 },
-    ]);
+    // Feature importance data
+    const [features] = useState<FeatureImportance[]>([]);
 
     // Simulated real-time data stream
+    // Real-time data stream would go here
     useEffect(() => {
-        // Initial data
-        const initialHistory = [];
-        const now = Date.now();
-        for (let i = 0; i < 50; i++) {
-            initialHistory.push({
-                timestamp: now - (50 - i) * 10000,
-                bull: 0.3 + Math.random() * 0.2,
-                bear: 0.2 + Math.random() * 0.1,
-                chop: 0.2 + Math.random() * 0.3,
-            });
-        }
-        setRegimeHistory(initialHistory);
-
-        const interval = setInterval(() => {
-            const now = Date.now();
-            const newPoint: RegimeProbability = {
-                timestamp: now,
-                bull: 0.3 + Math.random() * 0.4,
-                bear: 0.2 + Math.random() * 0.3,
-                chop: 0.2 + Math.random() * 0.3,
-            };
-
-            setRegimeHistory((prev) => {
-                const updated = [...prev, newPoint];
-                // Keep last 30 minutes (180 points @ 10s intervals)
-                return updated.slice(-180);
-            });
-        }, 2000); // Update every 2 seconds for demo
-
-        return () => clearInterval(interval);
+        // Placeholder for real data subscription
     }, []);
 
     // Current regime
@@ -90,7 +57,7 @@ export function MLTab() {
                     <Brain className="h-8 w-8 text-neon-cyan" />
                     <div>
                         <div className="text-xs text-zinc-400 uppercase tracking-wider">Model Version</div>
-                        <div className="text-xl font-data font-bold text-white">v2.1.0-RC3</div>
+                        <div className="text-xl font-data font-bold text-white">—</div>
                     </div>
                 </GlassCard>
 
@@ -98,7 +65,7 @@ export function MLTab() {
                     <ClockIcon className="h-8 w-8 text-neon-amber" />
                     <div>
                         <div className="text-xs text-zinc-400 uppercase tracking-wider">Last Trained</div>
-                        <div className="text-xl font-data font-bold text-white">4h 12m ago</div>
+                        <div className="text-xl font-data font-bold text-white">—</div>
                     </div>
                 </GlassCard>
 
@@ -106,7 +73,7 @@ export function MLTab() {
                     <Activity className="h-8 w-8 text-neon-green" />
                     <div>
                         <div className="text-xs text-zinc-400 uppercase tracking-wider">Accuracy (24h)</div>
-                        <div className="text-xl font-data font-bold text-neon-green">68.4%</div>
+                        <div className="text-xl font-data font-bold text-neon-green">—</div>
                     </div>
                 </GlassCard>
 

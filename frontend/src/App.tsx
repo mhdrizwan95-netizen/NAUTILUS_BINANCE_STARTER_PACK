@@ -15,10 +15,12 @@ import { TabbedInterface } from "./components/TabbedInterface";
 import { TopHUD } from "./components/TopHUD";
 import NautilusTerminal from "./components/NautilusTerminal";
 import { Toaster } from "./components/ui/sonner";
+import { TooltipProvider } from "./components/ui/tooltip";
 import {
   flattenPositions,
   getConfigEffective,
   getDashboardSummary,
+  getStrategies,
   getHealth,
   getOpsStatus,
   setTradingEnabled,
@@ -31,6 +33,7 @@ import { generateIdempotencyKey } from "./lib/idempotency";
 // LoopGuard removed to prevent false positives in high-frequency streams
 import { queryClient, queryKeys } from "./lib/queryClient";
 import { useAppStore, useDashboardFilters } from "./lib/store";
+import { useTradingStore } from "./lib/tradingStore";
 import { mergeMetricsSnapshot, mergeVenuesSnapshot } from "./lib/streamMergers";
 import { useWebSocket } from "./lib/websocket";
 
@@ -218,7 +221,13 @@ export function App() {
   }
 
   return (
-    <NautilusTerminal />
+    <TooltipProvider delayDuration={0}>
+      <CommandCenterShell
+        bootStatus={bootStatus}
+        summaryParamsKey={summaryParamsKey}
+        setBootStatus={setBootStatus}
+      />
+    </TooltipProvider>
   );
 }
 
@@ -232,6 +241,8 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
   const opsActor = useAppStore((state) => state.opsAuth.actor);
   // TEMP DEBUG
   const { lastMessage, isConnected: wsConnected } = useWebSocket();
+  // const wsConnected = false;
+  // const lastMessage = null;
   const lastProcessedMessage = useRef<{ type: string; ts: number | null } | null>(null);
   const metricsDigestRef = useRef<string | null>(null);
   const venuesDigestRef = useRef<string | null>(null);
@@ -290,6 +301,36 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
     [healthQueryKey, fetchHealth],
   );
   const healthQuery = useQuery(healthQueryOptions);
+
+  const strategiesQueryKey = useMemo(() => ["strategies"], []);
+  const fetchStrategies = useCallback(() => getStrategies({ limit: 100 }), []);
+  const strategiesQueryOptions = useMemo(
+    () => ({
+      queryKey: strategiesQueryKey,
+      queryFn: fetchStrategies,
+      staleTime: 60 * 1000,
+    }),
+    [strategiesQueryKey, fetchStrategies],
+  );
+  const strategiesQuery = useQuery(strategiesQueryOptions);
+
+  useEffect(() => {
+    if (strategiesQuery.data?.data) {
+      console.log("Raw strategies data:", strategiesQuery.data.data);
+      const strategies = strategiesQuery.data.data.map((s: any) => ({
+        id: s.id,
+        name: s.name || s.id,
+        enabled: s.status === "running",
+        confidence: s.confidence ?? 0.8, // Mock high confidence for now
+        signal: s.signal ?? 0.5, // Mock positive signal for now
+        lastUpdate: Date.now(),
+      }));
+      console.log("Mapped strategies:", strategies);
+      useTradingStore.getState().setStrategies(strategies);
+    } else {
+      console.log("No strategies data available", strategiesQuery.data);
+    }
+  }, [strategiesQuery.data]);
 
   // --- LoopGuard Removed ---
   // High frequency data streams will trigger frequent renders. 

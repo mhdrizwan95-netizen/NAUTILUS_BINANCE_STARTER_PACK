@@ -491,6 +491,9 @@ else:
 MARGIN_REST = margin_rest_client
 
 
+_START_TIME = time.time()
+
+
 # ---- Binance WebSocket mark handler -----------------------------------------
 _binance_mark_ts: dict[str, float] = {}
 _BINANCE_WS_SYMBOLS: list[str] = []
@@ -600,16 +603,17 @@ async def wallet_balance_worker() -> None:
             margin_level = 0.0
             margin_liability_usd = 0.0
             try:
-                margin_snapshot = await rest.margin_account()
-                margin_level = _as_float(margin_snapshot.get("marginLevel"))
-                liability_btc = _as_float(margin_snapshot.get("totalLiabilityOfBtc"))
-                if liability_btc > 0:
-                    try:
-                        btc_px = float(await rest.ticker_price("BTCUSDT", market="spot"))
-                    except rest_errors:
-                        fallback = spot_snapshot.get("lastPrice") if spot_snapshot else 0.0
-                        btc_px = _as_float(fallback)
-                    margin_liability_usd = liability_btc * btc_px
+                if _truthy_env("MARGIN_ENABLED") or _truthy_env("BINANCE_MARGIN_ENABLED"):
+                    margin_snapshot = await rest.margin_account()
+                    margin_level = _as_float(margin_snapshot.get("marginLevel"))
+                    liability_btc = _as_float(margin_snapshot.get("totalLiabilityOfBtc"))
+                    if liability_btc > 0:
+                        try:
+                            btc_px = float(await rest.ticker_price("BTCUSDT", market="spot"))
+                        except rest_errors:
+                            fallback = spot_snapshot.get("lastPrice") if spot_snapshot else 0.0
+                            btc_px = _as_float(fallback)
+                        margin_liability_usd = liability_btc * btc_px
             except rest_errors as margin_exc:
                 _WALLET_LOG.debug("wallet monitor: margin snapshot failed (%s)", margin_exc)
 
@@ -2556,6 +2560,16 @@ async def _bootstrap_snapshot_state() -> None:
         _startup_logger.warning("Snapshot bootstrap failed", exc_info=True)
 
 
+@app.get("/status")
+async def status() -> dict[str, Any]:
+    """Return engine status."""
+    return {
+        "status": "ok",
+        "timestamp": time.time(),
+        "uptime": time.time() - _START_TIME if "_START_TIME" in globals() else 0,
+    }
+
+
 @app.get("/health")
 async def health() -> dict[str, Any]:
     try:
@@ -2654,6 +2668,228 @@ async def get_price(
         "quote_ccy": QUOTE_CCY,
         "ts": time.time(),
     }
+
+
+# ============================================================================
+# Aggregate Endpoints for Frontend Dashboard
+# ============================================================================
+
+@app.get("/aggregate/portfolio")
+async def get_aggregate_portfolio() -> dict[str, Any]:
+    """Aggregate portfolio summary for dashboard."""
+    state = portfolio.state
+    baseline = float(os.getenv("BASELINE_EQUITY_USD", "10000"))
+    equity = state.equity or 0
+    cash = state.cash or 0
+    gain = equity - baseline
+    return_pct = (gain / baseline * 100) if baseline > 0 else 0
+    
+    return {
+        "equity_usd": equity,
+        "cash_usd": cash,
+        "gain_usd": gain,
+        "return_pct": return_pct,
+        "baseline_equity_usd": baseline,
+        "last_refresh_epoch": time.time()
+    }
+
+
+@app.get("/aggregate/exposure")
+async def get_aggregate_exposure() -> dict[str, Any]:
+    """Aggregate exposure across all positions."""
+    state = portfolio.state
+    by_symbol: dict[str, dict[str, Any]] = {}
+    total_exposure = 0.0
+    venues_seen = set()
+    
+    for symbol, pos in state.positions.items():
+        qty = abs(pos.quantity or 0)
+        last_price = pos.last_price or 0
+        exposure = qty * last_price
+        total_exposure += exposure
+        
+        venue = symbol.split(".")[-1] if "." in symbol else "BINANCE"
+        venues_seen.add(venue)
+        
+        by_symbol[symbol] = {
+            "qty_base": pos.quantity or 0,
+            "last_price_usd": last_price,
+            "exposure_usd": exposure
+        }
+    
+    return {
+        "totals": {
+            "exposure_usd": total_exposure,
+            "count": len(state.positions),
+            "venues": len(venues_seen)
+        },
+        "by_symbol": by_symbol
+    }
+
+
+@app.get("/aggregate/pnl")
+async def get_aggregate_pnl() -> dict[str, Any]:
+    """Aggregate realized and unrealized PnL by symbol."""
+    state = portfolio.state
+    realized: dict[str, float] = {}
+    unrealized: dict[str, float] = {}
+    
+    for symbol, pos in state.positions.items():
+        realized[symbol] = pos.rpl or 0
+        unrealized[symbol] = pos.upl or 0
+    
+    return {
+        "realized": realized,
+        "unrealized": unrealized,
+        "total_realized": state.realized or 0,
+        "total_unrealized": state.unrealized or 0
+    }
+
+
+@app.get("/strategies")
+async def get_strategies() -> dict[str, Any]:
+    """List active strategies with their status."""
+    strategies_data = []
+    
+    # Default empty params schema
+    default_params_schema = {"fields": []}
+    
+    # Get strategy modules status
+    try:
+        from engine import strategy as strat_mod
+        
+        if hasattr(strat_mod, 'TREND_MODULE') and strat_mod.TREND_MODULE:
+            strategies_data.append({
+                "id": "trend_follow",
+                "name": "Trend Follow",
+                "kind": "trend",
+                "status": "running" if getattr(strat_mod.TREND_MODULE, 'enabled', False) else "stopped",
+                "symbols": getattr(strat_mod.TREND_CFG, 'symbols', []) if strat_mod.TREND_CFG else [],
+                "paramsSchema": default_params_schema,
+                "params": {},
+            })
+        
+        if hasattr(strat_mod, 'SCALP_MODULE') and strat_mod.SCALP_MODULE:
+            strategies_data.append({
+                "id": "scalp",
+                "name": "Scalp Strategy",
+                "kind": "scalp",
+                "status": "running" if getattr(strat_mod.SCALP_MODULE, 'enabled', False) else "stopped",
+                "symbols": getattr(strat_mod.SCALP_CFG, 'symbols', []) if strat_mod.SCALP_CFG else [],
+                "paramsSchema": default_params_schema,
+                "params": {},
+            })
+        
+        if hasattr(strat_mod, 'MOMENTUM_RT_MODULE') and strat_mod.MOMENTUM_RT_MODULE:
+            strategies_data.append({
+                "id": "momentum_rt",
+                "name": "Momentum RT",
+                "kind": "momentum",
+                "status": "running" if getattr(strat_mod.MOMENTUM_RT_MODULE, 'enabled', False) else "stopped",
+                "symbols": getattr(strat_mod.MOMENTUM_RT_CFG, 'symbols', []) if strat_mod.MOMENTUM_RT_CFG else [],
+                "paramsSchema": default_params_schema,
+                "params": {},
+            })
+        
+        # HMM/Ensemble
+        s_cfg = getattr(strat_mod, 'S_CFG', None)
+        if s_cfg:
+            if getattr(s_cfg, 'hmm_enabled', False):
+                strategies_data.append({
+                    "id": "hmm_ensemble",
+                    "name": "HMM Ensemble",
+                    "kind": "hmm",
+                    "status": "running" if getattr(s_cfg, 'enabled', False) else "stopped",
+                    "symbols": getattr(s_cfg, 'symbols', []),
+                    "paramsSchema": default_params_schema,
+                    "params": {},
+                })
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        pass
+    
+    return {
+        "data": strategies_data,
+        "page": {"nextCursor": None, "prevCursor": None, "limit": 50}
+    }
+
+
+
+@app.get("/trades/recent")
+async def get_recent_trades(limit: int = 100) -> dict[str, Any]:
+    """Get recent trades from SQLite store."""
+    trades = []
+    
+    if store is not None:
+        try:
+            rows = store.get_recent_orders(limit=limit)
+            for row in rows:
+                trades.append({
+                    "id": row.get("id", ""),
+                    "symbol": row.get("symbol", ""),
+                    "side": row.get("side", ""),
+                    "quantity": row.get("qty", 0),
+                    "price": row.get("price", 0),
+                    "pnl": row.get("pnl", 0),
+                    "timestamp": row.get("ts_accept", 0),
+                    "strategyId": row.get("strategy", "unknown"),
+                    "venueId": row.get("venue", "binance")
+                })
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            pass
+    
+    return {
+        "data": trades,
+        "page": {"nextCursor": None, "prevCursor": None, "limit": limit}
+    }
+
+
+@app.get("/alerts")
+async def get_alerts(limit: int = 50) -> dict[str, Any]:
+    """Get recent system alerts."""
+    alerts = []
+    
+    # Pull from alert daemon if available
+    try:
+        daemon = alert_daemon.get_instance()
+        if daemon:
+            alerts = daemon.get_recent_alerts(limit)
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        pass
+    
+    return {
+        "data": alerts,
+        "page": {"nextCursor": None, "prevCursor": None, "limit": limit}
+    }
+
+
+@app.get("/orders/open")
+async def get_open_orders() -> dict[str, Any]:
+    """Get currently open orders."""
+    orders = []
+    
+    # Get from router's pending orders if available
+    try:
+        pending = getattr(router, '_pending_orders', {})
+        for order_id, order in pending.items():
+            orders.append({
+                "id": order_id,
+                "symbol": order.get("symbol", ""),
+                "side": order.get("side", ""),
+                "type": order.get("type", "MARKET"),
+                "qty": order.get("qty", 0),
+                "filled": order.get("filled", 0),
+                "price": order.get("price", 0),
+                "status": order.get("status", "PENDING"),
+                "createdAt": order.get("ts", 0)
+            })
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        pass
+    
+    return {
+        "data": orders,
+        "page": {"nextCursor": None, "prevCursor": None, "limit": 100}
+    }
+
 
 
 @app.post("/strategy/promote")
@@ -3541,3 +3777,52 @@ async def simulate_governance_event(event_type: str) -> dict[str, Any]:
         return {"status": "error", "message": str(exc)}
     else:
         return {"status": f"simulated {event_type}", "data": payload}
+@app.post("/ops/flatten")
+async def flatten_positions(request: Request) -> dict[str, Any]:
+    """Emergency flatten all positions."""
+    require_ops_token(request)
+    try:
+        body = await request.json()
+        reason = body.get("reason", "manual_flatten")
+    except Exception:
+        reason = "manual_flatten"
+
+    flattened = []
+    failed = []
+    
+    # 1. Flatten via OrderRouter (Best Effort)
+    try:
+        if order_router and portfolio:
+            positions = portfolio.state.positions
+            for symbol, pos in positions.items():
+                qty = pos.qty_base
+                if qty == 0:
+                    continue
+                
+                side = "SELL" if qty > 0 else "BUY"
+                abs_qty = abs(qty)
+                
+                try:
+                    # Submit market order to close
+                    await order_router.submit_order(
+                        symbol=symbol,
+                        side=side,
+                        quantity=abs_qty,
+                        order_type="MARKET",
+                        reduce_only=True,
+                        tag="flatten"
+                    )
+                    flattened.append({"symbol": symbol, "qty": abs_qty, "side": side})
+                except Exception as e:
+                    failed.append({"symbol": symbol, "error": str(e)})
+    except Exception as e:
+        _app_logger.error("Flatten failed: %s", e, exc_info=True)
+        return {"status": "error", "message": str(e)}
+
+    return {
+        "status": "success",
+        "flattened": flattened,
+        "failed": failed,
+        "requested": len(flattened) + len(failed),
+        "succeeded": len(flattened)
+    }

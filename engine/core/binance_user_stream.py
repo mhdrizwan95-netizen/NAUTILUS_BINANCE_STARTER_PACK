@@ -36,11 +36,20 @@ class BinanceUserStream:
         self._on_order_update = on_order_update
         self._listen_key: str | None = None
         self._stop_event = asyncio.Event()
-        self._base_url = self._settings.futures_base
-        self._ws_base = "wss://fstream.binance.com/ws" if "fapi" in self._base_url else "wss://stream.binance.com:9443/ws"
-        # Adjust WS base for testnet if needed
-        if "testnet" in self._base_url:
-             self._ws_base = "wss://stream.binancefuture.com/ws"
+        
+        if self._settings.is_futures:
+            self._base_url = self._settings.futures_base
+            self._listen_key_path = "/fapi/v1/listenKey"
+            self._ws_base = "wss://fstream.binance.com/ws"
+            if "testnet" in self._base_url:
+                 self._ws_base = "wss://stream.binancefuture.com/ws"
+        else:
+            self._base_url = self._settings.spot_base
+            self._listen_key_path = "/api/v3/userDataStream"
+            self._ws_base = "wss://stream.binance.com:9443/ws"
+            if "testnet" in self._base_url:
+                 self._ws_base = "wss://testnet.binance.vision/ws"
+
         self.last_event_ts: float = time.time()
 
     async def run(self):
@@ -49,7 +58,7 @@ class BinanceUserStream:
             _LOGGER.warning("[UserStream] No API Key provided. User Stream disabled.")
             return
 
-        _LOGGER.info("[UserStream] Starting Binance User Data Stream...")
+        _LOGGER.info(f"[UserStream] Starting Binance User Data Stream ({'Futures' if self._settings.is_futures else 'Spot'})...")
         
         # Start keep-alive task
         asyncio.create_task(self._keep_alive_loop())
@@ -89,11 +98,11 @@ class BinanceUserStream:
                 _LOGGER.warning("[UserStream] listenKey expired. Refreshing...")
                 self._listen_key = None # Force re-fetch
             
-            elif event_type == "ACCOUNT_UPDATE":
+            elif event_type == "ACCOUNT_UPDATE" or event_type == "outboundAccountPosition":
                 if self._on_account_update:
                     await self._dispatch(self._on_account_update, data)
             
-            elif event_type == "ORDER_TRADE_UPDATE":
+            elif event_type == "ORDER_TRADE_UPDATE" or event_type == "executionReport":
                 if self._on_order_update:
                     await self._dispatch(self._on_order_update, data)
 
@@ -112,7 +121,7 @@ class BinanceUserStream:
         try:
             async with httpx.AsyncClient() as client:
                 resp = await client.post(
-                    f"{self._base_url}/fapi/v1/listenKey",
+                    f"{self._base_url}{self._listen_key_path}",
                     headers={"X-MBX-APIKEY": self._settings.api_key}
                 )
                 resp.raise_for_status()
@@ -129,7 +138,7 @@ class BinanceUserStream:
                 try:
                     async with httpx.AsyncClient() as client:
                         await client.put(
-                            f"{self._base_url}/fapi/v1/listenKey",
+                            f"{self._base_url}{self._listen_key_path}",
                             headers={"X-MBX-APIKEY": self._settings.api_key}
                         )
                     _LOGGER.debug("[UserStream] listenKey refreshed.")

@@ -3,6 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 
 import { issueWebsocketSession } from "./api";
 import { useAppStore, useRealTimeActions } from "./store";
+import { useTradingStore } from "./tradingStore";
 import { wsGetSnapshot, wsSetState, wsSubscribe } from "./wsStore";
 import type { GlobalMetrics, StrategyPerformance, Venue } from "../types/trading";
 
@@ -310,6 +311,88 @@ export function useWebSocket(): WebSocketHookResult {
       case "heartbeat":
         // Heartbeat response - connection is healthy
         break;
+      // ============ New handlers for tradingStore integration ============
+      case "account_update":
+      case "portfolio": {
+        // Update tradingStore with portfolio data from engine
+        const portfolioData = message.data as Record<string, unknown>;
+        useTradingStore.getState().setPortfolio({
+          equity: Number(portfolioData.total_equity_usdt || portfolioData.equity_usd || 0),
+          cash: Number(portfolioData.spot_free_usdt || portfolioData.cash_usd || 0),
+          balances: {},
+          realizedPnl: Number(portfolioData.realized || 0),
+          unrealizedPnl: Number(portfolioData.unrealized || 0),
+          fees: 0,
+          positions: [],
+        });
+        useTradingStore.getState().setSystemHealth({
+          tradingEnabled: Boolean(portfolioData.trading_enabled),
+        });
+        break;
+      }
+      case "market.tick":
+      case "price": {
+        // Update price in tradingStore
+        const priceData = message.data as Record<string, unknown>;
+        if (priceData.symbol && priceData.price) {
+          useTradingStore.getState().updatePrice({
+            symbol: String(priceData.symbol),
+            price: Number(priceData.price),
+            volume: Number(priceData.volume || 0),
+            timestamp: Number(priceData.ts || Date.now()),
+          });
+        }
+        break;
+      }
+      case "trade.fill":
+      case "trade": {
+        // Add trade to tradingStore
+        const tradeData = message.data as Record<string, unknown>;
+        useTradingStore.getState().addTrade({
+          id: String(tradeData.id || tradeData.order_id || Date.now()),
+          symbol: String(tradeData.symbol || ""),
+          side: (String(tradeData.side || "BUY").toUpperCase() as "BUY" | "SELL"),
+          quantity: Number(tradeData.filled_qty || tradeData.quantity || 0),
+          price: Number(tradeData.avg_price || tradeData.price || 0),
+          fee: Number(tradeData.fee_usd || 0),
+          pnl: Number(tradeData.pnl || 0),
+          timestamp: Number(tradeData.ts || Date.now()),
+        });
+        break;
+      }
+      case "strategy.performance": {
+        // Update strategies in tradingStore
+        const stratData = message.data as Array<Record<string, unknown>>;
+        if (Array.isArray(stratData)) {
+          for (const strat of stratData) {
+            useTradingStore.getState().updateStrategy(
+              String(strat.name || strat.id),
+              {
+                name: String(strat.name || strat.id),
+                enabled: Boolean(strat.status === "active" || strat.enabled),
+                confidence: Number(strat.confidence || 0),
+                signal: Number(strat.signal || 0),
+              }
+            );
+          }
+        }
+        break;
+      }
+      case "venue.health": {
+        // Update venue health in tradingStore
+        const venueData = message.data as Record<string, unknown>;
+        useTradingStore.getState().updateVenue(
+          String(venueData.name || "BINANCE"),
+          {
+            name: String(venueData.name || "BINANCE"),
+            connected: Boolean(venueData.status === "ok" || venueData.connected),
+            latencyMs: Number(venueData.latencyMs || venueData.latency_ms || 0),
+            queue: Number(venueData.queue || 0),
+            wsGapSeconds: Number(venueData.ws_gap_seconds || 0),
+          }
+        );
+        break;
+      }
       default:
         wsDevLog("Unhandled WebSocket message:", message);
     }

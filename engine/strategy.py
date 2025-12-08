@@ -10,7 +10,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel, Field
 
 from . import metrics
@@ -350,6 +350,66 @@ def post_strategy_signal(sig: StrategySignal, request: Request):
     require_ops_token(request)
     idem = request.headers.get("X-Idempotency-Key")
     return _execute_strategy_signal(sig, idem_key=idem)
+
+
+class StrategyParams(BaseModel):
+    params: dict[str, Any]
+
+
+@router.post("/strategies/{strategy_id}/start")
+def start_strategy(strategy_id: str, request: Request, payload: StrategyParams | None = None):
+    require_ops_token(request)
+    if strategy_id == "trend_follow" and TREND_MODULE:
+        TREND_MODULE.enabled = True
+        logging.getLogger(__name__).info("Strategy %s started", strategy_id)
+        return {"status": "started", "id": strategy_id}
+    elif strategy_id == "scalp" and SCALP_MODULE:
+        SCALP_MODULE.enabled = True
+        logging.getLogger(__name__).info("Strategy %s started", strategy_id)
+        return {"status": "started", "id": strategy_id}
+    elif strategy_id == "momentum_rt" and MOMENTUM_RT_MODULE:
+        MOMENTUM_RT_MODULE.enabled = True
+        logging.getLogger(__name__).info("Strategy %s started", strategy_id)
+        return {"status": "started", "id": strategy_id}
+    
+    raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found or not loaded")
+
+
+@router.post("/strategies/{strategy_id}/stop")
+def stop_strategy(strategy_id: str, request: Request):
+    require_ops_token(request)
+    if strategy_id == "trend_follow" and TREND_MODULE:
+        TREND_MODULE.enabled = False
+        logging.getLogger(__name__).info("Strategy %s stopped", strategy_id)
+        return {"status": "stopped", "id": strategy_id}
+    elif strategy_id == "scalp" and SCALP_MODULE:
+        SCALP_MODULE.enabled = False
+        logging.getLogger(__name__).info("Strategy %s stopped", strategy_id)
+        return {"status": "stopped", "id": strategy_id}
+    elif strategy_id == "momentum_rt" and MOMENTUM_RT_MODULE:
+        MOMENTUM_RT_MODULE.enabled = False
+        logging.getLogger(__name__).info("Strategy %s stopped", strategy_id)
+        return {"status": "stopped", "id": strategy_id}
+
+    raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found or not loaded")
+
+
+@router.post("/strategies/{strategy_id}/update")
+def update_strategy(strategy_id: str, request: Request, payload: StrategyParams):
+    require_ops_token(request)
+    params = payload.params
+    if strategy_id == "trend_follow" and TREND_MODULE:
+        # Update config attributes dynamically if they exist
+        if hasattr(TREND_MODULE, "cfg"):
+            for k, v in params.items():
+                if hasattr(TREND_MODULE.cfg, k):
+                    setattr(TREND_MODULE.cfg, k, v)
+        logging.getLogger(__name__).info("Strategy %s updated with %s", strategy_id, params)
+        return {"status": "updated", "id": strategy_id, "params": params}
+    
+    # Add other strategies as needed
+    
+    raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found or not loaded")
 
 
 _EXECUTOR: StrategyExecutor | None = None

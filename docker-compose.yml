@@ -99,14 +99,17 @@ services:
     logging: *id001
     dns: *id003
     environment:
-      - TRADING_ENABLED=false
+      - TRADING_ENABLED=true
+      - STRATEGY_ENABLED=true
+      - TREND_ENABLED=true
+      - MEME_SENTIMENT_ENABLED=false
       - ROLE=trader
       - VENUE=BINANCE
       - GOVERNANCE_POLICY=/app/engine/policies.yaml
-      - BINANCE_MODE=${BINANCE_MODE}
-      - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE}
+      - BINANCE_MODE=futures
+      - BINANCE_SPOT_BASE=${BINANCE_SPOT_BASE:-https://api.binance.com}
       - BINANCE_FUTURES_BASE=${BINANCE_FUTURES_BASE:-https://fapi.binance.com}
-      - DEMO_SPOT_BASE=${DEMO_SPOT_BASE}
+      - DEMO_SPOT_BASE=${DEMO_SPOT_BASE:-https://testnet.binance.vision}
       - BINANCE_API_KEY=${BINANCE_API_KEY}
       - BINANCE_API_SECRET=${BINANCE_API_SECRET}
       - TRADE_SYMBOLS=${TRADE_SYMBOLS:-BTCUSDT,ETHUSDT,BNBUSDT}
@@ -116,6 +119,13 @@ services:
       - BINANCE_WS_ENABLED=${BINANCE_WS_ENABLED:-true}
       - PARAM_CONTROLLER_URL=http://param_controller:8002
       - HMM_MODEL_PATH=/app/engine/models/current/hmm_model.pkl
+      - STOP_VALIDATOR_ENABLED=false
+      - WATCHDOG_TIMEOUT_SEC=300
+      - MARGIN_ENABLED=false
+      - BINANCE_MARGIN_ENABLED=false
+      - AUTO_TOPUP_ENABLED=false
+      - SCALP_ENABLED=true
+      - MOMENTUM_RT_ENABLED=true
     healthcheck:
       test:
         - CMD
@@ -136,6 +146,7 @@ services:
       - ./engine/logs:/app/engine/logs:rw
       - ./data:/app/data:rw
       - ml_models_volume:/app/engine/models:ro
+      - ./config/external_feeds.yaml:/app/config/external_feeds.yaml:ro
     ports:
       - 8003:8003
     networks:
@@ -172,6 +183,7 @@ services:
       BINANCE_API_TIMEOUT: ${BINANCE_API_TIMEOUT}
       UI_METRICS_SOURCE: direct
       HMM_URL: http://ml_service:8000
+      ENGINE_URL: http://engine_binance:8003
     volumes:
       - ./data:/app/data:rw
     ports:
