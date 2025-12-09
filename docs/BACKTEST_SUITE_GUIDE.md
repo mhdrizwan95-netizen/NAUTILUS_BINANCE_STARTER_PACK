@@ -1,6 +1,10 @@
 
 # Robust Backtest Suite with Embedded Continuous Learning
 
+> [!TIP]
+> **Implementation Status: COMPLETE (December 2024)**  
+> The backtest suite is now fully implemented with prequential evaluation.
+
 This suite implements **prequential (test-then-train)** evaluation: at time *t*, the model used to decide is trained only on data up to *t-1*. After the outcome at *t* is observed, the learner may update (on a cadence). That mirrors production **online learning** without leaking the future.
 
 ## Quick start
@@ -14,7 +18,13 @@ This suite implements **prequential (test-then-train)** evaluation: at time *t*,
    docker logs -f backtester
    ```
 
-3. Adjust behaviour via environment variables:
+3. Or run directly with the CLI:
+   ```bash
+   cd services/backtest_suite
+   python -m app.cli --strategy momentum --data-dir /path/to/historical --output-dir ./results
+   ```
+
+4. Adjust behaviour via environment variables:
    - `RETRAIN_EVERY_MIN` — cadence for embedded HMM retrains (e.g. `360`).
    - `STEP_MINUTES` — bar granularity.
    - `EXACTLY_ONCE` — toggle strict one-pass training.
@@ -22,15 +32,18 @@ This suite implements **prequential (test-then-train)** evaluation: at time *t*,
 
 Stop the container when the simulation finishes; it writes metrics to `/results/`.
 
-## What’s included
+## What's included
 
-- `services/backtest_suite/app/driver.py` — feeds the ledger from your research CSVs chunk by chunk.
-- `services/backtest_suite/app/engine.py` — event loop: ingest → train → param fetch → execute → record.
-- `services/backtest_suite/app/strategy_*` — sample strategies (e.g. `strategy_momentum.py`).
-- `services/backtest_suite/app/execution.py` — execution model with fees/slippage.
-- `services/backtest_suite/app/metrics.py` — performance helpers.
-- `services/backtest_suite/app/clock.py` — simulation clock.
-- `compose.backtest.yml` — compose overlay wiring the runner to the ML and parameter services.
+| Module | Purpose |
+|--------|---------|
+| `app/cli.py` | Command-line entry point with argument parsing |
+| `app/engine.py` | Main prequential evaluation loop |
+| `app/driver.py` | Data loading from CSV files |
+| `app/clock.py` | Deterministic simulation clock |
+| `app/execution.py` | Fill/fee/slippage execution model |
+| `app/metrics.py` | Performance metrics calculation |
+| `app/strategies.py` | Sample strategies (MomentumStrategy, TrendFollowStrategy) |
+| `app/config.py` | Configuration settings |
 
 ## Why this is the right approach
 

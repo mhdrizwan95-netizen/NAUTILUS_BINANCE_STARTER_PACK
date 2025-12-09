@@ -13,7 +13,10 @@
 |------|-------|----------------------|
 | Execution engine | FastAPI order API, risk rails, persistence, reconciliation, metrics | `engine/app.py`, `engine/core/order_router.py`, `engine/risk.py`, `engine/metrics.py`, `engine/storage/sqlite.py` |
 | Strategy runtime | Built-in MA + HMM ensemble, tick strategies, event-driven modules | `engine/strategy.py`, `engine/strategies/policy_hmm.py`, `engine/strategies/trend_follow.py`, `engine/strategies/listing_sniper.py` |
-| Machine learning & research | Model registry, hierarchical HMM training, replay/backtests, notebooks | `ml_service/app.py`, `scripts/train_hmm_policy.py`, `pipeline/*`, `notebooks/*` |
+| Dynamic symbols | Symbol scanner and universe management | `engine/strategies/symbol_scanner.py`, `engine/universe/effective.py` |
+| ML service | HMM training, regime detection, model registry | `services/ml_service/app/main.py`, `services/ml_service/app/trainer.py`, `services/ml_service/app/model_store.py` |
+| Param controller | LinTS bandit, preset management, feedback loop | `services/param_controller/app/main.py`, `services/param_controller/app/bandit.py`, `services/param_controller/app/store.py` |
+| Data ingester | OHLCV collection, watermark tracking | `services/data_ingester/app/main.py`, `services/data_ingester/app/config.py` |
 | Ops & governance | Ops API, capital allocator, exposure collectors, governance daemons | `ops/ops_api.py`, `ops/strategy_router.py`, `ops/capital_allocator.py`, `ops/exposure_collector.py` |
 | Observability | Prometheus registry, dashboards, alert rules, validation tooling | `ops/observability/docker-compose.observability.yml`, `ops/observability/prometheus/rules/*.yml`, `ops/observability/validate_obs.sh` |
 | Supporting services | Tradable universe, situation detection, screener scanning | `universe/service.py`, `situations/service.py`, `screener/service.py` |
@@ -21,14 +24,15 @@
 
 ## Curated document set
 
-- `PROJECT_OVERVIEW.md` — mission, current snapshot, and open venue roadmap.
+- `PROJECT_OVERVIEW.md` — mission, current snapshot, and completed milestones.
 - `SYSTEM_DESIGN.md` — layered architecture, execution flow, and fault-tolerance patterns.
 - `DEV_GUIDE.md` — environment bootstrap, coding standards, testing expectations, and instrumentation.
 - `OPS_RUNBOOK.md` — daily health checks, incident recovery, governance controls, and escalation paths.
 - `OBSERVABILITY.md` — Prometheus/Grafana topology, alerting rules, and validation tooling.
 - `FEATURE_FLAGS.md` — risk gates and feature toggles with recommended defaults.
+- `AUTONOMOUS_LOOP.md` — **NEW** Three-cycle autonomous trading loop (Symbol Selection → Regime Detection → Feedback).
 - `ML_SERVICE_INTEGRATION.md` — autotrain stack quick start, ledger semantics, and operational guardrails.
-- `BACKTEST_SUITE_GUIDE.md` — prequential simulation workflow, quick start, and extension hooks.
+- `BACKTEST_SUITE_GUIDE.md` — prequential simulation workflow (stub - see `ROADMAP.md` for status).
 - `README-BINANCE-BACKFILL.md` — historical backfill job covering configuration and safety notes.
 
 ## Daily References

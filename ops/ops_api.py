@@ -99,6 +99,66 @@ async def issue_ws_session():
     token = secrets.token_urlsafe(32)
     return {"session": token, "expires": 3600}
 
+
+# ============================================================================
+# Event Ingestion Endpoints - Receive events from Engine
+# ============================================================================
+
+# In-memory price cache (last N ticks per symbol)
+_price_cache: dict[str, list[dict]] = {}
+_PRICE_CACHE_SIZE = 100
+
+@APP.post("/api/events/price")
+async def receive_price_event(request: Request):
+    """
+    Receive price tick events from the engine's PriceBridge.
+    Stores ticks in memory for dashboard/charting use.
+    """
+    try:
+        tick = await request.json()
+        symbol = tick.get("symbol")
+        if not symbol:
+            return {"status": "ignored", "reason": "no symbol"}
+        
+        # Store in cache
+        if symbol not in _price_cache:
+            _price_cache[symbol] = []
+        
+        _price_cache[symbol].append({
+            "price": tick.get("price"),
+            "ts": tick.get("ts", time.time()),
+            "source": tick.get("source"),
+        })
+        
+        # Trim to max size
+        if len(_price_cache[symbol]) > _PRICE_CACHE_SIZE:
+            _price_cache[symbol] = _price_cache[symbol][-_PRICE_CACHE_SIZE:]
+        
+        return {"status": "ok"}
+    except Exception as e:
+        logger.warning(f"Failed to process price event: {e}")
+        return {"status": "error", "error": str(e)}
+
+
+@APP.get("/api/events/prices")
+async def get_price_events(symbol: str | None = None, limit: int = 50):
+    """
+    Get cached price events for charting.
+    """
+    if symbol:
+        ticks = _price_cache.get(symbol, [])[-limit:]
+        return {"symbol": symbol, "ticks": ticks}
+    
+    # Return summary of all symbols
+    summary = {}
+    for sym, ticks in _price_cache.items():
+        if ticks:
+            summary[sym] = {
+                "latest": ticks[-1],
+                "count": len(ticks)
+            }
+    return {"symbols": summary}
+
 @APP.get("/status")
 async def get_status():
     """Fetch trading status from engine."""
@@ -142,42 +202,44 @@ async def get_metrics_summary():
     """Fetch portfolio metrics summary from engine."""
     client = await get_client()
     try:
-        # Try getting aggregate portfolio data
+        # Fetch aggregate data
         portfolio_resp = await client.get(f"{ENGINE_URL}/aggregate/portfolio")
         pnl_resp = await client.get(f"{ENGINE_URL}/aggregate/pnl")
+        stats_resp = await client.get(f"{ENGINE_URL}/trades/stats")
         
         portfolio = portfolio_resp.json() if portfolio_resp.status_code == 200 else {}
         pnl = pnl_resp.json() if pnl_resp.status_code == 200 else {}
+        stats = stats_resp.json() if stats_resp.status_code == 200 else {}
         
         # Calculate KPIs from real data
-        equity = portfolio.get("equity_usd", 0)
-        gain = portfolio.get("gain_usd", 0)
-        return_pct = portfolio.get("return_pct", 0)
-        
         realized = pnl.get("realized", {})
         unrealized = pnl.get("unrealized", {})
         
         total_pnl = sum(realized.values()) + sum(unrealized.values())
         positions_count = len([v for v in unrealized.values() if v != 0])
         
-        # Build equity by strategy from PnL data
-        equity_by_strategy = []
-        pnl_by_symbol = []
+        # Get computed stats from engine
+        win_rate = float(stats.get("win_rate", 0.0))
+        sharpe = float(stats.get("sharpe", 0.0))
+        max_drawdown = float(stats.get("max_drawdown", 0.0))
+        returns = stats.get("returns", [])
         
+        # Build PnL by symbol
+        pnl_by_symbol = []
         for symbol, val in {**realized, **unrealized}.items():
             pnl_by_symbol.append({"symbol": symbol, "pnl": val})
         
         return {
             "kpis": {
                 "totalPnl": total_pnl,
-                "winRate": 0.0,  # Would need trade history to calculate
-                "sharpe": 0.0,   # Would need returns history
-                "maxDrawdown": 0.0,
+                "winRate": win_rate,
+                "sharpe": sharpe,
+                "maxDrawdown": max_drawdown,
                 "openPositions": positions_count
             },
-            "equityByStrategy": equity_by_strategy,
+            "equityByStrategy": [],
             "pnlBySymbol": pnl_by_symbol[:10],  # Top 10
-            "returns": []
+            "returns": returns
         }
     except (httpx.RequestError, httpx.TimeoutException) as e:
         logger.warning(f"Engine metrics fetch failed: {e}")

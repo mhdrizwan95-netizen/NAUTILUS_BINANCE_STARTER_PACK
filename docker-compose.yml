@@ -126,6 +126,15 @@ services:
       - AUTO_TOPUP_ENABLED=false
       - SCALP_ENABLED=true
       - MOMENTUM_RT_ENABLED=true
+      # Dynamic Symbol Discovery (SymbolScanner)
+      - SYMBOL_SCANNER_ENABLED=true
+      - SYMBOL_SCANNER_UNIVERSE=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,MATICUSDT,SHIBUSDT,LTCUSDT,ATOMUSDT,UNIUSDT,ETCUSDT,XLMUSDT,NEARUSDT,APTUSDT,ARBUSDT
+      - SYMBOL_SCANNER_TOP_N=5
+      - SYMBOL_SCANNER_INTERVAL_SEC=300
+      - SYMBOL_SCANNER_MIN_VOLUME_USD=500000
+      - SYMBOL_SCANNER_MIN_ATR_PCT=0.1
+      - OPS_URL=http://ops:8002
+      - OPS_TOKEN=${OPS_API_TOKEN:-}
     healthcheck:
       test:
         - CMD
@@ -141,6 +150,7 @@ services:
     container_name: hmm_engine_binance
     env_file: .env
     volumes:
+      - ./engine:/app/engine:rw
       - ./engine/state:/app/engine/state:rw
       - ./engine/logs:/app/engine/logs:rw
       - ./engine/logs:/app/engine/logs:rw
@@ -185,6 +195,8 @@ services:
       HMM_URL: http://ml_service:8000
       ENGINE_URL: http://engine_binance:8003
     volumes:
+      - ./ops:/app/ops:rw
+      - ./frontend:/app/frontend:ro
       - ./data:/app/data:rw
     ports:
       - ${OPS_PORT:-8002}:8002
@@ -339,14 +351,21 @@ services:
       - EXACTLY_ONCE=true
       - DELETE_AFTER_PROCESS=true
       - LOG_LEVEL=INFO
-      - RETRAIN_CRON=0 */6 * * *
+      - RETRAIN_CRON=0 */4 * * *
     command:
-      - python
-      - -m
-      - app.scheduler
+      - /bin/bash
+      - -c
+      - |
+        echo "Starting ML Scheduler Loop (Every 4H)..."
+        while true; do
+          /app/ops/nightly_retrain.sh
+          echo "Sleeping for 4 hours..."
+          sleep 14400
+        done
     volumes:
       - ml_data_volume:/ml
       - ml_models_volume:/models
+      - ./:/app
     restart: unless-stopped
     networks:
       - trading_net

@@ -46,7 +46,7 @@ class PriceBridge:
         await self._client.aclose()
         logger.info("PriceBridge stopped")
 
-    def _on_tick(self, topic: str, payload: dict):
+    def _on_tick(self, payload: dict):
         # Payload expected: {symbol, price, time, ...}
         self._buffer.append(payload)
 

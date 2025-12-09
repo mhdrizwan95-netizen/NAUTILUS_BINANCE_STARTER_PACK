@@ -41,6 +41,7 @@ from starlette.responses import Response
 
 import engine.state as state_mod
 from engine import metrics, strategy
+from engine.strategy import SYMBOL_SCANNER
 from engine.config import (
     QUOTE_CCY,
     get_settings,
@@ -84,9 +85,11 @@ from engine.services.param_client import (
     get_param_client,
 )
 from engine.services.price_bridge import PriceBridge
+from engine.services.liquidation_watcher import LiquidationWatcher
 from engine.state import SnapshotStore
 from engine.state import SnapshotStore
 from engine.universe import configured_universe, last_prices
+from engine.core.binance_market_stream import BinanceMarketStream
 from engine.core.binance_user_stream import BinanceUserStream
 from engine.services.telemetry_broadcaster import BROADCASTER
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
@@ -98,6 +101,8 @@ setup_logging()
 
 SERVICE_NAME = os.getenv("OBS_SERVICE_NAME", "engine")
 _ENGINE_START_TS = time.time()
+_PRICE_BRIDGE: PriceBridge | None = None
+_LIQUIDATION_WATCHER: LiquidationWatcher | None = None
 _app_logger = logging.getLogger("engine.app")
 _JITTER_RNG = SystemRandom()
 
@@ -283,6 +288,11 @@ async def _bootstrap_services() -> None:
     _PRICE_BRIDGE = PriceBridge()
     await _PRICE_BRIDGE.start()
 
+    # [Institutional Upgrade] Start Liquidation Watcher
+    global _LIQUIDATION_WATCHER
+    _LIQUIDATION_WATCHER = LiquidationWatcher(BUS)
+    await _LIQUIDATION_WATCHER.start()
+
 
 @app.on_event("shutdown")
 async def _shutdown_services() -> None:
@@ -293,6 +303,10 @@ async def _shutdown_services() -> None:
     global _PRICE_BRIDGE
     if _PRICE_BRIDGE:
         await _PRICE_BRIDGE.stop()
+        
+    global _LIQUIDATION_WATCHER
+    if _LIQUIDATION_WATCHER:
+        await _LIQUIDATION_WATCHER.stop()
 
 
 def _truthy_env(name: str) -> bool:
@@ -506,7 +520,7 @@ def _apply_binance_mark_metrics(base: str, price: float) -> None:
     _price_map[base] = price
 
 
-def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
+async def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
     base = sym.split(".")[0].upper() if "." in sym else sym.upper()
     try:
         price_f = float(price)
@@ -518,15 +532,17 @@ def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None:
     _binance_mark_ts[base] = ts or time.time()
 
     _safely(f"binance mark metrics ({base})", _apply_binance_mark_metrics, base, price_f)
-    _safely(
-        f"binance strategy tick ({base})",
-        _maybe_emit_strategy_tick,
-        qual,
-        price_f,
-        ts=ts or time.time(),
-        source="binance_ws",
-        stream="ws",
-    )
+    
+    try:
+        await _maybe_emit_strategy_tick(
+            qual,
+            price_f,
+            ts=ts or time.time(),
+            source="binance_ws",
+            stream="ws",
+        )
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        _log_suppressed(f"binance strategy tick ({base})", exc)
 
 
 async def auto_topup_worker() -> None:
@@ -705,8 +721,20 @@ async def _broadcast_market_tick(event: dict[str, Any]) -> None:
     await BROADCASTER.broadcast(payload)
 
 
+
+async def _broadcast_market_trade(event: dict[str, Any]) -> None:
+    """Forward market trades to WebSocket clients."""
+    payload = {
+        "type": "trade",
+        "data": event,
+        "ts": time.time()
+    }
+    await BROADCASTER.broadcast(payload)
+
+
 # Wire up telemetry
 BUS.subscribe("market.tick", _broadcast_market_tick)
+BUS.subscribe("market.trade", _broadcast_market_trade)
 
 portfolio = Portfolio(on_update=_broadcast_telemetry)
 router = OrderRouterExt(rest_client, portfolio, venue=VENUE)
@@ -783,7 +811,7 @@ def _config_hash() -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
 
-def _maybe_emit_strategy_tick(
+async def _maybe_emit_strategy_tick(
     symbol: str,
     price: float,
     *,
@@ -839,14 +867,15 @@ def _maybe_emit_strategy_tick(
     if cfg is None or not getattr(cfg, "enabled", False):
         return
 
-    _safely(
-        f"strategy on_tick ({qualified})",
-        strategy.on_tick,
-        qualified,
-        float(price),
-        event_ts,
-        volume,
-    )
+    try:
+        await strategy.on_tick(
+            qualified,
+            float(price),
+            event_ts,
+            volume,
+        )
+    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        _log_suppressed(f"strategy on_tick ({qualified})", exc)
 
 
 @app.get("/readyz")
@@ -2674,15 +2703,31 @@ async def get_price(
 # Aggregate Endpoints for Frontend Dashboard
 # ============================================================================
 
+# Global state for session baseline
+_DYNAMIC_BASELINE: float | None = None
+
 @app.get("/aggregate/portfolio")
 async def get_aggregate_portfolio() -> dict[str, Any]:
     """Aggregate portfolio summary for dashboard."""
+    global _DYNAMIC_BASELINE
     state = portfolio.state
-    baseline = float(os.getenv("BASELINE_EQUITY_USD", "10000"))
     equity = state.equity or 0
     cash = state.cash or 0
+    
+    # Determine baseline:
+    # 1. Use explicit env var if set (e.g. for paper trading / fixed starts)
+    # 2. Else use first-seen non-zero equity (session PnL)
+    # 3. Fallback to equity (0 PnL) or 10000 if equity is 0
+    env_baseline = os.getenv("BASELINE_EQUITY_USD")
+    if env_baseline:
+        baseline = float(env_baseline)
+    else:
+        if _DYNAMIC_BASELINE is None and equity > 0:
+            _DYNAMIC_BASELINE = equity
+        baseline = _DYNAMIC_BASELINE if _DYNAMIC_BASELINE else (equity if equity > 0 else 10000.0)
+
     gain = equity - baseline
-    return_pct = (gain / baseline * 100) if baseline > 0 else 0
+    return_pct = (gain / baseline) if baseline > 0 else 0
     
     return {
         "equity_usd": equity,
@@ -2790,6 +2835,38 @@ async def get_strategies() -> dict[str, Any]:
                 "paramsSchema": default_params_schema,
                 "params": {},
             })
+
+        if hasattr(strat_mod, 'LIQU_MODULE') and strat_mod.LIQU_MODULE:
+            liqu_schema = {
+                "fields": [
+                    {"key": "dry_run", "type": "boolean", "label": "Dry Run"},
+                    {"key": "grid_steps", "type": "number", "label": "Grid Steps", "min": 1, "max": 10, "step": 1},
+                    {"key": "size_usd", "type": "number", "label": "Size (USD)", "min": 10, "max": 10000},
+                    {"key": "stop_loss_pct", "type": "number", "label": "Stop Loss %", "step": 0.01},
+                    {"key": "take_profit_pct", "type": "number", "label": "Take Profit %", "step": 0.01},
+                ]
+            }
+            # Populate basic params from config
+            l_cfg = getattr(strat_mod, 'LIQU_CFG', None)
+            l_params = {}
+            if l_cfg:
+                l_params = {
+                    "dry_run": l_cfg.dry_run,
+                    "grid_steps": len(l_cfg.grid_steps) if l_cfg.grid_steps else 3,
+                    "size_usd": l_cfg.size_usd,
+                    "stop_loss_pct": l_cfg.stop_loss_pct,
+                    "take_profit_pct": l_cfg.take_profit_pct,
+                }
+
+            strategies_data.append({
+                "id": "liquidation_sniper",
+                "name": "Liquidation Sniper",
+                "kind": "liquidation",
+                "status": "running" if getattr(strat_mod.LIQU_MODULE, 'enabled', False) else "stopped",
+                "symbols": ["ALL"], # Global watcher
+                "paramsSchema": liqu_schema,
+                "params": l_params,
+            })
         
         # HMM/Ensemble
         s_cfg = getattr(strat_mod, 'S_CFG', None)
@@ -2841,6 +2918,34 @@ async def get_recent_trades(limit: int = 100) -> dict[str, Any]:
         "data": trades,
         "page": {"nextCursor": None, "prevCursor": None, "limit": limit}
     }
+
+
+@app.get("/trades/stats")
+async def get_trade_stats() -> dict[str, Any]:
+    """Get computed trade statistics: win rate, sharpe, max drawdown."""
+    stats = {"win_rate": 0.0, "sharpe": 0.0, "max_drawdown": 0.0, "total_trades": 0, "returns": []}
+    
+    if store is not None:
+        try:
+            computed = store.compute_trade_stats()
+            stats["win_rate"] = computed.get("win_rate", 0.0)
+            stats["total_trades"] = computed.get("total_trades", 0)
+            stats["max_drawdown"] = computed.get("max_drawdown", 0.0)
+            
+            # Compute Sharpe ratio from returns if available
+            returns = computed.get("returns", [])
+            if returns and len(returns) >= 5:
+                import statistics
+                mean_ret = statistics.mean(returns)
+                std_ret = statistics.stdev(returns) if len(returns) > 1 else 1.0
+                # Annualize assuming daily trades
+                if std_ret > 0:
+                    stats["sharpe"] = round((mean_ret / std_ret) * (252 ** 0.5), 2)
+                stats["returns"] = returns[-50:]  # Last 50 returns for charting
+        except _SUPPRESSIBLE_EXCEPTIONS:
+            pass
+    
+    return stats
 
 
 @app.get("/alerts")
@@ -3159,6 +3264,59 @@ async def _start_user_stream() -> None:
     asyncio.create_task(_user_stream.run())
 
 
+_market_stream: BinanceMarketStream | None = None
+
+@app.on_event("startup")
+async def _start_market_stream() -> None:
+    """Start the Binance Public Market Data Stream."""
+    global _market_stream
+    if IS_EXPORTER or VENUE != "BINANCE":
+        return
+
+    # Gather all trading symbols
+    symbols = configured_universe()
+    if not symbols:
+        # Fallback if universe not ready
+        symbols = (os.getenv("TRADE_SYMBOLS") or "BTCUSDT,ETHUSDT").split(",")
+        symbols = [s.strip() for s in symbols if s.strip()]
+
+    async def on_market_event(data: dict) -> None:
+        if _market_data_dispatcher:
+            _market_data_dispatcher.handle_stream_event(data)
+        
+        # Update system telemetry (Price/Heartbeat)
+        if data.get("type") == "trade":
+            sym = data.get("symbol")
+            price = data.get("price")
+            ts = data.get("ts")
+            if sym and price is not None:
+                # _binance_on_mark updates metrics and triggers strategy ticks
+                await _binance_on_mark("trade", sym, price, ts or time.time())
+    
+    MARKET_STREAM = BinanceMarketStream(symbols, on_event=on_market_event)
+    _market_stream = MARKET_STREAM
+    
+    # Start the watchdog to update subscriptions dynamically
+    async def _scanner_watchdog():
+        if not SYMBOL_SCANNER:
+            return
+        
+        logging.getLogger("engine.app").info("[Watchdog] Started dynamic symbol subscription watchdog")
+        while True:
+            await asyncio.sleep(30)
+            try:
+                # Get current target universe
+                current = SYMBOL_SCANNER.get_selected()
+                if current and _market_stream:
+                    # BinanceMarketStream.subscribe handles diffing and reconnection automatically
+                    _market_stream.subscribe(current)
+            except Exception as e:
+                logging.getLogger("engine.app").warning(f"[Watchdog] check failed: {e}")
+
+    asyncio.create_task(_scanner_watchdog())
+    asyncio.create_task(_market_stream.run())
+
+
 @app.on_event("startup")
 async def _start_telemetry_watchdog() -> None:
     """Monitor telemetry latency and alert if stale."""
@@ -3257,7 +3415,10 @@ async def _refresh_binance_futures_snapshot() -> None:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
                 except _SUPPRESSIBLE_EXCEPTIONS as exc:
                     _log_suppressed("engine guard", exc)
-                _maybe_emit_strategy_tick(sym, px, ts=now_ts, source="rest_snapshot", stream="rest")
+                try:
+                    await _maybe_emit_strategy_tick(sym, px, ts=now_ts, source="rest_snapshot", stream="rest")
+                except _SUPPRESSIBLE_EXCEPTIONS:
+                    pass
             if new_map:
                 _price_map = new_map
     except _SUPPRESSIBLE_EXCEPTIONS as exc:
@@ -3432,8 +3593,11 @@ async def _refresh_binance_spot_snapshot() -> None:
                 _log_suppressed("ticker price parse", exc)
                 continue
             if px > 0:
-                new_map[sym] = px
-                _maybe_emit_strategy_tick(sym, px, source="rest_snapshot", stream="rest")
+                _price_map[sym] = px
+                try:
+                    await _maybe_emit_strategy_tick(sym, px, source="rest_snapshot", stream="rest")
+                except _SUPPRESSIBLE_EXCEPTIONS:
+                    pass
         if new_map:
             _price_map = new_map
             for sym, px in new_map.items():

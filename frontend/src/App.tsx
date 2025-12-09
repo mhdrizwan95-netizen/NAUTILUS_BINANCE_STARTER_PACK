@@ -321,8 +321,8 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
         id: s.id,
         name: s.name || s.id,
         enabled: s.status === "running",
-        confidence: s.confidence ?? 0.8, // Mock high confidence for now
-        signal: s.signal ?? 0.5, // Mock positive signal for now
+        confidence: s.confidence || 0,
+        signal: s.signal || 0,
         lastUpdate: Date.now(),
       }));
       console.log("Mapped strategies:", strategies);
@@ -649,7 +649,7 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
   const isRealtimeConnected = wsConnected || hasHealthyVenue;
 
   return (
-    <div className="h-screen bg-zinc-950 flex flex-col overflow-hidden dark">
+    <div className="h-screen bg-transparent flex flex-col overflow-hidden dark">
       {bootStatus.phase === "degraded" ? (
         <div className="bg-amber-500/10 border-b border-amber-500/40 text-amber-200 text-sm px-4 py-2">
           Running in degraded mode{bootStatus.note ? ` — ${bootStatus.note}` : ""}

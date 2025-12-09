@@ -20,11 +20,33 @@ curl -X POST http://localhost:8003/train
 
 All services share the `data`, `models`, and `shared` volumes declared in the compose overlay. Default ports:
 
-| Service | Port | Key endpoints |
-|---------|------|---------------|
-| data_ingester | `8001` | `/health`, `/ingest_once` |
-| param_controller | `8002` | `/health`, `/param/{strategy}/{instrument}`, `/learn/outcome/...` |
-| ml_service | `8003` | `/health`, `/train`, `/predict`, `/model` |
+| Service | Internal Port | Host Port | Key endpoints |
+|---------|---------------|-----------|---------------|
+| data_ingester | `8000` | `8013` | `/health`, `/ingest_once` |
+| param_controller | `8002` | `8016` | `/health`, `/param/{strategy}/{instrument}`, `/preset/register/...`, `/learn/outcome/...` |
+| ml_service | `8000` | `8015` | `/health`, `/train`, `/predict`, `/model` |
+
+### Module Structure (December 2024)
+
+Each service now has a complete module structure:
+
+**ml_service** (`services/ml_service/app/`):
+- `main.py` - FastAPI app with `/train`, `/predict`, `/model` endpoints
+- `model_store.py` - Model versioning, registry, and persistence
+- `trainer.py` - HMM training with synthetic data fallback
+- `inference.py` - Regime prediction with model caching
+- `schemas.py` - Pydantic request/response models
+- `auth.py` - Role-based access control
+
+**param_controller** (`services/param_controller/app/`):
+- `main.py` - FastAPI app with preset and parameter endpoints
+- `bandit.py` - LinTS (Linear Thompson Sampling) implementation
+- `store.py` - SQLite storage for presets and outcomes
+- `config.py` - Configuration settings
+
+**data_ingester** (`services/data_ingester/app/`):
+- `main.py` - FastAPI app with `/ingest_once` endpoint
+- `config.py` - CCXT configuration settings
 
 ## Authentication & JWT flow
 

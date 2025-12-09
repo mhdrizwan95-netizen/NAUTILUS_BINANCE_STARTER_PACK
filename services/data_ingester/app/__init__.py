@@ -1,0 +1,1 @@
+"""Data Ingester app package."""

@@ -9,7 +9,7 @@ import httpx
 import yaml
 
 from ops import m25_governor
-from ops.env import engine_endpoints
+from ops.environment import engine_endpoints
 from ops.net import create_async_client, request_with_retry
 
 REGISTRY_PATH = Path("ops/strategy_registry.json")

@@ -134,3 +134,143 @@ def insert_equity(venue: str, equity: float, cash: float, upnl: float, ts_ms: in
                VALUES(?,?,?,?,?)""",
         (venue, equity, cash, upnl, ts_ms),
     )
+
+
+# =============================
+# Query functions for analytics
+# =============================
+
+def get_recent_fills(limit: int = 500) -> list[dict[str, Any]]:
+    """Fetch recent fills for trade history and metrics computation."""
+    global _DB
+    if _DB is None:
+        return []
+    try:
+        with _LOCK:
+            cursor = _DB.execute(
+                """SELECT id, order_id, venue, symbol, side, qty, price, fee_ccy, fee, ts
+                   FROM fills ORDER BY ts DESC LIMIT ?""",
+                (limit,),
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "id": r[0],
+                "order_id": r[1],
+                "venue": r[2],
+                "symbol": r[3],
+                "side": r[4],
+                "qty": r[5],
+                "price": r[6],
+                "fee_ccy": r[7],
+                "fee": r[8],
+                "ts": r[9],
+            }
+            for r in rows
+        ]
+    except sqlite3.Error as exc:
+        _LOGGER.warning("get_recent_fills failed: %s", exc)
+        return []
+
+
+def get_equity_curve(limit: int = 100) -> list[dict[str, Any]]:
+    """Fetch equity snapshots for drawdown calculation."""
+    global _DB
+    if _DB is None:
+        return []
+    try:
+        with _LOCK:
+            cursor = _DB.execute(
+                """SELECT venue, equity_usd, cash_usd, upnl_usd, ts
+                   FROM equity_snapshots ORDER BY ts DESC LIMIT ?""",
+                (limit,),
+            )
+            rows = cursor.fetchall()
+        return [
+            {
+                "venue": r[0],
+                "equity_usd": r[1],
+                "cash_usd": r[2],
+                "upnl_usd": r[3],
+                "ts": r[4],
+            }
+            for r in rows
+        ]
+    except sqlite3.Error as exc:
+        _LOGGER.warning("get_equity_curve failed: %s", exc)
+        return []
+
+
+def compute_trade_stats() -> dict[str, float]:
+    """Compute win rate and returns for Sharpe calculation from fills.
+    
+    Returns:
+        dict with 'win_rate', 'total_trades', 'returns' (list of % returns per round-trip)
+    """
+    fills = get_recent_fills(limit=1000)
+    if not fills:
+        return {"win_rate": 0.0, "total_trades": 0, "returns": [], "max_drawdown": 0.0}
+    
+    # Group fills by symbol to compute round-trip PnL
+    from collections import defaultdict
+    positions: dict[str, list[dict]] = defaultdict(list)
+    for fill in sorted(fills, key=lambda x: x["ts"]):
+        positions[fill["symbol"]].append(fill)
+    
+    round_trips = []
+    for symbol, sym_fills in positions.items():
+        net_qty = 0.0
+        avg_entry = 0.0
+        for fill in sym_fills:
+            qty_signed = fill["qty"] if fill["side"] == "BUY" else -fill["qty"]
+            if net_qty == 0:
+                # Opening position
+                net_qty = qty_signed
+                avg_entry = fill["price"]
+            elif (net_qty > 0 and qty_signed < 0) or (net_qty < 0 and qty_signed > 0):
+                # Closing or reducing position
+                closed_qty = min(abs(net_qty), abs(qty_signed))
+                if net_qty > 0:
+                    # Was long, sold to close
+                    pnl_pct = ((fill["price"] - avg_entry) / avg_entry) * 100 if avg_entry > 0 else 0
+                else:
+                    # Was short, bought to close
+                    pnl_pct = ((avg_entry - fill["price"]) / avg_entry) * 100 if avg_entry > 0 else 0
+                round_trips.append(pnl_pct)
+                net_qty += qty_signed
+                if abs(net_qty) < 1e-10:
+                    net_qty = 0.0
+                    avg_entry = 0.0
+            else:
+                # Adding to position - update average
+                total_cost = avg_entry * abs(net_qty) + fill["price"] * abs(qty_signed)
+                net_qty += qty_signed
+                avg_entry = total_cost / abs(net_qty) if net_qty != 0 else 0
+    
+    if not round_trips:
+        return {"win_rate": 0.0, "total_trades": 0, "returns": [], "max_drawdown": 0.0}
+    
+    wins = sum(1 for r in round_trips if r > 0)
+    win_rate = wins / len(round_trips) * 100 if round_trips else 0.0
+    
+    # Compute max drawdown from equity curve
+    equity_curve = get_equity_curve(limit=500)
+    max_dd = 0.0
+    if equity_curve:
+        equities = [e["equity_usd"] for e in reversed(equity_curve) if e["equity_usd"] > 0]
+        if equities:
+            peak = equities[0]
+            for eq in equities:
+                if eq > peak:
+                    peak = eq
+                dd = (peak - eq) / peak * 100 if peak > 0 else 0
+                if dd > max_dd:
+                    max_dd = dd
+    
+    return {
+        "win_rate": round(win_rate, 2),
+        "total_trades": len(round_trips),
+        "returns": round_trips,
+        "max_drawdown": round(max_dd, 2),
+    }
+

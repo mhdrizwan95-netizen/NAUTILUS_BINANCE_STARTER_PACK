@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import threading
 import time
 from collections.abc import Sequence
@@ -116,15 +117,84 @@ class SymbolScanner:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._base_url = (get_settings().base_url or "https://api.binance.com").rstrip("/")
+        self._futures_base_url = (get_settings().futures_base or "https://fapi.binance.com").rstrip("/")
+        self._universe_size = 20  # How many top coins to consider as universe
+        self._dynamic_universe: list[str] = []  # Cached dynamic universe
+        self._universe_refresh_interval = 3600  # Refresh universe every hour
+        self._last_universe_refresh = 0.0
         self._state_path = Path(self.cfg.state_path)
         self._state_path.parent.mkdir(parents=True, exist_ok=True)
         self._load_state()
         try:
             from engine import metrics as MET
-
             self._metrics = MET
         except ImportError:
             self._metrics = None
+
+        # Register for Dynamic Params (Macro Brain)
+        try:
+            from engine.services.param_client import get_param_client
+            client = get_param_client()
+            if client:
+                client.register_symbol("symbol_scanner", "GLOBAL")
+        except ImportError:
+            pass
+
+    def _fetch_dynamic_universe(self) -> list[str]:
+        """
+        Fetch top N USDT perpetual futures by 24h volume from Binance.
+        Returns list of symbols like ['BTCUSDT', 'ETHUSDT', ...].
+        Falls back to config universe on error.
+        """
+        now = time.time()
+        
+        # Use cached universe if still fresh
+        if self._dynamic_universe and (now - self._last_universe_refresh) < self._universe_refresh_interval:
+            return self._dynamic_universe
+        
+        try:
+            # Fetch 24hr ticker data from Binance Futures
+            url = f"{self._futures_base_url}/fapi/v1/ticker/24hr"
+            resp = httpx.get(url, timeout=15.0)
+            resp.raise_for_status()
+            tickers = resp.json()
+            
+            if not isinstance(tickers, list):
+                raise ValueError("Invalid ticker response")
+            
+            # Filter USDT perpetuals and sort by quote volume
+            usdt_pairs = []
+            for t in tickers:
+                symbol = t.get("symbol", "")
+                # Only USDT pairs, exclude stablecoins and low-liquidity pairs
+                if not symbol.endswith("USDT"):
+                    continue
+                if any(skip in symbol for skip in ["BUSD", "TUSD", "USDCUSDT", "DAIUSDT", "FDUSD"]):
+                    continue
+                    
+                try:
+                    quote_volume = float(t.get("quoteVolume", 0))
+                except (ValueError, TypeError):
+                    continue
+                    
+                usdt_pairs.append((symbol, quote_volume))
+            
+            # Sort by volume descending and take top N
+            usdt_pairs.sort(key=lambda x: x[1], reverse=True)
+            top_symbols = [sym for sym, _ in usdt_pairs[:self._universe_size]]
+            
+            if top_symbols:
+                self._dynamic_universe = top_symbols
+                self._last_universe_refresh = now
+                logging.getLogger(__name__).info(f"Dynamic Universe Fetched ({len(top_symbols)}): {top_symbols[:3]}...")
+                return top_symbols
+                
+        except _SUPPRESSIBLE_EXCEPTIONS as e:
+            logging.getLogger(__name__).warning(f"Failed to fetch dynamic universe: {e}")
+        
+        # Fallback to config universe
+        logging.getLogger(__name__).info("Using fallback config universe")
+        return list(self.cfg.universe)
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -170,6 +240,7 @@ class SymbolScanner:
     def _scan_once(self) -> None:
         ranked: list[tuple[str, float]] = []
         now = time.time()
+        logger = logging.getLogger(__name__)
 
         # --- Dynamic Parameter Adaptation (Macro Brain) ---
         try:
@@ -197,7 +268,10 @@ class SymbolScanner:
         except Exception:
             pass  # Fail safe
 
-        for sym in self.cfg.universe:
+        # Fetch dynamic universe (top coins by volume)
+        universe = self._fetch_dynamic_universe()
+        
+        for sym in universe:
             if self._cooldown_active(sym, now):
                 continue
             # Optimization: If we already fetched BTC, reuse it?
@@ -205,13 +279,21 @@ class SymbolScanner:
             # Given lookback is small, it's fine.
             data = self._fetch_klines(sym)
             if not data:
+                logger.debug(f"No kline data for {sym}")
                 continue
             score = self._score_symbol(sym, data)
             if score is None:
+                logger.debug(f"Score None for {sym} (filtered)")
                 continue
             ranked.append((sym, score))
+            
         ranked.sort(key=lambda x: x[1], reverse=True)
         top = [sym for sym, _ in ranked[: self.cfg.top_n]]
+        
+        if top:
+            logger.info(f"Scanner Selected: {top} (from {len(ranked)} ranked)")
+        else:
+            logger.warning("Scanner selected EMPTY set! Keeping previous.")
 
         # Log dynamic weights if top changed or periodically?
         # Let's just log if we have a logger. SymbolScanner doesn't have self._log.
@@ -228,7 +310,8 @@ class SymbolScanner:
         self._persist_state()
 
     def _fetch_klines(self, symbol: str) -> list[list[str]] | None:
-        url = f"{self._base_url}/api/v3/klines"
+        # Use Futures API for klines as we are in Futures mode
+        url = f"{self._futures_base_url}/fapi/v1/klines"
         try:
             resp = httpx.get(
                 url,
@@ -239,6 +322,7 @@ class SymbolScanner:
                 },
                 timeout=10.0,
             )
+
             resp.raise_for_status()
             data = resp.json()
             if isinstance(data, list) and data:

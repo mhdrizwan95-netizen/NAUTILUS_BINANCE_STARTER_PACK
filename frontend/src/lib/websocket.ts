@@ -303,13 +303,12 @@ export function useWebSocket(): WebSocketHookResult {
           actionsRef.current.updatePerformances(message.data);
         }
         break;
-      case "venues":
-        if (isVenueArray(message.data)) {
-          actionsRef.current.updateVenues(message.data);
-        }
-        break;
+
       case "heartbeat":
         // Heartbeat response - connection is healthy
+        // Tick the latency graph to keep it moving even if idle
+        actionsRef.current.updateVenues([]);
+        actionsRef.current.updateRealTimeData({ lastHeartbeat: Date.now() });
         break;
       // ============ New handlers for tradingStore integration ============
       case "account_update":
@@ -381,16 +380,36 @@ export function useWebSocket(): WebSocketHookResult {
       case "venue.health": {
         // Update venue health in tradingStore
         const venueData = message.data as Record<string, unknown>;
+        const venueObj: Venue = {
+          id: String(venueData.name || "BINANCE"),
+          name: String(venueData.name || "BINANCE"),
+          type: "crypto",
+          status: (venueData.status === "ok" || venueData.connected) ? "connected" : "degraded",
+          latency: Number(venueData.latencyMs || venueData.latency_ms || 0),
+        };
+
+        // Update legacy store
         useTradingStore.getState().updateVenue(
-          String(venueData.name || "BINANCE"),
+          venueObj.name,
           {
-            name: String(venueData.name || "BINANCE"),
-            connected: Boolean(venueData.status === "ok" || venueData.connected),
-            latencyMs: Number(venueData.latencyMs || venueData.latency_ms || 0),
+            name: venueObj.name,
+            connected: venueObj.status === "connected",
+            latencyMs: venueObj.latency,
             queue: Number(venueData.queue || 0),
             wsGapSeconds: Number(venueData.ws_gap_seconds || 0),
           }
         );
+
+        // Update real-time store for heatmap
+        // Wrap in array as store expects list
+        actionsRef.current.updateVenues([venueObj]);
+        break;
+      }
+      case "venues": {
+        // Batch update from some sources
+        if (isVenueArray(message.data)) {
+          actionsRef.current.updateVenues(message.data);
+        }
         break;
       }
       default:

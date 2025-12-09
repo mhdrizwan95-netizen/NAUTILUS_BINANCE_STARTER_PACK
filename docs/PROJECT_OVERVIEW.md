@@ -14,13 +14,18 @@ This brief is for new developers joining the Nautilus trading stack. It captures
 |------|--------|-------|
 | Execution engine | ✅ | `engine/app.py` serves REST APIs for orders, reconciliation, metrics; hardened for **Binance spot/futures only**. |
 | Strategy runtime | ✅ | Built-in MA + HMM ensemble plus unified strategies (`engine/strategy.py`, `engine/strategies/policy_hmm.py`, `engine/strategies/trend_follow.py`, `engine/strategies/listing_sniper.py`). |
-| ML tooling | ✅ (auto) | `ml_service/app.py` provides training/inference endpoints and model registry; auto-promotion scripts live in `scripts/`. |
+| ML service | ✅ | `services/ml_service/app/` - HMM training, model registry, hot-reload. Modules: `model_store.py`, `trainer.py`, `inference.py`. |
+| Param controller | ✅ | `services/param_controller/app/` - LinTS bandit for parameter selection. Modules: `bandit.py`, `store.py`, `config.py`. |
+| Data ingester | ✅ | `services/data_ingester/app/` - CCXT-powered OHLCV fetcher with watermark tracking. |
+| Dynamic symbols | ✅ | `SymbolScanner` wired into `StrategyUniverse.get()` for autonomous symbol rotation. |
+| Trade stats | ✅ | `/trades/stats` endpoint with win rate, Sharpe, max drawdown; feeds frontend metrics. |
 | Ops control plane | ✅ | `ops/ops_api.py` aggregates metrics, exposes governance endpoints, supports WebSocket feeds, and coordinates strategy routing + capital allocation. |
 | Governance | ✅ | `ops/capital_allocator.py`, `ops/strategy_router.py`, policy JSON/YAML inputs; playbooks via `ops/m20_playbook.py`, `ops/m25_governor.py`. |
 | Observability | ✅ | Prometheus + Grafana + Loki bundle in `ops/observability/`, dashboards auto-provisioned (Command Center, venue views); metrics defined in `engine/metrics.py` and `ops/prometheus.py`. |
 | Persistence | ✅ | Portfolio snapshots (`engine/state.py`), idempotency cache, JSONL logs, SQLite (`engine/storage/sqlite.py`). |
 | Supporting services | ✅ | Universe, Situations, Screener FastAPI microservices provide symbol selection and pattern detection. |
 | Documentation | ✅ | Updated README, system design, dev guide, ops runbook (`docs/`). |
+| **Backtest suite** | ❌ | `services/backtest_suite/` exists as stub only. See `ROADMAP.md`. |
 
 ## 3. System Topology
 
@@ -73,17 +78,26 @@ Strategies / ML  ─┐
 
 ## 7. Achievements vs. Remaining Work
 
-### Delivered
+### Delivered (December 2024 Update)
 - Binance trading engine with trader/exporter roles and persistence.
 - Strategy scheduler with MA + HMM ensemble, bracket management, and ensemble fusion.
-- Manual ML service with hierarchical HMM tooling and promotion scripts.
+- **ML Service Integration** - Fully containerised with model store, training, inference, and hot-reload:
+  - `services/ml_service/app/model_store.py` - Model versioning and persistence
+  - `services/ml_service/app/trainer.py` - HMM training with synthetic fallback
+  - `services/ml_service/app/inference.py` - Regime prediction with caching
+- **Param Controller** - LinTS bandit for autonomous parameter selection:
+  - `services/param_controller/app/bandit.py` - Thompson Sampling implementation
+  - `services/param_controller/app/store.py` - SQLite preset/outcome storage
+- **Data Ingester** - CCXT-powered OHLCV ingestion with watermark tracking.
+- **Dynamic Symbol Selection** - `SymbolScanner` wired into `StrategyUniverse.get()`.
+- **Trade Statistics** - `/trades/stats` endpoint for win rate, Sharpe, max drawdown.
 - Ops control plane with governance APIs, capital allocation, strategy routing, executor support.
 - Observability stack with metrics, dashboards, log ingestion, and validation tooling.
 - Documentation refresh (README, system design, developer guide, ops runbook, incident write-ups).
 - Risk management (exposure caps, breakers, rate limits) and automated reconciliation.
 
 ### In Progress / Next Priorities
-- **ML service integration:** Optionally containerise and wire into `docker-compose.yml` with RBAC and hot reload.
+- **Backtest Suite:** Implement `services/backtest_suite/app/` (see `ROADMAP.md` for detailed checklist).
 - **Automation:** Expand guardian/governor automation, integrate notifications (Slack/Telegram) via `ops/m22_notify.py`.
 - **Testing:** Strengthen end-to-end tests (multi-venue integration, strategy scheduler) and add coverage for new connectors.
 - **Secrets & compliance:** Harden secret management (avoid plain `.env` at scale), document approval workflows.

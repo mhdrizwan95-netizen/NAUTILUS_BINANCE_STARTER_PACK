@@ -8,56 +8,27 @@ import { useEffect, useState } from 'react';
 import { LineChart, Line, ResponsiveContainer, YAxis } from 'recharts';
 
 import { cn } from '../lib/utils';
+import { useAppStore } from '../lib/store';
 import { GlassCard } from './ui/GlassCard';
+import { LatencyHeatmap } from './LatencyHeatmap';
 
 export function HealthMonitor() {
     // Simulated Health State
     const [heartbeatHistory, setHeartbeatHistory] = useState<{ i: number; v: number }[]>([]);
-    const [latencyMap, setLatencyMap] = useState<number[]>(Array(50).fill(0));
-    const [logs, setLogs] = useState<string[]>([]);
-    const [apiWeight, setApiWeight] = useState(450);
+    // const [latencyMap, setLatencyMap] = useState<number[]>(Array(50).fill(0)); // Removed mock
+    const [logs] = useState<string[]>([]); // TODO: Wire to store logs
+    // const [apiWeight, setApiWeight] = useState(450);
 
     // Simulation Loop
+    const lastHeartbeat = useAppStore(state => state.realTimeData.lastHeartbeat);
+    // Real Heartbeat History derived from store updates
     useEffect(() => {
-        // Initial Logs
-        setLogs([
-            "[INFO] Engine initialized successfully",
-            "[INFO] Connected to Binance Futures API",
-            "[INFO] ML Model loaded: v2.1.0-RC3",
-            "[INFO] Websocket stream active",
-        ]);
-
-        const interval = setInterval(() => {
-            // Heartbeat
-            setHeartbeatHistory(prev => {
-                const next = [...prev, { i: Date.now(), v: 1 + Math.random() * 0.5 }];
-                return next.slice(-20);
-            });
-
-            // Latency Heatmap
-            setLatencyMap(prev => {
-                const next = [...prev.slice(1), Math.random() * 100];
-                return next;
-            });
-
-            // API Weight
-            setApiWeight(prev => {
-                const change = Math.floor(Math.random() * 20) - 5;
-                return Math.min(1200, Math.max(0, prev + change));
-            });
-
-            // Random Logs
-            if (Math.random() > 0.8) {
-                const newLog = Math.random() > 0.9
-                    ? `[WARN] High slippage detected on BTCUSDT: ${Math.random().toFixed(2)}%`
-                    : `[INFO] Order filled: ${Math.random() > 0.5 ? 'BUY' : 'SELL'} ETHUSDT`;
-                setLogs(prev => [newLog, ...prev].slice(0, 10));
-            }
-
-        }, 1000);
-
-        return () => clearInterval(interval);
-    }, []);
+        if (!lastHeartbeat) return;
+        setHeartbeatHistory(prev => {
+            const newPoint = { i: Date.now(), v: 1 }; // Simple pulse
+            return [...prev, newPoint].slice(-50);
+        });
+    }, [lastHeartbeat]);
 
     return (
         <div className="p-8 space-y-8 min-h-screen flex flex-col bg-deep-space text-zinc-100 font-header pb-20">
@@ -74,49 +45,13 @@ export function HealthMonitor() {
             <div className="grid grid-cols-3 gap-8 h-[350px]">
 
                 {/* API Weight Radial */}
-                <GlassCard title="API Weight (Binance)" neonAccent={apiWeight > 1000 ? "red" : "green"} className="flex flex-col items-center justify-center">
-                    <div className="relative w-40 h-40">
-                        <svg className="transform -rotate-90" width="160" height="160">
-                            <circle cx="80" cy="80" r="70" stroke="rgba(255,255,255,0.05)" strokeWidth="12" fill="none" />
-                            <circle
-                                cx="80" cy="80" r="70"
-                                stroke={apiWeight > 1000 ? "#ff6b6b" : "#00ff9d"}
-                                strokeWidth="12"
-                                fill="none"
-                                strokeDasharray={2 * Math.PI * 70}
-                                strokeDashoffset={2 * Math.PI * 70 * (1 - apiWeight / 1200)}
-                                strokeLinecap="round"
-                                className="transition-all duration-500"
-                            />
-                        </svg>
-                        <div className="absolute inset-0 flex flex-col items-center justify-center">
-                            <div className="text-3xl font-data font-bold text-white">{apiWeight}</div>
-                            <div className="text-xs text-zinc-500">/ 1200</div>
-                        </div>
-                    </div>
+                {/* API Weight - Placeholder for future real data or remove */}
+                <GlassCard title="API Weight" neonAccent="green" className="flex flex-col items-center justify-center">
+                    <div className="text-zinc-500 text-sm">No Telemetry</div>
                 </GlassCard>
 
                 {/* Order Latency Heatmap */}
-                <GlassCard title="Order Latency Heatmap" neonAccent="blue" className="flex flex-col">
-                    <div className="flex-1 grid grid-cols-10 grid-rows-5 gap-1 content-center">
-                        {latencyMap.map((lat, i) => (
-                            <div
-                                key={i}
-                                className={cn(
-                                    "rounded-sm transition-colors duration-300",
-                                    lat < 20 ? "bg-[#00ff9d]/20" :
-                                        lat < 50 ? "bg-[#4361ee]/40" :
-                                            lat < 80 ? "bg-[#ffd93d]/60" : "bg-[#ff6b6b]"
-                                )}
-                                title={`${lat.toFixed(0)}ms`}
-                            />
-                        ))}
-                    </div>
-                    <div className="mt-2 flex justify-between text-xs text-zinc-500 font-mono">
-                        <span>Low (&lt;20ms)</span>
-                        <span>High (&gt;80ms)</span>
-                    </div>
-                </GlassCard>
+                <LatencyHeatmap />
 
                 {/* Watchdog Heartbeat */}
                 <GlassCard title="Watchdog Heartbeat" neonAccent="green" className="flex flex-col">
@@ -136,7 +71,9 @@ export function HealthMonitor() {
                         </ResponsiveContainer>
                     </div>
                     <div className="text-center text-xs text-neon-green font-mono mt-2 animate-pulse">
-                        SYSTEM HEALTHY • TICK GAP &lt; 1s
+                        {lastHeartbeat
+                            ? `SYSTEM HEALTHY • LAST TICK: ${new Date(lastHeartbeat).toLocaleTimeString()}`
+                            : 'WAITING FOR HEARTBEAT...'}
                     </div>
                 </GlassCard>
             </div>
@@ -176,7 +113,9 @@ export function HealthMonitor() {
                 {/* Error Log Stream */}
                 <GlassCard title="System Log Stream" neonAccent="amber" className="col-span-1 flex flex-col">
                     <div className="flex-1 overflow-hidden font-mono text-xs space-y-2">
-                        {logs.map((log, i) => (
+                        {logs.length === 0 ? (
+                            <div className="text-zinc-500 italic p-2">No active system logs captured.</div>
+                        ) : logs.map((log, i) => (
                             <div key={i} className={cn(
                                 "truncate",
                                 log.includes("WARN") ? "text-neon-amber" :

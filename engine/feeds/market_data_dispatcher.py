@@ -55,6 +55,8 @@ class MarketDataDispatcher:
             return "market.book"
         if normalized == "tick":
             return "market.tick"
+        if normalized == "liquidation":
+            return "market.liquidation"
         return None
 
 

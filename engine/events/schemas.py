@@ -38,3 +38,18 @@ class ExternalEvent(BaseModel):
         digest = hashlib.sha256(json.dumps(basis, sort_keys=True).encode()).hexdigest()[:16]
         self.id = f"{self.source}:{digest}"
         return self
+
+
+class LiquidationEvent(BaseModel):
+    """Normalized liquidation event (forced order)."""
+
+    symbol: str
+    side: str
+    price: float
+    quantity: float
+    quantity_filled: float = 0.0
+    notional: float = 0.0
+    ts: float
+    venue: str = "BINANCE"
+    source: str = "binance_force_order"
+

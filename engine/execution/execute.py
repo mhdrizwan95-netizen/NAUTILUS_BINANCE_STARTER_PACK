@@ -329,33 +329,75 @@ class StrategyExecutor:
         fallback_args: tuple[Any, ...] | None = None
 
         if quote is not None:
-            submit_callable = getattr(self._router, "market_quote", None)
-            if submit_callable:
-                call_kwargs = {"symbol": symbol, "side": side, "quote": float(quote)}
-                if market_hint is not None:
-                    call_kwargs["market"] = market_hint
-                args: tuple[Any, ...] = (symbol, side, float(quote))
-                if market_hint is not None:
-                    args = (*args, market_hint)
-                fallback_args = args
+            # Check for LIMIT order override
+            order_type = (meta or {}).get("order_type", "MARKET").upper()
+            if order_type == "LIMIT":
+                submit_callable = getattr(self._router, "limit_quote", None)
+                if submit_callable:
+                    limit_price = float((meta or {}).get("price", 0.0))
+                    tif = (meta or {}).get("time_in_force", "GTC")
+                    call_kwargs = {
+                        "symbol": symbol,
+                        "side": side,
+                        "quote": float(quote),
+                        "price": limit_price,
+                        "time_in_force": tif,
+                    }
+                    if market_hint is not None:
+                        call_kwargs["market"] = market_hint
+                    args: tuple[Any, ...] = (symbol, side, float(quote), limit_price, tif)
+                    if market_hint is not None:
+                        args = (*args, market_hint)
+                    fallback_args = args # This might not map cleanly if kwargs used, but safe for now
+
+            if submit_callable is None:
+                submit_callable = getattr(self._router, "market_quote", None)
+                if submit_callable:
+                    call_kwargs = {"symbol": symbol, "side": side, "quote": float(quote)}
+                    if market_hint is not None:
+                        call_kwargs["market"] = market_hint
+                    args: tuple[Any, ...] = (symbol, side, float(quote))
+                    if market_hint is not None:
+                        args = (*args, market_hint)
+                    fallback_args = args
+        
         if submit_callable is None:
-            submit_callable = getattr(self._router, "place_market_order", None)
-            if submit_callable:
-                call_kwargs = {
-                    "symbol": symbol,
-                    "side": side,
-                    "quote": None if quote is None else float(quote),
-                    "quantity": None if quantity is None else float(quantity),
-                }
-                if market_hint is not None:
-                    call_kwargs["market"] = market_hint
-                base_args = (
-                    symbol,
-                    side,
-                    None if quote is None else float(quote),
-                    None if quantity is None else float(quantity),
-                )
-                fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
+            # Quantity / Market Order path
+            order_type = (meta or {}).get("order_type", "MARKET").upper()
+            if order_type == "LIMIT":
+                 submit_callable = getattr(self._router, "limit_quantity", None)
+                 if submit_callable:
+                    limit_price = float((meta or {}).get("price", 0.0))
+                    tif = (meta or {}).get("time_in_force", "GTC")
+                    call_kwargs = {
+                        "symbol": symbol,
+                        "side": side,
+                        "quantity": None if quantity is None else float(quantity),
+                        "price": limit_price,
+                        "time_in_force": tif,
+                    }
+                    if market_hint is not None:
+                        call_kwargs["market"] = market_hint
+                    
+            if submit_callable is None:
+                submit_callable = getattr(self._router, "place_market_order", None)
+                if submit_callable:
+                    call_kwargs = {
+                        "symbol": symbol,
+                        "side": side,
+                        "quote": None if quote is None else float(quote),
+                        "quantity": None if quantity is None else float(quantity),
+                    }
+                    if market_hint is not None:
+                        call_kwargs["market"] = market_hint
+                    base_args = (
+                        symbol,
+                        side,
+                        None if quote is None else float(quote),
+                        None if quantity is None else float(quantity),
+                    )
+                    fallback_args = (*base_args, market_hint) if market_hint is not None else base_args
+        
         if submit_callable is None:
             submit_callable = getattr(self._router, "place_market_order_async", None)
             if submit_callable:

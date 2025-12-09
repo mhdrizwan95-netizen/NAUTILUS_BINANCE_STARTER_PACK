@@ -22,6 +22,13 @@ export interface Venue {
   latency: number;
 }
 
+
+export interface LatencyBucket {
+  time: number;
+  latency: number; // milliseconds
+  frequency: number; // count
+}
+
 export interface Strategy {
   id: string;
   name: StrategyType;

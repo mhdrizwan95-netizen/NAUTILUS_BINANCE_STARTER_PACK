@@ -46,6 +46,13 @@ try:
 except ImportError:  # pragma: no cover - optional component
     MomentumStrategyModule = None  # type: ignore
     load_momentum_rt_config = None  # type: ignore
+
+try:
+    from .strategies.liquidation import LiquidationStrategyModule, load_liquidation_config
+except ImportError as e:  # pragma: no cover - optional component
+    logging.getLogger(__name__).warning("Failed to import LiquidationStrategyModule: %s", e)
+    LiquidationStrategyModule = None  # type: ignore
+    load_liquidation_config = None  # type: ignore
 try:
     from .strategies.symbol_scanner import SymbolScanner, load_symbol_scanner_config
 except ImportError:  # pragma: no cover - optional component
@@ -115,6 +122,17 @@ if "MomentumStrategyModule" in globals() and MomentumStrategyModule and load_mom
             )
     except _SUPPRESSIBLE_EXCEPTIONS:
         MOMENTUM_RT_MODULE = None
+
+LIQU_CFG = None
+LIQU_MODULE: LiquidationStrategyModule | None = None
+if "LiquidationStrategyModule" in globals() and LiquidationStrategyModule and load_liquidation_config:
+    try:
+        LIQU_CFG = load_liquidation_config()
+        if LIQU_CFG.enabled:
+            LIQU_MODULE = LiquidationStrategyModule(LIQU_CFG)
+            logging.getLogger(__name__).info("Liquidation Strategy module enabled")
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        LIQU_MODULE = None
 
 _SCALP_BUS_WIRED = False
 _SCALP_BRACKET_MANAGER: ScalpBracketManager | None = None
@@ -281,7 +299,7 @@ async def _on_market_tick_event(event: dict[str, Any]) -> None:
     cfg = getattr(S_CFG, "enabled", False)
     if not cfg:
         return
-    on_tick(symbol, price_f, ts_val, volume)
+    await on_tick(symbol, price_f, ts_val, volume)
 
 
 try:
@@ -332,6 +350,64 @@ except _SUPPRESSIBLE_EXCEPTIONS:
     )
 
 
+async def _on_liquidation_cluster(event: dict[str, Any]) -> None:
+    if not LIQU_MODULE or not LIQU_MODULE.enabled:
+        return
+    
+    try:
+        decisions = LIQU_MODULE.handle_signal(event)
+    except _SUPPRESSIBLE_EXCEPTIONS:
+        decisions = None
+        
+    if not decisions:
+        return
+        
+    for decision in decisions:
+        # Convert decision dict to StrategySignal
+        symbol = str(decision.get("symbol") or "")
+        side = str(decision.get("side") or "").upper()
+        
+        meta = decision.get("meta") or {}
+        meta["order_type"] = decision.get("type", "LIMIT")
+        meta["price"] = decision.get("price")
+        meta["time_in_force"] = decision.get("time_in_force", "IOC")
+        
+        # Market resolution
+        market = resolve_market_choice(symbol, "futures") # Default to futures for liquidation sniping
+        
+        sig = StrategySignal(
+            symbol=symbol,
+            side=side,
+            quote=None, # We use explicit quantity
+            quantity=decision.get("quantity"),
+            dry_run=None,
+            tag=decision.get("tag", "liqu_sniper"),
+            meta=meta,
+            market=market
+        )
+        
+        # Execute Async
+        result = await _execute_strategy_signal_async(sig)
+        if result.get("status") == "submitted":
+            try:
+                metrics.strategy_orders_total.labels(
+                    symbol=symbol.split(".")[0],
+                    venue="BINANCE",
+                    side=side,
+                    source="liquidation_sniper",
+                ).inc()
+            except _SUPPRESSIBLE_EXCEPTIONS:
+                pass
+
+
+try:
+    BUS.subscribe("signal.liquidation_cluster", _on_liquidation_cluster)
+except _SUPPRESSIBLE_EXCEPTIONS:
+    logging.getLogger(__name__).warning(
+        "Failed to subscribe strategy to signal.liquidation_cluster", exc_info=True
+    )
+
+
 class StrategySignal(BaseModel):
     symbol: str = Field(..., description="e.g. BTCUSDT.BINANCE")
     side: str = Field(..., pattern=r"^(BUY|SELL)$")
@@ -346,10 +422,10 @@ class StrategySignal(BaseModel):
 
 
 @router.post("/strategy/signal")
-def post_strategy_signal(sig: StrategySignal, request: Request):
+async def post_strategy_signal(sig: StrategySignal, request: Request):
     require_ops_token(request)
     idem = request.headers.get("X-Idempotency-Key")
-    return _execute_strategy_signal(sig, idem_key=idem)
+    return await _execute_strategy_signal_async(sig, idem_key=idem)
 
 
 class StrategyParams(BaseModel):
@@ -371,6 +447,10 @@ def start_strategy(strategy_id: str, request: Request, payload: StrategyParams |
         MOMENTUM_RT_MODULE.enabled = True
         logging.getLogger(__name__).info("Strategy %s started", strategy_id)
         return {"status": "started", "id": strategy_id}
+    elif strategy_id == "liquidation_sniper" and LIQU_MODULE:
+        LIQU_MODULE.enabled = True
+        logging.getLogger(__name__).info("Strategy %s started", strategy_id)
+        return {"status": "started", "id": strategy_id}
     
     raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found or not loaded")
 
@@ -390,6 +470,10 @@ def stop_strategy(strategy_id: str, request: Request):
         MOMENTUM_RT_MODULE.enabled = False
         logging.getLogger(__name__).info("Strategy %s stopped", strategy_id)
         return {"status": "stopped", "id": strategy_id}
+    elif strategy_id == "liquidation_sniper" and LIQU_MODULE:
+        LIQU_MODULE.enabled = False
+        logging.getLogger(__name__).info("Strategy %s stopped", strategy_id)
+        return {"status": "stopped", "id": strategy_id}
 
     raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found or not loaded")
 
@@ -399,15 +483,19 @@ def update_strategy(strategy_id: str, request: Request, payload: StrategyParams)
     require_ops_token(request)
     params = payload.params
     if strategy_id == "trend_follow" and TREND_MODULE:
-        # Update config attributes dynamically if they exist
         if hasattr(TREND_MODULE, "cfg"):
             for k, v in params.items():
                 if hasattr(TREND_MODULE.cfg, k):
                     setattr(TREND_MODULE.cfg, k, v)
         logging.getLogger(__name__).info("Strategy %s updated with %s", strategy_id, params)
         return {"status": "updated", "id": strategy_id, "params": params}
-    
-    # Add other strategies as needed
+    elif strategy_id == "liquidation_sniper" and LIQU_MODULE:
+        if hasattr(LIQU_MODULE, "cfg"):
+            for k, v in params.items():
+                if hasattr(LIQU_MODULE.cfg, k):
+                    setattr(LIQU_MODULE.cfg, k, v)
+        logging.getLogger(__name__).info("Strategy %s updated with %s", strategy_id, params)
+        return {"status": "updated", "id": strategy_id, "params": params}
     
     raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found or not loaded")
 
@@ -423,10 +511,10 @@ def _get_executor() -> StrategyExecutor:
     if _EXECUTOR is None:
         try:
             from .app import router as order_router_instance
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - import guard
+        except _SUPPRESSIBLE_EXCEPTIONS as exc:
             raise OrderRouterUnavailableError() from exc
         try:
-            from .app import _config_hash as _cfg_hash  # type: ignore[attr-defined]
+            from .app import _config_hash as _cfg_hash
         except _SUPPRESSIBLE_EXCEPTIONS:
             _cfg_hash = None
         _EXECUTOR = StrategyExecutor(
@@ -515,13 +603,12 @@ def _notify_listeners(symbol: str, price: float, ts: float) -> None:
                     loop = asyncio.get_running_loop()
                     loop.create_task(res)  # type: ignore[arg-type]
                 except RuntimeError:
-                    # No running loop in this thread; drop async listener result
                     pass
         except _SUPPRESSIBLE_EXCEPTIONS:
             continue
 
 
-def on_tick(
+async def on_tick(
     symbol: str, price: float, ts: float | None = None, volume: float | None = None
 ) -> None:
     """Tick-driven strategy loop entrypoint."""
@@ -534,7 +621,6 @@ def on_tick(
 
     _notify_listeners(qualified, price, ts_val)
 
-    # Entry block window (startup/reconnect warmup)
     if time.time() < _entry_block_until:
         return
 
@@ -563,7 +649,7 @@ def on_tick(
                 meta=scalp_decision.get("meta"),
                 market=resolved_market,
             )
-            result = _execute_strategy_signal(sig)
+            result = await _execute_strategy_signal_async(sig)
             if result.get("status") == "submitted":
                 scalp_base = scalp_symbol.split(".")[0]
                 scalp_venue = scalp_symbol.split(".")[1] if "." in scalp_symbol else "BINANCE"
@@ -606,7 +692,7 @@ def on_tick(
                 meta=momentum_meta,
                 market=resolved_market,
             )
-            result = _execute_strategy_signal(sig)
+            result = await _execute_strategy_signal_async(sig)
             if result.get("status") == "submitted":
                 try:
                     metrics.strategy_orders_total.labels(
@@ -647,7 +733,7 @@ def on_tick(
                 tag=trend_tag,
                 market=resolved_market,
             )
-            result = _execute_strategy_signal(sig)
+            result = await _execute_strategy_signal_async(sig)
             if result.get("status") == "submitted":
                 try:
                     metrics.strategy_orders_total.labels(
@@ -689,9 +775,9 @@ def on_tick(
     # --- Ensemble fusion ---
     fused = ensemble_policy.combine(base, ma_side, ma_conf, hmm_decision)
 
-    signal_side: str | None = None
-    signal_quote: float = S_CFG.quote_usdt
-    signal_meta: dict = {}
+    signal_side = None
+    signal_quote = S_CFG.quote_usdt
+    signal_meta = {}
     conf_to_emit = 0.0
 
     if fused:
@@ -699,6 +785,7 @@ def on_tick(
         conf_to_emit = float(signal_meta.get("conf", 0.0))
     elif ma_side and not S_CFG.ensemble_enabled:
         signal_side = ma_side
+        signal_quote = S_CFG.quote_usdt
         signal_meta = {"exp": "ma_v1", "conf": ma_conf}
         conf_to_emit = ma_conf
     elif hmm_decision:
@@ -753,10 +840,11 @@ def on_tick(
             quantity=None,
             dry_run=None,
             tag=source_tag,
+            meta=signal_meta,
             market=market_choice,
         )
 
-        result = _execute_strategy_signal(sig)
+        result = await _execute_strategy_signal_async(sig)
         if result.get("status") == "submitted":
             try:
                 metrics.strategy_orders_total.labels(

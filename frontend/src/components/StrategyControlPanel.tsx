@@ -227,14 +227,32 @@ function StrategyCard({
     );
 }
 
+import { getStrategy } from '../lib/api';
+
 function DynamicConfigForm({ strategyName }: { strategyName: string }) {
-    // Mock config - in production, fetch from API based on strategy
-    const [config, setConfig] = useState<StrategyConfig>({
-        quote_usdt: 100,
-        cooldown_sec: 30,
-        confidence_threshold: 0.6,
-        enabled: true,
-    });
+    const [config, setConfig] = useState<StrategyConfig>({});
+    const [isLoading, setIsLoading] = useState(false);
+
+    useEffect(() => {
+        let mounted = true;
+        const fetchConfig = async () => {
+            setIsLoading(true);
+            try {
+                const summary = await getStrategy(strategyName);
+                if (mounted && summary.params) {
+                    // Type assertion for simple config display
+                    setConfig(summary.params as unknown as StrategyConfig);
+                }
+            } catch (error) {
+                console.error(`Failed to fetch config for ${strategyName}:`, error);
+            } finally {
+                if (mounted) setIsLoading(false);
+            }
+        };
+
+        fetchConfig();
+        return () => { mounted = false; };
+    }, [strategyName]);
 
     const handleSubmit = async () => {
         try {
@@ -246,6 +264,14 @@ function DynamicConfigForm({ strategyName }: { strategyName: string }) {
             alert(`Failed to update config: ${error}`);
         }
     };
+
+    if (isLoading) {
+        return <div className="text-cyber-text-dim text-sm p-4">Loading configuration...</div>;
+    }
+
+    if (Object.keys(config).length === 0) {
+        return <div className="text-cyber-text-dim text-sm p-4">No configuration parameters available for this strategy.</div>;
+    }
 
     return (
         <div className="space-y-4">

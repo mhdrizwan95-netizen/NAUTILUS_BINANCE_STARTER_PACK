@@ -602,6 +602,20 @@ ws_disconnects_total = Counter("ws_disconnects_total", "Websocket disconnects ob
 last_specs_refresh_epoch = Gauge(
     "last_specs_refresh_epoch", "Unix time of last venue specs refresh"
 )
+
+# [Institutional Upgrade] Liquidation Sniping Metrics
+liquidation_velocity_usd = Gauge(
+    "liquidation_velocity_usd_per_sec",
+    "Real-time liquidation volume velocity (USD/sec)",
+    ["symbol", "venue"],
+    multiprocess_mode="max",
+)
+liquidation_clusters_total = Counter(
+    "liquidation_clusters_detected_total",
+    "Liquidation clusters (cascades) detected",
+    ["symbol", "venue"],
+)
+
 submit_to_ack_ms = Histogram(
     "submit_to_ack_ms",
     "Latency from order submit to venue ack (ms)",
@@ -628,6 +642,8 @@ REGISTRY = {
     "last_specs_refresh_epoch": last_specs_refresh_epoch,
     "submit_to_ack_ms": submit_to_ack_ms,
     "fill_latency_ms": fill_latency,
+    "liquidation_velocity_usd": liquidation_velocity_usd,
+    "liquidation_clusters_total": liquidation_clusters_total,
     "pnl_realized_total": pnl_realized,
     "pnl_unrealized_total": pnl_unrealized,
     "equity_usd": equity_usd,

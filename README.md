@@ -250,9 +250,13 @@ To profile end‑to‑end: target median `strategy_tick_to_order_latency_ms` < 1
 
 ## Further Reading
 
+ - docs/AUTONOMOUS_LOOP.md — **NEW** Three-cycle autonomous trading architecture (Symbol Selection → Regime → Feedback)
  - docs/FEATURE_FLAGS.md — quick index of environment flags
  - docs/OBSERVABILITY.md — dashboards, PromQL, and SLOs
  - docs/OPS_RUNBOOK.md — daily checks, incident playbooks, staged go‑live
- - hmm_operator_handbook.md — strategy‑operator playbook and ML service notes
+ - docs/ML_SERVICE_INTEGRATION.md — autotrain stack, model registry, param controller
+ - docs/PROJECT_OVERVIEW.md — system overview with December 2024 milestone status
+ - ROADMAP.md — completed features and remaining work
 
 Keep documentation up to date when adding venues, strategies, or governance features—this README should always describe what actually runs in `docker-compose.yml`.
+

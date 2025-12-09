@@ -245,7 +245,10 @@ class TrendStrategyModule:
 
             self._metrics = MET
         except ImportError:
+            self._metrics = MET
+        except ImportError:
             self._metrics = None
+        self._registered_symbols: set[str] = set()
 
     # --- public API ---
     def handle_tick(self, symbol: str, price: float, ts: float) -> dict[str, float | str] | None:
@@ -264,6 +267,16 @@ class TrendStrategyModule:
 
         # --- Dynamic Parameter Adaptation (Micro Brain) ---
         # --- Dynamic Parameter Adaptation (Micro Brain) ---
+        if base not in self._registered_symbols:
+            try:
+                from engine.services.param_client import get_param_client
+                client = get_param_client()
+                if client:
+                    client.register_symbol("trend_strategy", base)
+                    self._registered_symbols.add(base)
+            except ImportError:
+                pass
+
         try:
             from engine.services.param_client import apply_dynamic_config, update_context
 

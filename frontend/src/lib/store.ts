@@ -4,7 +4,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 
 import type { PageMetadata } from "./api";
 import { createDefaultDashboardFilters, type DashboardFiltersState } from "./dashboardFilters";
-import type { ModeType, GlobalMetrics, Venue, StrategyPerformance } from "../types/trading";
+import type { ModeType, GlobalMetrics, Venue, StrategyPerformance, LatencyBucket } from "../types/trading";
 
 type NautilusWindow = Window & { __NAUTILUS_DISABLE_PERSIST__?: boolean };
 
@@ -30,7 +30,9 @@ interface AppState {
     globalMetrics: GlobalMetrics | null;
     performances: StrategyPerformance[];
     venues: Venue[];
+    latencyHistory: LatencyBucket[];
     lastUpdate: number | null;
+    lastHeartbeat: number | null;
   };
   // UI state
   ui: {
@@ -93,7 +95,9 @@ const defaultState: AppState = {
     globalMetrics: null,
     performances: [],
     venues: [],
+    latencyHistory: [],
     lastUpdate: null,
+    lastHeartbeat: null,
   },
   ui: {
     sidebarOpen: true,
@@ -193,13 +197,48 @@ const createAppStore: StoreCreator = (set, _get, _store) => {
         },
       })),
     updateVenues: (venues) =>
-      apply("updateVenues", (state) => ({
-        realTimeData: {
-          ...state.realTimeData,
-          venues,
-          lastUpdate: Date.now(),
-        },
-      })),
+      apply("updateVenues", (state) => {
+        const now = Date.now();
+        const history = state.realTimeData.latencyHistory || [];
+
+        let avgLatency = 0;
+        let shouldAdd = false;
+
+        if (venues.length > 0) {
+          // New data arrived
+          avgLatency = venues.reduce((acc, v) => acc + v.latency, 0) / venues.length;
+          shouldAdd = true;
+        } else if (history.length > 0) {
+          // Empty update (heartbeat/tick): Extend last known state for continuity
+          // Decay latency slightly towards 0 if idle
+          const last = history[history.length - 1];
+          avgLatency = Math.max(0, last.latency * 0.95);
+          shouldAdd = true;
+        }
+
+        // Create new bucket 
+        const newBucket = shouldAdd ? {
+          time: now,
+          latency: avgLatency,
+          frequency: 1
+        } : null;
+
+        // Append to history and prune old data (>100s)
+        const cutoff = now - 100 * 1000;
+        const nextHistory = [...history.filter(b => b.time > cutoff)];
+        if (newBucket) {
+          nextHistory.push(newBucket);
+        }
+
+        return {
+          realTimeData: {
+            ...state.realTimeData,
+            venues: venues.length > 0 ? venues : state.realTimeData.venues, // Keep last venues if empty tick
+            latencyHistory: nextHistory,
+            lastUpdate: Date.now(),
+          },
+        };
+      }),
     updateRealTimeData: (data) =>
       apply("updateRealTimeData", (state) => ({
         realTimeData: {
