@@ -200,7 +200,7 @@ services:
       OPS_API_TOKEN_FILE: ${OPS_API_TOKEN_FILE:-}
       ENGINE_ENDPOINTS: ${ENGINE_ENDPOINTS:-http://engine_binance:8003}
       OPS_METRICS_URL: http://ops:8002/metrics
-      SITUATIONS_SSE_URL: http://situations:8011/events/stream
+
       OPS_METRICS_PORT: ${OPS_METRICS_PORT:-9102}
       BINANCE_MODE: ${BINANCE_MODE}
       BINANCE_API_KEY: ${BINANCE_API_KEY}
@@ -234,48 +234,7 @@ services:
       - trading_net
     tmpfs:
       - /tmp/prom_multiproc:rw,uid=1000,gid=1000,mode=1777
-  universe:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: hmm_universe
-    logging: *id001
-    command: '/usr/bin/tini -- uvicorn universe.service:APP --host 0.0.0.0 --port 8009
 
-      '
-    ports:
-      - 8009:8009
-    networks:
-      - trading_net
-  situations:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: hmm_situations
-    logging: *id001
-    command: '/usr/bin/tini -- uvicorn situations.service:APP --host 0.0.0.0 --port 8011
-
-      '
-    ports:
-      - 8011:8011
-    networks:
-      - trading_net
-  screener:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: hmm_screener
-    logging: *id001
-    command: '/usr/bin/tini -- uvicorn screener.service:APP --host 0.0.0.0 --port 8010
-
-      '
-    ports:
-      - 8010:8010
-    depends_on:
-      - universe
-      - situations
-    networks:
-      - trading_net
   data_ingester:
     build:
       context: .

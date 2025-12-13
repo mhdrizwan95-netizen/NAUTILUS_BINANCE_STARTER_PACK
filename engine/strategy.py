@@ -23,6 +23,7 @@ from .risk import RiskRails
 from .state.cooldown import Cooldowns
 from .strategies import ensemble_policy, policy_hmm
 from .strategies.policy_river import RiverPolicy
+from .state import get_global_redis
 
 # Initialize River Policy (Global)
 river_policy = RiverPolicy()
@@ -63,7 +64,14 @@ except ImportError:  # pragma: no cover - optional component
     SymbolScanner = None  # type: ignore
     load_symbol_scanner_config = None  # type: ignore
 
+try:
+    from .strategies.deepseek_v2 import DeepSeekStrategyModule, load_deepseek_config
+except ImportError:
+    DeepSeekStrategyModule = None
+    load_deepseek_config = None
+
 _last_telemetry_ts: dict[str, float] = defaultdict(float)
+_last_telemetry_ts['deepseek_v2'] = 0.0
 
 router = APIRouter()
 S_CFG = load_strategy_config()
@@ -143,6 +151,18 @@ if "LiquidationStrategyModule" in globals() and LiquidationStrategyModule and lo
             logging.getLogger(__name__).info("Liquidation Strategy module enabled")
     except Exception as exc:
         LIQU_MODULE = None
+
+DEEPSEEK_CFG = None
+DEEPSEEK_MODULE: DeepSeekStrategyModule | None = None
+if DeepSeekStrategyModule and load_deepseek_config:
+    try:
+        DEEPSEEK_CFG = load_deepseek_config()
+        if DEEPSEEK_CFG.enabled:
+            DEEPSEEK_MODULE = DeepSeekStrategyModule(DEEPSEEK_CFG)
+            logging.getLogger(__name__).info("DeepSeek module enabled (model=%s)", DEEPSEEK_CFG.model)
+    except Exception as exc:
+        logging.getLogger(__name__).warning("DeepSeek init failed: %s", exc)
+        DEEPSEEK_MODULE = None
 
 _SCALP_BUS_WIRED = False
 _SCALP_BRACKET_MANAGER: ScalpBracketManager | None = None
@@ -507,6 +527,13 @@ def update_strategy(strategy_id: str, request: Request, payload: StrategyParams)
                     setattr(LIQU_MODULE.cfg, k, v)
         logging.getLogger(__name__).info("Strategy %s updated with %s", strategy_id, params)
         return {"status": "updated", "id": strategy_id, "params": params}
+    elif strategy_id == "deepseek_v2" and DEEPSEEK_MODULE:
+        if hasattr(DEEPSEEK_MODULE, "cfg"):
+            for k, v in params.items():
+                if hasattr(DEEPSEEK_MODULE.cfg, k):
+                    setattr(DEEPSEEK_MODULE.cfg, k, v)
+        logging.getLogger(__name__).info("Strategy %s updated with %s", strategy_id, params)
+        return {"status": "updated", "id": strategy_id, "params": params}
     
     raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found or not loaded")
 
@@ -638,6 +665,10 @@ async def on_tick(
     try:
         from engine.ops.watchdog import get_watchdog
         get_watchdog().heartbeat()
+        # Publish to Redis for Supervisor
+        r = get_global_redis()
+        if r:
+            r.publish("heartbeat", ts_val)
     except Exception:
         pass
 
@@ -771,6 +802,21 @@ async def on_tick(
             
             # Return early if we traded to avoid double-processing
             return
+
+    if DEEPSEEK_MODULE and DEEPSEEK_MODULE.enabled:
+        # Ingest tick (Non-blocking)
+        try:
+            await DEEPSEEK_MODULE.handle_tick(qualified, price, ts_val)
+        except Exception:
+            pass
+
+
+
+
+        # --- Broadcast Performance for DeepSeek (Throttled 1s) ---
+
+
+            # But DeepSeek is low frequency, so it's fine.
 
         # --- Broadcast Performance for SCALP (Throttled 1s) ---
         # Only broadcast if we didn't trade (if we traded, we returned above)
@@ -1361,3 +1407,83 @@ async def startup_event():
 @router.on_event("shutdown")
 async def shutdown_event():
     stop_scheduler()
+
+from engine.brain import NautilusBrain
+
+# Initialize Brain
+BRAIN = NautilusBrain()
+
+async def _on_deepseek_signal(event: dict[str, Any]) -> None:
+    """
+    Handles asynchronous trading decisions from the DeepSeek Worker.
+    Routes ALL signals through Nautilus Brain for ensemble voting.
+    """
+    symbol = str(event.get("symbol") or "")
+    # Support both old and new keys for robust migration
+    action = str(event.get("action") or "HOLD").upper()
+    confidence = float(event.get("confidence") or 0.0)
+    sentiment_score = float(event.get("sentiment_score") or 0.0)
+    reasoning = str(event.get("reasoning") or "")
+    price = float(event.get("price") or 0.0)
+    
+    # 1. Feed the attributes into the Brain
+    # Note: DeepSeek v2 now provides explicit sentiment_score (-1 to 1)
+    # If missing (legacy), try to Infer from action?
+    if sentiment_score == 0.0 and action == "BUY":
+        sentiment_score = 0.6
+    elif sentiment_score == 0.0 and action == "SELL":
+        sentiment_score = -0.6
+        
+    BRAIN.update_sentiment(symbol, sentiment_score, time.time())
+    
+    # 2. Ask Brain for the final decision
+    # The Brain combines HMM Regime + Sentiment Veto + StatArb Logic
+    decision_side, size_factor, brain_meta = BRAIN.get_decision(symbol, price)
+    
+    if not decision_side:
+        logging.info(f"🧠 Brain VETO for {symbol}: {brain_meta.get('brain_reason')}")
+        return
+
+    logging.info(f"🧠 Brain APPROVED {decision_side} for {symbol}: {brain_meta.get('brain_reason')}")
+
+    # 3. Sizing
+    # Use defaults scaled by Brain's size_factor
+    base_quote = 100.0
+    # Try to respect AI's quote if provided, but modded by Brain
+    raw_quote = event.get("quote")
+    if raw_quote:
+        try:
+            base_quote = float(raw_quote)
+        except (TypeError, ValueError):
+            pass
+            
+    final_quote = base_quote * size_factor
+
+    # 4. Execute
+    market = "futures"
+    
+    sig = StrategySignal(
+        symbol=symbol,
+        side=decision_side, # Use Brain's decided side
+        quote=final_quote,
+        quantity=None,
+        dry_run=None,
+        tag="nautilus_brain_ensemble",
+        meta={
+            "brain_reason": brain_meta.get("brain_reason"),
+            "ai_confidence": confidence,
+            "ai_sentiment": sentiment_score,
+            "regime": brain_meta.get("regime"),
+            "price": price
+        },
+        market=market,
+    )
+    
+    await _execute_strategy_signal_async(sig)
+
+
+try:
+    BUS.subscribe("strategy.deepseek_signal", _on_deepseek_signal)
+    logging.getLogger(__name__).info("DeepSeek Signal Handler Wired")
+except Exception as exc:
+    logging.getLogger(__name__).warning("Failed to wire DeepSeek signal handler", exc_info=True)

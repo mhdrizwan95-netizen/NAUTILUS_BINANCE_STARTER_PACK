@@ -270,6 +270,11 @@ class OrderRouter:
         if _ROUTER is None:
             _ROUTER = self
 
+    def exchange_client(self, venue: str | None = None):
+        """Expose the underlying exchange client (e.g. for BBO access)."""
+        return _CLIENTS.get((venue or self._venue).upper())
+
+
     def _split_symbol(self, symbol: str) -> tuple[str, str]:
         base = symbol.split(".")[0].upper()
         venue = (

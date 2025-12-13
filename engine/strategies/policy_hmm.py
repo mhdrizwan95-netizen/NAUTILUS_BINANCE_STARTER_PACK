@@ -12,6 +12,7 @@ from pathlib import Path
 from ..config import load_strategy_config
 from ..services.param_client import get_cached_params, update_param_features
 from .calibration import adjust_confidence, adjust_quote, cooldown_scale
+from engine.strategies.vol_target import VolatilityManager
 
 S = load_strategy_config()
 PARAM_STRATEGY = "hmm"
@@ -24,6 +25,7 @@ STATE_EDGE = {0: 0.0, 1: 1.0, 2: -1.0}
 _prices: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
 _vols: dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=S.hmm_window))
 _last_signal_ts: dict[str, float] = defaultdict(float)
+_vol_managers: dict[str, VolatilityManager] = defaultdict(lambda: VolatilityManager(target_vol_ann=0.40)) # 40% Target Vol
 
 
 class HMMModelNotFoundError(FileNotFoundError):
@@ -64,11 +66,30 @@ def _features(sym: str) -> list[float] | None:
     if len(P) < 3:  # need minimum data
         logging.warning(f"[HMM] {sym}: Not enough data for features ({len(P)} < 3)")
         return None
-    rets = [0.0] + [(P[i] - P[i - 1]) / P[i - 1] for i in range(1, len(P))]
+    # Feature 1: Log Returns
+    # Handle zeros to avoid math domain error
+    rets = [0.0]
+    for i in range(1, len(P)):
+        p_curr, p_prev = P[i], P[i-1]
+        try:
+            r = math.log(p_curr / p_prev)
+        except (ValueError, ZeroDivisionError):
+            r = 0.0
+        rets.append(r)
+
+    # Feature 2: Institutional Volatility (EMA)
+    # Use the live manager's current estimate (fast access)
+    inst_vol = _vol_managers[sym].get_annualized_vol()
+    
+    # Check if manager is "warmed up" (has basic data), else fallback to simple std
+    if inst_vol == 0.0:
+       inst_vol = _vola(rets[-20:]) * math.sqrt(525600) # Ann approx
+
     vwap = _vwap(list(P), list(V) if len(V) == len(P) else [1.0] * len(P))
+    
     feats = [
-        rets[-1],  # latest return
-        _vola(rets[-20:]),  # short volatility
+        rets[-1],  # latest log return
+        inst_vol,  # Annualized EMA Volatility
         (P[-1] - vwap) / vwap,  # dev vs VWAP
         _zscore(list(P)[-30:]),  # zscore of price
         (float(V[-1]) / max(1.0, sum(list(V)[-20:]) / 20.0) if V else 1.0),  # volume spike ratio
@@ -91,6 +112,7 @@ def ingest_tick(sym: str, price: float, volume: float = 1.0) -> None:
     # print(f"[HMM] Ingesting {sym}: {price}")
     _prices[sym].append(float(price))
     _vols[sym].append(float(volume))
+    _vol_managers[sym].update(float(price))
 
 
 def _load_model():
@@ -196,8 +218,20 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
     px = 0.0
 
     quote = adjust_quote(sym, float(params.get("quote_usdt") or S.quote_usdt))
-    # vol-scaled sizing (example): smaller size when vola high
-    # Here kept simple; robust sizing can use realized vola bins
+    
+    # --- Institutional Volatility Targeting ---
+    # Calc target size based on volatility
+    # Assume we want to use the config quote as "Base Equity" per trade concept, 
+    # or better, use account equity if available. For starter pack, use quote as base.
+    base_equity = quote
+    vol_mgr = _vol_managers[sym]
+    target_exposure = vol_mgr.get_target_exposure(base_equity, cap_leverage=2.0)
+    
+    # If HMM confidence is high, we might scale up? 
+    # "Half-Kelly" check logic could go here. 
+    # For now, simply use VolTarget result as the notional.
+    quote_sized = target_exposure
+
     if p_bull > p_bear and p_bull > p_chop:
         side = "BUY"
     elif p_bear > p_bull and p_bear > p_chop:
@@ -209,11 +243,14 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
 
     _last_signal_ts[sym] = now
     meta = {
-        "exp": "hmm_v1",
+        "exp": "hmm_inst_v2",
         "probs": probs.tolist(),
         "mark": px,
         "conf": adj_conf,
         "cooldown": dynamic_cooldown,
+        "vol_ann": vol_mgr.get_annualized_vol(),
+        "algo": "chase", # Phase 1 Smart Exec
+        "max_slippage": 0.01
     }
     if selection:
         meta["param_config_id"] = selection.get("config_id")
@@ -222,7 +259,7 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
         meta["param_strategy"] = selection.get("strategy") or PARAM_STRATEGY
         meta["param_instrument"] = selection.get("instrument") or instrument
         meta["param_params"] = params
-    return side, float(quote), meta
+    return side, float(quote_sized), meta
 
 
 # Wire hot-reload subscription

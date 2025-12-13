@@ -17,7 +17,30 @@ __all__ = [
     "now_ms",
 ]
 
+
 _LOCK = threading.Lock()
+_GLOBAL_REDIS = None
+
+def get_global_redis():
+    global _GLOBAL_REDIS
+    if _GLOBAL_REDIS:
+        return _GLOBAL_REDIS
+    redis_host = os.getenv("REDIS_HOST")
+    if not redis_host:
+        return None
+    try:
+        import redis
+        _GLOBAL_REDIS = redis.Redis(
+            host=redis_host,
+            port=int(os.getenv("REDIS_PORT", "6379")),
+            db=0,
+            decode_responses=True,
+            socket_connect_timeout=2.0
+        )
+        return _GLOBAL_REDIS
+    except Exception:
+        return None
+
 STATE_DIR = Path("engine/state")
 STATE_DIR.mkdir(parents=True, exist_ok=True)
 SNAP_PATH = STATE_DIR / "portfolio.json"

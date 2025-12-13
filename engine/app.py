@@ -774,19 +774,6 @@ try:
     from engine.storage import sqlite as _sqlite_store
 
     
-    # [Dynamic Universe]
-    try:
-        BUS.subscribe("universe.update", _handle_universe_update)
-    except Exception as exc:
-        _app_logger.warning("Failed to subscribe to universe.update: %s", exc)
-
-
-    # [Dynamic Universe]
-    try:
-        BUS.subscribe("universe.update", _handle_universe_update)
-    except Exception as exc:
-        _app_logger.warning("Failed to subscribe to universe.update: %s", exc)
-
     _schedule_startup_event()
     store = _sqlite_store
 

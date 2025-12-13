@@ -12,6 +12,7 @@ from typing import Any
 from engine import metrics
 from engine.idempotency import CACHE, append_jsonl
 from engine.risk import RiskRails
+from engine.execution.smart_execute import SmartAlgorithm
 
 _LOGGER = logging.getLogger(__name__)
 _RECORDER_ERRORS: tuple[type[Exception], ...] = (RuntimeError, ValueError)
@@ -120,7 +121,9 @@ class StrategyExecutor:
         self._source = source
         self._backtest_mode = bool(backtest_mode)
         self._order_recorder = order_recorder
+        self._order_recorder = order_recorder
         self._recorded_orders: list[RecordedOrder] = []
+        self._smart_algo = SmartAlgorithm(router)
 
     @property
     def recorded_orders(self) -> Sequence[RecordedOrder]:
@@ -228,7 +231,31 @@ class StrategyExecutor:
             CACHE.set(key, payload)
             return payload
 
-        result = await self._submit(symbol, side, quote, quantity, market_hint, tag, meta)
+        algo = (meta or {}).get("algo")
+        if algo == "chase" and not self._backtest_mode and not eff_dry:
+            # Use Smart Execution
+            result = await self._smart_algo.limit_chase(
+                symbol, 
+                side, 
+                float(quantity) if quantity else 0.0,
+                max_slippage=float((meta or {}).get("max_slippage", 0.01)),
+                meta=meta
+            )
+        elif algo == "twap" and not self._backtest_mode and not eff_dry:
+            # Smart Execution: TWAP
+            # Parameters from meta
+            duration = float((meta or {}).get("duration", 60.0))
+            slices = int((meta or {}).get("slices", 4))
+            result = await self._smart_algo.twap(
+                symbol, side, 
+                float(quantity) if quantity else 0.0,
+                duration=duration,
+                slices=slices,
+                algo_inner=(meta or {}).get("inner_algo", "chase"),
+                meta=meta
+            )
+        else:
+            result = await self._submit(symbol, side, quote, quantity, market_hint, tag, meta)
 
         metrics.orders_submitted.inc()
         payload = {

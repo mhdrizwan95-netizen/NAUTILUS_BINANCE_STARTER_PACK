@@ -1,0 +1,12 @@
+# Antigravity Mutable Configuration
+# Updated by Optimizer at 2025-12-13T18:43:09.575744
+
+[deepseek_v2]
+deepseek_api_key = "sk-ac31a2bac6c24a88b2cbdbd0fb75b7ea"
+stop_loss_pct = 0.0157
+take_profit_pct = 0.0376
+confidence_threshold = 0.85
+cooldown_sec = 120
+max_drawdown_daily = 0.03
+regime_lookback = 500
+hurst_threshold = 0.5

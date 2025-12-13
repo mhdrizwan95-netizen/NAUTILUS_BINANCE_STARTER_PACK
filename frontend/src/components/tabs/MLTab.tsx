@@ -1,9 +1,9 @@
 /**
- * ML Tab - "THE NEURAL LINK" - Real-Time HMM Stream
+ * ML Tab - "THE NEURAL LINK" - DeepSeek & HMM Antigravity Stream
  * 
- * Shows real-time regime probabilities and neural feature streams.
+ * Shows real-time AI reasoning, regime probabilities, and neural feature streams.
  */
-import { Brain, Activity, Layers } from 'lucide-react';
+import { Brain, Activity, Layers, MessageSquare, Terminal } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { SVGProps } from 'react';
@@ -82,10 +82,19 @@ export function MLTab() {
     const latestStrategy = useRef<StrategyStatus | undefined>(undefined);
 
     const strategies = useAllStrategies();
-    // Fallback: Find *any* active strategy (Ensemble, MA, etc.) if 'hmm' is not explicitly found
-    const activeStrategy = strategies.find((s) => s.name.toLowerCase().includes('hmm'))
+
+    // Priority: DeepSeek -> HMM -> Ensemble -> Any Active
+    const deepseekParams = strategies.find(s => s.name.toLowerCase().includes('deepseek'));
+    const hmmParams = strategies.find(s => s.name.toLowerCase().includes('hmm'));
+
+    const activeStrategy = deepseekParams || hmmParams
         || strategies.find((s) => s.name.toLowerCase().includes('ensemble'))
         || strategies.find(s => s.enabled);
+
+    // DeepSeek Specifics
+    const isDeepSeek = activeStrategy?.name.toLowerCase().includes('deepseek');
+    const reasoning = activeStrategy?.metrics?.reasoning || null;
+    const modelName = activeStrategy?.metrics?.model || "Standard HMM";
 
     // Real-time feature state
     const [features, setFeatures] = useState<FeatureImportance[]>([
@@ -118,9 +127,7 @@ export function MLTab() {
         // Map simple signal (-1 to 1) to Probabilities
         // If metrics are present, use them for more accurate probabilities if available, otherwise heuristic
         probBull: activeStrategy.metrics?.p_bull || (activeStrategy.kind === 'HMM' ? (activeStrategy as any).signal > 0 : 0.33),
-        // Note: The logic below is heuristic legacy; ideally backend sends prob directly.
-        // For now preventing regression by keeping detailed logic similar to before but safer.
-        probBear: 0.1, // Placeholder if dynamic logic is complex, sticking to original logic below:
+        probBear: 0.1,
         probChop: 0.1,
         regime: 'UNKNOWN',
         confidence: activeStrategy.performance?.sharpe || 0, // Using strategy standard field if available
@@ -201,31 +208,31 @@ export function MLTab() {
                 <GlassCard className="flex items-center gap-4 p-6 bg-white/5">
                     <Brain className="h-8 w-8 text-neon-cyan" />
                     <div>
-                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Model Version</div>
-                        <div className="text-xl font-data font-bold text-white">{modelVersion}</div>
+                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Active Brain</div>
+                        <div className="text-xl font-data font-bold text-white truncate max-w-[150px]">{activeStrategy?.name || "None"}</div>
                     </div>
                 </GlassCard>
 
                 <GlassCard className="flex items-center gap-4 p-6 bg-white/5">
-                    <ClockIcon className="h-8 w-8 text-neon-amber" />
+                    <Terminal className="h-8 w-8 text-neon-amber" />
                     <div>
-                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Last Trained</div>
-                        <div className="text-xl font-data font-bold text-white">{lastTrained}</div>
+                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Model Type</div>
+                        <div className="text-xl font-data font-bold text-white truncate max-w-[150px]">{modelName}</div>
                     </div>
                 </GlassCard>
 
                 <GlassCard className="flex items-center gap-4 p-6 bg-white/5">
                     <Activity className="h-8 w-8 text-neon-green" />
                     <div>
-                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Accuracy (24h)</div>
-                        <div className="text-xl font-data font-bold text-neon-green">{accuracy}</div>
+                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Confidence</div>
+                        <div className="text-xl font-data font-bold text-neon-green">{((activeStrategy?.confidence || 0) * 100).toFixed(1)}%</div>
                     </div>
                 </GlassCard>
 
                 <GlassCard className="flex items-center gap-4 p-6 bg-white/5">
                     <Layers className="h-8 w-8 text-neon-blue" />
                     <div>
-                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Current Regime</div>
+                        <div className="text-xs text-zinc-400 uppercase tracking-wider">Current Signal</div>
                         <div className={cn(
                             "text-xl font-data font-bold",
                             dominantRegime === 'BULL' ? "text-neon-green" :
@@ -237,6 +244,18 @@ export function MLTab() {
                     </div>
                 </GlassCard>
             </div>
+
+            {/* DEEPSEEK REASONING (If Available) */}
+            {isDeepSeek && reasoning && (
+                <GlassCard title="Antigravity Reasoning (DeepSeek V2)" neonAccent="purple" className="flex flex-col relative overflow-hidden group">
+                    <div className="absolute top-4 right-4 animate-pulse">
+                        <Brain className="w-5 h-5 text-neon-purple opacity-80" />
+                    </div>
+                    <div className="p-4 font-mono text-sm leading-relaxed text-zinc-300 whitespace-pre-wrap max-h-[300px] overflow-y-auto custom-scrollbar">
+                        {reasoning}
+                    </div>
+                </GlassCard>
+            )}
 
             {/* MAIN ROW: Regime Stream & Features */}
             <div className="grid grid-cols-12 gap-8 h-[450px]">
@@ -279,7 +298,7 @@ export function MLTab() {
                 </GlassCard>
 
                 {/* Feature Importance */}
-                <GlassCard title="Feature Importance" neonAccent="blue" className="col-span-4 flex flex-col">
+                <GlassCard title="HMM Feature Importance" neonAccent="blue" className="col-span-4 flex flex-col">
                     <div className="flex-1 w-full h-full min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                             <BarChart data={features} layout="vertical" margin={{ left: 40 }}>
