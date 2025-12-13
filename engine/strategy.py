@@ -21,7 +21,7 @@ from .execution.execute import StrategyExecutor
 from .ops_auth import require_ops_token
 from .risk import RiskRails
 from .state.cooldown import Cooldowns
-from .strategies import policy_hmm
+from .strategies import ensemble_policy, policy_hmm
 from .strategies.policy_river import RiverPolicy
 
 # Initialize River Policy (Global)
