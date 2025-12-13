@@ -57,7 +57,7 @@ class BracketGovernor:
                 self.tp_bps,
                 self.sl_bps,
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self.log.exception("BracketGovernor failed to wire")
 
     async def _on_fill(self, evt: dict[str, Any]) -> None:
@@ -81,7 +81,7 @@ class BracketGovernor:
                 await self.router.place_reduce_only_limit(
                     qual, "SELL" if side == "BUY" else "BUY", abs(qty), float(tp_px)
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("bracket tp placement", exc)
 
             # Place/Amend SL reduce-only stop (obeys ALLOW_STOP_AMEND)
@@ -89,7 +89,7 @@ class BracketGovernor:
                 await self.router.amend_stop_reduce_only(
                     qual, "SELL" if side == "BUY" else "BUY", float(sl_px), abs(qty)
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("bracket stop placement", exc)
 
             self.log.info(
@@ -101,6 +101,6 @@ class BracketGovernor:
                 tp_px,
                 sl_px,
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             # Never break event loop
             self.log.exception("BracketGovernor on_fill error")

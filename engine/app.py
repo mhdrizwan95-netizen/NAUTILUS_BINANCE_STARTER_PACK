@@ -97,7 +97,6 @@ from shared.time_guard import check_clock_skew
 from fastapi import WebSocket, WebSocketDisconnect
 from contextlib import asynccontextmanager
 
-setup_logging()
 
 SERVICE_NAME = os.getenv("OBS_SERVICE_NAME", "engine")
 _ENGINE_START_TS = time.time()
@@ -136,7 +135,7 @@ def _safely(
     """Invoke callable while logging (instead of swallowing) any exception."""
     try:
         return func(*args, **kwargs)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
+    except Exception as exc:
         _app_logger.warning("%s failed: %s", context, exc, exc_info=True)
         return None
 
@@ -172,7 +171,7 @@ class _HttpMetricsMiddleware(BaseHTTPMiddleware):
         start = time.perf_counter()
         try:
             response = await call_next(request)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             duration = time.perf_counter() - start
             metrics.observe_http_request(
                 SERVICE_NAME, request.method, _route_template(request), 500, duration
@@ -222,7 +221,7 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except Exception:
+            except Exception as exc:
                 pass
 
 _WS_MANAGER = ConnectionManager()
@@ -259,7 +258,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_json({"type": "heartbeat", "ts": time.time()})
     except WebSocketDisconnect:
         _WS_MANAGER.disconnect(websocket)
-    except Exception:
+    except Exception as exc:
         _WS_MANAGER.disconnect(websocket)
 
 
@@ -296,9 +295,16 @@ async def _bootstrap_services() -> None:
 
 @app.on_event("shutdown")
 async def _shutdown_services() -> None:
-    client = get_param_client()
-    if client:
-        await client.stop()
+    if _market_stream:
+        _market_stream.stop()
+
+    try:
+        from engine.services.param_client import get_param_client
+        pc = get_param_client()
+        if pc:
+            await pc.stop()
+    except Exception:
+        pass
 
     global _PRICE_BRIDGE
     if _PRICE_BRIDGE:
@@ -492,7 +498,7 @@ if _truthy_env("MARGIN_ENABLED") or _truthy_env("BINANCE_MARGIN_ENABLED"):
         try:
             margin_rest_client = BinanceMarginREST()
             set_exchange_client("BINANCE_MARGIN", margin_rest_client)
-        except _SUPPRESSIBLE_EXCEPTIONS as margin_exc:  # noqa: BLE001
+        except Exception as exc:
             logging.getLogger("engine.startup").warning(
                 "[STARTUP] Failed to initialize margin REST client: %s", margin_exc
             )
@@ -541,7 +547,7 @@ async def _binance_on_mark(qual: str, sym: str, price: float, ts: float) -> None
             source="binance_ws",
             stream="ws",
         )
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed(f"binance strategy tick ({base})", exc)
 
 
@@ -732,9 +738,20 @@ async def _broadcast_market_trade(event: dict[str, Any]) -> None:
     await BROADCASTER.broadcast(payload)
 
 
+async def _broadcast_strategy_performance(event: dict[str, Any]) -> None:
+    """Forward strategy performance metrics to WebSocket clients."""
+    payload = {
+        "type": "strategy.performance",
+        "data": event,
+        "ts": time.time()
+    }
+    await BROADCASTER.broadcast(payload)
+
+
 # Wire up telemetry
 BUS.subscribe("market.tick", _broadcast_market_tick)
 BUS.subscribe("market.trade", _broadcast_market_trade)
+BUS.subscribe("strategy.performance", _broadcast_strategy_performance)
 
 portfolio = Portfolio(on_update=_broadcast_telemetry)
 router = OrderRouterExt(rest_client, portfolio, venue=VENUE)
@@ -756,12 +773,27 @@ store = None
 try:
     from engine.storage import sqlite as _sqlite_store
 
-    _sqlite_store.init()
+    
+    # [Dynamic Universe]
+    try:
+        BUS.subscribe("universe.update", _handle_universe_update)
+    except Exception as exc:
+        _app_logger.warning("Failed to subscribe to universe.update: %s", exc)
+
+
+    # [Dynamic Universe]
+    try:
+        BUS.subscribe("universe.update", _handle_universe_update)
+    except Exception as exc:
+        _app_logger.warning("Failed to subscribe to universe.update: %s", exc)
+
+    _schedule_startup_event()
     store = _sqlite_store
+
     _persist_logger.info(
         "SQLite persistence initialized at %s", Path("data/runtime/trades.db").resolve()
     )
-except _SUPPRESSIBLE_EXCEPTIONS:  # pragma: no cover - defensive guard
+except Exception as exc:
     _persist_logger.exception("SQLite initialization failed")
 
 # Attach metrics router
@@ -874,7 +906,7 @@ async def _maybe_emit_strategy_tick(
             event_ts,
             volume,
         )
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed(f"strategy on_tick ({qualified})", exc)
 
 
@@ -954,7 +986,7 @@ async def ingest_external_event(
 
     try:
         event_id = await publish_external_event(envelope)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         metrics.external_feed_errors_total.labels(envelope.source).inc()
         _external_event_logger.warning(
             "Failed to enqueue external event from %s: %s",
@@ -1137,7 +1169,7 @@ def _record_venue_error(venue: str, exc: Exception) -> None:
         else:
             error_label = exc.__class__.__name__.upper()
         metrics.venue_errors.labels(venue=venue_label, error=error_label[:64]).inc()
-    except _SUPPRESSIBLE_EXCEPTIONS as metric_exc:
+    except Exception as exc:
         _log_suppressed("record venue error metrics", metric_exc)
 
 
@@ -1164,13 +1196,13 @@ async def on_startup() -> None:
                 if os.getenv(k) is not None
             }
             _startup_logger.info("Config hash=%s flags=%s", h, flags)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("startup config hash logging", exc)
         # Start event bus early so other tasks can publish
         try:
             await initialize_event_bus()
             _startup_logger.info("Event bus initialized")
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             _startup_logger.warning("Event bus init failed", exc_info=True)
         await router.initialize_balances()
         # Optional: seed starting cash for demo/test if no balances detected
@@ -1184,7 +1216,7 @@ async def on_startup() -> None:
                         state.cash = val
                         state.equity = val
                         _startup_logger.info("Seeded starting cash of %s USD", val)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _startup_logger.warning("Unable to seed starting cash: %s", exc, exc_info=True)
         # Initialize portfolio metrics
         state = portfolio.state
@@ -1216,7 +1248,7 @@ async def _refresh_specs_periodically() -> None:
                     set_fn(_last_specs_refresh)
             refreshed_at = datetime.datetime.utcfromtimestamp(_last_specs_refresh)
             logging.getLogger().info("Venue specs refreshed at %s", refreshed_at)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             logging.getLogger().exception("Spec refresh failed")
         await asyncio.sleep(86400)  # 24h
 
@@ -1328,7 +1360,7 @@ async def _init_multi_venue_clients() -> None:
         _startup_logger.warning(
             "IBKR client not available - ib-insync not installed", exc_info=True
         )
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.exception("IBKR client initialization failed")
 
 
@@ -1342,7 +1374,7 @@ async def _start_reconciliation() -> None:
         _startup_logger.info("Reconciliation daemon started")
     except ImportError:
         _startup_logger.warning("Reconciliation module not available", exc_info=True)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.exception("Reconciliation daemon startup failed")
 
 
@@ -1387,9 +1419,9 @@ async def _start_guardian_and_feeds() -> None:
                     "risk.cross_health_critical",
                     risk_handlers.on_cross_health_critical(router, cfg),
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 _startup_logger.warning("Risk handlers did not wire", exc_info=True)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Risk guardian failed to start", exc_info=True)
 
     # DEX feed loop
@@ -1401,7 +1433,7 @@ async def _start_guardian_and_feeds() -> None:
 
             asyncio.create_task(dexscreener_loop(), name="dexscreener-feed")
             _startup_logger.info("DEX Screener feed started")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("DEX Screener feed failed to start", exc_info=True)
 
     # DEX sniper wiring
@@ -1447,7 +1479,7 @@ async def _start_guardian_and_feeds() -> None:
                 _DEX_WATCHER = DexWatcher(dex_cfg, state, executor, oracle)
                 _DEX_WATCHER.start()
                 _startup_logger.info("DEX watcher loop started")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("DEX sniper wiring failed", exc_info=True)
 
     # Momentum breakout module
@@ -1469,7 +1501,7 @@ async def _start_guardian_and_feeds() -> None:
                 momentum_cfg.notional_usd,
                 momentum_cfg.interval_sec,
             )
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Momentum breakout wiring failed", exc_info=True)
 
     # Wire Event Breakout consumer (subscribe to strategy.event_breakout)
@@ -1487,18 +1519,18 @@ async def _start_guardian_and_feeds() -> None:
                 try:
                     if hasattr(bo, "enable_sighup_reload"):
                         bo.enable_sighup_reload(bo.cfg.denylist_path)
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     _startup_logger.info("SIGHUP not supported for denylist reload")
             # Entropy-based auto-denylist wiring
             if os.getenv("ENTROPY_DENY_ENABLED", "").lower() in {"1", "true", "yes"}:
                 try:
                     BUS.subscribe("event_bo.skip", bo.on_skip_entropy)
                     _startup_logger.info("Entropy deny wiring enabled")
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("engine guard", exc)
             BUS.subscribe("strategy.event_breakout", bo.on_event)
             _startup_logger.info("Event Breakout consumer wired")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Event Breakout consumer failed to wire", exc_info=True)
 
     # Meme sentiment strategy wiring
@@ -1527,11 +1559,11 @@ async def _start_guardian_and_feeds() -> None:
         elif _MEME_SENTIMENT is not None:
             try:
                 BUS.unsubscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             _MEME_SENTIMENT = None
             _startup_logger.info("Meme sentiment strategy disabled via configuration")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Meme sentiment strategy wiring failed", exc_info=True)
 
     # Listing sniper wiring
@@ -1560,15 +1592,15 @@ async def _start_guardian_and_feeds() -> None:
         elif _LISTING_SNIPER is not None:
             try:
                 BUS.unsubscribe("events.external_feed", _LISTING_SNIPER.on_external_event)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             try:
                 await _LISTING_SNIPER.shutdown()
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             _LISTING_SNIPER = None
             _startup_logger.info("Listing sniper disabled via configuration")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Listing sniper wiring failed", exc_info=True)
 
     # Airdrop / promotion watcher wiring
@@ -1596,15 +1628,15 @@ async def _start_guardian_and_feeds() -> None:
         elif _AIRDROP_PROMO is not None:
             try:
                 BUS.unsubscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             try:
                 await _AIRDROP_PROMO.shutdown()
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             _AIRDROP_PROMO = None
             _startup_logger.info("Airdrop promo watcher disabled via configuration")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Airdrop promo watcher wiring failed", exc_info=True)
 
     # Start Telegram digest (if enabled)
@@ -1632,7 +1664,7 @@ async def _start_guardian_and_feeds() -> None:
                     "Telegram notify bridge %s",
                     "enabled" if bridge_enabled else "disabled",
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             # Health notifier (BUS -> Telegram) if enabled
             try:
@@ -1647,7 +1679,7 @@ async def _start_guardian_and_feeds() -> None:
                 }
                 HealthNotifier(hcfg, BUS, tg, _startup_logger, _t, metrics)
                 _startup_logger.info("Telegram health notifier wired")
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 _startup_logger.warning("Health notifier wiring failed", exc_info=True)
             # Lightweight fills -> Telegram helper (until Alertmanager is in place)
             try:
@@ -1666,7 +1698,7 @@ async def _start_guardian_and_feeds() -> None:
 
                 BUS.subscribe("trade.fill", _on_fill_tele)
                 _startup_logger.info("Telegram fill pings enabled")
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             roll = EventBORollup()
             # Optional 6h buckets
@@ -1690,7 +1722,7 @@ async def _start_guardian_and_feeds() -> None:
             job.buckets = buckets
             asyncio.create_task(job.run())
             _startup_logger.info("Telegram digest job started")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Telegram digest failed to start", exc_info=True)
 
     # Guards: Depeg and Funding
@@ -1710,15 +1742,15 @@ async def _start_guardian_and_feeds() -> None:
                         val = 1 if now < depeg.safe_until else 0
                         try:
                             risk_depeg_active.set(val)
-                        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                        except Exception as exc:
                             _log_suppressed("engine guard", exc)
-                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    except Exception as exc:
                         _log_suppressed("engine guard", exc)
                     await asyncio.sleep(60)
 
             asyncio.create_task(_loop_depeg())
             _startup_logger.info("Depeg guard started")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Depeg guard wiring failed", exc_info=True)
 
     try:
@@ -1731,20 +1763,20 @@ async def _start_guardian_and_feeds() -> None:
                 while True:
                     try:
                         await funding.tick()
-                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    except Exception as exc:
                         _log_suppressed("engine guard", exc)
                     await asyncio.sleep(300)
 
             asyncio.create_task(_loop_funding())
             _startup_logger.info("Funding guard started")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Funding guard wiring failed", exc_info=True)
 
     # Subscribe to model promotion events for hot-reload
     try:
         BUS.subscribe("model.promoted", strategy.policy_hmm.reload_model)
         _startup_logger.info("Subscribed to model.promoted event for hot-reload")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Failed to subscribe to model.promoted", exc_info=True)
 
     # Auto cutback/mute overrides (symbol-level execution control)
@@ -1765,10 +1797,10 @@ async def _start_guardian_and_feeds() -> None:
             # attach to router for place_entry consult
             try:
                 router._overrides = ov
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             _startup_logger.info("Auto cutback/mute overrides enabled")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Auto cutback wiring failed", exc_info=True)
 
 
@@ -1781,7 +1813,7 @@ async def manual_reconciliation() -> dict[str, Any]:
         stats = await reconcile_once()
     except HTTPException:
         raise
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Manual reconciliation failed: {exc}") from exc
     else:
         return {"status": "completed", **stats}
@@ -1816,18 +1848,18 @@ def _startup_load_snapshot_and_reconcile() -> None:
                     pos.upl = float(entry.get("unrealized_usd", 0.0))
                     pos.rpl = float(entry.get("realized_usd", 0.0))
                     state.positions[sym] = pos
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("snapshot position parse", exc)
                     continue
             try:
                 _last_position_symbols.clear()
                 _last_position_symbols.update(state.positions.keys())
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             metrics.update_portfolio_gauges(
                 state.cash, state.realized, state.unrealized, state.exposure
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             _startup_logger.warning("Failed to hydrate portfolio from snapshot", exc_info=True)
     else:
         _startup_logger.info("No persisted portfolio snapshot found; starting fresh")
@@ -1837,7 +1869,7 @@ def _startup_load_snapshot_and_reconcile() -> None:
     if api_key and api_secret and api_key not in {"__REQUIRED__", "__PLACEHOLDER__"}:
         try:
             post_reconcile()  # same logic; small universe should be fast
-        except (_SUPPRESSIBLE_EXCEPTIONS, _httpx.HTTPStatusError):
+        except Exception as exc:
             # Non-fatal — engine can still serve, UI can trigger /reconcile manually
             _startup_logger.warning("Initial reconcile on startup failed", exc_info=True)
     else:
@@ -1848,7 +1880,7 @@ def _startup_load_snapshot_and_reconcile() -> None:
     try:
         strategy.start_scheduler()
         _startup_logger.info("Strategy scheduler started")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Strategy scheduler failed to start", exc_info=True)
 
 
@@ -1864,19 +1896,19 @@ async def on_shutdown() -> None:
         try:
             _market_data_logger.stop()
             _startup_logger.info("Market data logger stopped")
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             _startup_logger.debug("Market data logger shutdown encountered issues", exc_info=True)
         _market_data_logger = None
     try:
         if _MOMENTUM_BREAKOUT is not None:
             await _MOMENTUM_BREAKOUT.stop()
             _MOMENTUM_BREAKOUT = None
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Momentum breakout shutdown encountered errors", exc_info=True)
     try:
         if _LISTING_SNIPER is not None:
             await _LISTING_SNIPER.shutdown()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Listing sniper shutdown failed", exc_info=True)
     try:
         if _MEME_SENTIMENT is not None:
@@ -1884,10 +1916,10 @@ async def on_shutdown() -> None:
 
             try:
                 BUS.unsubscribe("events.external_feed", _MEME_SENTIMENT.on_external_event)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             _MEME_SENTIMENT = None
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Meme sentiment shutdown failed", exc_info=True)
     try:
         if _AIRDROP_PROMO is not None:
@@ -1895,20 +1927,20 @@ async def on_shutdown() -> None:
 
             try:
                 BUS.unsubscribe("events.external_feed", _AIRDROP_PROMO.on_external_event)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
             try:
                 await _AIRDROP_PROMO.shutdown()
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 _startup_logger.warning("Airdrop promo watcher shutdown failed", exc_info=True)
             _AIRDROP_PROMO = None
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Airdrop promo shutdown encountered errors", exc_info=True)
     try:
         from engine.core.signal_queue import SIGNAL_QUEUE
 
         await SIGNAL_QUEUE.stop()
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
     await rest_client.close()
 
@@ -1998,7 +2030,7 @@ async def submit_market_order(
                     }
                 )
                 _persist_logger.debug("Order %s stored successfully", order_id)
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 _persist_logger.exception("Failed to persist order %s", order_id)
 
         metrics.orders_submitted.inc()
@@ -2038,7 +2070,7 @@ async def submit_market_order(
                 )
                 # Persist snapshot
                 _store.save(state.snapshot())
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             # Non-fatal; reconcile daemon or manual /reconcile can catch up
             _log_suppressed("portfolio fill persistence", exc)
 
@@ -2053,7 +2085,7 @@ async def submit_market_order(
             CACHE.set(idem_key, resp)
         return resp
 
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pylint: disable=broad-except
+    except Exception as exc:
         metrics.orders_rejected.inc()
         _record_venue_error(venue, exc)
         # Surface Binance error payloads for easier debugging
@@ -2062,7 +2094,7 @@ async def submit_market_order(
                 status = exc.response.status_code
                 body = exc.response.text
                 raise HTTPException(status_code=status, detail=f"Binance error: {body}") from exc
-        except _SUPPRESSIBLE_EXCEPTIONS as payload_exc:
+        except Exception as exc:
             _log_suppressed("engine guard", payload_exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -2154,7 +2186,7 @@ async def submit_limit_order(
                     }
                 )
                 _persist_logger.debug("Order %s stored successfully", order_id)
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 _persist_logger.exception("Failed to persist order %s", order_id)
 
         metrics.orders_submitted.inc()
@@ -2186,7 +2218,7 @@ async def submit_limit_order(
                 st = portfolio.state
                 metrics.update_portfolio_gauges(st.cash, st.realized, st.unrealized, st.exposure)
                 _store.save(st.snapshot())
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
 
         resp = {
@@ -2200,7 +2232,7 @@ async def submit_limit_order(
             CACHE.set(idem_key, resp)
         return resp
 
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         metrics.orders_rejected.inc()
         _record_venue_error(venue, exc)
         try:
@@ -2208,7 +2240,7 @@ async def submit_limit_order(
                 status = exc.response.status_code
                 body = exc.response.text
                 raise HTTPException(status_code=status, detail=f"Binance error: {body}") from exc
-        except _SUPPRESSIBLE_EXCEPTIONS as payload_exc:
+        except Exception as exc:
             _log_suppressed("engine guard", payload_exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -2245,7 +2277,7 @@ async def symbol_info(symbol: str) -> dict[str, Any]:
             f"{exc} ({mode_info}, base_url={base_used}, url_attempted={third_party})"
         )
         raise HTTPException(status_code=400, detail=detail_msg) from exc
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         base_used = settings.api_base or "no_base"
         mode_info = f"mode={settings.mode}, is_futures={settings.is_futures}"
         detail_msg = (
@@ -2296,7 +2328,7 @@ async def get_portfolio() -> dict[str, Any]:
                     snap["pnl"] = dict(persisted_snapshot.get("pnl") or {})
                 if "ts_ms" not in snap and persisted_snapshot.get("ts_ms") is not None:
                     snap["ts_ms"] = persisted_snapshot.get("ts_ms")
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         snap = _store.load()
         persisted_snapshot = snap
         if not snap:
@@ -2326,11 +2358,11 @@ async def get_portfolio() -> dict[str, Any]:
             try:
                 if last is not None:
                     portfolio.update_price(base, float(last))
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
         snap["quote_ccy"] = QUOTE_CCY
         snap["positions"] = positions
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
     # Refresh engine metrics from latest snapshot so external scrapers see updated values
     try:
@@ -2345,7 +2377,7 @@ async def get_portfolio() -> dict[str, Any]:
             # and accumulate across ALL open positions.
             try:
                 snap2 = await router.get_account_snapshot()
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 _persist_logger.warning("Futures snapshot fetch failed", exc_info=True)
                 snap2 = None
 
@@ -2363,7 +2395,7 @@ async def get_portfolio() -> dict[str, Any]:
                     total_unreal += upnl
                     if metric_unreal is not None and sym:
                         metric_unreal.labels(symbol=sym).set(upnl)
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("futures pnl gauge update", exc)
                     continue
             # market_value_usd := total unrealized (not Σ qty*price) for linear futures
@@ -2375,7 +2407,7 @@ async def get_portfolio() -> dict[str, Any]:
                     cash = float(
                         snap2.get("totalWalletBalance") or snap2.get("walletBalance") or 0.0
                     )
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     cash = float(getattr(state, "cash", 0.0) or 0.0)
             else:
                 cash = float(getattr(state, "cash", 0.0) or 0.0)
@@ -2383,7 +2415,7 @@ async def get_portfolio() -> dict[str, Any]:
             # Sync in-process portfolio cash so subsequent calls are consistent
             try:
                 portfolio.state.cash = cash
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
 
             # Update gauges using live cash + unrealized (venue truth)
@@ -2402,9 +2434,9 @@ async def get_portfolio() -> dict[str, Any]:
                         metrics.set_core_metric("initial_margin_usd", init_m)
                         metrics.set_core_metric("maint_margin_usd", maint_m)
                         metrics.set_core_metric("available_usd", avail)
-                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    except Exception as exc:
                         _log_suppressed("engine guard", exc)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
         else:
             # Spot: signed market value = sum(qty * last)
@@ -2416,14 +2448,14 @@ async def get_portfolio() -> dict[str, Any]:
                 if metric_unreal is not None:
                     for pos in state.positions.values():
                         metric_unreal.labels(symbol=pos.symbol).set(pos.upl)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
         # Record mark time for auditability - always set, even when no positions
         try:
             metrics.set_core_metric("mark_time_epoch", time.time())
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
     try:
         state = portfolio.state
@@ -2433,7 +2465,7 @@ async def get_portfolio() -> dict[str, Any]:
         pnl.setdefault("realized", _coerce_float(getattr(state, "realized", 0.0)))
         pnl.setdefault("unrealized", _coerce_float(getattr(state, "unrealized", 0.0)))
         snap["pnl"] = pnl
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     if "cash_usd" not in snap or "equity_usd" not in snap:
@@ -2463,7 +2495,7 @@ async def account_snapshot(force: bool = False) -> dict[str, Any]:
 
     try:
         router.snapshot_loaded = True
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     state = portfolio.state
@@ -2474,7 +2506,7 @@ async def account_snapshot(force: bool = False) -> dict[str, Any]:
         metrics.set_core_metric("equity_usd", float(state.equity))
         metrics.set_core_metric("available_usd", float(snap.get("availableBalance", state.cash)))
         metrics.set_core_metric("mark_time_epoch", time.time())
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     if store is not None:
@@ -2504,7 +2536,7 @@ async def account_snapshot(force: bool = False) -> dict[str, Any]:
                 elif not equity_val:
                     equity_val = cash_val + unreal_val
             store.insert_equity(VENUE.lower(), equity_val, cash_val, unreal_val, snapshot_ts)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             _persist_logger.exception(
                 "Failed to persist account snapshot for venue %s", VENUE.lower()
             )
@@ -2530,11 +2562,11 @@ async def account_snapshot(force: bool = False) -> dict[str, Any]:
             metrics.set_core_symbol_metric("unrealized_profit", symbol=sym, value=0.0)
         _last_position_symbols.clear()
         _last_position_symbols.update(current_symbols)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
     try:
         _store.save(state.snapshot())
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
     return snap
 
@@ -2556,7 +2588,7 @@ def post_reconcile() -> dict[str, Any]:
     if not symbols:
         try:
             symbols = router.trade_symbols()  # EXPECTED: provide in router
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             symbols = []
     if not symbols:
         raise HTTPException(status_code=400, detail="No symbols configured for reconciliation")
@@ -2576,7 +2608,7 @@ def post_reconcile() -> dict[str, Any]:
             "applied_snapshot_ts_ms": snap.get("ts_ms"),
             "equity": snap.get("equity_usd"),
         }
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Reconcile failed: {exc}") from exc
 
 
@@ -2585,7 +2617,7 @@ async def _bootstrap_snapshot_state() -> None:
     """Restore snapshot + reconcile in background to avoid blocking server startup."""
     try:
         await asyncio.to_thread(_startup_load_snapshot_and_reconcile)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Snapshot bootstrap failed", exc_info=True)
 
 
@@ -2603,7 +2635,7 @@ async def status() -> dict[str, Any]:
 async def health() -> dict[str, Any]:
     try:
         snap = _store.load() or {}
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         snap = {}
     lag = max(0.0, time.time() - _last_reconcile_ts) if _last_reconcile_ts else None
     if lag is not None:
@@ -2614,7 +2646,7 @@ async def health() -> dict[str, Any]:
         snapshot_metric = cast(Any, metrics.REGISTRY.get("snapshot_loaded"))
         if snapshot_metric is not None:
             snapshot_metric.set(1 if snap_ok else 0)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     # Venue-specific labels for health endpoint
@@ -2634,7 +2666,7 @@ async def health() -> dict[str, Any]:
             from engine.universe import configured_universe
 
             symbols = configured_universe()
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
 
     return {
@@ -2685,7 +2717,7 @@ async def get_price(
         venue_symbol = symbol if "." in symbol else f"{normalized}.{VENUE}"
         try:
             price = await router.get_last_price(venue_symbol)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             price = None
 
     if price is None:
@@ -2880,8 +2912,16 @@ async def get_strategies() -> dict[str, Any]:
                     "symbols": getattr(s_cfg, 'symbols', []),
                     "paramsSchema": default_params_schema,
                     "params": {},
+                    "metrics": getattr(strat_mod.policy_hmm, 'get_regime', lambda s: {})(getattr(s_cfg, 'symbols', ['BTCUSDT'])[0]) or {},
+                    "performance": {
+                        "pnl": 0.0,
+                        "sharpe": 0.0,
+                        "drawdown": 0.0,
+                        "winRate": 0.0,
+                        "equitySeries": []
+                    }
                 })
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
     
     return {
@@ -2911,7 +2951,7 @@ async def get_recent_trades(limit: int = 100) -> dict[str, Any]:
                     "strategyId": row.get("strategy", "unknown"),
                     "venueId": row.get("venue", "binance")
                 })
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
     
     return {
@@ -2942,7 +2982,7 @@ async def get_trade_stats() -> dict[str, Any]:
                 if std_ret > 0:
                     stats["sharpe"] = round((mean_ret / std_ret) * (252 ** 0.5), 2)
                 stats["returns"] = returns[-50:]  # Last 50 returns for charting
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
     
     return stats
@@ -2958,7 +2998,7 @@ async def get_alerts(limit: int = 50) -> dict[str, Any]:
         daemon = alert_daemon.get_instance()
         if daemon:
             alerts = daemon.get_recent_alerts(limit)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
     
     return {
@@ -2987,7 +3027,7 @@ async def get_open_orders() -> dict[str, Any]:
                 "status": order.get("status", "PENDING"),
                 "createdAt": order.get("ts", 0)
             })
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
     
     return {
@@ -3004,7 +3044,7 @@ async def promote_strategy(request: Request) -> dict[str, Any]:
 
     try:
         data = await request.json()
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         raise HTTPException(
             status_code=400, detail='JSON body required: {"model_tag": "<tag>"}'
         ) from exc
@@ -3025,7 +3065,7 @@ async def promote_strategy(request: Request) -> dict[str, Any]:
             await strategy.reload_model(tag)
     except AttributeError:
         pass  # Strategy layer doesn't support hot reload, that's ok
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         # Surface reload errors clearly to caller
         raise HTTPException(status_code=500, detail=f"reload_model failed: {exc}") from exc
 
@@ -3083,7 +3123,7 @@ async def _start_external_feeds() -> None:
         started = await spawn_external_feeds_from_config()
         if started:
             _startup_logger.info("External feed connectors started: %s", ", ".join(started))
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("External feed connectors failed to start", exc_info=True)
 
 
@@ -3097,7 +3137,7 @@ async def _start_event_bus() -> None:
         _startup_logger.info("Event bus started")
         SIGNAL_QUEUE.start(BUS)
         _startup_logger.info("Signal priority queue dispatcher online")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.exception("Event bus startup failed")
 
 
@@ -3109,7 +3149,7 @@ async def _start_alerting() -> None:
     try:
         await alert_daemon.initialize_alerting()
         _startup_logger.info("Alerting system started")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.exception("Alerting startup failed")
 
 
@@ -3123,7 +3163,7 @@ async def _start_governance() -> None:
 
         await governance_daemon.initialize_governance()
         _startup_logger.info("Autonomous governance activated")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.exception("Governance startup failed")
 
 
@@ -3138,7 +3178,7 @@ async def _start_bracket_governor() -> None:
             "yes",
         }:
             BracketGovernor(router, BUS, _startup_logger).wire()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Bracket governor wiring failed", exc_info=True)
 
 
@@ -3171,7 +3211,7 @@ async def _start_stop_validator() -> None:
         )
         asyncio.create_task(_stop_validator.run())
         _startup_logger.info("Stop Validator started (repair=%s)", cfg["STOP_VALIDATOR_REPAIR"])
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         _startup_logger.warning("Stop Validator startup failed", exc_info=True)
 
 
@@ -3190,14 +3230,14 @@ async def _subscribe_governance_hooks() -> None:
         metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
         try:
             metrics.set_max_notional(RAILS.cfg.max_notional_usdt)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     try:
         BUS.subscribe("governance.action", _on_governance_action)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
 
@@ -3207,11 +3247,14 @@ _user_stream: BinanceUserStream | None = None
 async def _start_user_stream() -> None:
     """Start the Binance User Data Stream for real-time telemetry."""
     global _user_stream
+    _app_logger.info(f"Starting User Stream check. IS_EXPORTER={IS_EXPORTER} KEY_LEN={len(settings.api_key) if settings.api_key else 0}")
     if IS_EXPORTER:
         return
     
+    
+    _app_logger.info(f"DEBUG: Starting User Stream check. IS_EXPORTER={IS_EXPORTER} KEY_LEN={len(settings.api_key) if settings.api_key else 0}")
     if not (settings.api_key and settings.api_secret):
-        _startup_logger.warning("User Stream skipped: missing API credentials")
+        _app_logger.warning("User Stream skipped: missing API credentials")
         return
 
     async def on_account_update(data: dict) -> None:
@@ -3267,11 +3310,62 @@ async def _start_user_stream() -> None:
 _market_stream: BinanceMarketStream | None = None
 
 @app.on_event("startup")
+async def _start_param_client() -> None:
+    """Start the Dynamic Parameter Controller Client & Reinforcement Learning Feedback Loop."""
+    if IS_EXPORTER:
+        return
+    
+    # [Dynamic Params & RL]
+    try:
+        # settings.ops_url should be like "http://ops:8000"
+        if getattr(settings, "ops_url", None):
+            p_client = bootstrap_param_client(settings.ops_url)
+            if p_client:
+                # Wire RL feedback (Bus -> ParamClient -> Ops)
+                p_client.wire_feedback(BUS)
+                await p_client.start()
+                _app_logger.info("[ParamClient] Started & RL Feedback Wired")
+            else:
+                _app_logger.warning("[ParamClient] Failed to bootstrap (client is None)")
+        else:
+             _app_logger.info("[ParamClient] Skipped (OPS_URL not set)")
+    except Exception as exc:
+        _app_logger.warning("[ParamClient] Wiring failed: %s", exc)
+
+
+async def _handle_universe_update(evt: dict[str, Any]) -> None:
+    """Handle dynamic universe updates from SymbolScanner."""
+    symbols = evt.get("symbols")
+    if not symbols or not isinstance(symbols, list):
+        return
+        
+    global _market_stream
+    if _market_stream:
+        _app_logger.info(f"[Universe] Updating subscription to {len(symbols)} symbols: {symbols[:3]}...")
+        _market_stream.subscribe(symbols)
+    
+    # Update RiskRails allowlist so strategies can execute on these new symbols
+    if hasattr(strategy, "RAILS") and strategy.RAILS:
+        try:
+            # RAILS.cfg is a frozen dataclass, so we replace it
+            strategy.RAILS.cfg = replace(strategy.RAILS.cfg, trade_symbols=symbols)
+            _app_logger.info(f"[Risk] Updated allowed trade_symbols: {len(symbols)} symbols")
+        except Exception as exc:
+            _app_logger.warning("Failed to update RiskRails allowlist: %s", exc)
+
+
+@app.on_event("startup")
 async def _start_market_stream() -> None:
     """Start the Binance Public Market Data Stream."""
     global _market_stream
     if IS_EXPORTER or VENUE != "BINANCE":
         return
+
+    # [Dynamic Universe]
+    try:
+        BUS.subscribe("universe.update", _handle_universe_update)
+    except Exception as exc:
+        _app_logger.warning("Failed to subscribe to universe.update: %s", exc)
 
     # Gather all trading symbols
     symbols = configured_universe()
@@ -3291,7 +3385,7 @@ async def _start_market_stream() -> None:
             ts = data.get("ts")
             if sym and price is not None:
                 # _binance_on_mark updates metrics and triggers strategy ticks
-                await _binance_on_mark("trade", sym, price, ts or time.time())
+                await _binance_on_mark(sym, sym, price, ts or time.time())
     
     MARKET_STREAM = BinanceMarketStream(symbols, on_event=on_market_event)
     _market_stream = MARKET_STREAM
@@ -3323,16 +3417,22 @@ async def _start_telemetry_watchdog() -> None:
     if IS_EXPORTER:
         return
 
+    startup_ts = time.time()
+
     async def watchdog() -> None:
         while True:
             await asyncio.sleep(10)
             if _user_stream:
                 lag = time.time() - _user_stream.last_event_ts
-                if lag > 60:
+                # Grace period: 5 min after startup before alerting
+                if time.time() - startup_ts < 300:
+                    continue
+                # 360s threshold (allows 5-minute keep-alive + buffer)
+                if lag > 360:
                     _app_logger.error(f"CRITICAL: Telemetry Stale! Lag: {lag:.1f}s")
                     RAILS.set_circuit_breaker(True, f"Telemetry Lag {lag:.1f}s")
                     try:
-                        BUS.publish("alert.telemetry", {"type": "TELEMETRY_DISCONNECTED", "lag": lag})
+                        await BUS.publish("alert.telemetry", {"type": "TELEMETRY_DISCONNECTED", "lag": lag})
                     except:
                         pass
                 else:
@@ -3359,7 +3459,7 @@ async def _start_fee_manager() -> None:
         manager = FeeManager(portfolio, router, config=config)
         asyncio.create_task(manager.run())
         _app_logger.info("[FeeManager] Started")
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _app_logger.warning("[FeeManager] Failed to start: %s", exc)
 
 
@@ -3375,7 +3475,7 @@ async def _start_watchdog() -> None:
         watchdog = get_watchdog()
         watchdog.start()
         _app_logger.info("[Watchdog] Self-healing watchdog started")
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _app_logger.warning("[Watchdog] Failed to start: %s", exc)
 
 
@@ -3389,10 +3489,10 @@ async def _refresh_binance_futures_snapshot() -> None:
         try:
             from engine.ops.watchdog import get_watchdog
             get_watchdog().heartbeat()
-        except Exception:
+        except Exception as exc:
             pass
         _refresh_logger.debug("refresh tick")
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     try:
@@ -3406,34 +3506,34 @@ async def _refresh_binance_futures_snapshot() -> None:
                     raw_px = payload.get("markPrice") or payload.get("price") or 0.0
                 try:
                     px = float(raw_px or 0.0)
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     px = 0.0
                 if px <= 0.0:
                     continue
                 new_map[sym] = px
                 try:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("engine guard", exc)
                 try:
                     await _maybe_emit_strategy_tick(sym, px, ts=now_ts, source="rest_snapshot", stream="rest")
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             if new_map:
                 _price_map = new_map
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     try:
         acc_data = await rest_client.account()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         acc_data = {}
     if acc_data:
         try:
             wallet = float(acc_data.get("totalWalletBalance", 0.0))
             upnl = float(acc_data.get("totalUnrealizedProfit", 0.0))
             equity = float(acc_data.get("totalMarginBalance", 0.0))
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             wallet = upnl = equity = 0.0
 
         metrics.set_core_metric("cash_usd", wallet)
@@ -3447,19 +3547,19 @@ async def _refresh_binance_futures_snapshot() -> None:
             metrics.set_core_metric("initial_margin_usd", init_m)
             metrics.set_core_metric("maint_margin_usd", maint_m)
             metrics.set_core_metric("available_usd", avail)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
 
     try:
         pos_data = await rest_client.position_risk()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pos_data = []
     pos_data = [p for p in pos_data if float(p.get("positionAmt", 0.0)) != 0.0]
 
     is_hedge = False
     try:
         is_hedge = await rest_client.hedge_mode()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         is_hedge = False
 
     if is_hedge:
@@ -3471,7 +3571,7 @@ async def _refresh_binance_futures_snapshot() -> None:
         try:
             upnl_total = sum(float(p.get("unRealizedProfit", 0.0)) for p in legs)
             metrics.set_core_metric("market_value_usd", upnl_total)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
 
     current_symbols: set[str] = set()
@@ -3491,7 +3591,7 @@ async def _refresh_binance_futures_snapshot() -> None:
                 agg["entry"] = (
                     agg.get("entry", 0.0) * abs(agg.get("amt", 0.0)) + entry * weight
                 ) / max(1e-9, abs(agg.get("amt", 0.0)) + weight)
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 agg["entry"] = entry or agg.get("entry", 0.0)
         agg["upnl"] += upnl_sym
 
@@ -3522,15 +3622,15 @@ async def _refresh_binance_futures_snapshot() -> None:
                         mark = float(raw_mark.get("markPrice", 0.0) or 0.0)
                     else:
                         mark = float(raw_mark or 0.0)
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     mark = 0.0
             if mark:
                 metrics.set_core_symbol_metric("mark_price", symbol=sym, value=mark)
                 try:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(mark)
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("engine guard", exc)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
 
     try:
@@ -3541,7 +3641,7 @@ async def _refresh_binance_futures_snapshot() -> None:
             metrics.set_core_symbol_metric("entry_price", symbol=sym, value=0.0)
         _last_position_symbols.clear()
         _last_position_symbols.update(current_symbols)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     now_ts = time.time()
@@ -3565,7 +3665,7 @@ async def _refresh_binance_spot_snapshot() -> None:
     try:
         raw_symbols = await asyncio.to_thread(configured_universe)
         symbol_filter = {s.split(".")[0].upper() for s in raw_symbols}
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         symbol_filter = set()
 
     try:
@@ -3576,7 +3676,7 @@ async def _refresh_binance_spot_snapshot() -> None:
             resp = await client.get("/api/v3/ticker/price")
             resp.raise_for_status()
             payload = resp.json()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         payload = None
 
     if isinstance(payload, list):
@@ -3589,27 +3689,27 @@ async def _refresh_binance_spot_snapshot() -> None:
                 continue
             try:
                 px = float(item.get("price", 0.0))
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("ticker price parse", exc)
                 continue
             if px > 0:
                 _price_map[sym] = px
                 try:
                     await _maybe_emit_strategy_tick(sym, px, source="rest_snapshot", stream="rest")
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
         if new_map:
             _price_map = new_map
             for sym, px in new_map.items():
                 try:
                     metrics.MARK_PRICE.labels(symbol=sym, venue="binance").set(px)
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("mark price gauge update", exc)
                     continue
 
     try:
         account = await rest_client.account_snapshot()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         account = {}
 
     balances = account.get("balances") if isinstance(account, dict) else None
@@ -3621,7 +3721,7 @@ async def _refresh_binance_spot_snapshot() -> None:
                 try:
                     free = float(bal.get("free", 0.0))
                     locked = float(bal.get("locked", 0.0))
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     free = locked = 0.0
                 wallet = free + locked
                 break
@@ -3629,14 +3729,14 @@ async def _refresh_binance_spot_snapshot() -> None:
     state = portfolio.state
     try:
         state.cash = wallet
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     unreal = float(getattr(state, "unrealized", 0.0) or 0.0)
     equity = wallet + unreal
     try:
         state.equity = equity
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     metrics.set_core_metric("cash_usd", wallet)
@@ -3677,15 +3777,15 @@ async def _refresh_binance_spot_snapshot() -> None:
                         mark = float(raw_mark.get("markPrice", 0.0) or 0.0)
                     else:
                         mark = float(raw_mark or 0.0)
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     mark = 0.0
             if mark:
                 metrics.set_core_symbol_metric("mark_price", symbol=base_sym, value=mark)
                 try:
                     metrics.MARK_PRICE.labels(symbol=base_sym, venue="binance").set(mark)
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("engine guard", exc)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
 
     try:
@@ -3696,7 +3796,7 @@ async def _refresh_binance_spot_snapshot() -> None:
             metrics.set_core_symbol_metric("entry_price", symbol=sym, value=0.0)
         _last_position_symbols.clear()
         _last_position_symbols.update(current_symbols)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     metrics.set_core_metric("mark_time_epoch", now_ts)
@@ -3725,7 +3825,7 @@ async def _refresh_venue_data() -> None:
             VENUE,
             settings.is_futures,
         )
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
     while True:
@@ -3734,10 +3834,10 @@ async def _refresh_venue_data() -> None:
                 await _refresh_binance_futures_snapshot()
             else:
                 await _refresh_binance_spot_snapshot()
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             try:
                 _refresh_logger.exception("refresh loop error")
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
         await asyncio.sleep(5)
 
@@ -3746,7 +3846,7 @@ async def _refresh_venue_data() -> None:
 async def _shutdown_background_tasks() -> None:
     try:
         await runtime_tasks.shutdown()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         logging.getLogger(__name__).exception("Background task shutdown failed")
 
 
@@ -3767,13 +3867,13 @@ def _init_prom_multiproc_dir() -> None:
                 f.unlink()
             except FileNotFoundError:
                 continue
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("engine guard", exc)
         try:
             _startup_logger.info("Prometheus multiprocess directory: %s", path)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("engine guard", exc)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
 
 
@@ -3829,7 +3929,7 @@ def reload_risk_config() -> dict[str, Any]:
     metrics.set_trading_enabled(RAILS.cfg.trading_enabled)
     try:
         metrics.set_max_notional(RAILS.cfg.max_notional_usdt)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
     cfg = RAILS.cfg
     return {
@@ -3853,11 +3953,11 @@ async def toggle_trading(body: TradingToggle, request: Request) -> dict[str, Any
     RAILS.cfg = replace(RAILS.cfg, trading_enabled=enabled)
     try:
         metrics.set_trading_enabled(enabled)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         _log_suppressed("engine guard", exc)
     try:
         await router.set_trading_enabled(enabled)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         logging.getLogger("engine.ops_auth").warning(
             "Failed to persist trading flag", exc_info=True
         )
@@ -3871,7 +3971,7 @@ def get_governance_status() -> dict[str, Any]:
         from ops import governance_daemon
 
         snapshot = governance_daemon.get_governance_status()
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         return {"governance": {"status": "error", "error": str(exc)}}
     else:
         return {"governance": snapshot}
@@ -3884,7 +3984,7 @@ def reload_governance_policies() -> dict[str, Any]:
         from ops import governance_daemon
 
         success = governance_daemon.reload_governance_policies()
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         return {"status": "error", "message": str(exc)}
     else:
         return {"status": "success" if success else "failed"}
@@ -3897,7 +3997,7 @@ def list_governance_actions(limit: int = 20) -> dict[str, Any]:
         from ops import governance_daemon
 
         actions = governance_daemon.get_recent_governance_actions(limit)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         return {"actions": [], "error": str(exc)}
     else:
         return {"actions": actions, "limit": limit}
@@ -3937,7 +4037,7 @@ async def simulate_governance_event(event_type: str) -> dict[str, Any]:
             await BUS.publish("risk.rejected", payload)
         elif event_type == "market_stress":
             await BUS.publish("price.anomaly", payload)
-    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+    except Exception as exc:
         return {"status": "error", "message": str(exc)}
     else:
         return {"status": f"simulated {event_type}", "data": payload}
@@ -3948,7 +4048,7 @@ async def flatten_positions(request: Request) -> dict[str, Any]:
     try:
         body = await request.json()
         reason = body.get("reason", "manual_flatten")
-    except Exception:
+    except Exception as exc:
         reason = "manual_flatten"
 
     flattened = []

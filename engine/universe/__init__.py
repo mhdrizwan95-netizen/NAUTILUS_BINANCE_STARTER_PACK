@@ -67,7 +67,7 @@ def _dynamic_universe() -> list[str]:
 
     try:
         symbols = _fetch_binance_universe()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         symbols = _DEFAULT_UNIVERSE
 
     _UNIVERSE_CACHE["symbols"] = symbols
@@ -101,6 +101,6 @@ async def last_prices() -> dict[str, float]:
             from engine.app import router as order_router
 
             out[s] = await order_router.get_last_price(f"{s}.BINANCE")
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             continue
     return out

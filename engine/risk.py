@@ -136,6 +136,7 @@ class RiskRails:
         quantity: float | None,
         market: str | None = None,
         strategy_id: str | None = None,  # NEW
+        dry_run: bool = False,
     ) -> tuple[bool, dict]:
         """
         Validate order against risk rules.
@@ -212,7 +213,7 @@ class RiskRails:
                         "error": "STRATEGY_BANKRUPT",
                         "message": f"Strategy {strategy_id} has been killed by WealthManager (Alloc=$0).",
                     }
-            except Exception:
+            except Exception as exc:
                 # Fallback to standard rails if allocation read fails
                 pass
 
@@ -249,7 +250,7 @@ class RiskRails:
                 "hint": "Remove or set state/trading_enabled.flag=true to re-enable at boundary.",
             }
         # Use dynamic 'cfg' for the check
-        if not cfg.trading_enabled:
+        if not cfg.trading_enabled and not dry_run:
             return False, {
                 "error": "TRADING_DISABLED",
                 "message": "Trading is disabled by configuration.",
@@ -272,7 +273,7 @@ class RiskRails:
             from . import risk_quarantine as _rq  # lazy import to avoid cycles
 
             q, remain = _rq.is_quarantined(symbol)
-        except (ImportError, _SUPPRESSIBLE_EXCEPTIONS) as exc:
+        except Exception as exc:
             _log_suppressed("risk quarantine lookup", exc)
             q, remain = (False, 0.0)
         if q:
@@ -348,14 +349,14 @@ class RiskRails:
                         if isinstance(res, (int, float)):
                             return float(res)
                         return float(res)  # type: ignore[arg-type]
-                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    except Exception as exc:
                         _log_suppressed("risk price lookup", exc)
                         return 0.0
 
                 prices = _price_lookup
             else:
                 prices = _zero_price
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("risk snapshot fetch", exc)
             snap = {}
             prices = _zero_price
@@ -387,7 +388,7 @@ class RiskRails:
                     # Cannot await in sync context; fall back to 0
                     return 0.0
                 return float(px or 0.0)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("risk resolve price", exc)
                 return 0.0
 
@@ -454,7 +455,7 @@ class RiskRails:
                 total_expo += value
                 if pos_base == symbol_base:
                     sym_expo += value
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("risk position ingestion", exc)
                 continue
 
@@ -528,8 +529,8 @@ class RiskRails:
             breaker_rejections.inc()
             return False, metrics_state.breaker_payload
 
-        # Rate limiting
-        if not self.ratelimiter.allow():
+        # Rate limiting (skip for dry run orders to not consume budget)
+        if not dry_run and not self.ratelimiter.allow():
             return False, {
                 "error": "ORDER_RATE_EXCEEDED",
                 "message": f"Max {cfg.max_orders_per_min}/min exceeded.",
@@ -651,7 +652,7 @@ class RiskRails:
             try:
                 risk_equity_buffer_usd.set(buffer_usd)
                 risk_equity_drawdown_pct.set(drawdown_pct)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("risk equity gauges", exc)
 
             if floor_breach or drawdown_breach:
@@ -662,7 +663,7 @@ class RiskRails:
                 )
                 try:
                     risk_equity_floor_breach.set(1)
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("risk floor breach set", exc)
                 remaining = self._equity_breaker_until - now
                 breaker_payload = {
@@ -676,7 +677,7 @@ class RiskRails:
                 if not self._equity_breaker_active:
                     try:
                         risk_equity_floor_breach.set(0)
-                    except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                    except Exception as exc:
                         _log_suppressed("risk floor reset (equity)", exc)
         else:
             if self._equity_breaker_active and now >= self._equity_breaker_until:
@@ -684,7 +685,7 @@ class RiskRails:
             if not self._equity_breaker_active:
                 try:
                     risk_equity_floor_breach.set(0)
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("risk floor reset (no equity)", exc)
 
         return RiskRails.SnapshotMetricsState(
@@ -708,7 +709,7 @@ class RiskRails:
             unrealized = self._sanitize_float(pnl_section.get("unrealized"))
             if cash is not None or unrealized is not None:
                 return (cash or 0.0) + (unrealized or 0.0)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("risk extract equity", exc)
             return None
         return None
@@ -741,7 +742,7 @@ class RiskRails:
                 venue_exposure_usd.labels(venue=ven).set(max(0.0, safe_val))
                 headroom = max(0.0, cap - safe_val)
                 risk_exposure_headroom_usd.labels(venue=ven).set(headroom)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("risk exposure gauges", exc)
 
     def _update_exposures_from_snapshot(
@@ -789,7 +790,7 @@ class RiskRails:
                 cap = max(0.0, float(self.cfg.exposure_cap_venue_usd))
                 exposure_cap_usd.labels(venue=venue_key).set(cap)
                 risk_exposure_headroom_usd.labels(venue=venue_key).set(cap)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("risk config gauges", exc)
 
     def record_result(self, ok: bool):
@@ -824,7 +825,10 @@ class RiskRails:
         if not self._equity_breaker_active:
             return False
         now = time.time()
-        return now < self._equity_breaker_until
+        is_open = now < self._equity_breaker_until
+        if is_open:
+            logger.info(f"[RISK] Equity Breaker Enforced: {self._equity_breaker_reason} (Ends in {self._equity_breaker_until - now:.1f}s)")
+        return is_open
 
     def current_drawdown_pct(self) -> float:
         """Return the latest computed equity drawdown percentage."""
@@ -832,7 +836,7 @@ class RiskRails:
             return 0.0
         try:
             return max(0.0, float(self._compute_drawdown_pct(self._last_equity)))
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("risk drawdown calc", exc)
             return 0.0
 
@@ -859,7 +863,7 @@ class RiskRails:
             self._equity_breaker_active = False
             try:
                 risk_equity_floor_breach.set(0)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("risk breaker reset", exc)
 
 

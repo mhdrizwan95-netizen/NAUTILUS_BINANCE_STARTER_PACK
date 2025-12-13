@@ -122,7 +122,7 @@ class EventBreakout:
             from engine import metrics as MET
 
             self._MET = MET
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self._MET = None
         # Load denylist
         self.deny_enabled = bool(self.cfg.denylist_enabled)
@@ -149,7 +149,7 @@ class EventBreakout:
             apply_dynamic_config(self, sym)
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass
             
         # Denylist enforcement (early exit)
@@ -163,7 +163,7 @@ class EventBreakout:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_skips_total.labels(reason="denylist", symbol=sym).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             return
         if self._cooldown_active(sym):
@@ -186,7 +186,7 @@ class EventBreakout:
                     "event_bo.plan_dry",
                     {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
             self._arm_cooldown(sym)
             return
@@ -213,7 +213,7 @@ class EventBreakout:
                 await self.router.place_reduce_only_limit(
                     plan.symbol, "SELL", tp2_qty, plan.tp2_price
                 )  # type: ignore[attr-defined]
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
             # Emit metrics and publish open event for trailer
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
@@ -221,7 +221,7 @@ class EventBreakout:
                     self._MET.event_bo_trades_total.labels(
                         venue=plan.venue, symbol=plan.symbol
                     ).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             try:
                 from engine.core.event_bus import BUS
@@ -238,9 +238,9 @@ class EventBreakout:
                     "event_bo.plan_live",
                     {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             self.log.warning("[EVENT-BO] execution failed for %s: %s", sym, exc)
         self._log_plan(plan, dry=False)
         self._arm_cooldown(sym)
@@ -271,7 +271,7 @@ class EventBreakout:
             sl = self.router.round_tick(sym, sl)  # type: ignore[attr-defined]
             tp1 = self.router.round_tick(sym, tp1)  # type: ignore[attr-defined]
             tp2 = self.router.round_tick(sym, tp2)  # type: ignore[attr-defined]
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
         qualified = f"{sym}.BINANCE"
         market_choice = resolve_market_choice(qualified, self.cfg.default_market)
@@ -292,13 +292,13 @@ class EventBreakout:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_half_size_applied_total.labels(symbol=sym).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             try:
                 from engine.core.event_bus import BUS
 
                 await BUS.publish("event_bo.half", {"symbol": sym})
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
         return plan
 
@@ -308,7 +308,7 @@ class EventBreakout:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_skips_total.labels(reason="no_klines", symbol=sym).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             return False
         try:
@@ -322,27 +322,27 @@ class EventBreakout:
                 if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                     try:
                         self._MET.event_bo_skips_total.labels(reason="late_chase", symbol=sym).inc()
-                    except _SUPPRESSIBLE_EXCEPTIONS:
+                    except Exception as exc:
                         pass
                 try:
                     from engine.core.event_bus import BUS
 
                     await BUS.publish("event_bo.skip", {"symbol": sym, "reason": "late_chase"})
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
                 return False
             notional_1m = float(kl[-1][7] or 0.0)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_skips_total.labels(reason="parse_error", symbol=sym).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             try:
                 from engine.core.event_bus import BUS
 
                 await BUS.publish("event_bo.skip", {"symbol": sym, "reason": "parse_error"})
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
             return False
         bt = await self._book_ticker(sym)
@@ -355,13 +355,13 @@ class EventBreakout:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_skips_total.labels(reason="spread", symbol=sym).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             try:
                 from engine.core.event_bus import BUS
 
                 await BUS.publish("event_bo.skip", {"symbol": sym, "reason": "spread"})
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
             return False
         if notional_1m < float(self.cfg.min_notional_1m_usd):
@@ -369,13 +369,13 @@ class EventBreakout:
             if self.cfg.metrics_enabled and getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_skips_total.labels(reason="notional", symbol=sym).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             try:
                 from engine.core.event_bus import BUS
 
                 await BUS.publish("event_bo.skip", {"symbol": sym, "reason": "notional"})
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
             return False
         return True
@@ -401,7 +401,7 @@ class EventBreakout:
             else:
                 base_sec = val
             return max(0.0, float(self.clock.time()) - base_sec) / 60.0
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return None
 
     def _log_plan(self, plan: BreakoutPlan, dry: bool) -> None:
@@ -427,7 +427,7 @@ class EventBreakout:
                         symbol=plan.symbol,
                         dry="true" if dry else "false",
                     ).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             # Emit rollup events (fire-and-forget)
             try:
@@ -437,9 +437,9 @@ class EventBreakout:
                     "event_bo.plan_dry" if dry else "event_bo.plan_live",
                     {"symbol": plan.symbol, "venue": plan.venue, "market": plan.market},
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     async def _qty_from_notional(self, sym: str, usd: float) -> float:
@@ -449,7 +449,7 @@ class EventBreakout:
         qty = float(usd) / float(px)
         try:
             return self.router.round_step(sym, qty)  # type: ignore[attr-defined]
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return qty
 
     async def _atr(self, sym: str) -> float:
@@ -476,7 +476,7 @@ class EventBreakout:
                 return 0.0
             trs = trs[1:]  # drop first seed
             return sum(trs) / len(trs)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return 0.0
 
     async def _sl_min3low_or_atr(self, sym: str, entry_px: float) -> float | None:
@@ -488,7 +488,7 @@ class EventBreakout:
             l3 = float(kl[-3][3])
             l4 = float(kl[-4][3])
             low3 = min(l2, l3, l4)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             low3 = None
         atr = await self._atr(sym) or 0.0
         if low3 is None:
@@ -502,12 +502,12 @@ class EventBreakout:
                 if hasattr(px, "__await__"):
                     px = await px
                 return float(px) if px else None
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
         try:
             px = await self.router.get_last_price(f"{sym}.BINANCE")
             return float(px) if px else None
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return None
 
     async def _klines(self, sym: str, interval: str, limit: int) -> list:
@@ -524,7 +524,7 @@ class EventBreakout:
                 if hasattr(out, "__await__"):
                     out = await out
                 return out if isinstance(out, list) else []
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
         return []
 
@@ -541,7 +541,7 @@ class EventBreakout:
                 if hasattr(out, "__await__"):
                     out = await out
                 return out if isinstance(out, dict) else {}
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
         return {}
 
@@ -556,7 +556,7 @@ class EventBreakout:
                     syms.add(line)
         except FileNotFoundError:
             return syms
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return syms
         return syms
 

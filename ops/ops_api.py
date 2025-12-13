@@ -13,6 +13,8 @@ import httpx
 import asyncio
 import time
 import logging
+from fastapi import FastAPI, Response, HTTPException, Request, WebSocket, WebSocketDisconnect
+import websockets
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ops.api")
@@ -22,6 +24,8 @@ APP = FastAPI(title="Nautilus Ops", version="0.2.0")
 # Engine connection settings
 ENGINE_URL = os.getenv("ENGINE_URL", "http://engine_binance:8003").rstrip("/")
 ENGINE_TIMEOUT = float(os.getenv("ENGINE_TIMEOUT", "5.0"))
+HMM_URL = os.getenv("HMM_URL", "http://ml_service:8000").rstrip("/")
+
 
 # Shared async client for connection pooling
 _http_client: httpx.AsyncClient | None = None
@@ -64,7 +68,7 @@ async def health_check():
             data = resp.json()
             # Transform to frontend expected format
             return {
-                "status": "ok" if data.get("status") == "ok" else "degraded",
+                "status": "ok" if (data.get("status") == "ok" or data.get("engine") == "ok") else "degraded",
                 "venues": data.get("venues", [
                     {"name": "Binance", "status": "ok", "latencyMs": 50, "queue": 0}
                 ])
@@ -451,6 +455,21 @@ async def get_aggregate_pnl():
         pass
     return {"realized": {}, "unrealized": {}}
 
+
+@APP.get("/api/metrics/models")
+async def get_metrics_models():
+    """Proxy to ML service for model history."""
+    try:
+        client = await get_client()
+        resp = await client.get(f"{HMM_URL}/models", timeout=5.0)
+        if resp.status_code == 200:
+            return resp.json()
+        logger.warning(f"ML Service returned status {resp.status_code}")
+    except Exception as e:
+        logger.exception(f"Failed to fetch models: {e}")
+    return {"data": [], "page": {"nextCursor": None, "prevCursor": None, "limit": 50}}
+
+
 # ============================================================================
 # UI Serving Logic
 # ============================================================================
@@ -492,6 +511,49 @@ else:
     @APP.get("/")
     async def root():
         return JSONResponse({"detail": "Frontend not found. Please run npm run build."}, status_code=404)
+
+@APP.websocket("/ws")
+async def websocket_proxy(websocket: WebSocket):
+    """Proxy WebSocket connections to the engine."""
+    await websocket.accept()
+    token = websocket.query_params.get("token", "")
+    
+    # Construct upstream URL (Engine)
+    engine_ws_base = ENGINE_URL.replace("http://", "ws://").replace("https://", "wss://")
+    upstream_url = f"{engine_ws_base}/ws?token={token}"
+    
+    try:
+        async with websockets.connect(upstream_url) as upstream_ws:
+            async def client_to_upstream():
+                try:
+                    while True:
+                        data = await websocket.receive_text()
+                        await upstream_ws.send(data)
+                except WebSocketDisconnect:
+                    pass
+                except Exception as e:
+                    logger.debug(f"WS client->upstream error: {e}")
+
+            async def upstream_to_client():
+                try:
+                    async for message in upstream_ws:
+                        await websocket.send_text(message)
+                except Exception as e:
+                    logger.debug(f"WS upstream->client error: {e}")
+
+            # Run both readers concurrently
+            await asyncio.gather(
+                client_to_upstream(),
+                upstream_to_client(),
+                return_exceptions=True
+            )
+    except Exception as e:
+        logger.error(f"WS proxy connection failed: {e}")
+        # Close with policy violation or internal error
+        try:
+            await websocket.close(code=1011)
+        except Exception:
+            pass
 
 if __name__ == "__main__":
     import uvicorn

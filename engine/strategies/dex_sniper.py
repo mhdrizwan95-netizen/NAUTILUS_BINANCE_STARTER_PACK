@@ -119,7 +119,7 @@ class DexSniper:
             fill = await self.executor.buy(
                 symbol=symbol, token_address=token_addr, notional_usd=notional
             )
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             logger.warning("[DEX] execution failed for %s: %s", symbol, exc)
             return False
 
@@ -156,7 +156,7 @@ class DexSniper:
                     "pos_id": position.pos_id,
                 },
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             logger.debug(
                 "[DEX] failed to publish open event for %s", position.symbol, exc_info=True
             )
@@ -167,7 +167,7 @@ class DexSniper:
         for pos in list(self.state.open_positions()):
             try:
                 await self.executor.sell(symbol=pos.symbol, token_address=pos.address, qty=pos.qty)
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 logger.warning("[DEX] flatten failed for %s", pos.symbol, exc_info=True)
             self.state.close_position(pos.pos_id, reason="flatten_all")
 

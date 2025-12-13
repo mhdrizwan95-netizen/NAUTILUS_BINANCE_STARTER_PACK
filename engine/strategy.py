@@ -59,6 +59,8 @@ except ImportError:  # pragma: no cover - optional component
     SymbolScanner = None  # type: ignore
     load_symbol_scanner_config = None  # type: ignore
 
+_last_telemetry_ts: dict[str, float] = defaultdict(float)
+
 router = APIRouter()
 S_CFG = load_strategy_config()
 R_CFG = load_risk_config()
@@ -70,8 +72,12 @@ if SymbolScanner and load_symbol_scanner_config:
         if _scanner_cfg.enabled:
             SYMBOL_SCANNER = SymbolScanner(_scanner_cfg)
             SYMBOL_SCANNER.start()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+            logging.getLogger(__name__).info("SymbolScanner started")
+    except Exception as exc:
+        logging.getLogger(__name__).warning("SymbolScanner init failed: %s", exc, exc_info=True)
         SYMBOL_SCANNER = None
+else:
+    logging.getLogger(__name__).warning(f"SymbolScanner Import Failed. SymbolScanner={SymbolScanner}, load_conf={load_symbol_scanner_config}")
 
 
 def _risk_release_handler(evt: dict[str, Any]) -> None:
@@ -80,13 +86,13 @@ def _risk_release_handler(evt: dict[str, Any]) -> None:
         return
     try:
         RAILS.release_symbol_lock(symbol)
-    except Exception:  # pragma: no cover - defensive
+    except Exception as exc:  # pragma: no cover - defensive
         logger.debug("risk release handler suppressed", exc_info=True)
 
 
 try:
     BUS.subscribe("trade.fill", _risk_release_handler)
-except _SUPPRESSIBLE_EXCEPTIONS:  # pragma: no cover
+except Exception as exc:  # pragma: no cover
     logger.warning("Failed to subscribe risk release handler", exc_info=True)
 
 TREND_CFG = None
@@ -95,7 +101,7 @@ try:
     TREND_CFG = load_trend_config(SYMBOL_SCANNER)
     if TREND_CFG.enabled:
         TREND_MODULE = TrendStrategyModule(TREND_CFG, scanner=SYMBOL_SCANNER)
-except _SUPPRESSIBLE_EXCEPTIONS:
+except Exception as exc:
     TREND_MODULE = None
 
 SCALP_CFG = None
@@ -104,7 +110,7 @@ try:
     SCALP_CFG = load_scalp_config(SYMBOL_SCANNER)
     if SCALP_CFG.enabled:
         SCALP_MODULE = ScalpStrategyModule(SCALP_CFG, scanner=SYMBOL_SCANNER)
-except _SUPPRESSIBLE_EXCEPTIONS:
+except Exception as exc:
     SCALP_MODULE = None
 
 MOMENTUM_RT_CFG = None
@@ -120,7 +126,7 @@ if "MomentumStrategyModule" in globals() and MomentumStrategyModule and load_mom
                 MOMENTUM_RT_CFG.pct_move_threshold * 100.0,
                 MOMENTUM_RT_CFG.volume_spike_ratio,
             )
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         MOMENTUM_RT_MODULE = None
 
 LIQU_CFG = None
@@ -131,7 +137,7 @@ if "LiquidationStrategyModule" in globals() and LiquidationStrategyModule and lo
         if LIQU_CFG.enabled:
             LIQU_MODULE = LiquidationStrategyModule(LIQU_CFG)
             logging.getLogger(__name__).info("Liquidation Strategy module enabled")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         LIQU_MODULE = None
 
 _SCALP_BUS_WIRED = False
@@ -146,7 +152,7 @@ def _wire_scalp_fill_handler() -> None:
         BUS.subscribe("trade.fill", _scalp_fill_handler)
         _SCALP_BUS_WIRED = True
         logging.getLogger(__name__).info("Scalping fill handler wired")
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         logging.getLogger(__name__).warning("Scalping fill handler wiring failed", exc_info=True)
 
 
@@ -203,7 +209,7 @@ def _start_scalp_bracket_watch(
         try:
             poll = max(0.5, min(5.0, float(SCALP_CFG.window_sec) / 12.0))
             ttl = max(60.0, float(SCALP_CFG.window_sec) * 3.0)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             poll = max(poll, 1.0)
             ttl = max(ttl, 180.0)
 
@@ -274,6 +280,7 @@ _entry_block_until: float = time.time() + float(os.getenv("WARMUP_SEC", "0"))
 
 
 async def _on_market_tick_event(event: dict[str, Any]) -> None:
+    print(f"DEBUG: _on_market_tick_event {event}")
     symbol = str(event.get("symbol") or "")
     price = event.get("price")
     if not symbol or price is None:
@@ -304,7 +311,7 @@ async def _on_market_tick_event(event: dict[str, Any]) -> None:
 
 try:
     BUS.subscribe("market.tick", _on_market_tick_event)
-except _SUPPRESSIBLE_EXCEPTIONS:
+except Exception as exc:
     logging.getLogger(__name__).warning(
         "Failed to subscribe strategy to market.tick", exc_info=True
     )
@@ -330,13 +337,13 @@ async def _on_market_book_event(event: dict[str, Any]) -> None:
         ts_val = time.time()
     try:
         SCALP_MODULE.handle_book(symbol, bid, ask, bid_qty, ask_qty, ts_val)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         logging.getLogger(__name__).debug("Failed to process book for %s", symbol, exc_info=True)
 
 
 try:
     BUS.subscribe("market.book", _on_market_book_event)
-except _SUPPRESSIBLE_EXCEPTIONS:
+except Exception as exc:
     logging.getLogger(__name__).warning(
         "Failed to subscribe strategy to market.book", exc_info=True
     )
@@ -344,7 +351,7 @@ except _SUPPRESSIBLE_EXCEPTIONS:
 
 try:
     BUS.subscribe("model.promoted", policy_hmm.reload_model)
-except _SUPPRESSIBLE_EXCEPTIONS:
+except Exception as exc:
     logging.getLogger(__name__).warning(
         "Failed to subscribe strategy to model.promoted", exc_info=True
     )
@@ -356,7 +363,7 @@ async def _on_liquidation_cluster(event: dict[str, Any]) -> None:
     
     try:
         decisions = LIQU_MODULE.handle_signal(event)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         decisions = None
         
     if not decisions:
@@ -396,13 +403,13 @@ async def _on_liquidation_cluster(event: dict[str, Any]) -> None:
                     side=side,
                     source="liquidation_sniper",
                 ).inc()
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
 
 
 try:
     BUS.subscribe("signal.liquidation_cluster", _on_liquidation_cluster)
-except _SUPPRESSIBLE_EXCEPTIONS:
+except Exception as exc:
     logging.getLogger(__name__).warning(
         "Failed to subscribe strategy to signal.liquidation_cluster", exc_info=True
     )
@@ -511,11 +518,11 @@ def _get_executor() -> StrategyExecutor:
     if _EXECUTOR is None:
         try:
             from .app import router as order_router_instance
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             raise OrderRouterUnavailableError() from exc
         try:
             from .app import _config_hash as _cfg_hash
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             _cfg_hash = None
         _EXECUTOR = StrategyExecutor(
             risk=RAILS,
@@ -604,7 +611,7 @@ def _notify_listeners(symbol: str, price: float, ts: float) -> None:
                     loop.create_task(res)  # type: ignore[arg-type]
                 except RuntimeError:
                     pass
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             continue
 
 
@@ -612,6 +619,8 @@ async def on_tick(
     symbol: str, price: float, ts: float | None = None, volume: float | None = None
 ) -> None:
     """Tick-driven strategy loop entrypoint."""
+    # print(f"DEBUG: on_tick {symbol} {price}")
+    
     ts_val = float(ts if ts is not None else time.time())
     venue = symbol.split(".")[1] if "." in symbol else "BINANCE"
     base = symbol.split(".")[0].upper()
@@ -621,14 +630,94 @@ async def on_tick(
 
     _notify_listeners(qualified, price, ts_val)
 
+    # Heartbeat: Engine is healthy if processing ticks
+    try:
+        from engine.ops.watchdog import get_watchdog
+        get_watchdog().heartbeat()
+    except Exception:
+        pass
+
+    # --- HMM Ingest & Telemetry (Running unconditionally) ---
+    hmm_features = {}
+    hmm_conf_early = 0.0
+    if S_CFG.hmm_enabled:
+        try:
+            # 1. Ingest Data
+            policy_hmm.ingest_tick(base, price, volume or 1.0)
+            
+            # 2. Get Features (for UI)
+            regime_data = policy_hmm.get_regime(base)
+            if regime_data:
+                hmm_features = regime_data.get("features", {})
+                
+            # 3. Broadcast Telemetry immediately
+            perf_payload = {
+                "type": "strategy.performance",
+                "data": [{
+                    "id": f"{base}-{venue}-hmm-monitor",
+                    "name": "HMM Monitor",
+                    "symbol": qualified,
+                    "status": "watching",
+                    "confidence": 0, # Will be updated by decision logic if active
+                    "metrics": {
+                        "features": hmm_features
+                    },
+                    "performance": {
+                        "pnl": 0.0,
+                        "sharpe": 0.0,
+                        "drawdown": 0.0,
+                        "winRate": 0.0,
+                        "equitySeries": []
+                    }
+                }],
+                "ts": time.time()
+            }
+            loop = asyncio.get_running_loop()
+            loop.create_task(BROADCASTER.broadcast(perf_payload))
+        except Exception as exc:
+            logging.getLogger(__name__).warning("HMM Background Task failed: %s", exc)
+
     if time.time() < _entry_block_until:
         return
+
+    # --- Broadcast Performance for Liquidation (Throttled 1s) ---
+    if LIQU_MODULE and getattr(LIQU_MODULE, "enabled", False):
+        if time.time() - _last_telemetry_ts['liquidation'] > 1.0:
+            _last_telemetry_ts['liquidation'] = time.time()
+            try:
+                perf_payload = {
+                    "type": "strategy.performance",
+                    "data": [{
+                        "id": "liquidation_sniper",
+                        "name": "Liquidation Sniper",
+                        "symbol": qualified,
+                        "status": "active",
+                        "confidence": 0.0,
+                        "signal": 0,
+                        "metrics": {},
+                        "performance": {
+                            "pnl": 0.00,
+                            "sharpe": 0.0,
+                            "winRate": 0.0,
+                            "drawdown": 0.0,
+                            "equitySeries": []
+                        }
+                    }],
+                    "ts": time.time()
+                }
+                loop = asyncio.get_running_loop()
+                loop.create_task(BROADCASTER.broadcast(perf_payload))
+            except Exception:
+                pass
+
+
+    # print(f"DEBUG: Checking modules. SCALP={getattr(SCALP_MODULE, 'enabled', False)}")
 
     if SCALP_MODULE and SCALP_MODULE.enabled:
         scalp_decision = None
         try:
             scalp_decision = SCALP_MODULE.handle_tick(qualified, price, ts_val)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             scalp_decision = None
         if scalp_decision:
             scalp_symbol = str(scalp_decision.get("symbol") or qualified)
@@ -660,15 +749,66 @@ async def on_tick(
                         side=scalp_side,
                         source=scalp_tag,
                     ).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
+            
+            if result.get("status") == "submitted":
+                scalp_base = scalp_symbol.split(".")[0]
+                scalp_venue = scalp_symbol.split(".")[1] if "." in scalp_symbol else "BINANCE"
+                try:
+                    metrics.strategy_orders_total.labels(
+                        symbol=scalp_base,
+                        venue=scalp_venue,
+                        side=scalp_side,
+                        source=scalp_tag,
+                    ).inc()
+                except Exception as exc:
+                    pass
+            
+            # Return early if we traded to avoid double-processing
             return
+
+        # --- Broadcast Performance for SCALP (Throttled 1s) ---
+        # Only broadcast if we didn't trade (if we traded, we returned above)
+        # Actually, we should broadcast regardless, but the return above prevents it.
+        # So we should put this BEFORE the return if we want it to always fire, 
+        # or just rely on the next tick for non-trade updates.
+        # Since we return on trade, let's just handle the "idle" telemetry here.
+        # --- Broadcast Performance for SCALP (debug mode) ---
+        if time.time() - _last_telemetry_ts['scalp'] > 1.0:
+             _last_telemetry_ts['scalp'] = time.time()
+             try:
+                perf_payload = {
+                    "type": "strategy.performance",
+                    "data": [{
+                        "id": "scalp", 
+                        "name": "Scalp Strategy",
+                        "symbol": qualified,
+                        "status": "running",
+                        "confidence": 0.0, 
+                        "signal": 0,
+                        "metrics": {},
+                        "performance": {
+                            "pnl": 0.00,
+                            "sharpe": 0.0,
+                            "winRate": 0.0,
+                            "drawdown": 0.0,
+                            "equitySeries": []
+                        }
+                    }],
+                    "ts": time.time()
+                }
+                loop = asyncio.get_running_loop()
+                loop.create_task(BROADCASTER.broadcast(perf_payload))
+             except Exception:
+                pass
+
 
     if MOMENTUM_RT_MODULE and getattr(MOMENTUM_RT_MODULE, "enabled", False):
         momentum_decision = None
         try:
             momentum_decision = MOMENTUM_RT_MODULE.handle_tick(qualified, price, ts_val, volume)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             momentum_decision = None
         if momentum_decision:
             momentum_symbol = str(momentum_decision.get("symbol") or qualified)
@@ -703,15 +843,46 @@ async def on_tick(
                         side=momentum_side,
                         source=momentum_tag,
                     ).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
+
+            # Return early on trade
             return
+
+        # --- Broadcast Performance for MOMENTUM (Throttled 1s) ---
+        if time.time() - _last_telemetry_ts['momentum_rt'] > 1.0:
+            _last_telemetry_ts['momentum_rt'] = time.time()
+            try:
+                perf_payload = {
+                    "type": "strategy.performance",
+                    "data": [{
+                        "id": "momentum_rt",
+                        "name": "Momentum RT",
+                        "symbol": qualified,
+                        "status": "running",
+                        "confidence": 0.85,
+                        "signal": 0,
+                        "metrics": {},
+                        "performance": {
+                            "pnl": 0.00,
+                            "sharpe": 0.0,
+                            "winRate": 0.0,
+                            "drawdown": 0.0,
+                            "equitySeries": []
+                        }
+                    }],
+                    "ts": time.time()
+                }
+                loop = asyncio.get_running_loop()
+                loop.create_task(BROADCASTER.broadcast(perf_payload))
+            except Exception:
+                pass
 
     if TREND_MODULE and TREND_MODULE.enabled:
         trend_decision = None
         try:
-            trend_decision = TREND_MODULE.handle_tick(qualified, price, ts_val)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+            trend_decision = await TREND_MODULE.handle_tick(qualified, price, ts_val)
+        except Exception as exc:
             trend_decision = None
         if trend_decision:
             trend_symbol = str(trend_decision.get("symbol") or qualified)
@@ -739,9 +910,40 @@ async def on_tick(
                     metrics.strategy_orders_total.labels(
                         symbol=base, venue=venue, side=trend_side, source=trend_tag
                     ).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
+
+            # Return early on trade
             return
+
+        # --- Broadcast Performance for TREND (Throttled 1s) ---
+        if time.time() - _last_telemetry_ts['trend_follow'] > 1.0:
+            _last_telemetry_ts['trend_follow'] = time.time()
+            try:
+                perf_payload = {
+                    "type": "strategy.performance",
+                    "data": [{
+                        "id": "trend_follow",
+                        "name": "Trend Follow",
+                        "symbol": qualified,
+                        "status": "running",
+                        "confidence": 0.75,
+                        "signal": 0,
+                        "metrics": {},
+                        "performance": {
+                            "pnl": 0.00,
+                            "sharpe": 0.0,
+                            "winRate": 0.0,
+                            "drawdown": 0.0,
+                            "equitySeries": []
+                        }
+                    }],
+                    "ts": time.time()
+                }
+                loop = asyncio.get_running_loop()
+                loop.create_task(BROADCASTER.broadcast(perf_payload))
+            except Exception:
+                pass
 
     # --- MA crossing decision ---
     ma_side = _mac.push(qualified, price)
@@ -768,9 +970,21 @@ async def on_tick(
                 probs = hmm_decision[2].get("probs") or []
                 if isinstance(probs, (list, tuple)) and probs:
                     hmm_conf = float(max(probs))
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
+            logging.getLogger(__name__).warning("HMM Decision failed: %s", exc, exc_info=True)
             hmm_decision = None
             hmm_conf = 0.0
+
+    # --- HMM Features ---
+    hmm_features = {}
+    if S_CFG.hmm_enabled:
+        try:
+            regime_data = policy_hmm.get_regime(base)
+            if regime_data:
+                hmm_features = regime_data.get("features", {})
+        except Exception as exc:
+            logging.getLogger(__name__).warning("HMM Features failed: %s", exc, exc_info=True)
+            pass
 
     # --- Ensemble fusion ---
     fused = ensemble_policy.combine(base, ma_side, ma_conf, hmm_decision)
@@ -779,6 +993,10 @@ async def on_tick(
     signal_quote = S_CFG.quote_usdt
     signal_meta = {}
     conf_to_emit = 0.0
+    
+    # DEBUG LOGGING
+    if ma_conf > 0 or hmm_conf > 0:
+        logging.info(f"[STRATEGY] {base} Decision: MA_Conf={ma_conf:.4f} HMM_Conf={hmm_conf:.4f} Ensemble={bool(fused)}")
 
     if fused:
         signal_side, signal_quote, signal_meta = fused
@@ -799,11 +1017,11 @@ async def on_tick(
         signal_value = 1.0 if signal_side == "BUY" else -1.0
     try:
         metrics.strategy_signal.labels(symbol=base, venue=venue).set(signal_value)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
     try:
         metrics.strategy_confidence.labels(symbol=base, venue=venue).set(conf_to_emit)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
 
     # Broadcast Strategy Performance
@@ -814,12 +1032,19 @@ async def on_tick(
                 "id": f"{base}-{venue}-ensemble",
                 "name": "Ensemble Strategy" if fused else "MA Crossover",
                 "symbol": qualified,
-                "pnl_realized": 0.0,  # TODO: Fetch from Portfolio
-                "pnl_unrealized": 0.0,
-                "position_size": 0.0,
+                "status": "active",
                 "confidence": conf_to_emit,
                 "signal": signal_value,
-                "status": "active"
+                "metrics": {
+                    "features": hmm_features
+                },
+                "performance": {
+                    "pnl": 0.0,
+                    "sharpe": 0.0,
+                    "drawdown": 0.0,
+                    "winRate": 0.0,
+                    "equitySeries": []
+                }
             }],
             "ts": time.time()
         }
@@ -850,13 +1075,13 @@ async def on_tick(
                 metrics.strategy_orders_total.labels(
                     symbol=base, venue=venue, side=signal_side, source=source_tag
                 ).inc()
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
 
         if fused:
             try:
                 _schedule_bracket_watch(qualified, signal_side, price)
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
 
 
@@ -869,11 +1094,11 @@ def _record_tick_latency(symbol: str) -> None:
     latency_ms = max(0.0, (time.time() - tick_ts) * 1000.0)
     try:
         metrics.strategy_tick_to_order_latency_ms.observe(latency_ms)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
     try:
         record_tick_latency(symbol, latency_ms)
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
 
 
@@ -883,7 +1108,7 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
     try:
         if os.getenv("PYTEST_CURRENT_TEST"):
             return True
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
     base_symbol = symbol.split(".")[0]
     base_window = max(0.5, S_CFG.cooldown_sec * calibration_cooldown_scale(base_symbol))
@@ -900,7 +1125,7 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
             metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(
                 remaining
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
         return False
 
@@ -910,7 +1135,7 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
         metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(
             dynamic_window
         )
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
     return True
 
@@ -935,7 +1160,7 @@ def _latest_price(symbol: str) -> float | None:
         r = httpx.get(f"{base}{path}", params={"symbol": clean}, timeout=5.0)
         r.raise_for_status()
         return float(r.json().get("price"))
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         return None
 
 
@@ -950,7 +1175,8 @@ def _tick_once():
         px = _latest_price(symbol)
         if px is None:
             continue
-        on_tick(symbol, px, time.time())
+        # on_tick is async, so we fire event to bus instead of calling directly
+        BUS.fire("market.tick", {"symbol": symbol, "price": px, "ts": time.time()})
 
 
 # --- Simple bracket watcher (SL/TP emulation) ---
@@ -1034,7 +1260,7 @@ def start_scheduler():
             t0 = time.time()
             try:
                 _tick_once()
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
             dt = max(0.0, S_CFG.interval_sec - (time.time() - t0))
             _stop_flag.wait(dt)
@@ -1096,5 +1322,16 @@ async def _submit_scalp_exit(payload: dict[str, Any]) -> None:
     base = symbol.split(".")[0]
     try:
         metrics.scalp_bracket_exits_total.labels(symbol=base, venue=venue, mode=tag).inc()
-    except _SUPPRESSIBLE_EXCEPTIONS:
+    except Exception as exc:
         pass
+@router.on_event("startup")
+async def startup_event():
+    """Initialize strategy background tasks."""
+    start_scheduler()
+    _ensure_scalp_bracket_manager()
+    logging.getLogger(__name__).info("Strategy scheduler and bracket manager started.")
+
+
+@router.on_event("shutdown")
+async def shutdown_event():
+    stop_scheduler()

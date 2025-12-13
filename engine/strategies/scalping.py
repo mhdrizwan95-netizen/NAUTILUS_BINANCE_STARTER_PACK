@@ -223,7 +223,7 @@ class ScalpStrategyModule:
             return None
         try:
             model = _slip_module.load_model()
-        except _SUPPRESSIBLE_EXCEPTIONS:  # pragma: no cover - best effort
+        except Exception as exc:  # pragma: no cover - best effort
             return None
         if not model:
             return None
@@ -231,7 +231,7 @@ class ScalpStrategyModule:
         def _predict(features: dict[str, float]) -> float:
             try:
                 return float(_slip_module.predict_slip_bp(model, features))
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 return 0.0
 
         return _predict
@@ -274,7 +274,7 @@ class ScalpStrategyModule:
         try:
             metrics.scalp_spread_bp.labels(symbol=base, venue=venue).set(book.spread_bp)
             metrics.scalp_orderbook_imbalance.labels(symbol=base, venue=venue).set(book.imbalance)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _estimate_slippage_bp(self, features: dict[str, float]) -> float:
@@ -317,7 +317,7 @@ class ScalpStrategyModule:
             metrics.scalp_slippage_estimate_bp.labels(symbol=base, venue=venue, side=side).set(
                 slip_bp
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def handle_tick(self, symbol: str, price: float, ts: float) -> dict | None:
@@ -364,7 +364,7 @@ class ScalpStrategyModule:
 
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass  # Fail safe
 
         prices = [p for _, p in window]
@@ -395,7 +395,7 @@ class ScalpStrategyModule:
             metrics.scalp_position.labels(symbol=base, venue=venue).set(price_pos)
             if rsi_value is not None:
                 metrics.scalp_rsi.labels(symbol=base, venue=venue).set(rsi_value)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
         history = self._signal_history[base]

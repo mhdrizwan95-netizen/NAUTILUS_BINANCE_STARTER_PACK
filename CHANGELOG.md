@@ -18,6 +18,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the scheduler service.
 - Dead `scripts/simulate_venue_errors.py` helper flagged by the dead code guard.
 
+## [1.1.0] - 2025-12-13
+
+### 🚀 Dynamic Architecture & Experience Learning (Phase 5)
+
+This release activates the "brain" of the organism, allowing it to explore new markets and learn from experience.
+
+### ✨ New Features
+- **Dynamic User Universe**: `SymbolScanner` now autonomously discovers high-momentum/volume assets (e.g., `FOLKSUSDT`) and injects them into the trading loop.
+- **Reinforcement Learning (RL) Loop**: `ParamControllerBridge` wires realized PnL back to the Bandit Model, enabling the system to learn optimal risk parameters (Confidence Thresholds, Cooldowns) over time.
+- **Adaptive Risk Rails**: `RiskRails` allowlist now dynamically expands to include scanned symbols via `universe.update` events.
+
+### 🛠 Fixes & Improvements
+- **Event Bus Wiring**: Fixed `SymbolScanner` event publishing by switching to thread-safe `BUS.fire()` logic.
+- **User Stream Stability**: Resolved `401 Unauthorized` issues preventing PnL tracking (IP Whitelist).
+- **Frontend Telemetry**: Fixed "MISSING" IDs in the dashboard and "NULL" PnL display.
+- **Strategy Tuning**: Enforced RRR > 2.5 for Trend and Scalp strategies to prioritize expectancy.
+
+### ⚠️ Breaking Changes
+- `SYMBOL_SCANNER_ENABLED` defaults to `true`.
+- Requires updated `BINANCE_API_KEY` permissions (IP Whitelist).
+
+---
+
 ## [1.0.0] - 2025-10-11
 
 🧠 Nautilus HMM v1.0.0

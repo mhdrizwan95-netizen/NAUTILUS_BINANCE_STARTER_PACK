@@ -38,7 +38,7 @@ class HealthNotifier:
         try:
             # Subscribe
             bus.subscribe("health.state", self.on_health_state)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("health notifier subscribe", exc)
 
     async def on_health_state(self, evt: dict[str, Any]) -> None:
@@ -59,7 +59,7 @@ class HealthNotifier:
             self.metrics.health_transitions_total.labels(
                 str(self.last_state), str(new), reason
             ).inc()
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("health transition metric", exc)
         self.last_state, self.last_change_ts = new, now
         labels = {0: "OK", 1: "DEGRADED", 2: "HALTED"}
@@ -67,5 +67,5 @@ class HealthNotifier:
         msg = f"{emoji.get(new,'❔')} *Health state:* {labels.get(new,str(new))}\n*Reason:* `{reason}`"
         try:
             await self.tg.send(msg)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self.log.exception("[HEALTH] Telegram send failed")

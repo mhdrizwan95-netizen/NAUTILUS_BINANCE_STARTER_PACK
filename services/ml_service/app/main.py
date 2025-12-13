@@ -15,6 +15,9 @@ from .schemas import (
     PredictResponse,
     TrainRequest,
     TrainResponse,
+    ModelListResponse,
+    ModelVersion,
+    PageMetadata,
 )
 from .trainer import train_once
 
@@ -43,6 +46,25 @@ def model_info() -> ModelInfo:
         active_version=active,
         registry_size=model_store.registry_size(),
         metrics=meta if meta else None,
+    )
+
+
+@app.get("/models", response_model=ModelListResponse)
+def list_models(limit: int = 50, cursor: str | None = None) -> ModelListResponse:
+    """List historical models."""
+    hist = model_store.get_history(limit, cursor)
+    data = []
+    for h in hist:
+        data.append(ModelVersion(
+            version_id=h.get("version_id", "unknown"),
+            created_at=h.get("created_at", ""),
+            metrics=h.get("metrics"),
+            path=h.get("path")
+        ))
+    
+    return ModelListResponse(
+        data=data,
+        page=PageMetadata(limit=limit, nextCursor=None)
     )
 
 

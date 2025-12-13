@@ -223,7 +223,7 @@ class ListingSniper:
             pass
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass
 
         for raw_symbol in tickers:
@@ -243,7 +243,7 @@ class ListingSniper:
                 apply_dynamic_config(self, symbol)
             except ImportError:
                 pass
-            except Exception:
+            except Exception as exc:
                 pass
 
             self._record_announcement(symbol, announced_at, go_live_at)
@@ -364,7 +364,7 @@ class ListingSniper:
                     "ts": time.time(),
                 }
             )
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.warning("[LISTING] execution failed for %s: %s", symbol, exc)
             self._record_skip(symbol, "execution_exception")
             if self.cfg.metrics_enabled:
@@ -403,7 +403,7 @@ class ListingSniper:
             qty_filled = float(
                 router_result.get("filled_qty_base") or router_result.get("executedQty") or 0.0
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             avg_fill = last_price
             qty_filled = 0.0
 
@@ -421,7 +421,7 @@ class ListingSniper:
     def _sizing_notional(self) -> float:
         try:
             equity = float(self.router._portfolio.state.equity)  # type: ignore[attr-defined]
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             equity = 0.0
         if equity <= 0:
             equity = float(self.cfg.fallback_equity_usd)
@@ -476,7 +476,7 @@ class ListingSniper:
             stop_price = max(avg_px * 0.0001, stop_price)
             try:
                 await self.router.amend_stop_reduce_only(symbol, "SELL", stop_price, abs(qty))
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("[LISTING] stop placement failed for %s: %s", symbol, exc)
 
         levels = [price for price in target_prices if price > 0]
@@ -491,7 +491,7 @@ class ListingSniper:
             if callable(rounder):
                 try:
                     price = rounder(symbol, raw_price)
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     price = raw_price
             clip_qty = per_clip if idx < len(levels) - 1 else max(qty - placed, 0.0)
             placed += clip_qty
@@ -499,7 +499,7 @@ class ListingSniper:
                 continue
             try:
                 await self.router.place_reduce_only_limit(symbol, "SELL", clip_qty, price)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
+            except Exception as exc:
                 logger.debug("[LISTING] tp placement failed for %s @%.4f: %s", symbol, price, exc)
 
     async def _forward_legacy(self, symbol: str, announced_at: float) -> None:
@@ -528,7 +528,7 @@ class ListingSniper:
                     source="listing_sniper_bridge",
                 )
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             logger.debug("[LISTING] failed to forward legacy event for %s", symbol)
         await self._maybe_emit_dex_candidate(symbol)
 
@@ -565,7 +565,7 @@ class ListingSniper:
         try:
             await BUS.publish("strategy.dex_candidate", payload)
             self._dex_forwarded.add(base)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             logger.debug("[LISTING] dex candidate publish failed for %s", symbol)
 
     async def _fetch_dex_candidate(self, token: str) -> dict[str, Any] | None:
@@ -575,7 +575,7 @@ class ListingSniper:
                 res = await client.get(url)
                 res.raise_for_status()
                 data = res.json() or {}
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return None
         pairs = data.get("pairs") or data.get("tokens") or []
         token_upper = token.upper()
@@ -645,7 +645,7 @@ class ListingSniper:
                     if inspect.isawaitable(res):
                         res = await res
                     price = self._extract_price(res)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
+        except Exception as exc:
             logger.debug("[LISTING] price fetch failed for %s: %s", symbol, exc)
         return price, spread
 
@@ -727,7 +727,7 @@ class ListingSniper:
                     tzinfo=UTC,
                 )
                 return dt.timestamp()
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 continue
         return None
 
@@ -750,7 +750,7 @@ class ListingSniper:
             from datetime import datetime
 
             return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return time.time()
 
     @staticmethod

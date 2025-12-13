@@ -46,11 +46,20 @@ export interface Portfolio {
 }
 
 export interface StrategyStatus {
-    name: string;
+    id: string; // Explicit ID
+    name: string; // Used as display name
+    kind?: string;
     enabled: boolean;
     confidence: number;
     signal: number; // -1 to 1
     lastUpdate: number;
+    metrics?: Record<string, any>;
+    performance?: {
+        sharpe?: number;
+        drawdown?: number;
+        winRate?: number;
+        pnl?: number;
+    };
 }
 
 export interface VenueHealth {
@@ -139,17 +148,20 @@ export const useTradingStore = create<TradingState>()((set) => ({
             trades: [trade, ...state.trades].slice(0, 1000), // Keep last 1000
         })),
 
-    updateStrategy: (name, status) =>
+    updateStrategy: (id, status) =>
         set((state) => {
             const newStrategies = new Map(state.strategies);
-            const existing = newStrategies.get(name) || {
-                name,
+            // Key by ID
+            const existing = newStrategies.get(id) || {
+                id: id,
+                name: status.name || id,
+                kind: status.kind || 'unknown',
                 enabled: false,
                 confidence: 0,
                 signal: 0,
                 lastUpdate: Date.now(),
             };
-            newStrategies.set(name, { ...existing, ...status, lastUpdate: Date.now() });
+            newStrategies.set(id, { ...existing, ...status, lastUpdate: Date.now() });
             return { strategies: newStrategies };
         }),
 
@@ -157,11 +169,14 @@ export const useTradingStore = create<TradingState>()((set) => ({
         set((state) => {
             const newStrategies = new Map(state.strategies);
             strategies.forEach((s) => {
-                const existing = newStrategies.get(s.name);
+                // Determine ID: prefer explicit ID, fallback to name if missing (backward compat)
+                // In properly typed system, 'id' field should be added to StrategyStatus interface
+                const key = (s as any).id || s.name;
+                const existing = newStrategies.get(key);
                 if (existing) {
-                    newStrategies.set(s.name, { ...existing, ...s });
+                    newStrategies.set(key, { ...existing, ...s });
                 } else {
-                    newStrategies.set(s.name, s);
+                    newStrategies.set(key, s);
                 }
             });
             return { strategies: newStrategies };

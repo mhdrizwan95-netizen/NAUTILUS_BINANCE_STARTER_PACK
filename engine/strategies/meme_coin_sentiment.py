@@ -258,7 +258,7 @@ class MemeCoinSentiment:
             apply_dynamic_config(self, symbol)
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass
 
         now = self.clock.time()
@@ -333,7 +333,7 @@ class MemeCoinSentiment:
                     "ts": now,
                 }
             )
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # noqa: BLE001
+        except Exception as exc:
             _LOG.warning("[MEME] execution failed for %s: %s", symbol, exc)
             self._record_order(symbol, "failed")
             self._set_cooldown(symbol, now)
@@ -504,7 +504,7 @@ class MemeCoinSentiment:
     def _router_equity(self) -> float:
         try:
             return float(self.router._portfolio.state.equity)  # type: ignore[attr-defined]
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return 0.0
 
     async def _price_snapshot(self, symbol: str) -> tuple[float, float] | None:
@@ -561,7 +561,7 @@ class MemeCoinSentiment:
         }
         try:
             await BUS.publish(topic, payload)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             # Publishing is best-effort; do not raise.
             pass
 
@@ -591,7 +591,7 @@ class MemeCoinSentiment:
                 "strategy.meme_sentiment_bracket",
                 meta,
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _set_cooldown(self, symbol: str, now: float | None = None) -> None:
@@ -599,7 +599,7 @@ class MemeCoinSentiment:
         if self.cfg.metrics_enabled and meme_sentiment_cooldown_epoch is not None and until:
             try:
                 meme_sentiment_cooldown_epoch.labels(symbol=symbol).set(until)
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
 
     def _cooldown_active(self, symbol: str, now: float) -> bool:
@@ -615,7 +615,7 @@ class MemeCoinSentiment:
             return
         try:
             meme_sentiment_events_total.labels(symbol=symbol, decision=decision).inc()
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _record_order(self, symbol: str, status: str) -> None:
@@ -623,7 +623,7 @@ class MemeCoinSentiment:
             return
         try:
             meme_sentiment_orders_total.labels(symbol=symbol, status=status).inc()
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _select_symbol(self, evt: dict[str, Any]) -> str | None:

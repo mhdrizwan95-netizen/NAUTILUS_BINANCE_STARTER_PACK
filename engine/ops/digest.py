@@ -90,7 +90,7 @@ class DigestJob:
                     lines.append(
                         f"{label}: trades *{trades_b}*, live *{live_b}*, eff *{eff_b:.2f}*, half *{half_b}*, skips *{skips_b}*"
                     )
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("digest bucket snapshot", exc)
         return "\n".join(lines)
 
@@ -109,6 +109,6 @@ class DigestJob:
                     self.rollups.cnt.get("plans_live", 0),
                     self.rollups.cnt.get("trades", 0),
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 self.log.exception("[DIGEST] send failed")
             await asyncio.sleep(interval)

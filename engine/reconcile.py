@@ -85,7 +85,7 @@ def reconcile_since_snapshot(
                 else:
                     result = asyncio.run_coroutine_threadsafe(result, loop).result()
             trades.extend(result or [])
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed(f"reconcile fetch for {s}", exc)
             continue
     trades.sort(key=lambda t: t.get("time", 0))
@@ -153,7 +153,7 @@ def reconcile_since_snapshot(
                 ctr = _METRICS.get("venue_trades_total")
                 if ctr is not None:
                     ctr.inc()
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("reconcile metrics increment", exc)
 
     # Persist new snapshot

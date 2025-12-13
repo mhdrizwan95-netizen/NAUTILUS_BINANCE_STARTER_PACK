@@ -1,7 +1,9 @@
 # engine/strategies/policy_hmm.py
 from __future__ import annotations
 
+import logging
 import math
+import os
 import pickle  # nosec B403 - loads trusted local models only
 import time
 from collections import defaultdict, deque
@@ -60,6 +62,7 @@ def _vola(returns: list[float]) -> float:
 def _features(sym: str) -> list[float] | None:
     P, V = _prices[sym], _vols[sym]
     if len(P) < 3:  # need minimum data
+        logging.warning(f"[HMM] {sym}: Not enough data for features ({len(P)} < 3)")
         return None
     rets = [0.0] + [(P[i] - P[i - 1]) / P[i - 1] for i in range(1, len(P))]
     vwap = _vwap(list(P), list(V) if len(V) == len(P) else [1.0] * len(P))
@@ -70,6 +73,7 @@ def _features(sym: str) -> list[float] | None:
         _zscore(list(P)[-30:]),  # zscore of price
         (float(V[-1]) / max(1.0, sum(list(V)[-20:]) / 20.0) if V else 1.0),  # volume spike ratio
     ]
+    logging.info(f"[HMM] {sym}: Computed features: {feats}")
     return feats
 
 
@@ -84,6 +88,7 @@ def _feature_payload(feats: list[float]) -> dict[str, float]:
 
 
 def ingest_tick(sym: str, price: float, volume: float = 1.0) -> None:
+    # print(f"[HMM] Ingesting {sym}: {price}")
     _prices[sym].append(float(price))
     _vols[sym].append(float(volume))
 
@@ -96,7 +101,16 @@ def _load_model():
         raise HMMModelNotFoundError(model_path, active_path)
     print(f"[HMM] Loading model from {model_path}")
     with open(model_path, "rb") as f:
-        return pickle.load(f)  # nosec B301 - models are produced by trusted pipeline
+        data = pickle.load(f)  # nosec B301
+        print(f"[HMM] Loaded data type: {type(data)}")
+        if isinstance(data, dict):
+            print(f"[HMM] Data keys: {list(data.keys())}")
+            if "model" in data:
+                print("[HMM] Loaded model packet (dict). Extracting model object.")
+                mdl = data["model"]
+                print(f"[HMM] Extracted model type: {type(mdl)}")
+                return mdl
+        return data
 
 
 _model = None
@@ -123,7 +137,7 @@ def get_regime(sym: str) -> dict | None:
         return None
     try:
         probs = model().predict_proba([feats])[0]
-    except Exception:
+    except Exception as exc:
         return None
 
     base_conf = float(max(probs))
@@ -144,6 +158,7 @@ def get_regime(sym: str) -> dict | None:
         "p_bull": p_bull,
         "p_bear": p_bear,
         "p_chop": p_chop,
+        "features": _feature_payload(feats),
     }
 
 
@@ -153,6 +168,7 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
     instrument = sym.split(".")[0].upper()
     feats = _features(sym)
     if not feats:
+        # logging.debug(f"[HMM] {sym}: Not enough features yet (len={len(_prices[sym])})")
         return None
     feature_payload = _feature_payload(feats)
     update_param_features(PARAM_STRATEGY, instrument, feature_payload)
@@ -161,6 +177,7 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
     cooldown_setting = float(params.get("cooldown_sec") or S.cooldown_sec)
     dynamic_cooldown = max(1.0, cooldown_setting * cooldown_scale(sym))
     if now - _last_signal_ts[sym] < dynamic_cooldown:
+        logging.info(f"[HMM] {sym}: Cooldown active ({now - _last_signal_ts[sym]:.1f} < {dynamic_cooldown:.1f})")
         return None
 
     probs = model().predict_proba([feats])[0]  # e.g., [p_bull, p_bear, p_chop]
@@ -169,7 +186,10 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
     # Map regimes → action
     p_bull, p_bear = probs[0], probs[1]
     p_chop = probs[2] if len(probs) >= 3 else 0.0
-    if adj_conf < 0.5:
+    
+    min_conf = float(os.getenv("HMM_MIN_CONF", "0.5"))
+    if adj_conf < min_conf:
+        logging.info(f"[HMM] {sym}: Low Confidence {adj_conf:.4f} < {min_conf} (Probs: {probs})")
         return None  # low confidence
 
     # Get current market price for reference (used in meta, not required for decision)
@@ -183,12 +203,14 @@ def decide(sym: str) -> tuple[str, float, dict] | None:
     elif p_bear > p_bull and p_bear > p_chop:
         side = "SELL"
     else:
+        # e.g., chop is dominant
+        logging.info(f"[HMM] {sym}: Chop Dominant (Probs: {probs})")
         return None
 
     _last_signal_ts[sym] = now
     meta = {
         "exp": "hmm_v1",
-        "probs": probs,
+        "probs": probs.tolist(),
         "mark": px,
         "conf": adj_conf,
         "cooldown": dynamic_cooldown,

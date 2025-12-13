@@ -1,0 +1,16 @@
+DEBUG: _on_market_tick_event {'symbol': 'BTCUSDT.BINANCE', 'base': 'BTCUSDT', 'venue': 'BINANCE', 'price': 92409.4, 'ts': 1765537436.446, 'source': 'binance_ws', 'stream': 'ws'}
+[HMM] BTCUSDT: Not enough features yet (len=2)
+DEBUG: _on_market_tick_event {'symbol': 'BTCUSDT.BINANCE', 'base': 'BTCUSDT', 'venue': 'BINANCE', 'price': 92409.5, 'ts': 1765537436.498, 'source': 'binance_ws', 'stream': 'ws'}
+[HMM] Loading model from engine/models/active_hmm_policy.pkl
+[HMM] Loaded data type: <class 'dict'>
+[HMM] Data keys: ['model', 'scaler', 'metadata']
+[HMM] Loaded model packet (dict). Extracting model object.
+[HMM] Extracted model type: <class 'hmmlearn.hmm.GaussianHMM'>
+DEBUG: _on_market_tick_event {'symbol': 'ETHUSDT.BINANCE', 'base': 'ETHUSDT', 'venue': 'BINANCE', 'price': 3242.82, 'ts': 1765537436.571, 'source': 'binance_ws', 'stream': 'ws'}
+[HMM] ETHUSDT: Not enough features yet (len=2)
+DEBUG: _on_market_tick_event {'symbol': 'ETHUSDT.BINANCE', 'base': 'ETHUSDT', 'venue': 'BINANCE', 'price': 3242.83, 'ts': 1765537436.661, 'source': 'binance_ws', 'stream': 'ws'}
+[HMM] Wired hot-reload subscription.
+Loaded venue specs from /app/engine/core/venue_specs.json: 442 symbols
+[HMM] Reloading model due to event: {'paths': ['engine/models/active_hmm_policy.pkl'], 'mtime': 1765525676.2107856}
+[HMM] Reloading model due to event: {'paths': ['engine/models/active_hmm_policy.pkl'], 'mtime': 1765525676.2107856}
+[HMM] Reloading model due to event: {'paths': ['engine/models/active_hmm_policy.pkl'], 'mtime': 1765525676.2107856}

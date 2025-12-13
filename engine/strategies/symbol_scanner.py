@@ -26,6 +26,11 @@ _SUPPRESSIBLE_EXCEPTIONS = (
     httpx.HTTPError,
 )
 
+try:
+    from engine.core.event_bus import BUS
+except ImportError:
+    BUS = None
+
 
 @dataclass
 class SymbolScannerConfig:
@@ -189,7 +194,7 @@ class SymbolScanner:
                 logging.getLogger(__name__).info(f"Dynamic Universe Fetched ({len(top_symbols)}): {top_symbols[:3]}...")
                 return top_symbols
                 
-        except _SUPPRESSIBLE_EXCEPTIONS as e:
+        except Exception as exc:
             logging.getLogger(__name__).warning(f"Failed to fetch dynamic universe: {e}")
         
         # Fallback to config universe
@@ -233,7 +238,7 @@ class SymbolScanner:
         while not self._stop.is_set():
             try:
                 self._scan_once()
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
             self._stop.wait(self.cfg.interval_sec)
 
@@ -265,7 +270,7 @@ class SymbolScanner:
 
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass  # Fail safe
 
         # Fetch dynamic universe (top coins by volume)
@@ -297,7 +302,12 @@ class SymbolScanner:
 
         # Log dynamic weights if top changed or periodically?
         # Let's just log if we have a logger. SymbolScanner doesn't have self._log.
-        # I'll add logging import and use module level logger or print.
+        if top and BUS:
+            try:
+                BUS.fire("universe.update", {"symbols": top, "source": "scanner", "ts": now})
+                logger.info(f"Published universe.update: {len(top)} symbols")
+            except Exception as exc:
+                logger.warning("Failed to publish universe.update", exc_info=True)
 
         with self._lock:
             self._selected = top or list(self._selected)
@@ -327,7 +337,7 @@ class SymbolScanner:
             data = resp.json()
             if isinstance(data, list) and data:
                 return data
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return None
         return None
 
@@ -355,7 +365,7 @@ class SymbolScanner:
                 + trend * self.cfg.weight_trend
                 + atr_pct / 100.0 * self.cfg.weight_vol
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return None
         else:
             return round(score, 6)
@@ -383,7 +393,7 @@ class SymbolScanner:
             return
         try:
             self._metrics.symbol_scanner_score.labels(symbol=symbol).set(score)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _inc_selected(self, symbol: str) -> None:
@@ -391,7 +401,7 @@ class SymbolScanner:
             return
         try:
             self._metrics.symbol_scanner_selected_total.labels(symbol=symbol).inc()
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _persist_state(self) -> None:
@@ -402,7 +412,7 @@ class SymbolScanner:
         }
         try:
             self._state_path.write_text(json.dumps(payload, indent=2))
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _load_state(self) -> None:
@@ -413,7 +423,7 @@ class SymbolScanner:
             self._selected = list(data.get("selected") or self._selected)
             self._scores = data.get("scores") or {}
             self._last_selected = data.get("last_selected") or {}
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
 

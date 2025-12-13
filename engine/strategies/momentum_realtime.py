@@ -198,7 +198,7 @@ class MomentumStrategyModule:
 
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass  # Fail safe
 
         now = ts if ts is not None else self._clock.time()
@@ -252,7 +252,7 @@ class MomentumStrategyModule:
             metrics.momentum_rt_window_return_pct.labels(symbol=base, venue=venue.lower()).set(
                 pct_move_up * 100.0 if pct_move_up >= pct_move_down else -pct_move_down * 100.0
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
             
         # --- Late Context Update (Post-Calculation) ---
@@ -265,7 +265,7 @@ class MomentumStrategyModule:
             })
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass
 
         if now < self._cooldown_until.get(base, 0.0):
@@ -317,7 +317,7 @@ class MomentumStrategyModule:
             metrics.momentum_rt_cooldown_epoch.labels(symbol=base, venue=venue.lower()).set(
                 cooldown_until
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
         logger.info(

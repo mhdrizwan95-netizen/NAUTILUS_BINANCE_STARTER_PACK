@@ -1,6 +1,6 @@
 import { LayoutDashboard, Target, Wallet, Brain, Settings, Activity, Terminal } from "lucide-react";
 import { motion } from "motion/react";
-import { Suspense, lazy } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 
 import { Skeleton } from "./ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -29,6 +29,25 @@ const SettingsTab = lazy(() =>
 );
 
 export function TabbedInterface() {
+  const [activeTab, setActiveTab] = useState(() => {
+    const hash = window.location.hash.replace("#", "");
+    return hash || "dashboard";
+  });
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace("#", "");
+      if (hash) setActiveTab(hash);
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  const handleTabChange = (value: string) => {
+    setActiveTab(value);
+    window.location.hash = value;
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -36,7 +55,7 @@ export function TabbedInterface() {
       transition={{ delay: 0.1 }}
       className="flex-1 flex flex-col border-t border-zinc-800/50 bg-zinc-900/40 backdrop-blur-sm overflow-hidden"
     >
-      <Tabs defaultValue="dashboard" className="flex-1 flex flex-col overflow-hidden">
+      <Tabs value={activeTab} onValueChange={handleTabChange} className="flex-1 flex flex-col overflow-hidden">
         <TabsList className="w-full justify-start border-b border-zinc-800/50 bg-transparent rounded-none px-8 h-12 flex-shrink-0">
           <TabsTrigger
             value="dashboard"

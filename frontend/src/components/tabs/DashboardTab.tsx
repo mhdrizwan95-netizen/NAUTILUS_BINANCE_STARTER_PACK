@@ -32,8 +32,8 @@ export function DashboardTab() {
   const netEquity = portfolio.equity || 0;
   const dailyPnL = totalPnl || globalMetrics?.totalPnL || 0;
   const latency = venues.find(v => v.name === 'BINANCE')?.latency ||
-    (venues.find(v => v.status === 'connected')?.latency) || 0;
-  const isOnline = venues.some(v => v.status === 'connected');
+    (venues.find(v => v.status === 'ok')?.latency) || 0;
+  const isOnline = venues.some(v => v.status === 'ok');
   const tradingEnabled = systemHealth.tradingEnabled;
 
   // Strategies Data - unify different data sources

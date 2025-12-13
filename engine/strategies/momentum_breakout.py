@@ -194,7 +194,7 @@ class MomentumBreakout:
                 await self._scan_once()
             except asyncio.CancelledError:
                 break
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - defensive
+            except Exception as exc:
                 self.log.warning("[MOMO] scan loop error: %s", exc, exc_info=True)
             elapsed = self.clock.time() - started
             await asyncio.sleep(max(1.0, interval - min(interval, elapsed)))
@@ -209,7 +209,7 @@ class MomentumBreakout:
                 break
             try:
                 plan = await self._evaluate_symbol(sym)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 self.log.debug("[MOMO] evaluate %s failed: %s", sym, exc)
                 continue
             if plan is None:
@@ -223,14 +223,14 @@ class MomentumBreakout:
                 selected = self.scanner.get_selected()[: self.cfg.scanner_top_n]
                 if selected:
                     return [sym.split(".")[0].upper() for sym in selected]
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
         if self.cfg.symbols:
             return [s.split(".")[0].upper() for s in self.cfg.symbols]
         try:
             universe = self.router.trade_symbols()
             return [s.split(".")[0].upper() for s in universe][: self.cfg.scanner_top_n]
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return []
 
     async def _evaluate_symbol(self, symbol: str) -> MomentumPlan | None:
@@ -259,7 +259,7 @@ class MomentumBreakout:
 
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass  # Fail safe
 
         limit = max(
@@ -317,7 +317,7 @@ class MomentumBreakout:
             })
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass
             
         notional_recent = sum(qvols[-self.cfg.volume_window :])
@@ -417,20 +417,20 @@ class MomentumBreakout:
             self._arm_cooldown(clean, now)
             if qty > 0:
                 await self._arm_managed_exits(symbol, qty, plan)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - network/venue issues
+        except Exception as exc:
             self.log.warning("[MOMO] execution failed for %s: %s", symbol, exc)
             momentum_breakout_orders_total.labels(clean, plan.venue, "failed").inc()
 
     async def _arm_managed_exits(self, symbol: str, qty: float, plan: MomentumPlan) -> None:
         try:
             await self.router.amend_stop_reduce_only(symbol, "SELL", plan.stop_price, abs(qty))
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
         try:
             await self.router.place_reduce_only_limit(
                 symbol, "SELL", abs(qty) * 0.5, plan.take_profit
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _cooldown_ready(self, symbol: str, now: float) -> bool:

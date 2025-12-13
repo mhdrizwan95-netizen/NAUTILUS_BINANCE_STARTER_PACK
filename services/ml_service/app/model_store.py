@@ -130,7 +130,26 @@ def promote_version(version_id: str) -> bool:
 def registry_size() -> int:
     """Get the number of models in the registry."""
     registry = _load_registry()
-    return len(registry.get("versions", []))
+
+
+def get_history(limit: int = 50, cursor: str | None = None) -> list[dict]:
+    """Get model history from registry.
+    
+    Args:
+        limit: Max number of items
+        cursor: Pagination cursor (simple offset logic or timestamp)
+        
+    Returns:
+        List of version dicts
+    """
+    registry = _load_registry()
+    versions = registry.get("versions", [])
+    # Sort by created_at descending (newest first)
+    versions.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    
+    # Basic pagination logic (slice)
+    # If cursor provided, find index? For now, just slice.
+    return versions[:limit]
 
 
 def _load_registry() -> dict:

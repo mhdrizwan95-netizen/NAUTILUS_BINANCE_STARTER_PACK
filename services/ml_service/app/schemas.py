@@ -1,5 +1,6 @@
 """ML Service Schemas."""
 
+from typing import Any
 from pydantic import BaseModel, Field
 
 
@@ -36,3 +37,24 @@ class PredictResponse(BaseModel):
     probs: list[float] = Field(default_factory=list)
     regime: str = "CHOP"
     confidence: float = 0.0
+
+
+class ModelVersion(BaseModel):
+    """Model version info."""
+    version_id: str
+    created_at: str
+    metrics: dict[str, Any] | None = None
+    path: str | None = None
+
+
+class PageMetadata(BaseModel):
+    """Pagination metadata."""
+    nextCursor: str | None = None
+    prevCursor: str | None = None
+    limit: int = 50
+    totalHint: int | None = None
+
+class ModelListResponse(BaseModel):
+    """Paginated model list."""
+    data: list[ModelVersion]
+    page: PageMetadata

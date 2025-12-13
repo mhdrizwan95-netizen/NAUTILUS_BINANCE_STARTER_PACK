@@ -32,7 +32,11 @@ import { stableHash } from "./lib/equality";
 import { generateIdempotencyKey } from "./lib/idempotency";
 // LoopGuard removed to prevent false positives in high-frequency streams
 import { queryClient, queryKeys } from "./lib/queryClient";
-import { useAppStore, useDashboardFilters } from "./lib/store";
+import {
+  useAppStore,
+  useDashboardFilters,
+  useRealTimeActions,
+} from "./lib/store";
 import { useTradingStore } from "./lib/tradingStore";
 import { mergeMetricsSnapshot, mergeVenuesSnapshot } from "./lib/streamMergers";
 import { useWebSocket } from "./lib/websocket";
@@ -237,6 +241,7 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
   const [controlState, setControlState] = useState<"pause" | "resume" | "flatten" | "kill" | null>(
     null,
   );
+  const { updateGlobalMetrics, updateVenues } = useRealTimeActions();
   const opsToken = useAppStore((state) => state.opsAuth.token);
   const opsActor = useAppStore((state) => state.opsAuth.actor);
   // TEMP DEBUG
@@ -302,6 +307,27 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
   );
   const healthQuery = useQuery(healthQueryOptions);
 
+  // HYDRATION FIX: Sync React Query state to Zustand store
+  useEffect(() => {
+    if (healthQuery.data?.venues) {
+      updateVenues(healthQuery.data.venues as any[]);
+    }
+  }, [healthQuery.data, updateVenues]);
+
+  useEffect(() => {
+    if (summaryQuery.data?.kpis) {
+      const { kpis } = summaryQuery.data;
+      updateGlobalMetrics({
+        totalPnL: kpis.totalPnl,
+        totalPnLPercent: 0,
+        sharpe: kpis.sharpe,
+        drawdown: kpis.maxDrawdown,
+        activePositions: kpis.openPositions,
+        dailyTradeCount: 0
+      });
+    }
+  }, [summaryQuery.data, updateGlobalMetrics]);
+
   const strategiesQueryKey = useMemo(() => ["strategies"], []);
   const fetchStrategies = useCallback(() => getStrategies({ limit: 100 }), []);
   const strategiesQueryOptions = useMemo(
@@ -316,7 +342,6 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
 
   useEffect(() => {
     if (strategiesQuery.data?.data) {
-      console.log("Raw strategies data:", strategiesQuery.data.data);
       const strategies = strategiesQuery.data.data.map((s: any) => ({
         id: s.id,
         name: s.name || s.id,
@@ -325,10 +350,7 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
         signal: s.signal || 0,
         lastUpdate: Date.now(),
       }));
-      console.log("Mapped strategies:", strategies);
       useTradingStore.getState().setStrategies(strategies);
-    } else {
-      console.log("No strategies data available", strategiesQuery.data);
     }
   }, [strategiesQuery.data]);
 
@@ -417,6 +439,17 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
         const merged = mergeMetricsSnapshot(current, payloadCandidate);
         if (merged !== current) {
           queryClient.setQueryData(summaryQueryKey, merged);
+          // Sync with Zustand for DashboardTab
+          if (merged && merged.kpis) {
+            updateGlobalMetrics({
+              totalPnL: merged.kpis.totalPnl,
+              totalPnLPercent: 0, // Not provided directly in kpis usually
+              sharpe: merged.kpis.sharpe,
+              drawdown: merged.kpis.maxDrawdown,
+              activePositions: merged.kpis.openPositions,
+              dailyTradeCount: 0
+            });
+          }
         }
       });
     }
@@ -433,6 +466,10 @@ function CommandCenterShell({ bootStatus, summaryParamsKey, setBootStatus }: She
         const merged = mergeVenuesSnapshot(current, venues);
         if (merged !== current) {
           queryClient.setQueryData(healthQueryKey, merged);
+          // Sync with Zustand for DashboardTab
+          if (merged && merged.venues) {
+            updateVenues(merged.venues as any[]);
+          }
         }
       });
     }

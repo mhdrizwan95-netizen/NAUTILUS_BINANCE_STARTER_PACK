@@ -227,7 +227,10 @@ export function initializeWebSocket(
   // This ensures it works for localhost, LAN IP, or Public IP automatically.
   const getEngineUrl = () => {
     const host = window.location.hostname;
-    return `ws://${host}:8003/ws`;
+    // Use port 8002 (Ops) which proxies to Engine, unless overridden
+    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const port = window.location.port ? `:${window.location.port}` : "";
+    return `${protocol}//${host}${port}/ws`;
   };
   const baseUrl = import.meta.env?.VITE_WS_URL ?? getEngineUrl();
   const wsUrl = buildWebSocketUrl(baseUrl, session);
@@ -364,13 +367,18 @@ export function useWebSocket(): WebSocketHookResult {
         const stratData = message.data as Array<Record<string, unknown>>;
         if (Array.isArray(stratData)) {
           for (const strat of stratData) {
+            const id = String(strat.id || strat.name);
             useTradingStore.getState().updateStrategy(
-              String(strat.name || strat.id),
+              id,
               {
-                name: String(strat.name || strat.id),
-                enabled: Boolean(strat.status === "active" || strat.enabled),
+                id: id,
+                name: String(strat.name || id),
+                enabled: Boolean(strat.status === "active" || strat.status === "running" || strat.enabled),
                 confidence: Number(strat.confidence || 0),
                 signal: Number(strat.signal || 0),
+                // Pass through rich telemetry
+                metrics: (strat.metrics as Record<string, any>) || {},
+                performance: (strat.performance as { sharpe?: number; drawdown?: number; winRate?: number; pnl?: number; equitySeries?: any[] }) || {},
               }
             );
           }
@@ -384,7 +392,7 @@ export function useWebSocket(): WebSocketHookResult {
           id: String(venueData.name || "BINANCE"),
           name: String(venueData.name || "BINANCE"),
           type: "crypto",
-          status: (venueData.status === "ok" || venueData.connected) ? "connected" : "degraded",
+          status: (venueData.status === "ok" || venueData.connected) ? "ok" : "down",
           latency: Number(venueData.latencyMs || venueData.latency_ms || 0),
         };
 
@@ -393,7 +401,7 @@ export function useWebSocket(): WebSocketHookResult {
           venueObj.name,
           {
             name: venueObj.name,
-            connected: venueObj.status === "connected",
+            connected: venueObj.status === "ok",
             latencyMs: venueObj.latency,
             queue: Number(venueData.queue || 0),
             wsGapSeconds: Number(venueData.ws_gap_seconds || 0),
@@ -439,16 +447,10 @@ export function useWebSocket(): WebSocketHookResult {
   useEffect(() => {
     const trimmedToken = opsToken.trim();
     const trimmedActor = opsActor.trim();
-    if (!trimmedToken || !trimmedActor) {
-      setWsSession((prev) => (prev === null ? prev : null));
-      managerRef.current?.disconnect();
-      managerRef.current = null;
-      currentUrl = null;
-      lastCredentialsRef.current = null;
-      return;
-    }
+    const effectiveToken = trimmedToken || "anonymous";
+    const effectiveActor = trimmedActor || "observer";
 
-    const credentialSignature = `${trimmedToken}:${trimmedActor}`;
+    const credentialSignature = `${effectiveToken}:${effectiveActor}`;
     if (wsSession && lastCredentialsRef.current === credentialSignature) {
       return;
     }
@@ -471,8 +473,8 @@ export function useWebSocket(): WebSocketHookResult {
       sessionRequestInFlight.current = true;
       try {
         const response = await issueWebsocketSession({
-          token: trimmedToken,
-          actor: trimmedActor,
+          token: effectiveToken,
+          actor: effectiveActor,
         });
         if (cancelled) {
           return;
@@ -500,14 +502,8 @@ export function useWebSocket(): WebSocketHookResult {
   }, [opsToken, opsActor, wsSession]);
 
   useEffect(() => {
-    const trimmedToken = opsToken.trim();
-
-    if (!trimmedToken) {
-      managerRef.current?.disconnect();
-      managerRef.current = null;
-      currentUrl = null;
-      return;
-    }
+    // Token check removed to allow anonymous connection
+    // if (!trimmedToken) { ... }
 
     if (!wsSession) {
       return;

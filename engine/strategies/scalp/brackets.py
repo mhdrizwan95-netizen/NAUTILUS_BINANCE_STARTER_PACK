@@ -104,7 +104,7 @@ class ScalpBracketManager:
             if result is None:
                 return None
             return float(result)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return None
 
     async def _watch_loop(
@@ -168,7 +168,7 @@ class ScalpBracketManager:
         except asyncio.CancelledError:
             self._log.debug("Bracket watcher cancelled: %s", key)
             raise
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self._log.exception("Bracket watcher error: %s", key)
         finally:
             self._tasks.pop(key, None)
@@ -198,5 +198,5 @@ class ScalpBracketManager:
         }
         try:
             await self._exit_callback(payload)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self._log.warning("[SCALP] exit submission failed for %s", symbol, exc_info=True)

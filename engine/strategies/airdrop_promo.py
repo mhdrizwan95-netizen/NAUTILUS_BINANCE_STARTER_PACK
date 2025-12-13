@@ -279,7 +279,7 @@ class AirdropPromoWatcher:
                     "ts": now,
                 }
             )
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _LOG.warning("[AIRDROP] execution failed for %s: %s", symbol, exc)
             self._record_order(symbol, "failed")
             self._set_cooldown(symbol, now)
@@ -297,7 +297,7 @@ class AirdropPromoWatcher:
         if expected_reward and airdrop_expected_value_usd:
             try:
                 airdrop_expected_value_usd.labels(symbol=symbol).set(float(expected_reward))
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - metrics optional
+            except Exception as exc:
                 _log_suppressed("airdrop.expected_reward_metric", exc)
 
         self._seen_promos.add(promo_id)
@@ -531,7 +531,7 @@ class AirdropPromoWatcher:
         if self.cfg.metrics_enabled and airdrop_cooldown_epoch:
             try:
                 airdrop_cooldown_epoch.labels(symbol=symbol).set(expiry)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - metrics optional
+            except Exception as exc:
                 _log_suppressed("airdrop.cooldown_metric", exc)
 
     async def _publish_participation(
@@ -572,7 +572,7 @@ class AirdropPromoWatcher:
             return
         try:
             airdrop_events_total.labels(symbol=symbol, decision=decision).inc()
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - metrics optional
+        except Exception as exc:
             _log_suppressed("airdrop.event_metric", exc)
 
     def _record_order(self, symbol: str, status: str) -> None:
@@ -580,7 +580,7 @@ class AirdropPromoWatcher:
             return
         try:
             airdrop_orders_total.labels(symbol=symbol, status=status).inc()
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:  # pragma: no cover - metrics optional
+        except Exception as exc:
             _log_suppressed("airdrop.order_metric", exc)
 
     @staticmethod

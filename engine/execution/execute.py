@@ -166,9 +166,11 @@ class StrategyExecutor:
             quantity=None if quantity is None else float(quantity),
             market=market_hint,
             strategy_id=tag,
+            dry_run=bool(eff_dry),
         )
         if not ok:
             metrics.orders_rejected.inc()
+            _LOGGER.warning("Order Rejected: %s", err)
             payload = {
                 "status": "rejected",
                 **err,

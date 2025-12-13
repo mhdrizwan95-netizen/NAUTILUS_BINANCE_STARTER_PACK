@@ -219,7 +219,7 @@ class TrendStrategyModule:
     ) -> None:
         self.cfg = cfg
         self.enabled = bool(cfg.enabled)
-        self._client = client or _SyncKlinesClient()
+        self._client = client or _AsyncKlinesClient()
         self._clock = clock
         self._log = logger or logging.getLogger("engine.trend")
         self._universe = StrategyUniverse(scanner)
@@ -229,7 +229,7 @@ class TrendStrategyModule:
         try:
             settings = get_settings()
             self._venue = getattr(settings, "venue", "BINANCE").upper()
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
         self._default_market = "futures" if cfg.allow_shorts else "spot"
         self._cache: dict[str, dict[str, list[list[float]]]] = defaultdict(dict)
@@ -251,7 +251,7 @@ class TrendStrategyModule:
         self._registered_symbols: set[str] = set()
 
     # --- public API ---
-    def handle_tick(self, symbol: str, price: float, ts: float) -> dict[str, float | str] | None:
+    async def handle_tick(self, symbol: str, price: float, ts: float) -> dict[str, float | str] | None:
         if not self.enabled:
             return None
         base = symbol.split(".")[0].upper()
@@ -295,10 +295,10 @@ class TrendStrategyModule:
 
         except ImportError:
             pass
-        except Exception:
+        except Exception as exc:
             pass  # Fail safe
 
-        snap = self._build_snapshot(base)
+        snap = await self._build_snapshot(base)
         if snap is None:
             return None
 
@@ -395,7 +395,7 @@ class TrendStrategyModule:
         if action and "meta" in action:
             try:
                 self._log.info("[TREND] %s %s meta=%s", base, action["side"], action["meta"])
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
         return action
 
@@ -426,7 +426,7 @@ class TrendStrategyModule:
             if isinstance(snap, dict):
                 equity = snap.get("equity") or snap.get("cash") or 0.0
                 return float(equity or 0.0)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return 0.0
         return 0.0
 
@@ -489,7 +489,7 @@ class TrendStrategyModule:
                 side=side,
                 state=state,
             ).inc()
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _observe_stop_distance(self, symbol: str, distance_bps: float) -> None:
@@ -499,7 +499,7 @@ class TrendStrategyModule:
             self._metrics.trend_follow_stop_distance_bp.labels(
                 symbol=symbol, venue=self._venue
             ).observe(max(distance_bps, 0.0))
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             pass
 
     def _record_trade(
@@ -518,11 +518,11 @@ class TrendStrategyModule:
                 self._metrics.trend_follow_trade_pnl_pct.labels(
                     symbol=symbol, venue=self._venue, result=result
                 ).observe(abs(pnl_pct))
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
         try:
             self._auto_tuner.observe_trade(symbol, pnl_pct, stop_bps, meta or {})
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self._log.debug("[TREND] auto tuner observe failed", exc_info=True)
 
     @staticmethod
@@ -531,10 +531,10 @@ class TrendStrategyModule:
             return 0.0
         return max(0.0, (price - stop) / price * 10_000.0)
 
-    def _build_snapshot(self, base: str) -> dict[str, float] | None:
-        primary = self._klines(base, self.cfg.primary.interval, self._params.primary_slow + 5)
-        secondary = self._klines(base, self.cfg.secondary.interval, self._params.secondary_slow + 5)
-        regime = self._klines(base, self.cfg.regime.interval, self._params.regime_slow + 5)
+    async def _build_snapshot(self, base: str) -> dict[str, float] | None:
+        primary = await self._klines(base, self.cfg.primary.interval, self._params.primary_slow + 5)
+        secondary = await self._klines(base, self.cfg.secondary.interval, self._params.secondary_slow + 5)
+        regime = await self._klines(base, self.cfg.regime.interval, self._params.regime_slow + 5)
         if not primary or not secondary or not regime:
             return None
         primary_closes = [float(row[4]) for row in primary]
@@ -561,7 +561,7 @@ class TrendStrategyModule:
             snapshot["target"] = primary_closes[-1] + (atr_val * self._params.atr_target_mult)
         return snapshot
 
-    def _klines(self, base: str, interval: str, minimum: int) -> list[list[float]] | None:
+    async def _klines(self, base: str, interval: str, minimum: int) -> list[list[float]] | None:
         key = (base, interval)
         now = self._clock.time()
         cached = self._cache.get(base, {}).get(interval)
@@ -569,10 +569,10 @@ class TrendStrategyModule:
             return cached
         data: list[list[float]] | None = None
         try:
-            data = self._client.klines(
+            data = await self._client.klines(
                 base, interval=interval, limit=max(self.cfg.fetch_limit, minimum)
             )
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             self._log.warning("[TREND] kline fetch failed for %s %s: %s", base, interval, exc)
             data = None
         if isinstance(data, list) and len(data) >= minimum:
@@ -582,7 +582,7 @@ class TrendStrategyModule:
         return cached
 
 
-class _SyncKlinesClient:
+class _AsyncKlinesClient:
     def __init__(self):
         settings = get_settings()
         base = getattr(settings, "base_url", "https://api.binance.com") or "https://api.binance.com"
@@ -593,18 +593,22 @@ class _SyncKlinesClient:
         if api_key:
             self._headers["X-MBX-APIKEY"] = api_key
         self._is_futures = getattr(settings, "is_futures", False)
+        # We use a single client for efficiency (managed externally or here)
+        self._client = httpx.AsyncClient(timeout=self._timeout)
 
-    def klines(self, symbol: str, *, interval: str, limit: int) -> list[list[float]]:
+    async def klines(self, symbol: str, *, interval: str, limit: int) -> list[list[float]]:
         path = "/fapi/v1/klines" if self._is_futures else "/api/v3/klines"
-        resp = httpx.get(
-            f"{self._base}{path}",
-            params={"symbol": symbol, "interval": interval, "limit": limit},
-            timeout=self._timeout,
-            headers=self._headers or None,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        return data if isinstance(data, list) else []
+        try:
+            resp = await self._client.get(
+                f"{self._base}{path}",
+                params={"symbol": symbol, "interval": interval, "limit": limit},
+                headers=self._headers or None,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            return data if isinstance(data, list) else []
+        except Exception:
+            raise
 
 
 __all__ = ["TrendStrategyModule", "TrendStrategyConfig", "load_trend_config"]

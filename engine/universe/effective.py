@@ -49,7 +49,7 @@ class StrategyUniverse:
                     
                 if selected and len(selected) > 0:
                     return list(selected)
-            except Exception:
+            except Exception as exc:
                 # Fail silently to env var fallback
                 pass
         
@@ -67,7 +67,7 @@ class StrategyUniverse:
         try:
             if hasattr(self.scanner, 'get_selected'):
                 return len(self.scanner.get_selected()) > 0
-        except Exception:
+        except Exception as exc:
             pass
         return False
 

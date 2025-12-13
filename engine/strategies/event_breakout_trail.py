@@ -38,12 +38,12 @@ class EventBreakoutTrailer:
         # Subscribe to open events to add symbols
         try:
             BUS.subscribe("strategy.event_breakout_open", self._on_open)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self.log.debug("[EVENT-BO:TRAIL] subscribe failed", exc_info=True)
         while True:
             try:
                 await self._tick()
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 self.log.warning("[EVENT-BO:TRAIL] tick error: %s", exc)
             await asyncio.sleep(self.interval)
 
@@ -55,7 +55,7 @@ class EventBreakoutTrailer:
             if getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_open_positions.set(len(self._tracked))
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
 
     async def _tick(self) -> None:
@@ -71,7 +71,7 @@ class EventBreakoutTrailer:
                     try:
                         self._MET.event_bo_open_positions.set(len(self._tracked))
                         self._MET.event_bo_trail_exits_total.labels(symbol=sym).inc()
-                    except _SUPPRESSIBLE_EXCEPTIONS:
+                    except Exception as exc:
                         pass
                 continue
             last = await self._last_price(sym)
@@ -83,7 +83,7 @@ class EventBreakoutTrailer:
             # Round
             try:
                 desired = self.router.round_tick(f"{sym}.BINANCE", desired)
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 pass
             # Only tighten
             if desired <= (self._last_stop.get(sym, 0.0) or 0.0):
@@ -95,12 +95,12 @@ class EventBreakoutTrailer:
             if getattr(self, "_MET", None) is not None:
                 try:
                     self._MET.event_bo_trail_updates_total.labels(symbol=sym).inc()
-                except _SUPPRESSIBLE_EXCEPTIONS:
+                except Exception as exc:
                     pass
             # Publish rollup event for digest
             try:
                 await BUS.publish("event_bo.trail", {"symbol": sym})
-            except _SUPPRESSIBLE_EXCEPTIONS:
+            except Exception as exc:
                 self.log.debug("[EVENT-BO:TRAIL] trail publish failed for %s", sym, exc_info=True)
 
     def _position_qty(self, sym: str) -> float:
@@ -113,14 +113,14 @@ class EventBreakoutTrailer:
             if pos is None:
                 return 0.0
             return float(getattr(pos, "quantity", 0.0) or 0.0)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return 0.0
 
     async def _last_price(self, sym: str) -> float | None:
         try:
             px = await self.router.get_last_price(f"{sym}.BINANCE")
             return float(px) if px else None
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return None
 
     async def _atr(self, sym: str) -> float:
@@ -155,5 +155,5 @@ class EventBreakoutTrailer:
                 return 0.0
             trs = trs[1:]
             return sum(trs) / len(trs)
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             return 0.0

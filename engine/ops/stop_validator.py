@@ -66,7 +66,7 @@ class StopValidator:
         try:
             if bus is not None:
                 bus.subscribe("trade.fill", self.on_fill)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("stop validator subscribe", exc)
 
     async def on_fill(self, evt: dict) -> None:
@@ -81,7 +81,7 @@ class StopValidator:
             return
         try:
             metric.labels(**labels).inc()
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed(f"{attr} metric", exc)
 
     async def _fetch_protection(self, symbol: str) -> _ProtView:
@@ -92,7 +92,7 @@ class StopValidator:
             return _ProtView(None)
         try:
             items = await list_fn(symbol)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("list_open_protection", exc)
             return _ProtView(None)
         return _ProtView(list(items) if isinstance(items, list) else None)
@@ -101,7 +101,7 @@ class StopValidator:
         try:
             atr = float(self.md.atr(symbol, tf="1m", n=14) or 0.0)
             last = float(self.md.last(symbol) or 0.0)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("stop validator market refs", exc)
             return 0.0, 0.0
         return atr, last
@@ -120,7 +120,7 @@ class StopValidator:
             )
             if hasattr(self.metrics, "stop_validator_alerts_total"):
                 self.metrics.stop_validator_alerts_total.labels(symbol=symbol, kind="SL").inc()
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("stop validator notify", exc)
             return
         self._last_alert[symbol] = now
@@ -131,14 +131,14 @@ class StopValidator:
         while True:
             try:
                 await self._sweep_positions()
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("stop validator sweep loop", exc)
             await asyncio.sleep(int(self.cfg.get("STOP_VALIDATOR_INTERVAL_SEC", 5)))
 
     async def _sweep_positions(self) -> None:
         try:
             state = self.router.portfolio_service().state
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("stop validator state sweep", exc)
             return
         for sym, pos in (state.positions or {}).items():
@@ -152,7 +152,7 @@ class StopValidator:
             return
         try:
             state = self.router.portfolio_service().state
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("stop validator state fetch", exc)
             return
         pos = state.positions.get(symbol) or state.positions.get(symbol.split(".")[0])
@@ -177,7 +177,7 @@ class StopValidator:
                 want_sl,
                 abs(qty),
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self.log.exception("[STOPVAL] Repair failed for %s", symbol)
             return
         self._inc_metric("stop_validator_repaired_total", symbol=symbol, kind="SL")

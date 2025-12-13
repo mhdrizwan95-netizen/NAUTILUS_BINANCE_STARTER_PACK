@@ -24,6 +24,7 @@ import {
 } from "@/lib/api";
 import { generateIdempotencyKey } from "@/lib/idempotency";
 import { useAppStore } from "@/lib/store";
+import { useTradingStore } from "@/lib/tradingStore";
 import type { StrategySummary } from "@/types/trading";
 
 function formatCurrency(value: number) {
@@ -45,6 +46,9 @@ export function StrategyTab() {
   const opsToken = useAppStore((state) => state.opsAuth.token);
   const opsActor = useAppStore((state) => state.opsAuth.actor);
   const [pageInfo, setPageInfo] = useState<PageMetadata | null>(null);
+
+  // Subscribe to live updates
+  const liveStrategies = useTradingStore((state) => state.strategies);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -173,20 +177,57 @@ export function StrategyTab() {
         </div>
       ) : null}
 
+      {/* DEBUG OVERLAY */}
+      <div className="rounded-lg border border-yellow-500/50 bg-yellow-500/10 p-4 text-xs font-mono text-yellow-200 mb-4 overflow-x-auto">
+        <h4 className="font-bold border-b border-yellow-500/30 mb-2 pb-1">TELEMETRY DEBUGGER v3 (DATA INSPECT)</h4>
+        <table className="w-full text-left">
+          <thead>
+            <tr className="border-b border-yellow-500/20">
+              <th>Key</th>
+              <th>ID</th>
+              <th>Name</th>
+              <th>PnL</th>
+              <th>Conf</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from(liveStrategies.entries()).map(([key, strat]) => (
+              <tr key={key} className="border-b border-yellow-500/10">
+                <td className="py-1 pr-2 text-zinc-400">{key}</td>
+                <td className="py-1 pr-2 text-blue-300">{strat.id || "MISSING"}</td>
+                <td className="py-1 pr-2 text-zinc-300 truncate max-w-[100px]">{strat.name}</td>
+                <td className="py-1 pr-2 text-green-300">{strat.performance?.pnl?.toFixed(2) ?? "NULL"}</td>
+                <td className="py-1 text-purple-300">{strat.confidence}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {appliedStrategies.map((strategy) => {
-          const performance = strategy.performance;
-          const trend: "up" | "down" | "neutral" = performance?.equitySeries?.length
-            ? performance.equitySeries.at(-1)!.equity >= performance.equitySeries[0].equity
+          const liveState = liveStrategies.get(strategy.id);
+          const performance = liveState?.performance ?? strategy.performance;
+
+          // Debug fallback if performance is missing
+          // console.log(`Rendering ${strategy.id}`, { live: liveState, static: strategy });
+
+          const perfAny = performance as any;
+          const trend: "up" | "down" | "neutral" = perfAny?.equitySeries?.length
+            ? perfAny.equitySeries.at(-1)!.equity >= perfAny.equitySeries[0].equity
               ? "up"
               : "down"
             : "neutral";
-          const sparkline = performance?.equitySeries?.map((point) => point.equity) ?? [];
+          const sparkline = perfAny?.equitySeries?.map((point: any) => point.equity) ?? [];
           const pnlValue = performance?.pnl ?? 0;
+
+          // Use live status if available, otherwise static
+          const status = liveState ? (liveState.enabled ? "running" : "stopped") : strategy.status;
+
           const statusAdornment =
-            strategy.status === "running"
+            status === "running"
               ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
-              : strategy.status === "error"
+              : status === "error"
                 ? "border-red-400/40 bg-red-500/10 text-red-300"
                 : "border-zinc-700 bg-zinc-900 text-zinc-400";
 

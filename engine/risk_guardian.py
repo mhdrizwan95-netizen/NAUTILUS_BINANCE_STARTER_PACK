@@ -127,7 +127,7 @@ class RiskGuardian:
                 await asyncio.wait_for(self._task, timeout=1.0)
             except TimeoutError:
                 self._task.cancel()
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("guardian.stop", exc)
                 self._task.cancel()
 
@@ -185,16 +185,16 @@ class RiskGuardian:
                 # Keep portfolio gauges fresh via rails snapshot ingestion
                 try:
                     rails.refresh_snapshot_metrics(snap)
-                except _SUPPRESSIBLE_EXCEPTIONS as exc:
+                except Exception as exc:
                     _log_suppressed("guardian.refresh_snapshot_metrics", exc)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 # Soft-fail to avoid killing the loop
                 _log_suppressed("guardian.loop", exc)
                 try:
                     ctr = MET.get("engine_venue_errors_total")
                     if ctr is not None:
                         ctr.labels(venue="guard", error="LOOP_ERROR").inc()
-                except _SUPPRESSIBLE_EXCEPTIONS as metric_exc:
+                except Exception as exc:
                     _log_suppressed("guardian.loop.metric", metric_exc)
             dt = max(0.0, self.cfg.poll_sec - (time.time() - t0))
             await asyncio.sleep(dt)
@@ -232,7 +232,7 @@ class RiskGuardian:
                 from engine.core.event_bus import BUS as _BUS
 
                 _BUS.fire("health.state", {"state": 0, "reason": "daily_reset"})
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("guardian.daily_reset_signal", exc)
             return
         pnl_day = realized - (self._day_anchor[1] or 0.0)
@@ -240,7 +240,7 @@ class RiskGuardian:
             pnl_metric = MET.get("pnl_realized_total")
             if pnl_metric is not None:
                 pnl_metric.set(realized)
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("guardian.pnl_metric", exc)
         if pnl_day <= -abs(loss_limit_usd) and not self._paused_until_utc_reset:
             # Pause trading via RiskRails config gate
@@ -250,7 +250,7 @@ class RiskGuardian:
                 trading_metric = MET.get("trading_enabled")
                 if trading_metric is not None:
                     trading_metric.set(0)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("guardian.trading_metric", exc)
             self._paused_until_utc_reset = True
             self._paused_until_utc_reset = True
@@ -272,7 +272,7 @@ class RiskGuardian:
                     "daily_stop",
                     {"pnl_day": pnl_day, "limit": self.cfg.max_daily_loss_usd},
                 )
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("guardian.publish_daily_stop", exc)
 
     async def _enforce_cross_health(self, order_router, snap: dict | None) -> None:
@@ -322,7 +322,7 @@ class RiskGuardian:
                     },
                 },
             )
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("guardian.derisk_soft", exc)
 
     async def _derisk_hard(self, order_router, score: float) -> None:
@@ -378,7 +378,7 @@ class RiskGuardian:
                         "side": side,
                     },
                 )
-        except _SUPPRESSIBLE_EXCEPTIONS as exc:
+        except Exception as exc:
             _log_suppressed("guardian.derisk_hard", exc)
 
         # If critical, also pause trading to prevent further damage
@@ -396,7 +396,7 @@ class RiskGuardian:
                         },
                     )
                     _write_trading_flag(False)
-            except _SUPPRESSIBLE_EXCEPTIONS as exc:
+            except Exception as exc:
                 _log_suppressed("guardian.derisk_hard_pause", exc)
 
 

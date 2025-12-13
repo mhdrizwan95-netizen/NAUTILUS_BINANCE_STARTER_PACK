@@ -41,7 +41,9 @@ class Settings:
         self.mode = ""
         self.is_futures = False
         self.options_base = ""
+        self.options_base = ""
         self.options_enabled = False
+        self.ops_url = os.getenv("OPS_URL", "")
 
         if venue == "IBKR":
             # IBKR-specific configuration

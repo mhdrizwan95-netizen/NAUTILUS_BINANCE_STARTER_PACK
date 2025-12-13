@@ -58,6 +58,7 @@ class BinanceUserStream:
             _LOGGER.warning("[UserStream] No API Key provided. User Stream disabled.")
             return
 
+
         _LOGGER.info(f"[UserStream] Starting Binance User Data Stream ({'Futures' if self._settings.is_futures else 'Spot'})...")
         
         # Start keep-alive task
@@ -131,9 +132,9 @@ class BinanceUserStream:
             return None
 
     async def _keep_alive_loop(self):
-        """Refresh listenKey every 30 minutes."""
+        """Refresh listenKey every 5 minutes (also acts as heartbeat)."""
         while not self._stop_event.is_set():
-            await asyncio.sleep(1800) # 30 minutes
+            await asyncio.sleep(300)  # 5 minutes (more frequent heartbeat)
             if self._listen_key:
                 try:
                     async with httpx.AsyncClient() as client:
@@ -141,7 +142,9 @@ class BinanceUserStream:
                             f"{self._base_url}{self._listen_key_path}",
                             headers={"X-MBX-APIKEY": self._settings.api_key}
                         )
-                    _LOGGER.debug("[UserStream] listenKey refreshed.")
+                    # Successful keep-alive = we're still connected, update timestamp
+                    self.last_event_ts = time.time()
+                    _LOGGER.debug("[UserStream] listenKey refreshed (heartbeat).")
                 except Exception as e:
                     _LOGGER.error(f"[UserStream] Error refreshing listenKey: {e}")
                     self._listen_key = None # Force re-create on next WS loop

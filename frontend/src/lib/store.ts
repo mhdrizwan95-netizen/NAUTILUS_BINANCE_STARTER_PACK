@@ -88,7 +88,7 @@ const defaultState: AppState = {
     notificationsEnabled: true,
   },
   opsAuth: {
-    token: "dev-token",
+    token: "test-ops-token-1234567890",
     actor: "dev-user",
   },
   realTimeData: {
@@ -342,6 +342,7 @@ const storeInitializer = shouldPersist()
         dashboardFilters: state.ui.dashboardFilters,
         pagination: state.ui.pagination,
       },
+      opsAuth: state.opsAuth,
     }),
   })
   : createAppStore;
@@ -351,7 +352,6 @@ if (!shouldPersist()) {
 }
 
 export const useAppStore = create<AppState & AppActions>()(storeInitializer);
-
 // Selectors for commonly used state slices
 export const useMode = () => useAppStore((state) => state.mode);
 export const usePreferences = () => useAppStore((state) => state.preferences);

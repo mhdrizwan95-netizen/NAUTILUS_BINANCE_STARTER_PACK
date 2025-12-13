@@ -20,6 +20,15 @@ export interface ControlRequestOptions {
   idempotencyKey?: string;
 }
 
+import type { MLModelVersion } from "@/types/trading";
+
+export const getMetricsModels = (options?: FetchPageOptions) => {
+  const params = buildPageQuery({ cursor: options?.cursor, limit: options?.limit ?? 50 });
+  const query = params.toString();
+  const path = query ? `/api/metrics/models?${query}` : "/api/metrics/models";
+  return api<PageResponse<MLModelVersion>>(path, undefined, options?.signal);
+};
+
 const BASE = "";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
@@ -41,7 +50,7 @@ interface TimeoutSignal {
 
 const createTimeoutSignal = (signal: AbortSignal | undefined, timeoutMs: number): TimeoutSignal => {
   if (signal?.aborted) {
-    return { signal, cleanup: () => {} };
+    return { signal, cleanup: () => { } };
   }
 
   const controller = new AbortController();
@@ -281,12 +290,7 @@ export const getOpenOrders = (options?: FetchPageOptions) => {
   return api<PageResponse<Order>>(path, undefined, options?.signal);
 };
 
-export const getMetricsModels = (options?: FetchPageOptions) => {
-  const params = buildPageQuery({ cursor: options?.cursor, limit: options?.limit ?? 50 });
-  const query = params.toString();
-  const path = query ? `/api/metrics/models?${query}` : "/api/metrics/models";
-  return api<PageResponse<MetricsModel>>(path, undefined, options?.signal);
-};
+
 
 export const getHealth = (signal?: AbortSignal) =>
   api<{

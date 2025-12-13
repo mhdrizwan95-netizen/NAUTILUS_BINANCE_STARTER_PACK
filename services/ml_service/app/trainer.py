@@ -108,15 +108,40 @@ def _load_training_data() -> np.ndarray | None:
             try:
                 df = pd.read_csv(f)
                 if "close" in df.columns:
-                    # Compute log returns
-                    close = df["close"].values
-                    returns = np.diff(np.log(close + 1e-10))
-                    dfs.append(returns)
+                    # Align with engine/strategies/policy_hmm.py features
+                    # 1. Log Returns
+                    df["ret"] = np.log(df["close"] / df["close"].shift(1))
+                    
+                    # 2. Volatility (20)
+                    df["vol"] = df["ret"].rolling(20).std()
+                    
+                    # 3. VWAP Deviation
+                    if "volume" in df.columns:
+                        vwap = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
+                        df["dev_vwap"] = (df["close"] - vwap) / vwap
+                        
+                        # 5. Volume Spike (20) - (Index 5 in list, but we compute parallel)
+                        vol_safe = df["volume"].replace(0, 1) # avoid div by zero
+                        df["vol_spike"] = df["volume"] / vol_safe.rolling(20).mean()
+                    else:
+                        df["dev_vwap"] = 0.0
+                        df["vol_spike"] = 1.0
+
+                    # 4. Z-Score (30)
+                    r30_mean = df["close"].rolling(30).mean()
+                    r30_std = df["close"].rolling(30).std()
+                    df["zscore"] = (df["close"] - r30_mean) / r30_std
+
+                    # Drop NaN from rolling windows
+                    df_clean = df[["ret", "vol", "dev_vwap", "zscore", "vol_spike"]].dropna()
+                    
+                    if not df_clean.empty:
+                        dfs.append(df_clean.values)
             except Exception:
                 continue
         
         if dfs:
-            return np.concatenate(dfs)
+            return np.concatenate(dfs, axis=0)
         return None
         
     except Exception:
@@ -135,8 +160,14 @@ def _create_default_model(n_states: int, tag: str, promote: bool) -> dict[str, A
             random_state=42,
         )
         
-        # Fit on synthetic data to initialize
-        synthetic = np.random.randn(1000, 1) * 0.01
+        # Fit on synthetic data to initialize (5 features: ret, vol, dev_vwap, zscore, vol_spike)
+        synthetic = np.random.randn(1000, 5)
+        # Scale to look realistic
+        synthetic[:, 0] *= 0.01  # Ret
+        synthetic[:, 1] *= 0.02  # Vol
+        synthetic[:, 2] *= 0.05  # Dev
+        synthetic[:, 3] *= 1.0   # Zscore
+        synthetic[:, 4] *= 1.0   # Spike
         model.fit(synthetic)
         
         metadata = {

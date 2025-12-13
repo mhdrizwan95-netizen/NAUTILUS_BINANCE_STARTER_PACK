@@ -18,7 +18,7 @@ export interface Venue {
   id: string;
   name: string;
   type: VenueType;
-  status: "connected" | "degraded" | "offline";
+  status: "ok" | "warn" | "down";
   latency: number;
 }
 
@@ -109,6 +109,13 @@ export interface MetricsModel {
   tradingDays?: number | null;
 }
 
+export interface MLModelVersion {
+  version_id: string;
+  created_at: string;
+  metrics?: Record<string, any> | null;
+  path?: string | null;
+}
+
 export interface GlobalMetrics {
   totalPnL: number;
   totalPnLPercent: number;
@@ -141,6 +148,9 @@ export type StrategySummary = {
   paramsSchema: ParamSchema;
   params?: Record<string, unknown>;
   performance?: StrategyPerformanceSnapshot;
+  metrics?: Record<string, any>;
+  signal?: number;
+  confidence?: number;
 };
 
 export type BacktestResult = {

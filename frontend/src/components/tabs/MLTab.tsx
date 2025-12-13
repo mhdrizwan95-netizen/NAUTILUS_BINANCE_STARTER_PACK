@@ -1,14 +1,17 @@
 /**
- * ML Tab - "THE NEURAL LINK" - Real-Time HMM Visualization
+ * ML Tab - "THE NEURAL LINK" - Real-Time HMM Stream
  * 
- * Shows real-time regime probabilities, feature importance, and canary model status
+ * Shows real-time regime probabilities and neural feature streams.
  */
 import { Brain, Activity, Layers } from 'lucide-react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import type { SVGProps } from 'react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 import { useAllStrategies } from '../../lib/tradingStore';
+import type { StrategyStatus } from '../../lib/tradingStore';
+import { getMetricsModels } from '../../lib/api';
 import { cn } from '../../lib/utils';
 import { GlassCard } from '../ui/GlassCard';
 
@@ -25,7 +28,6 @@ interface FeatureImportance {
     currentValue: number;
 }
 
-// New interface for HMMRegime
 interface HMMRegime {
     timestamp: number;
     probBull: number;
@@ -35,75 +37,161 @@ interface HMMRegime {
     confidence: number;
 }
 
+interface FeatureHistory {
+    timestamp: number;
+    vol: number;
+    ret: number;
+    dev_vwap: number;
+    zscore: number;
+    vol_spike: number;
+}
+
+function parseModelDate(dateStr: string): string {
+    // Expects "YYYYMMDD_HHMMSS"
+    if (!dateStr || dateStr.length < 15) return "—";
+    const y = dateStr.substring(0, 4);
+    const m = dateStr.substring(4, 6);
+    const d = dateStr.substring(6, 8);
+    const H = dateStr.substring(9, 11);
+    const M = dateStr.substring(11, 13);
+    return `${y}-${m}-${d} ${H}:${M}`;
+}
+
 export function MLTab() {
+    // Fetch Model History
+    const { data: modelsData } = useQuery({
+        queryKey: ['metrics', 'models'],
+        queryFn: () => getMetricsModels({ limit: 1 }),
+        refetchInterval: 30000,
+    });
+
+    const latestModel = modelsData?.data?.[0];
+    const modelVersion = latestModel?.version_id || "—";
+    const lastTrained = latestModel?.created_at ? parseModelDate(latestModel.created_at) : "—";
+    const accuracy = latestModel?.metrics?.metric_value
+        ? `${(latestModel.metrics.metric_value * 100).toFixed(1)}%`
+        : "—";
+
     // Real-time regime probability stream (last 30 minutes)
     const [regimeHistory, setRegimeHistory] = useState<RegimeProbability[]>([]);
+    // Real-time feature history stream
+    const [featureHistory, setFeatureHistory] = useState<FeatureHistory[]>([]);
+
+    // Refs to hold latest data for the interval loop
+    const latestRegime = useRef<HMMRegime | null>(null);
+    const latestStrategy = useRef<StrategyStatus | undefined>(undefined);
 
     const strategies = useAllStrategies();
     // Fallback: Find *any* active strategy (Ensemble, MA, etc.) if 'hmm' is not explicitly found
-    // This ensures the dashboard always has "something" to show, even if just basic trend data
     const activeStrategy = strategies.find((s) => s.name.toLowerCase().includes('hmm'))
         || strategies.find((s) => s.name.toLowerCase().includes('ensemble'))
         || strategies.find(s => s.enabled);
 
+    // Real-time feature state
     const [features, setFeatures] = useState<FeatureImportance[]>([
-        { name: 'Vol Raw', importance: 0.35, currentValue: 0.02 }, // Changed 'weight' to 'importance' to match existing interface
-        { name: 'RSI Div', importance: 0.25, currentValue: 0.15 },
-        { name: 'VWAP Dist', importance: 0.20, currentValue: -0.01 },
-        { name: 'Z-Score', importance: 0.15, currentValue: 1.2 },
-        { name: 'Tick Vel', importance: 0.05, currentValue: 0.8 },
+        { name: 'Vol Raw', importance: 0.35, currentValue: 0 },
+        { name: 'Returns', importance: 0.25, currentValue: 0 },
+        { name: 'VWAP Dist', importance: 0.20, currentValue: 0 },
+        { name: 'Z-Score', importance: 0.15, currentValue: 0 },
+        { name: 'Vol Spike', importance: 0.05, currentValue: 0 },
     ]);
 
-    // Simulation Loop: Jitter features to show "Liveness"
-    // This allows the user to see the system is active even if market is slow
+    // Real-time synchronization with active strategy state
     useEffect(() => {
-        const interval = setInterval(() => {
-            setFeatures(prev => prev.map(f => ({
-                ...f,
-                importance: Math.max(0.05, Math.min(0.95, f.importance + (Math.random() - 0.5) * 0.1)),
-                currentValue: f.currentValue + (Math.random() - 0.5) * 0.05
-            })).sort((a, b) => b.importance - a.importance));
-        }, 1000);
-        return () => clearInterval(interval);
-    }, []);
+        if (activeStrategy?.metrics?.features) {
+            const f = activeStrategy.metrics.features;
+            // Map backend keys to UI labels
+            // Backend: ret, vol, dev_vwap, zscore, vol_spike
+            setFeatures([
+                { name: 'Vol Raw', importance: 0.35, currentValue: f.vol || 0 },
+                { name: 'Returns', importance: 0.25, currentValue: f.ret || 0 },
+                { name: 'VWAP Dist', importance: 0.20, currentValue: f.dev_vwap || 0 },
+                { name: 'Z-Score', importance: 0.15, currentValue: f.zscore || 0 },
+                { name: 'Vol Spike', importance: 0.05, currentValue: f.vol_spike || 0 },
+            ].sort((a, b) => Math.abs(b.currentValue) - Math.abs(a.currentValue)));
+        }
+    }, [activeStrategy]);
 
     // Derived from real strategy state or default to "SCANNING"
     const currentRegime: HMMRegime = activeStrategy ? {
         timestamp: Date.now(),
         // Map simple signal (-1 to 1) to Probabilities
-        probBull: activeStrategy.signal > 0.05 ? (0.5 + activeStrategy.confidence / 2) : 0.1,
-        probBear: activeStrategy.signal < -0.05 ? (0.5 + activeStrategy.confidence / 2) : 0.1,
-        probChop: Math.abs(activeStrategy.signal) <= 0.05 ? (0.5 + activeStrategy.confidence / 2) : 0.1,
-        regime: activeStrategy.signal > 0.05 ? 'BULL' : activeStrategy.signal < -0.05 ? 'BEAR' : 'CHOP',
-        confidence: activeStrategy.confidence,
+        // If metrics are present, use them for more accurate probabilities if available, otherwise heuristic
+        probBull: activeStrategy.metrics?.p_bull || (activeStrategy.kind === 'HMM' ? (activeStrategy as any).signal > 0 : 0.33),
+        // Note: The logic below is heuristic legacy; ideally backend sends prob directly.
+        // For now preventing regression by keeping detailed logic similar to before but safer.
+        probBear: 0.1, // Placeholder if dynamic logic is complex, sticking to original logic below:
+        probChop: 0.1,
+        regime: 'UNKNOWN',
+        confidence: activeStrategy.performance?.sharpe || 0, // Using strategy standard field if available
     } : {
-        // Fallback "Scanning" State
         timestamp: Date.now(),
         probBull: 0.33,
         probBear: 0.33,
         probChop: 0.34,
-        regime: 'UNKNOWN', // Will be rendered as "SCANNING..."
+        regime: 'UNKNOWN',
         confidence: 0,
     };
 
-    const dominantRegime = currentRegime.regime === 'UNKNOWN' ? 'UNKNOWN' : currentRegime.regime;
+    // Re-implementing the mapping logic from previous file correctly
+    const computedRegime: HMMRegime = activeStrategy ? {
+        timestamp: Date.now(),
+        // Map simple signal (-1 to 1) to Probabilities
+        probBull: (activeStrategy.signal ?? 0) > 0.05 ? (0.5 + (activeStrategy.confidence || 0) / 2) : 0.1,
+        probBear: (activeStrategy.signal ?? 0) < -0.05 ? (0.5 + (activeStrategy.confidence || 0) / 2) : 0.1,
+        probChop: Math.abs(activeStrategy.signal ?? 0) <= 0.05 ? (0.5 + (activeStrategy.confidence || 0) / 2) : 0.1,
+        regime: (activeStrategy.signal ?? 0) > 0.05 ? 'BULL' : (activeStrategy.signal ?? 0) < -0.05 ? 'BEAR' : 'CHOP',
+        confidence: activeStrategy.confidence || 0,
+    } : currentRegime;
 
-    // Real-time data stream for regime history
+    // Use computedRegime for consistency with old behavior
+    const dominantRegime = computedRegime.regime === 'UNKNOWN' ? 'UNKNOWN' : computedRegime.regime;
+
+    // Sync refs
+    useEffect(() => {
+        latestRegime.current = computedRegime;
+        latestStrategy.current = activeStrategy;
+    }, [computedRegime, activeStrategy]);
+
+    // Real-time data stream for regime and feature history (Decoupled Timer)
     useEffect(() => {
         const interval = setInterval(() => {
-            setRegimeHistory(prev => {
-                const newPoint = {
-                    timestamp: Date.now(),
-                    bull: currentRegime.probBull,
-                    bear: currentRegime.probBear,
-                    chop: currentRegime.probChop
-                };
-                // Keep only the last 30 minutes (1800 points at 1s interval)
-                return [...prev.slice(-1800), newPoint];
-            });
+            const now = Date.now();
+            const regime = latestRegime.current;
+            const strat = latestStrategy.current;
+
+            if (regime) {
+                // Update Regime History
+                setRegimeHistory(prev => {
+                    const newPoint = {
+                        timestamp: now,
+                        bull: regime.probBull,
+                        bear: regime.probBear,
+                        chop: regime.probChop
+                    };
+                    return [...prev.slice(-1800), newPoint];
+                });
+            }
+
+            if (strat) {
+                // Update Feature History
+                setFeatureHistory(prev => {
+                    const f = strat?.metrics?.features || {};
+                    const newPoint = {
+                        timestamp: now,
+                        vol: f.vol || 0,
+                        ret: f.ret || 0,
+                        dev_vwap: f.dev_vwap || 0,
+                        zscore: f.zscore || 0,
+                        vol_spike: f.vol_spike || 0,
+                    };
+                    return [...prev.slice(-1800), newPoint];
+                });
+            }
+
         }, 1000);
         return () => clearInterval(interval);
-    }, [currentRegime.probBull, currentRegime.probBear, currentRegime.probChop]);
+    }, []); // Empty dependency array ensures timer is stable
 
     return (
         <div className="p-8 space-y-8 min-h-screen flex flex-col max-w-[1920px] mx-auto w-full bg-deep-space text-zinc-100 font-header pb-20">
@@ -114,7 +202,7 @@ export function MLTab() {
                     <Brain className="h-8 w-8 text-neon-cyan" />
                     <div>
                         <div className="text-xs text-zinc-400 uppercase tracking-wider">Model Version</div>
-                        <div className="text-xl font-data font-bold text-white">—</div>
+                        <div className="text-xl font-data font-bold text-white">{modelVersion}</div>
                     </div>
                 </GlassCard>
 
@@ -122,7 +210,7 @@ export function MLTab() {
                     <ClockIcon className="h-8 w-8 text-neon-amber" />
                     <div>
                         <div className="text-xs text-zinc-400 uppercase tracking-wider">Last Trained</div>
-                        <div className="text-xl font-data font-bold text-white">—</div>
+                        <div className="text-xl font-data font-bold text-white">{lastTrained}</div>
                     </div>
                 </GlassCard>
 
@@ -130,7 +218,7 @@ export function MLTab() {
                     <Activity className="h-8 w-8 text-neon-green" />
                     <div>
                         <div className="text-xs text-zinc-400 uppercase tracking-wider">Accuracy (24h)</div>
-                        <div className="text-xl font-data font-bold text-neon-green">—</div>
+                        <div className="text-xl font-data font-bold text-neon-green">{accuracy}</div>
                     </div>
                 </GlassCard>
 
@@ -209,27 +297,32 @@ export function MLTab() {
                 </GlassCard>
             </div>
 
-            {/* BOTTOM ROW: Canary Model Comparison */}
+            {/* BOTTOM ROW: Neural Activity Monitor */}
             <div className="grid grid-cols-1 gap-8 h-[400px]">
-                <GlassCard title="Canary Model Performance vs Production" neonAccent="amber" className="flex flex-col">
+                <GlassCard title="Neural Activity Monitor (Real-Time Feature Stream)" neonAccent="blue" className="flex flex-col">
                     <div className="flex-1 w-full h-full min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={regimeHistory}>
+                            <LineChart data={featureHistory}>
                                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
                                 <XAxis dataKey="timestamp" tickFormatter={(t) => new Date(t).toLocaleTimeString()} stroke="#52525b" fontSize={12} />
-                                <YAxis stroke="#52525b" fontSize={12} />
+                                <YAxis stroke="#52525b" fontSize={12} domain={['auto', 'auto']} />
                                 <Tooltip
                                     contentStyle={{ backgroundColor: '#18181b', borderColor: '#27272a', color: '#f4f4f5' }}
                                     labelFormatter={(t) => new Date(t).toLocaleTimeString()}
                                 />
                                 <Legend />
-                                <Line type="monotone" dataKey="bull" stroke="#00ff9d" strokeWidth={2} dot={false} name="Prod v2.1 (PnL)" />
-                                <Line type="monotone" dataKey="chop" stroke="#ffd93d" strokeWidth={2} strokeDasharray="5 5" dot={false} name="Canary v2.2 (Shadow)" />
+                                <Line type="monotone" dataKey="vol" stroke="#00d2ff" strokeWidth={2} dot={false} name="Volatility" animationDuration={0} />
+                                <Line type="monotone" dataKey="zscore" stroke="#d946ef" strokeWidth={2} dot={false} name="Z-Score" animationDuration={0} />
+                                <Line type="monotone" dataKey="dev_vwap" stroke="#f59e0b" strokeWidth={2} dot={false} name="VWAP Dist" animationDuration={0} />
+                                <Line type="monotone" dataKey="ret" stroke="#10b981" strokeWidth={1} dot={false} name="Returns" opacity={0.5} animationDuration={0} />
+                                <Line type="monotone" dataKey="vol_spike" stroke="#ef4444" strokeWidth={1} dot={false} name="Vol Spike" opacity={0.5} animationDuration={0} />
                             </LineChart>
                         </ResponsiveContainer>
                     </div>
                 </GlassCard>
             </div>
+
+
         </div>
     );
 }

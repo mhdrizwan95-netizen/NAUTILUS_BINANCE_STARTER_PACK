@@ -184,7 +184,7 @@ export function SettingsTab() {
   };
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="space-y-6 p-6 relative z-50">
       <Card className={PANEL_CLASS}>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
@@ -211,7 +211,6 @@ export function SettingsTab() {
             value={opsTokenInput}
             onChange={(event) => {
               setOpsTokenInput(event.target.value);
-              setOpsToken(event.target.value);
             }}
             placeholder="Paste OPS_API_TOKEN value"
             autoComplete="off"
@@ -229,11 +228,27 @@ export function SettingsTab() {
             value={opsActorInput}
             onChange={(event) => {
               setOpsActorInput(event.target.value);
-              setOpsActor(event.target.value);
             }}
             placeholder="Enter your call-sign or initials"
             autoComplete="off"
           />
+          <div className="flex justify-end pt-2">
+            <Button
+              size="sm"
+              onClick={() => {
+                if (!opsTokenInput.trim()) {
+                  toast.error("Token cannot be empty");
+                  return;
+                }
+                setOpsToken(opsTokenInput);
+                setOpsActor(opsActorInput);
+                toast.success("Credentials saved");
+              }}
+              className="bg-cyan-500 hover:bg-cyan-600"
+            >
+              Save Credentials
+            </Button>
+          </div>
         </CardContent>
       </Card>
 

@@ -218,6 +218,7 @@ class EventBus:
         for handler, result in zip(handlers, results, strict=False):
             if isinstance(result, Exception):
                 failed += 1
+                func_name = getattr(handler, "__name__", str(handler))
                 logging.error("[BUS] Handler error on '%s': %s", topic, result)
                 continue
 

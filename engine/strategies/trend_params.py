@@ -153,7 +153,7 @@ class TrendAutoTuner:
                 "history": list(self.history)[-self.cfg.auto_tune_history :],
             }
             self._state_path.write_text(json.dumps(payload, indent=2))
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self._log.debug("[TREND-AUTO] Failed to persist tuner state", exc_info=True)
 
     def _load_state(self) -> None:
@@ -171,5 +171,5 @@ class TrendAutoTuner:
                 len(self.history),
                 self.params.to_dict(),
             )
-        except _SUPPRESSIBLE_EXCEPTIONS:
+        except Exception as exc:
             self._log.warning("[TREND-AUTO] Failed to restore tuner state", exc_info=True)
