@@ -21,7 +21,11 @@ from .execution.execute import StrategyExecutor
 from .ops_auth import require_ops_token
 from .risk import RiskRails
 from .state.cooldown import Cooldowns
-from .strategies import ensemble_policy, policy_hmm
+from .strategies import policy_hmm
+from .strategies.policy_river import RiverPolicy
+
+# Initialize River Policy (Global)
+river_policy = RiverPolicy()
 from .strategies.calibration import cooldown_scale as calibration_cooldown_scale
 from .strategies.scalp.brackets import ScalpBracketManager
 from .strategies.scalping import ScalpStrategyModule, load_scalp_config
@@ -986,8 +990,24 @@ async def on_tick(
             logging.getLogger(__name__).warning("HMM Features failed: %s", exc, exc_info=True)
             pass
 
-    # --- Ensemble fusion ---
-    fused = ensemble_policy.combine(base, ma_side, ma_conf, hmm_decision)
+    # --- River Online Learning ---
+    river_pred = 0
+    river_proba = {}
+    if hmm_features:
+        try:
+            r_res = river_policy.on_tick(base, hmm_features, price)
+            river_pred = r_res.get("prediction", 0)
+            river_proba = r_res.get("proba", {})
+            # Save model occasionally (1% chance) to avoid IO blocking
+            import random
+            if random.random() < 0.01:
+                river_policy.save()
+        except Exception as exc:
+            pass
+
+    # --- Ensemble fusion (with River voting) ---
+    river_decision = {"prediction": river_pred, "proba": river_proba} if river_pred is not None else None
+    fused = ensemble_policy.combine(base, ma_side, ma_conf, hmm_decision, river_decision)
 
     signal_side = None
     signal_quote = S_CFG.quote_usdt
@@ -995,22 +1015,26 @@ async def on_tick(
     conf_to_emit = 0.0
     
     # DEBUG LOGGING
-    if ma_conf > 0 or hmm_conf > 0:
-        logging.info(f"[STRATEGY] {base} Decision: MA_Conf={ma_conf:.4f} HMM_Conf={hmm_conf:.4f} Ensemble={bool(fused)}")
+    if ma_conf > 0 or hmm_conf > 0 or river_pred == 1:
+        logging.info(f"[STRATEGY] {base} Decision: MA_Conf={ma_conf:.4f} HMM_Conf={hmm_conf:.4f} River={river_pred} (Proba={river_proba}) Ensemble={bool(fused)}")
 
     if fused:
         signal_side, signal_quote, signal_meta = fused
         conf_to_emit = float(signal_meta.get("conf", 0.0))
+        logging.info(f"[STRATEGY_TRACE] {base} FUSED: Side={signal_side} Conf={conf_to_emit}")
     elif ma_side and not S_CFG.ensemble_enabled:
         signal_side = ma_side
         signal_quote = S_CFG.quote_usdt
         signal_meta = {"exp": "ma_v1", "conf": ma_conf}
         conf_to_emit = ma_conf
+        logging.info(f"[STRATEGY_TRACE] {base} MA (Solo): Side={signal_side} Conf={conf_to_emit}")
     elif hmm_decision:
         signal_side, signal_quote, signal_meta = hmm_decision
         conf_to_emit = float(signal_meta.get("conf", hmm_conf))
+        logging.info(f"[STRATEGY_TRACE] {base} HMM (Solo): Side={signal_side} Conf={conf_to_emit}")
     else:
         conf_to_emit = max(ma_conf, hmm_conf)
+        logging.info(f"[STRATEGY_TRACE] {base} NO SIGNAL. Conf={conf_to_emit}")
 
     signal_value = 0.0
     if signal_side:
@@ -1070,6 +1094,7 @@ async def on_tick(
         )
 
         result = await _execute_strategy_signal_async(sig)
+        logging.info(f"[STRATEGY_TRACE] Execution Result for {qualified}: {result}")
         if result.get("status") == "submitted":
             try:
                 metrics.strategy_orders_total.labels(
@@ -1122,6 +1147,7 @@ def _cooldown_ready(symbol: str, price: float, confidence: float, venue: str) ->
     if not _SYMBOL_COOLDOWNS.allow(symbol, now=now):
         try:
             remaining = _SYMBOL_COOLDOWNS.remaining(symbol, now=now)
+            logging.info(f"[STRATEGY_TRACE] Cooldown blocking {symbol}. Remaining: {remaining:.2f}s")
             metrics.strategy_cooldown_window_seconds.labels(symbol=base_symbol, venue=venue).set(
                 remaining
             )

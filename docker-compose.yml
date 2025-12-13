@@ -128,6 +128,7 @@ services:
       - SCALP_ENABLED=true
       - MOMENTUM_RT_ENABLED=true
       # Dynamic Symbol Discovery (SymbolScanner)
+      - ENSEMBLE_ENABLED=true
       - SYMBOL_SCANNER_ENABLED=true
       - SYMBOL_SCANNER_UNIVERSE=BTCUSDT,ETHUSDT,BNBUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,DOTUSDT,MATICUSDT,SHIBUSDT,LTCUSDT,ATOMUSDT,UNIUSDT,ETCUSDT,XLMUSDT,NEARUSDT,APTUSDT,ARBUSDT
       - SYMBOL_SCANNER_TOP_N=5
@@ -137,7 +138,11 @@ services:
       - SYMBOL_SCANNER_MIN_ATR_PCT=0.1
       - OPS_URL=http://ops:8002
       - OPS_TOKEN=${OPS_API_TOKEN:-}
+      - OPS_TOKEN=${OPS_API_TOKEN:-}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       # Relaxed constraints for dry-run testing
+      - STRATEGY_DRY_RUN=false
       - TREND_ATR_TARGET_MULT=2.5
       - TREND_ATR_STOP_MULT=1.0
       - TREND_RISK_PCT=0.01
@@ -324,6 +329,8 @@ services:
       - EXACTLY_ONCE=true
       - DELETE_AFTER_PROCESS=true
       - LOG_LEVEL=INFO
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     depends_on:
       data_ingester:
         condition: service_started
@@ -446,6 +453,16 @@ services:
     networks:
       - trading_net
     restart: unless-stopped
+  redis:
+    image: redis:alpine
+    container_name: hmm_redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - trading_net
+    ports:
+      - "6379:6379"
 networks:
   trading_net:
     external: true
@@ -457,3 +474,4 @@ volumes:
   backtest_research_volume: null
   prometheus_data: null
   grafana_data: null
+  redis_data: null

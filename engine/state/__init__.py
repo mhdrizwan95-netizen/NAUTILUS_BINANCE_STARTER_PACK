@@ -45,7 +45,7 @@ def now_ms() -> int:
 
 class SnapshotStore:
     """
-    Crash-safe portfolio snapshots with atomic writes.
+    Crash-safe portfolio snapshots with Redis backing (and file fallback).
     Schema is intentionally simple and engine-owned:
       {
         "ts_ms": 1712345678901,
@@ -54,22 +54,65 @@ class SnapshotStore:
         "positions": [
            {"symbol":"BTCUSDT.BINANCE","qty_base":0.0012,"avg_price_quote":62500.5}
         ],
-        "pnl":{"realized": 1.23, "unrealized": 0.45}
+        "pnl":{"realized": 1.23, "unrealized": 0.45},
+        "breaker": {"status": "open/closed", "trip_ts": ...}
       }
     """
 
     def __init__(self, path: Path = SNAP_PATH):
         self.path = path
+        self.redis_client = None
+        redis_host = os.getenv("REDIS_HOST")
+        if redis_host:
+            try:
+                import redis  # type: ignore
+                self.redis_client = redis.Redis(
+                    host=redis_host, 
+                    port=int(os.getenv("REDIS_PORT", "6379")), 
+                    db=0, 
+                    decode_responses=True,
+                    socket_connect_timeout=2.0
+                )
+                self.redis_client.ping()
+                print(f"[Persistence] Connected to Redis at {redis_host}")
+            except Exception as exc:
+                print(f"[Persistence] Redis connection failed: {exc}")
+                self.redis_client = None
 
     def load(self) -> dict[str, Any] | None:
+        # Try Redis first
+        if self.redis_client:
+            try:
+                data = self.redis_client.get("state:portfolio")
+                if data:
+                    print("[Persistence] Loaded state from Redis")
+                    return json.loads(data)
+            except Exception as exc:
+                print(f"[Persistence] Failed to load from Redis: {exc}")
+
+        # Fallback to File
         if not self.path.exists():
             return None
         with _LOCK:
-            with open(self.path) as f:
-                return json.load(f)
+            try:
+                with open(self.path) as f:
+                    print(f"[Persistence] Loaded state from {self.path}")
+                    return json.load(f)
+            except Exception:
+                return None
 
     def save(self, snapshot: dict[str, Any]) -> None:
         with _LOCK:
             payload = dict(snapshot)
             payload.setdefault("ts_ms", now_ms())
+            
+            # Save to Redis
+            if self.redis_client:
+                try:
+                    self.redis_client.set("state:portfolio", json.dumps(payload))
+                except Exception as exc:
+                    # Don't crash on Redis failure, fallback to file is safe
+                    pass
+
+            # Always save to File as backup (Double Persistence)
             _atomic_write_json(self.path, payload)

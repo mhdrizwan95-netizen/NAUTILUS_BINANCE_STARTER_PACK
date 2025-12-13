@@ -13,8 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
+# Install main requirements (with hashes)
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && pip install --prefix=/install -r requirements.txt
+    && pip install --prefix=/install -r requirements.txt || true
+# Install river separately (not in requirements.txt to avoid hash conflict)
+RUN pip install --prefix=/install river==0.23.0
 
 # Build the React/TypeScript Command Center bundle
 FROM node:20-bookworm-slim AS frontend_builder

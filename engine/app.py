@@ -2914,6 +2914,8 @@ async def get_strategies() -> dict[str, Any]:
                     "params": {},
                     "metrics": getattr(strat_mod.policy_hmm, 'get_regime', lambda s: {})(getattr(s_cfg, 'symbols', ['BTCUSDT'])[0]) or {},
                     "performance": {
+                        "realized_pnl": 0.0,
+                        "unrealized_pnl": 0.0,
                         "pnl": 0.0,
                         "sharpe": 0.0,
                         "drawdown": 0.0,
