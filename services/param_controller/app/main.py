@@ -1,8 +1,17 @@
-from typing import Any
 
+
+import logging
 import numpy as np
 from fastapi import FastAPI, HTTPException
-from loguru import logger
+
+try:
+    from shared.logging import setup_logging
+    setup_logging("param_controller")
+except ImportError:
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("param_controller").warning("Shared logging not available.")
+
+logger = logging.getLogger("param_controller")
 
 from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 

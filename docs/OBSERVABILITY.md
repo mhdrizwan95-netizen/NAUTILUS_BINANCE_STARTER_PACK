@@ -2,6 +2,14 @@
 
 Prometheus/Grafana are provisioned under `ops/observability/`. The engine exposes rich metrics in `engine/metrics.py`.
 
+## Standardized Logging
+
+All services (`engine`, `ops`, `ml_service`, `param_controller`) emit structured JSON logs via `shared.logging`.
+
+*   **Format**: `{"ts": "ISO8601", "level": "INFO", "service": "X", "msg": "..."}`
+*   **Redaction**: Sensitive keys (API keys, secrets) valid values are automatically masked as `***redacted***`.
+*   **Robustness**: Services perform a "Safe Import" causing them to fall back to standard text logging if the `shared` volume is momentarily unavailable during hot-reloads.
+
 ## Command Centre
 
 - **Primary surface (canonical)**: Grafana dashboard `Command Center v2`

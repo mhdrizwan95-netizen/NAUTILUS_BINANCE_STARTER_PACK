@@ -375,3 +375,11 @@ export const issueWebsocketSession = (options: ControlRequestOptions) =>
     },
     options?.signal,
   );
+
+// Scanner
+export const getScannerState = (signal?: AbortSignal) =>
+  api<{
+    selected: string[];
+    scores: Record<string, number>;
+    last_selected: Record<string, number>;
+  }>("/api/scanner/state", undefined, signal);

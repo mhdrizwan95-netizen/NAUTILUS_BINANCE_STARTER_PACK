@@ -129,6 +129,19 @@ export function DashboardTab() {
             </div>
           </div>
         </GlassCard>
+
+        {/* Risk Monitor */}
+        <GlassCard className="flex items-center !gap-4 !p-4" neonAccent={Math.abs(globalMetrics?.drawdown || 0) > 0.05 ? "red" : "blue"}>
+          <div className="!h-10 !w-10 rounded-lg bg-indigo-500/20 flex items-center justify-center">
+            <span className="text-indigo-400">🛡️</span>
+          </div>
+          <div>
+            <div className="!text-xs text-zinc-400 uppercase tracking-wider">Max DD</div>
+            <div className="!text-lg font-mono font-bold text-zinc-100">
+              {((globalMetrics?.drawdown || 0) * 100).toFixed(2)}%
+            </div>
+          </div>
+        </GlassCard>
       </div>
 
       {/* MAIN ROW: Strategies & Trades */}

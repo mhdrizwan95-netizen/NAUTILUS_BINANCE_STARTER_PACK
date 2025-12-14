@@ -10,6 +10,7 @@ import logging
 import math
 import os
 import time
+from decimal import Decimal, ROUND_DOWN, ROUND_HALF_UP
 from time import time as _now
 from typing import Any, Literal
 
@@ -109,6 +110,15 @@ class ClientMissingMethodError(ValueError):
 
     def __init__(self, method: str) -> None:
         super().__init__(f"CLIENT_MISSING_METHOD: {method}")
+
+
+class RiskViolationError(ValueError):
+    """Raised when the global risk engine rejects an order."""
+
+    def __init__(self, reason: dict) -> None:
+        msg = f"RISK_REJECTION: {reason.get('error')} - {reason.get('message')}"
+        super().__init__(msg)
+        self.reason = reason
 
 
 def _log_suppressed(context: str, exc: Exception) -> None:
@@ -256,10 +266,17 @@ async def _maybe_refresh_order_status(
 class OrderRouter:
     """Handles order validation and routing across multiple venues."""
 
-    def __init__(self, default_client, portfolio: Portfolio, venue: str | None = None) -> None:
+    def __init__(
+        self,
+        default_client,
+        portfolio: Portfolio,
+        venue: str | None = None,
+        rails: Any = None,
+    ) -> None:
         self._portfolio = portfolio
         self._settings = get_settings()
         self._venue = (venue or self._settings.venue).upper()
+        self._rails = rails
         # Register default client for this router's venue
         set_exchange_client(self._venue, default_client)
         if self._venue == "BINANCE":
@@ -990,6 +1007,20 @@ async def _place_market_order_async_core(
 
     quantity_val = float(quantity)
     notional = abs(quantity_val) * float(px)
+
+    # --- GLOBAL RISK CHECK ---
+    if getattr(self, "_rails", None):
+        ok, reason = self._rails.check_order(
+            symbol=symbol,
+            side=side,
+            quote=quote,
+            quantity=quantity,
+            market=market_hint,
+        )
+        if not ok:
+            orders_rejected.inc()
+            raise RiskViolationError(reason)
+
     if venue == "IBKR":
         min_notional = max(min_notional, ibkr_min_notional_usd())
 
@@ -1236,8 +1267,10 @@ async def _recover_orphan_order(
 def _round_step(value: float, step: float) -> float:
     if step <= 0:
         return value
-    factor = 1 / step
-    return round(value * factor) / factor
+    # Use Decimal for precise quantization (Round DOWN/FLOOR for safety on quantity)
+    d_val = Decimal(str(value))
+    d_step = Decimal(str(step))
+    return float(d_val.quantize(d_step, rounding=ROUND_DOWN))
 
 
 async def _resolve_last_price(
@@ -1269,9 +1302,10 @@ async def _resolve_last_price(
 
 def _round_tick(value: float, tick: float) -> float:
     if tick and tick > 0:
-        precision = int(abs(math.log10(tick))) if tick < 1 else 0
-        factor = 1 / tick
-        return math.floor(value * factor) / factor if factor != 0 else round(value, precision)
+        # Use Decimal for precise quantization (Round NEAREST for price)
+        d_val = Decimal(str(value))
+        d_tick = Decimal(str(tick))
+        return float(d_val.quantize(d_tick, rounding=ROUND_HALF_UP))
     return value
 
 
@@ -1472,6 +1506,19 @@ class OrderRouterExt(OrderRouter):
         if notional < min_notional:
             orders_rejected.inc()
             raise MinNotionalViolationError(notional, min_notional)
+
+        # --- GLOBAL RISK CHECK ---
+        if getattr(self, "_rails", None):
+            ok, reason = self._rails.check_order(
+                symbol=symbol,
+                side=side,
+                quote=None,
+                quantity=quantity,
+                market=market.lower() if isinstance(market, str) else None,
+            )
+            if not ok:
+                orders_rejected.inc()
+                raise RiskViolationError(reason)
 
         # Submit
         clean_symbol = _normalize_symbol(symbol) if venue == "BINANCE" else symbol

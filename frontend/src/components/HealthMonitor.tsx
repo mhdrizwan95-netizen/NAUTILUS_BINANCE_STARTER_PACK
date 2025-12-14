@@ -13,6 +13,15 @@ import { GlassCard } from './ui/GlassCard';
 import { LatencyHeatmap } from './LatencyHeatmap';
 
 export function HealthMonitor() {
+    // Real-time Data
+    const venues = useAppStore(state => state.realTimeData.venues);
+    const systemHealth = useAppStore(state => state.realTimeData.systemHealth);
+
+    // Aggregates
+    const totalQueue = venues.reduce((acc, v) => acc + (v.queue || 0), 0);
+    const maxLatency = Math.max(...venues.map(v => v.latency || 0), 0);
+    const mlStatus = venues.find(v => v.name === 'ML_SERVICE')?.status === 'ok' ? 'ONLINE' : 'OFFLINE';
+
     // Simulated Health State
     const [heartbeatHistory, setHeartbeatHistory] = useState<{ i: number; v: number }[]>([]);
     // const [latencyMap, setLatencyMap] = useState<number[]>(Array(50).fill(0)); // Removed mock
@@ -35,10 +44,10 @@ export function HealthMonitor() {
 
             {/* STATUS HEADER */}
             <div className="grid grid-cols-4 gap-6 shrink-0">
-                <StatusBadge label="ENGINE" status="OK" color="green" />
+                <StatusBadge label="ENGINE" status={systemHealth.tradingEnabled ? "ACTIVE" : "STANDBY"} color={systemHealth.tradingEnabled ? "green" : "amber"} />
                 <StatusBadge label="DATA FEED" status="OK" color="green" />
-                <StatusBadge label="EXECUTION" status="OK" color="green" />
-                <StatusBadge label="ML TRAINING" status="TRAINING" color="amber" />
+                <StatusBadge label="EXECUTION" status={systemHealth.tradingEnabled ? "LIVE" : "PAPER"} color="green" />
+                <StatusBadge label="ML TRAINING" status={mlStatus} color={mlStatus === 'ONLINE' ? "green" : "amber"} />
             </div>
 
             {/* MAIN METRICS ROW */}
@@ -129,7 +138,7 @@ export function HealthMonitor() {
                 </GlassCard>
 
                 {/* Database Health */}
-                <GlassCard title="Database Health" neonAccent="green" className="flex flex-col justify-around">
+                <GlassCard title="Data IO Health" neonAccent="green" className="flex flex-col justify-around">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <Database className="w-5 h-5 text-neon-green" />
@@ -140,16 +149,16 @@ export function HealthMonitor() {
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <Server className="w-5 h-5 text-neon-green" />
-                            <span className="text-zinc-300">Queue Size</span>
+                            <span className="text-zinc-300">Event Queue</span>
                         </div>
-                        <span className="font-mono font-bold text-white">0</span>
+                        <span className="font-mono font-bold text-white">{totalQueue} events</span>
                     </div>
                     <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                             <Activity className="w-5 h-5 text-neon-green" />
-                            <span className="text-zinc-300">Write Latency</span>
+                            <span className="text-zinc-300">Max Latency</span>
                         </div>
-                        <span className="font-mono font-bold text-white">2ms</span>
+                        <span className="font-mono font-bold text-white">{maxLatency}ms</span>
                     </div>
                 </GlassCard>
             </div>

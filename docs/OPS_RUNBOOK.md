@@ -6,6 +6,9 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 
 | Check | Command / Location | Pass Criteria |
 |-------|--------------------|---------------|
+| Check | Command / Location | Pass Criteria |
+|-------|--------------------|---------------|
+| Neuro-Symbolic Health | `curl http://localhost:8003/health | jq` | `{"status": "ok", "mode": "neuro-symbolic-phase7"}` |
 | Engine & exporter metrics | `make smoke-exporter` | `equity_usd`, `cash_usd`, `market_value_usd`, `metrics_heartbeat`, `risk_equity_buffer_usd` return non-empty values and residual ≈ 0. |
 | Prometheus scrape status | `make smoke-prom` or `http://localhost:9090/targets` | `engine_binance`, `ops`, and exporters show `health: "up"`. |
 | Ops API status | `curl http://localhost:8002/status | jq` | `{"trading_enabled": true}` (or expected value) and balances populated. |
@@ -33,6 +36,7 @@ This playbook captures the day-to-day checklist for running the Nautilus HMM sta
 | Flip feature flags | Edit `.env` and restart or export env in compose overrides | Start modules in dry-run where available; validate metrics first. |
 | Force trend auto-tune reset | Delete `data/runtime/trend_auto_tune.json` and restart engine | Only do this if the state file is corrupt or you want to revert to env defaults. |
 | Re-scan symbols manually | `touch data/runtime/symbol_scanner_state.json` then restart engine or call scanner control endpoint (TBD) | Scanner automatically runs every `SYMBOL_SCANNER_INTERVAL_SEC`; manual reset forces a fresh shortlist. |
+| Enable Dev Auth Bypass | Set `GLASS_COCKPIT=1` in `.env` | Disables `X-Ops-Token` requirement for API/WebSocket. **WARNING**: Do not use in production. |
 
 ### Operating without a custom UI
 
@@ -103,7 +107,11 @@ curl -X POST http://localhost:8002/api/ops/flatten \
    - `engine/logs/orders.jsonl` — confirm last trades prior to incident.
 3. **Clean start**
    ```bash
-   make up-core
+   ```bash
+   python3 neuro_symbolic_main.py
+   # Or via Docker if updated:
+   # make up-core
+   ```
    make up-obs      # optional
    ```
 4. **Validate**
@@ -120,9 +128,9 @@ curl -X POST http://localhost:8002/api/ops/flatten \
 
 | Symptom | What to inspect | Remedy |
 |---------|-----------------|--------|
-| Orders rejected unexpectedly | `engine/logs/app.log`, `/orders` response JSON, `RiskRails` metrics (`breaker_rejections_total`, `risk_equity_floor_breach`) | Check `TRADING_ENABLED`, notional limits, exposure caps, equity floor/drawdown breakers. Adjust env or policies, or call `/kill` to reset. |
+| Orders rejected unexpectedly | `docker compose logs engine_binance`, `/orders` response JSON, `RiskRails` metrics (`breaker_rejections_total`, `risk_equity_floor_breach`) | Check `TRADING_ENABLED`, notional limits, exposure caps, equity floor/drawdown breakers. Adjust env or policies, or call `/kill` to reset. |
 | Metrics frozen (heartbeat > 60s) | Exporter container logs (`docker compose logs engine_binance_exporter`), Prometheus targets, DNS/network | Restart exporter, ensure exporter and Prometheus share `nautilus_trading_network` (see `docs/network-dns-fix.md`). |
-| Tick ingestion stalled (`strategy_ticks_total` flat) | Trader logs, Binance REST connectivity, `/health` | Ensure `VENUE=BINANCE` refresh task logs `Starting background refresh task`; restart trader if missing. |
+| Tick ingestion stalled (`strategy_ticks_total` flat) | `docker compose logs engine_binance` (trader logs), Binance REST connectivity, `/health` | Ensure `VENUE=BINANCE` refresh task logs `Starting background refresh task`; restart trader if missing. |
 | Latency spike (`strategy_tick_to_order_latency_ms` > 250 ms) | Host CPU, Python GC (`python_gc_*` gauges), engine logs | Reduce symbol fan-out, verify no heavy work inside `_notify_listeners`, consider scaling hardware. |
 | Prometheus scrape errors | `make smoke-prom`, Prometheus UI errors | Validate targets in `ops/observability/prometheus/prometheus.yml`; ensure containers running; reload via `make prom-reload`. |
 | High venue error rate / breaker tripped | `engine/logs/orders.jsonl`, `engine/logs/events.jsonl`, metrics `engine_venue_errors_total`, `venue_error_rate_pct` | Investigate root cause; reduce trading exposure; kill switch if necessary; consider raising `VENUE_ERROR_BREAKER_PCT` temporarily once resolved. |

@@ -15,7 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 # Install main requirements (with hashes)
 RUN python -m pip install --upgrade pip setuptools wheel \
-    && pip install --prefix=/install -r requirements.txt || true
+    && pip install --prefix=/install -r requirements.txt
 # Install river separately (not in requirements.txt to avoid hash conflict)
 RUN pip install --prefix=/install river==0.23.0
 
@@ -63,4 +63,4 @@ RUN useradd -m appuser \
 USER appuser
 
 ENTRYPOINT ["/usr/bin/tini","--"]
-CMD ["uvicorn","engine.app:app","--host","0.0.0.0","--port","8003"]
+CMD ["python","production_main.py"]

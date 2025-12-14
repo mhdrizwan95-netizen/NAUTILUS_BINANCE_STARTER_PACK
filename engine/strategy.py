@@ -538,6 +538,104 @@ def update_strategy(strategy_id: str, request: Request, payload: StrategyParams)
     raise HTTPException(status_code=404, detail=f"Strategy {strategy_id} not found or not loaded")
 
 
+@router.get("/strategies")
+def get_strategies(request: Request):
+    """List all available strategies and their status."""
+    strategies = []
+    
+    # 1. Trend Follow
+    if TREND_MODULE:
+        strategies.append({
+            "id": "trend_follow",
+            "name": "Trend Follow",
+            "kind": "trend",
+            "status": "running" if getattr(TREND_MODULE, "enabled", False) else "stopped",
+            "params": getattr(TREND_MODULE, "cfg", {}).__dict__ if hasattr(TREND_MODULE, "cfg") else {},
+            "performance": {
+                "pnl": 0.0,
+                "sharpe": 0.0,
+                "winRate": 0.0,
+                "drawdown": 0.0,
+                "equitySeries": []
+            },
+            "symbols": S_CFG.symbols or ["BTCUSDT.BINANCE"]
+        })
+
+    # 2. Scalping
+    if SCALP_MODULE:
+        strategies.append({
+            "id": "scalp",
+            "name": "Scalp Strategy",
+            "kind": "scalp",
+            "status": "running" if getattr(SCALP_MODULE, "enabled", False) else "stopped",
+            "params": getattr(SCALP_MODULE, "cfg", {}).__dict__ if hasattr(SCALP_MODULE, "cfg") else {},
+            "performance": {
+                "pnl": 0.0,
+                "sharpe": 0.0,
+                "winRate": 0.0,
+                "drawdown": 0.0,
+                "equitySeries": []
+            },
+            "symbols": S_CFG.symbols or ["BTCUSDT.BINANCE"]
+        })
+
+    # 3. Momentum RT
+    if MOMENTUM_RT_MODULE:
+        strategies.append({
+            "id": "momentum_rt",
+            "name": "Momentum RT",
+            "kind": "momentum",
+            "status": "running" if getattr(MOMENTUM_RT_MODULE, "enabled", False) else "stopped",
+            "params": getattr(MOMENTUM_RT_MODULE, "cfg", {}).__dict__ if hasattr(MOMENTUM_RT_MODULE, "cfg") else {},
+            "performance": {
+                "pnl": 0.0,
+                "sharpe": 0.0,
+                "winRate": 0.0,
+                "drawdown": 0.0,
+                "equitySeries": []
+            },
+            "symbols": S_CFG.symbols or ["BTCUSDT.BINANCE"]
+        })
+
+    # 4. Liquidation Sniper
+    if LIQU_MODULE:
+        strategies.append({
+            "id": "liquidation_sniper",
+            "name": "Liquidation Sniper",
+            "kind": "event_driven",
+            "status": "running" if getattr(LIQU_MODULE, "enabled", False) else "stopped",
+            "params": getattr(LIQU_MODULE, "cfg", {}).__dict__ if hasattr(LIQU_MODULE, "cfg") else {},
+            "performance": {
+                "pnl": 0.0,
+                "sharpe": 0.0,
+                "winRate": 0.0,
+                "drawdown": 0.0,
+                "equitySeries": []
+            },
+            "symbols": ["Global Futures"]
+        })
+
+    # 5. DeepSeek
+    if DEEPSEEK_MODULE:
+        strategies.append({
+            "id": "deepseek_v2",
+            "name": "DeepSeek v2",
+            "kind": "ai",
+            "status": "running" if getattr(DEEPSEEK_MODULE, "enabled", False) else "stopped",
+            "params": getattr(DEEPSEEK_MODULE, "cfg", {}).__dict__ if hasattr(DEEPSEEK_MODULE, "cfg") else {},
+            "performance": {
+                "pnl": 0.0,
+                "sharpe": 0.0,
+                "winRate": 0.0,
+                "drawdown": 0.0,
+                "equitySeries": []
+            },
+            "symbols": ["AI Selected"]
+        })
+
+    return {"data": strategies, "page": {"totalHint": len(strategies)}}
+
+
 _EXECUTOR: StrategyExecutor | None = None
 _EXECUTOR_OVERRIDE: StrategyExecutor | None = None
 
@@ -1078,6 +1176,25 @@ async def on_tick(
         signal_side, signal_quote, signal_meta = hmm_decision
         conf_to_emit = float(signal_meta.get("conf", hmm_conf))
         logging.info(f"[STRATEGY_TRACE] {base} HMM (Solo): Side={signal_side} Conf={conf_to_emit}")
+
+    # --- BRAIN VETO / ENSEMBLE ---
+    if signal_side:
+        brain_side, brain_factor, brain_meta = BRAIN.get_decision(base, price)
+        if not brain_side:
+             # Brain VETO (Sentiment too low or Regime conflict)
+             logging.info(f"[STRATEGY] Brain VETOED {signal_side} for {base}: {brain_meta.get('brain_reason')}")
+             signal_side = None # Cancel signal
+        elif brain_side != signal_side:
+             # Brain CONFLICT (Strategy says BUY, Brain says SELL)
+             logging.info(f"[STRATEGY] Brain CONFLICT. Strat={signal_side} Brain={brain_side}. Blocking.")
+             signal_side = None 
+        else:
+             # Brain APPROVES
+             # Apply Brain Sizing Boost (e.g. 1.2x)
+             signal_quote *= brain_factor
+             signal_meta["brain_reason"] = brain_meta.get("brain_reason")
+             signal_meta["ai_sentiment"] = brain_meta.get("sentiment")
+             logging.info(f"[STRATEGY] Brain APPROVED {signal_side}. Factor={brain_factor}. Reason: {brain_meta.get('brain_reason')}")
     else:
         conf_to_emit = max(ma_conf, hmm_conf)
         logging.info(f"[STRATEGY_TRACE] {base} NO SIGNAL. Conf={conf_to_emit}")
@@ -1261,12 +1378,13 @@ def _schedule_bracket_watch(symbol: str, side: str, entry_px: float):
     up = entry_px * (1 + tp)
     dn = entry_px * (1 - sl)
 
-    def _watch():
+    async def _watch():
         # light, best-effort loop
         for _ in range(120):  # ~2h at 60s; adjust if you poll faster
-            px = _latest_price(symbol)
+            # Run sync price fetch in thread to avoid blocking loop
+            px = await asyncio.to_thread(_latest_price, symbol)
             if px is None:
-                time.sleep(S_CFG.interval_sec)
+                await asyncio.sleep(S_CFG.interval_sec)
                 continue
             if side == "BUY":
                 if px >= up:
@@ -1278,7 +1396,7 @@ def _schedule_bracket_watch(symbol: str, side: str, entry_px: float):
                         dry_run=None,
                         tag="tp",
                     )
-                    _execute_strategy_signal(sig)
+                    await _execute_strategy_signal_async(sig)
                     break
                 if px <= dn:
                     sig = StrategySignal(
@@ -1289,7 +1407,7 @@ def _schedule_bracket_watch(symbol: str, side: str, entry_px: float):
                         dry_run=None,
                         tag="sl",
                     )
-                    _execute_strategy_signal(sig)
+                    await _execute_strategy_signal_async(sig)
                     break
             else:  # short on futures/perp only; if spot, this will be ignored by router/rails
                 if px <= dn:
@@ -1301,7 +1419,7 @@ def _schedule_bracket_watch(symbol: str, side: str, entry_px: float):
                         dry_run=None,
                         tag="tp",
                     )
-                    _execute_strategy_signal(sig)
+                    await _execute_strategy_signal_async(sig)
                     break
                 if px >= up:
                     sig = StrategySignal(
@@ -1312,11 +1430,15 @@ def _schedule_bracket_watch(symbol: str, side: str, entry_px: float):
                         dry_run=None,
                         tag="sl",
                     )
-                    _execute_strategy_signal(sig)
+                    await _execute_strategy_signal_async(sig)
                     break
-            time.sleep(S_CFG.interval_sec)
+            await asyncio.sleep(S_CFG.interval_sec)
 
-    threading.Thread(target=_watch, daemon=True).start()
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_watch())
+    except RuntimeError:
+        pass
 
 
 def start_scheduler():
@@ -1327,18 +1449,28 @@ def start_scheduler():
         return
     _stop_flag.clear()
 
-    def loop():
+    _stop_flag.clear()
+
+    async def loop():
         while not _stop_flag.is_set():
             t0 = time.time()
             try:
-                _tick_once()
+                # Run tick_once (which does sync HTTP) in thread
+                await asyncio.to_thread(_tick_once)
             except Exception as exc:
                 pass
             dt = max(0.0, S_CFG.interval_sec - (time.time() - t0))
-            _stop_flag.wait(dt)
+            # Check flag more frequently or use wait_for? 
+            # For simplicity in async, just sleep. Flag check is on loop.
+            await asyncio.sleep(dt)
 
-    _loop_thread = threading.Thread(target=loop, name="strategy-ma-cross", daemon=True)
-    _loop_thread.start()
+    try:
+        aloop = asyncio.get_running_loop()
+        aloop.create_task(loop())
+    except RuntimeError:
+         # Fallback if no loop (e.g. tests)
+         t = threading.Thread(target=lambda: asyncio.run(loop()), name="strategy-ma-cross", daemon=True)
+         t.start()
 
 
 def stop_scheduler():

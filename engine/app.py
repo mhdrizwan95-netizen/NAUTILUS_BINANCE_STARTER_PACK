@@ -754,7 +754,7 @@ BUS.subscribe("market.trade", _broadcast_market_trade)
 BUS.subscribe("strategy.performance", _broadcast_strategy_performance)
 
 portfolio = Portfolio(on_update=_broadcast_telemetry)
-router = OrderRouterExt(rest_client, portfolio, venue=VENUE)
+router = OrderRouterExt(rest_client, portfolio, venue=VENUE, rails=RAILS)
 order_router = router
 try:
     # Expose BUS on router for event publishing (e.g., trade.fill)
@@ -3429,6 +3429,62 @@ async def _start_telemetry_watchdog() -> None:
                     RAILS.set_circuit_breaker(False)
 
     asyncio.create_task(watchdog())
+
+
+@app.on_event("startup")
+async def _start_venue_monitor() -> None:
+    """Start periodic venue health telemetry (Heartbeat for UI)."""
+    if IS_EXPORTER or VENUE != "BINANCE":
+        return
+
+    async def _monitor_loop() -> None:
+        _app_logger.info("[VenueMonitor] Started venue health telemetry")
+        while True:
+            try:
+                # Check _market_stream connectivity
+                connected = False
+                latency = 50 # Default dummy latency
+                
+                if _market_stream:
+                    # Proxy check: if _ws is set, we are connected
+                    ws = getattr(_market_stream, "_ws", None)
+                    if ws is not None:
+                         # websockets 10.x+ has `open` property or we check state
+                         if hasattr(ws, "open"):
+                             connected = ws.open
+                         else:
+                             # Fallback for older versions or other libs
+                             connected = not getattr(ws, "closed", True)
+                
+                # Emit venue.health (Single update)
+                payload = {
+                     "name": "BINANCE",
+                     "status": "ok" if connected else "down",
+                     "latency_ms": latency,
+                     "connected": connected,
+                     "ts": time.time()
+                }
+                await BROADCASTER.broadcast({
+                    "type": "venue.health",
+                    "data": payload
+                })
+                
+                # Emit venues list (Heatmap/Dashboard)
+                await BROADCASTER.broadcast({
+                    "type": "venues",
+                    "data": [{
+                        "id": "BINANCE",
+                        "name": "BINANCE",
+                        "status": "ok" if connected else "down",
+                        "latency_ms": latency,
+                        "cnt": 1
+                    }]
+                })
+            except Exception:
+                pass
+            await asyncio.sleep(2.0) # 2s freq for responsive UI
+
+    asyncio.create_task(_monitor_loop(), name="venue-monitor")
 
 
 @app.on_event("startup")

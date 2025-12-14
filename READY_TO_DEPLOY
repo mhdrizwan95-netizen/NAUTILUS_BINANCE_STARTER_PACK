@@ -1,0 +1,8 @@
+STATUS=READY (Neuro-Symbolic Mode)
+COMMAND=python3 neuro_symbolic_main.py
+NOTE=System architecture upgraded to Phase 6.
+- BridgeActor: Active (Legacy Bus -> Nautilus)
+- AsyncInference: Active (ProcessPool for HMM)
+- Supervisor: Active (Dynamic Strategies)
+- DeepSeek: Latent (Requires API Key)
+WARNING: Ensure REDIS is running for River Policy persistence.

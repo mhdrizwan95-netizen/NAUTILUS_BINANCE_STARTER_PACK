@@ -74,6 +74,10 @@ class EventBus:
         except _QUEUE_ENV_ERRORS as exc:
             _log_suppressed("queue capacity parse", exc)
             self._queue_max = 2000
+        
+        # [Phase 7 Fix] Concurrency Control
+        self._active_tasks: set[asyncio.Task] = set()
+        self._concurrency_limit = asyncio.Semaphore(100) # Max 100 concurrent events
 
     async def start(self) -> None:
         """Start the event processing loop."""
@@ -103,6 +107,12 @@ class EventBus:
                 pass
             except RuntimeError:
                 pass
+        
+        # Wait for active handlers to finish
+        if self._active_tasks:
+            logging.info(f"[BUS] Waiting for {len(self._active_tasks)} active event tasks...")
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+            
         self._queue = None
         self._loop = None
 
@@ -160,6 +170,7 @@ class EventBus:
         }
 
         if urgent:
+            # Urgent events bypass connection limits and queue
             await self._deliver_event(event)
         else:
             await queue.put(event)
@@ -190,7 +201,15 @@ class EventBus:
             try:
                 # Timeout to allow shutdown
                 event = await asyncio.wait_for(queue.get(), timeout=1.0)
-                await self._deliver_event(event)
+                
+                # [Phase 7 Fix] Non-blocking dispatch
+                # Acquire semaphore slot (waits if full)
+                await self._concurrency_limit.acquire()
+                
+                task = asyncio.create_task(self._deliver_event_wrapper(event))
+                self._active_tasks.add(task)
+                task.add_done_callback(self._active_tasks.discard)
+                
             except TimeoutError:
                 continue
             except RuntimeError:
@@ -199,13 +218,20 @@ class EventBus:
             except _PROCESS_ERRORS as exc:
                 _log_suppressed("process_events", exc)
 
+    async def _deliver_event_wrapper(self, event: dict[str, Any]) -> None:
+        """Wrapper to release semaphore after delivery."""
+        try:
+            await self._deliver_event(event)
+        finally:
+            self._concurrency_limit.release()
+
     async def _deliver_event(self, event: dict[str, Any]) -> None:
         """Deliver event to all subscribers with error isolation."""
         topic = event["topic"]
         data = event["data"]
 
         if topic not in self._subscribers:
-            logging.getLogger(__name__).debug("EventBus: no subscribers for topic %s", topic)
+            # logging.getLogger(__name__).debug("EventBus: no subscribers for topic %s", topic)
             return  # No subscribers for this topic
 
         delivered = 0
@@ -218,7 +244,7 @@ class EventBus:
         for handler, result in zip(handlers, results, strict=False):
             if isinstance(result, Exception):
                 failed += 1
-                func_name = getattr(handler, "__name__", str(handler))
+                # func_name = getattr(handler, "__name__", str(handler))
                 logging.error("[BUS] Handler error on '%s': %s", topic, result)
                 continue
 
@@ -251,6 +277,7 @@ class EventBus:
             "topics_count": len(self._stats["topics"]),
             "queue_size": self._queue.qsize() if self._queue is not None else 0,
             "running": self._running,
+            "concurrency_slots_free": self._concurrency_limit._value if self._concurrency_limit else 0
         }
 
     def fire(self, topic: str, data: dict[str, Any]) -> None:

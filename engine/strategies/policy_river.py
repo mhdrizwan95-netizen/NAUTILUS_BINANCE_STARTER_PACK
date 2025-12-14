@@ -39,6 +39,7 @@ class RiverPolicy:
                 self.redis = redis.Redis(
                     host=host,
                     port=int(os.getenv("REDIS_PORT", "6379")),
+                    password=os.getenv("REDIS_PASSWORD"),
                     db=0,
                     decode_responses=False
                 )

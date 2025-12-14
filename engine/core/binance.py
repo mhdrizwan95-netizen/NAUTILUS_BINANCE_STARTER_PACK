@@ -163,6 +163,13 @@ class BinanceREST:
         self._price_cache: dict[tuple[str, str], float] = {}
         self._lock = asyncio.Lock()
         self._logger = logging.getLogger("engine.binance.rest")
+        # [Optimization] Persistent session
+        self._client = httpx.AsyncClient(timeout=settings.timeout)
+
+    async def close(self) -> None:
+        """Close the underlying persistent HTTP session."""
+        if self._client:
+            await self._client.aclose()
 
     def _clean_symbol(self, symbol: str) -> str:
         return symbol.split(".")[0].upper()
@@ -238,11 +245,13 @@ class BinanceREST:
         timeout = self._settings.timeout
         if market_key == "options":
             path = "/vapi/v1/mark"
-            async with httpx.AsyncClient(
-                base_url=base_url, timeout=timeout, headers=headers
-            ) as client:
-                self._log_request("GET", path, params=payload)
-                response = await client.get(path, params=payload)
+            self._log_request("GET", path, params=payload)
+            response = await self._client.get(base_url + path, params=payload, headers=headers)
+            # async with httpx.AsyncClient(
+            #     base_url=base_url, timeout=timeout, headers=headers
+            # ) as client:
+            #     self._log_request("GET", path, params=payload)
+            #     response = await client.get(path, params=payload)
             response.raise_for_status()
             raw = response.json()
             price = 0.0
@@ -258,9 +267,11 @@ class BinanceREST:
             path = "/fapi/v1/premiumIndex"
         else:
             path = "/api/v3/ticker/price"
-        async with httpx.AsyncClient(base_url=base_url, timeout=timeout, headers=headers) as client:
-            self._log_request("GET", path, params=payload)
-            response = await client.get(path, params=payload)
+        self._log_request("GET", path, params=payload)
+        response = await self._client.get(base_url + path, params=payload, headers=headers)
+        # async with httpx.AsyncClient(base_url=base_url, timeout=timeout, headers=headers) as client:
+        #     self._log_request("GET", path, params=payload)
+        #     response = await client.get(path, params=payload)
         response.raise_for_status()
         data = response.json()
         key = "markPrice" if is_futures else "price"
@@ -288,13 +299,15 @@ class BinanceREST:
         headers = {"X-MBX-APIKEY": self._settings.api_key}
         timeout = self._settings.timeout
         try:
-            async with httpx.AsyncClient(
-                base_url=fallback_base,
-                timeout=timeout,
-                headers=headers,
-            ) as client:
-                self._log_request("GET", fallback_path, params=payload)
-                response = await client.get(fallback_path, params=payload)
+            self._log_request("GET", fallback_path, params=payload)
+            response = await self._client.get(fallback_base + fallback_path, params=payload, headers=headers)
+            # async with httpx.AsyncClient(
+            #     base_url=fallback_base,
+            #     timeout=timeout,
+            #     headers=headers,
+            # ) as client:
+            #     self._log_request("GET", fallback_path, params=payload)
+            #     response = await client.get(fallback_path, params=payload)
             response.raise_for_status()
             data = response.json()
             value = data.get("price", data.get("markPrice"))
@@ -330,9 +343,9 @@ class BinanceREST:
         query = urlencode(params, doseq=True)
         return hmac.new(secret.encode(), query.encode(), sha256).hexdigest()
 
-    async def close(self) -> None:
-        # Clients are created per-call; nothing persistent to close
-        return None
+    # async def close(self) -> None:
+    #     # Clients are created per-call; nothing persistent to close
+    #     return None
 
     async def ticker_price(self, symbol: str, *, market: str | None = None) -> float:
         clean = self._clean_symbol(symbol)
@@ -367,13 +380,18 @@ class BinanceREST:
         if not is_futures:
             return {}
         try:
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.timeout,
+            self._log_request("GET", "/fapi/v1/premiumIndex")
+            response = await self._client.get(
+                base_url + "/fapi/v1/premiumIndex",
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                self._log_request("GET", "/fapi/v1/premiumIndex")
-                response = await client.get("/fapi/v1/premiumIndex")
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=base_url,
+            #     timeout=self._settings.timeout,
+            #     headers={"X-MBX-APIKEY": self._settings.api_key},
+            # ) as client:
+            #     self._log_request("GET", "/fapi/v1/premiumIndex")
+            #     response = await client.get("/fapi/v1/premiumIndex")
             response.raise_for_status()
             data = response.json()
             price_map: dict[str, dict[str, Any]] = {}
@@ -408,15 +426,23 @@ class BinanceREST:
             params = dict(base_params)
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
+            params["signature"] = self._sign(params)
             try:
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
+                path = "/fapi/v2/positionRisk" if is_futures else "/api/v3/account"
+                self._log_request("GET", path, params=params)
+                r = await self._client.get(
+                    base_url + path,
+                    params=params,
                     headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    path = "/fapi/v2/positionRisk" if is_futures else "/api/v3/account"
-                    self._log_request("GET", path, params=params)
-                    r = await client.get(path, params=params)
+                )
+                # async with httpx.AsyncClient(
+                #     base_url=base_url,
+                #     timeout=self._settings.timeout,
+                #     headers={"X-MBX-APIKEY": self._settings.api_key},
+                # ) as client:
+                #     path = "/fapi/v2/positionRisk" if is_futures else "/api/v3/account"
+                #     self._log_request("GET", path, params=params)
+                #     r = await client.get(path, params=params)
                 r.raise_for_status()
                 data = r.json()
                 return (
@@ -455,13 +481,19 @@ class BinanceREST:
             ),
         }
         for _attempt in range(3):
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.timeout,
+            self._log_request("GET", "/fapi/v1/positionSide/dual", params=base_params)
+            r = await self._client.get(
+                base_url + "/fapi/v1/positionSide/dual",
+                params=base_params,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                self._log_request("GET", "/fapi/v1/positionSide/dual", params=base_params)
-                r = await client.get("/fapi/v1/positionSide/dual", params=base_params)
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=base_url,
+            #     timeout=self._settings.timeout,
+            #     headers={"X-MBX-APIKEY": self._settings.api_key},
+            # ) as client:
+            #     self._log_request("GET", "/fapi/v1/positionSide/dual", params=base_params)
+            #     r = await client.get("/fapi/v1/positionSide/dual", params=base_params)
             r.raise_for_status()
             data = r.json()
             is_hedge = bool(data.get("dualSidePosition", False))
@@ -482,14 +514,23 @@ class BinanceREST:
             params = dict(base_params)
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.timeout,
+            params["timestamp"] = _now_ms()
+            params["signature"] = self._sign(params)
+            path = "/fapi/v2/account"
+            self._log_request("GET", path, params=params)
+            r = await self._client.get(
+                base_url + path,
+                params=params,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                path = "/fapi/v2/account"
-                self._log_request("GET", path, params=params)
-                r = await client.get(path, params=params)
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=base_url,
+            #     timeout=self._settings.timeout,
+            #     headers={"X-MBX-APIKEY": self._settings.api_key},
+            # ) as client:
+            #     path = "/fapi/v2/account"
+            #     self._log_request("GET", path, params=params)
+            #     r = await client.get(path, params=params)
             r.raise_for_status()
             return r.json()
         return {}
@@ -511,14 +552,21 @@ class BinanceREST:
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
             try:
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
+                path = "/fapi/v1/leverage"
+                self._log_request("POST", path, data=params)
+                r = await self._client.post(
+                    base_url + path,
+                    data=params,
                     headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    path = "/fapi/v1/leverage"
-                    self._log_request("POST", path, data=params)
-                    r = await client.post(path, data=params)
+                )
+                # async with httpx.AsyncClient(
+                #     base_url=base_url,
+                #     timeout=self._settings.timeout,
+                #     headers={"X-MBX-APIKEY": self._settings.api_key},
+                # ) as client:
+                #     path = "/fapi/v1/leverage"
+                #     self._log_request("POST", path, data=params)
+                #     r = await client.post(path, data=params)
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
@@ -569,21 +617,30 @@ class BinanceREST:
             params = dict(base_params)
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.timeout,
+            if is_futures:
+                path = "/fapi/v1/order"
+            elif market_key == "margin":
+                path = "/sapi/v1/margin/order"
+            elif market_key == "options":
+                path = "/vapi/v1/order"
+            else:
+                path = "/api/v3/order"
+            self._log_request("GET", path, params=params)
+            r = await self._client.get(
+                base_url + path,
+                params=params,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                if is_futures:
-                    path = "/fapi/v1/order"
-                elif market_key == "margin":
-                    path = "/sapi/v1/margin/order"
-                elif market_key == "options":
-                    path = "/vapi/v1/order"
-                else:
-                    path = "/api/v3/order"
-                self._log_request("GET", path, params=params)
-                r = await client.get(path, params=params)
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=base_url,
+            #     timeout=self._settings.timeout,
+            #     headers={"X-MBX-APIKEY": self._settings.api_key},
+            # ) as client:
+            #     if is_futures:
+            #         path = "/fapi/v1/order"
+            #     ((...omitted...))
+            #     self._log_request("GET", path, params=params)
+            #     r = await client.get(path, params=params)
             try:
                 r.raise_for_status()
                 return r.json()
@@ -618,14 +675,21 @@ class BinanceREST:
                 return filt
 
             params = {"symbol": clean}
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.timeout,
+            path = "/fapi/v1/exchangeInfo" if is_futures else "/api/v3/exchangeInfo"
+            self._log_request("GET", path, params=params)
+            r = await self._client.get(
+                base_url + path,
+                params=params,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                path = "/fapi/v1/exchangeInfo" if is_futures else "/api/v3/exchangeInfo"
-                self._log_request("GET", path, params=params)
-                r = await client.get(path, params=params)
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=base_url,
+            #     timeout=self._settings.timeout,
+            #     headers={"X-MBX-APIKEY": self._settings.api_key},
+            # ) as client:
+            #     path = "/fapi/v1/exchangeInfo" if is_futures else "/api/v3/exchangeInfo"
+            #     self._log_request("GET", path, params=params)
+            #     r = await client.get(path, params=params)
             r.raise_for_status()
             info = r.json()
             symbols = info.get("symbols", [])
@@ -693,28 +757,28 @@ class BinanceREST:
             params = dict(base_params)
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.timeout,
+            params["signature"] = self._sign(params)
+            path = "/fapi/v2/account" if is_futures else "/api/v3/account"
+            self._log_request("GET", path, params=params)
+            r = await self._client.get(
+                base_url + path,
+                params=params,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                path = "/fapi/v2/account" if is_futures else "/api/v3/account"
-                self._log_request("GET", path, params=params)
-                r = await client.get(path, params=params)
-                if r.status_code in (418, 429):
-                    import asyncio
-                    import logging
+            )
+            if r.status_code in (418, 429):
+                import asyncio
+                import logging
 
-                    logging.getLogger(__name__).warning(
-                        "[BINANCE] /account returned %s (attempt %d) — backing off. body=%s",
-                        r.status_code,
-                        attempt + 1,
-                        r.text,
-                    )
-                    if attempt < 2:
-                        await asyncio.sleep(0.5 * (attempt + 1))
-                        continue
-                    return {"balances": [], "positions": []}
+                logging.getLogger(__name__).warning(
+                    "[BINANCE] /account returned %s (attempt %d) — backing off. body=%s",
+                    r.status_code,
+                    attempt + 1,
+                    r.text,
+                )
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                return {"balances": [], "positions": []}
             r.raise_for_status()
             return r.json()
         # Fallback (should never reach due to return above)
@@ -734,14 +798,23 @@ class BinanceREST:
             }
             params["signature"] = self._sign(params)
             _, base_url, _ = self._resolve_market("margin")
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.timeout,
+            params["signature"] = self._sign(params)
+            _, base_url, _ = self._resolve_market("margin")
+            path = "/sapi/v1/margin/account"
+            self._log_request("GET", path, params=params)
+            r = await self._client.get(
+                base_url + path,
+                params=params,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                path = "/sapi/v1/margin/account"
-                self._log_request("GET", path, params=params)
-                r = await client.get(path, params=params)
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=base_url,
+            #     timeout=self._settings.timeout,
+            #     headers={"X-MBX-APIKEY": self._settings.api_key},
+            # ) as client:
+            #     path = "/sapi/v1/margin/account"
+            #     self._log_request("GET", path, params=params)
+            #     r = await client.get(path, params=params)
             r.raise_for_status()
             return r.json()
         except BINANCE_DATA_ERRORS as exc:
@@ -772,14 +845,23 @@ class BinanceREST:
             params["symbol"] = self._clean_symbol(symbol)
         params["signature"] = self._sign(params)
         _, base_url, _ = self._resolve_market("margin")
-        async with httpx.AsyncClient(
-            base_url=base_url,
-            timeout=self._settings.timeout,
+        params["signature"] = self._sign(params)
+        _, base_url, _ = self._resolve_market("margin")
+        path = "/sapi/v1/margin/loan"
+        self._log_request("POST", path, data=params)
+        r = await self._client.post(
+            base_url + path,
+            data=params,
             headers={"X-MBX-APIKEY": self._settings.api_key},
-        ) as client:
-            path = "/sapi/v1/margin/loan"
-            self._log_request("POST", path, data=params)
-            r = await client.post(path, data=params)
+        )
+        # async with httpx.AsyncClient(
+        #     base_url=base_url,
+        #     timeout=self._settings.timeout,
+        #     headers={"X-MBX-APIKEY": self._settings.api_key},
+        # ) as client:
+        #     path = "/sapi/v1/margin/loan"
+        #     self._log_request("POST", path, data=params)
+        #     r = await client.post(path, data=params)
         r.raise_for_status()
         return r.json()
 
@@ -807,28 +889,44 @@ class BinanceREST:
             params["symbol"] = self._clean_symbol(symbol)
         params["signature"] = self._sign(params)
         _, base_url, _ = self._resolve_market("margin")
-        async with httpx.AsyncClient(
-            base_url=base_url,
-            timeout=self._settings.timeout,
+        params["signature"] = self._sign(params)
+        _, base_url, _ = self._resolve_market("margin")
+        path = "/sapi/v1/margin/repay"
+        self._log_request("POST", path, data=params)
+        r = await self._client.post(
+            base_url + path,
+            data=params,
             headers={"X-MBX-APIKEY": self._settings.api_key},
-        ) as client:
-            path = "/sapi/v1/margin/repay"
-            self._log_request("POST", path, data=params)
-            r = await client.post(path, data=params)
+        )
+        # async with httpx.AsyncClient(
+        #     base_url=base_url,
+        #     timeout=self._settings.timeout,
+        #     headers={"X-MBX-APIKEY": self._settings.api_key},
+        # ) as client:
+        #     path = "/sapi/v1/margin/repay"
+        #     self._log_request("POST", path, data=params)
+        #     r = await client.post(path, data=params)
         r.raise_for_status()
         return r.json()
 
     async def klines(self, symbol: str, interval: str = "1m", limit: int = 30) -> list:
+
         try:
             path = "/fapi/v1/klines" if self._is_futures else "/api/v3/klines"
             params = {"symbol": symbol, "interval": interval, "limit": limit}
-            async with httpx.AsyncClient(
-                base_url=self._base,
-                timeout=self._settings.timeout,
+            self._log_request("GET", path, params=params)
+            r = await self._client.get(
+                self._base + path,
+                params=params,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                self._log_request("GET", path, params=params)
-                r = await client.get(path, params=params)
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=self._base,
+            #     timeout=self._settings.timeout,
+            #     headers={"X-MBX-APIKEY": self._settings.api_key},
+            # ) as client:
+            #     self._log_request("GET", path, params=params)
+            #     r = await client.get(path, params=params)
             r.raise_for_status()
             return r.json()
         except BINANCE_DATA_ERRORS as exc:
@@ -841,13 +939,21 @@ class BinanceREST:
             market_key, base_url, is_futures = self._resolve_market(market)
             path = "/fapi/v1/ticker/bookTicker" if is_futures else "/api/v3/ticker/bookTicker"
             params = {"symbol": clean}
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=self._settings.timeout,
+            path = "/fapi/v1/ticker/bookTicker" if is_futures else "/api/v3/ticker/bookTicker"
+            params = {"symbol": clean}
+            self._log_request("GET", path, params=params)
+            r = await self._client.get(
+                base_url + path,
+                params=params,
                 headers={"X-MBX-APIKEY": self._settings.api_key},
-            ) as client:
-                self._log_request("GET", path, params=params)
-                r = await client.get(path, params=params)
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=base_url,
+            #     timeout=self._settings.timeout,
+            #     headers={"X-MBX-APIKEY": self._settings.api_key},
+            # ) as client:
+            #     self._log_request("GET", path, params=params)
+            #     r = await client.get(path, params=params)
             r.raise_for_status()
             return r.json()
         except BINANCE_DATA_ERRORS as exc:
@@ -878,14 +984,21 @@ class BinanceREST:
         params["signature"] = self._sign(params)
         
         try:
-            async with httpx.AsyncClient(
-                base_url=base_url,
-                timeout=settings.timeout,
+            path = "/sapi/v1/asset/dust"
+            self._log_request("POST", path, data=params)
+            r = await self._client.post(
+                base_url + path,
+                data=params,
                 headers={"X-MBX-APIKEY": settings.api_key},
-            ) as client:
-                path = "/sapi/v1/asset/dust"
-                self._log_request("POST", path, data=params)
-                r = await client.post(path, data=params)
+            )
+            # async with httpx.AsyncClient(
+            #     base_url=base_url,
+            #     timeout=settings.timeout,
+            #     headers={"X-MBX-APIKEY": settings.api_key},
+            # ) as client:
+            #     path = "/sapi/v1/asset/dust"
+            #     self._log_request("POST", path, data=params)
+            #     r = await client.post(path, data=params)
             r.raise_for_status()
             return r.json()
         except httpx.HTTPStatusError as exc:
@@ -920,19 +1033,31 @@ class BinanceREST:
             params["recvWindow"] = settings.recv_window
             params["signature"] = self._sign(params)
             try:
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
+                if is_futures:
+                    path = "/fapi/v1/userTrades"
+                elif market_key == "margin":
+                    path = "/sapi/v1/margin/myTrades"
+                else:
+                    path = "/api/v3/myTrades"
+                self._log_request("GET", path, params=params)
+                r = await self._client.get(
+                    base_url + path,
+                    params=params,
                     headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    if is_futures:
-                        path = "/fapi/v1/userTrades"
-                    elif market_key == "margin":
-                        path = "/sapi/v1/margin/myTrades"
-                    else:
-                        path = "/api/v3/myTrades"
-                    self._log_request("GET", path, params=params)
-                    r = await client.get(path, params=params)
+                )
+                # async with httpx.AsyncClient(
+                #     base_url=base_url,
+                #     timeout=self._settings.timeout,
+                #     headers={"X-MBX-APIKEY": self._settings.api_key},
+                # ) as client:
+                #     if is_futures:
+                #         path = "/fapi/v1/userTrades"
+                #     elif market_key == "margin":
+                #         path = "/sapi/v1/margin/myTrades"
+                #     else:
+                #         path = "/api/v3/myTrades"
+                #     self._log_request("GET", path, params=params)
+                #     r = await client.get(path, params=params)
                 r.raise_for_status()
                 data = r.json()
             except httpx.HTTPStatusError as e:
@@ -1000,13 +1125,19 @@ class BinanceREST:
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
             try:
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
+                self._log_request("POST", path, data=params)
+                r = await self._client.post(
+                    base_url + path,
+                    data=params,
                     headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    self._log_request("POST", path, data=params)
-                    r = await client.post(path, data=params)
+                )
+                # async with httpx.AsyncClient(
+                #     base_url=base_url,
+                #     timeout=self._settings.timeout,
+                #     headers={"X-MBX-APIKEY": self._settings.api_key},
+                # ) as client:
+                #     self._log_request("POST", path, data=params)
+                #     r = await client.post(path, data=params)
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
@@ -1088,13 +1219,19 @@ class BinanceREST:
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
             try:
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
+                self._log_request("POST", path, data=params)
+                r = await self._client.post(
+                    base_url + path,
+                    data=params,
                     headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    self._log_request("POST", path, data=params)
-                    r = await client.post(path, data=params)
+                )
+                # async with httpx.AsyncClient(
+                #     base_url=base_url,
+                #     timeout=self._settings.timeout,
+                #     headers={"X-MBX-APIKEY": self._settings.api_key},
+                # ) as client:
+                #     self._log_request("POST", path, data=params)
+                #     r = await client.post(path, data=params)
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
@@ -1221,13 +1358,19 @@ class BinanceREST:
             signed["timestamp"] = _now_ms()
             signed["signature"] = self._sign(signed)
             try:
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
+                self._log_request("DELETE", path, params=signed)
+                resp = await self._client.delete(
+                    base_url + path,
+                    params=signed,
                     headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    self._log_request("DELETE", path, params=signed)
-                    resp = await client.delete(path, params=signed)
+                )
+                # async with httpx.AsyncClient(
+                #     base_url=base_url,
+                #     timeout=self._settings.timeout,
+                #     headers={"X-MBX-APIKEY": self._settings.api_key},
+                # ) as client:
+                #     self._log_request("DELETE", path, params=signed)
+                #     resp = await client.delete(path, params=signed)
                 resp.raise_for_status()
                 try:
                     return resp.json()
@@ -1299,14 +1442,21 @@ class BinanceREST:
             params["timestamp"] = _now_ms()
             params["signature"] = self._sign(params)
             try:
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
+                path = "/fapi/v1/order"
+                self._log_request("POST", path, data=params)
+                r = await self._client.post(
+                    base_url + path,
+                    data=params,
                     headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    path = "/fapi/v1/order"
-                    self._log_request("POST", path, data=params)
-                    r = await client.post(path, data=params)
+                )
+                # async with httpx.AsyncClient(
+                #     base_url=base_url,
+                #     timeout=self._settings.timeout,
+                #     headers={"X-MBX-APIKEY": self._settings.api_key},
+                # ) as client:
+                #     path = "/fapi/v1/order"
+                #     self._log_request("POST", path, data=params)
+                #     r = await client.post(path, data=params)
                 r.raise_for_status()
                 return r.json()
             except httpx.HTTPStatusError as e:
@@ -1347,13 +1497,19 @@ class BinanceREST:
 
         for attempt in range(max(1, retries)):
             try:
-                async with httpx.AsyncClient(
-                    base_url=base_url,
-                    timeout=self._settings.timeout,
+                self._log_request("POST", path, data=signed)
+                resp = await self._client.post(
+                    base_url + path,
+                    data=signed,
                     headers={"X-MBX-APIKEY": self._settings.api_key},
-                ) as client:
-                    self._log_request("POST", path, data=signed)
-                    resp = await client.post(path, data=signed)
+                )
+                # async with httpx.AsyncClient(
+                #     base_url=base_url,
+                #     timeout=self._settings.timeout,
+                #     headers={"X-MBX-APIKEY": self._settings.api_key},
+                # ) as client:
+                #     self._log_request("POST", path, data=signed)
+                #     resp = await client.post(path, data=signed)
                 resp.raise_for_status()
                 return resp.json()
             except httpx.HTTPStatusError as exc:

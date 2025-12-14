@@ -8,6 +8,13 @@ from shared.dry_run import install_dry_run_guard, log_dry_run_banner
 
 from . import model_store
 from .auth import require_role
+try:
+    from shared.logging import setup_logging
+    setup_logging("ml_service")
+except ImportError:
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("ml_service").warning("Shared logging not available.")
 from .inference import predict_proba, start_watchdog
 from .schemas import (
     ModelInfo,

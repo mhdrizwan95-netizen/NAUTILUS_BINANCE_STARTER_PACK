@@ -114,9 +114,13 @@ Tips:
 - Always surface configuration via environment variables or dataclasses—never hard-code credentials or sensitive paths.
 - For file writes, use atomic patterns (`Path.write_text` to temp file + `Path.replace`) as seen in `engine/state.py`.
 - Instrument new behaviours with Prometheus metrics or logs; register metrics in `engine/metrics.py` or `ops/prometheus.py`.
-- Route errors through FastAPI HTTP exceptions with informative `detail` payloads; log context but avoid leaking secrets.
-- When touching `engine/strategy.py`, ensure `RiskRails.check_order` remains in the path and `Cache` idempotency semantics are preserved.
-- Follow existing logging style: structured messages with component prefixes (`logger.info("[COMPONENT] ...")`).
+- Route errors through FastAPI HTTP exceptions with informative `detail` payloads.
+- **Logging**: Use `shared.logging`. Do not use `print()`. Do not manually redact secrets; the JSON formatter handles it.
+  ```python
+  import logging
+  logger = logging.getLogger(__name__)  # JSON formatter acts on the root
+  logger.info("Processing order", extra={"order_id": "..."})
+  ```
 - Keep docstrings and comments concise; add explanatory comments only when intent is non-obvious.
 
 ## Observability during development
@@ -143,4 +147,13 @@ Tips:
 - Mention relevant Makefile targets or configuration knobs in commit messages to help operators.
 - Provide roll-back instructions or release notes if changes require coordinated deploys.
 
-Happy hacking! Keep the docs current—the quickest way to land smoother changes is to ensure future you (or the next teammate) can find the context right here.
+## Extending the Neuro-Symbolic Brain
+
+### Adding new AI Models
+1.  **Safety**: Never run heavy inference in the main thread.
+2.  **Implementation**: Add a top-level static function in `engine/inference`.
+3.  **Registration**: Add a wrapper method in `AsyncInferenceEngine.py` using `run_in_executor`.
+
+### Adding Strategies
+1.  **Define**: Create your strategy class inheriting from `Strategy`.
+2.  **Supervise**: Update `StrategySupervisor.py` to instantiate and add your strategy based on bridge signals.

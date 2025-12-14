@@ -1,4 +1,4 @@
-import { LayoutDashboard, Target, Wallet, Brain, Settings, Activity, Terminal } from "lucide-react";
+import { LayoutDashboard, Target, Wallet, Brain, Settings, Activity, Terminal, Scan } from "lucide-react";
 import { motion } from "motion/react";
 import { Suspense, lazy, useEffect, useState } from "react";
 
@@ -26,6 +26,12 @@ const BacktestingTab = lazy(() =>
 );
 const SettingsTab = lazy(() =>
   import("./tabs/SettingsTab").then((module) => ({ default: module.SettingsTab })),
+);
+const MarketScannerTab = lazy(() =>
+  import("./tabs/MarketScannerTab").then((module) => ({ default: module.MarketScannerTab })),
+);
+const LogViewerTab = lazy(() =>
+  import("./tabs/LogViewerTab").then((module) => ({ default: module.LogViewerTab })),
 );
 
 export function TabbedInterface() {
@@ -74,11 +80,27 @@ export function TabbedInterface() {
           </TabsTrigger>
 
           <TabsTrigger
+            value="scanner"
+            className="gap-2 data-[state=active]:bg-zinc-800/50 data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-t-lg rounded-b-none"
+          >
+            <Scan className="w-4 h-4" />
+            <span>Scanner</span>
+          </TabsTrigger>
+
+          <TabsTrigger
             value="system-internals"
             className="gap-2 data-[state=active]:bg-zinc-800/50 data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-t-lg rounded-b-none"
           >
             <Activity className="w-4 h-4" />
             <span>System Internals</span>
+          </TabsTrigger>
+
+          <TabsTrigger
+            value="logs"
+            className="gap-2 data-[state=active]:bg-zinc-800/50 data-[state=active]:text-cyan-400 data-[state=active]:border-b-2 data-[state=active]:border-cyan-400 rounded-t-lg rounded-b-none"
+          >
+            <Terminal className="w-4 h-4" />
+            <span>System Logs</span>
           </TabsTrigger>
 
           <TabsTrigger
@@ -127,9 +149,21 @@ export function TabbedInterface() {
             </Suspense>
           </TabsContent>
 
+          <TabsContent value="scanner" className="m-0 h-full">
+            <Suspense fallback={<TabSkeleton />}>
+              <MarketScannerTab />
+            </Suspense>
+          </TabsContent>
+
           <TabsContent value="system-internals" className="m-0 h-full">
             <Suspense fallback={<TabSkeleton />}>
               <HealthMonitor />
+            </Suspense>
+          </TabsContent>
+
+          <TabsContent value="logs" className="m-0 h-full">
+            <Suspense fallback={<TabSkeleton />}>
+              <LogViewerTab />
             </Suspense>
           </TabsContent>
 

@@ -32,12 +32,14 @@ def load_ops_token() -> str | None:
 
 def require_ops_token(request: Request) -> str:
     """Validate the inbound Ops control token, raising an HTTP error if missing."""
-    # Bypass validation as per user request
-    return "bypass-token"
-    # expected = load_ops_token()
-    # if not expected:
-    #     raise HTTPException(status_code=503, detail="OPS_API_TOKEN not configured on engine")
-    # provided = request.headers.get("X-Ops-Token") or request.headers.get("X-OPS-TOKEN")
-    # if not provided or not hmac.compare_digest(provided, expected):
-    #     raise HTTPException(status_code=401, detail="Invalid or missing X-Ops-Token")
-    # return expected
+    if os.getenv("GLASS_COCKPIT", "0") == "1":
+        _log.warning("Ops Auth: GLASS_COCKPIT=1, bypassing token validation")
+        return "bypass-token"
+
+    expected = load_ops_token()
+    if not expected:
+        raise HTTPException(status_code=503, detail="OPS_API_TOKEN not configured on engine")
+    provided = request.headers.get("X-Ops-Token") or request.headers.get("X-OPS-TOKEN")
+    if not provided or not hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Invalid or missing X-Ops-Token")
+    return expected

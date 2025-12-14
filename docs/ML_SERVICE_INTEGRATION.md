@@ -31,7 +31,7 @@ All services share the `data`, `models`, and `shared` volumes declared in the co
 Each service now has a complete module structure:
 
 **ml_service** (`services/ml_service/app/`):
-- `main.py` - FastAPI app with `/train`, `/predict`, `/model` endpoints
+- `main.py` - FastAPI app with `/train`, `/predict`, `/model` endpoints (Logs: JSON via `shared.logging`)
 - `model_store.py` - Model versioning, registry, and persistence
 - `trainer.py` - HMM training with synthetic data fallback
 - `inference.py` - Regime prediction with model caching

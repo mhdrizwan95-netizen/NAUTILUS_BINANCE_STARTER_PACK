@@ -4,19 +4,27 @@ Nautilus Ops API - Gateway to Engine Services
 This module provides a facade API that proxies requests to the engine
 and aggregates data for the frontend dashboard.
 """
-from fastapi import FastAPI, Response, HTTPException, Request
+import os
+import time
+import httpx
+import logging
+import asyncio
+import secrets
+import websockets
+import aiofiles
+from pathlib import Path
+from fastapi import FastAPI, Response, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import FileResponse, JSONResponse
-import os
-import httpx
-import asyncio
-import time
-import logging
-from fastapi import FastAPI, Response, HTTPException, Request, WebSocket, WebSocketDisconnect
-import websockets
+try:
+    from shared.logging import setup_logging
+    setup_logging("ops_api")
+except ImportError:
+    # Fallback if shared volume not mounted yet
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("ops.api").warning("Shared logging module not found. Using default.")
 
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("ops.api")
 
 APP = FastAPI(title="Nautilus Ops", version="0.2.0")
@@ -468,6 +476,110 @@ async def get_metrics_models():
     except Exception as e:
         logger.exception(f"Failed to fetch models: {e}")
     return {"data": [], "page": {"nextCursor": None, "prevCursor": None, "limit": 50}}
+
+
+@APP.post("/api/ai/generate")
+async def generate_ai_content(request: Request):
+    """Proxy AI generation to Google Gemini (server-side)."""
+    try:
+        data = await request.json()
+        prompt = data.get("prompt", "")
+        if not prompt:
+            raise HTTPException(status_code=400, detail="Prompt is required")
+            
+        api_key = os.getenv("GEMINI_API_KEY")
+        if not api_key:
+            # Check if we are in a dev environment with a hardcoded fallback (Discouraged but handling legacy)
+            # For now, just error out securely
+            raise HTTPException(status_code=503, detail="AI service not configured (Server missing GEMINI_API_KEY)")
+
+        client = await get_client()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key={api_key}"
+        
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        
+        resp = await client.post(url, json=payload, timeout=10.0)
+        
+        if resp.status_code != 200:
+            logger.warning(f"Gemini API error: {resp.text}")
+            raise HTTPException(status_code=resp.status_code, detail="AI Provider Error")
+            
+        return resp.json()
+        
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="AI Provider Timeout")
+    except Exception as e:
+        logger.exception(f"AI Generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
+
+
+@APP.get("/api/scanner/state")
+async def get_scanner_state():
+    """Read the latest Symbol Scanner state."""
+    try:
+        # Path is shared via volume mapping to /app/data
+        path = "/app/data/runtime/symbol_scanner_state.json"
+        
+        # In dev mode, it might be relative
+        if not os.path.exists(path):
+            if os.path.exists("data/runtime/symbol_scanner_state.json"):
+                path = "data/runtime/symbol_scanner_state.json"
+        
+        if not os.path.exists(path):
+             return {"selected": [], "scores": {}}
+
+        import aiofiles
+        async with aiofiles.open(path, mode='r') as f:
+            content = await f.read()
+            return json.loads(content)
+            
+    except Exception as e:
+        logger.warning(f"Failed to read scanner state: {e}")
+        return {"selected": [], "scores": {}}
+
+
+@APP.get("/api/logs")
+async def get_logs(lines: int = Query(100, ge=1, le=2000), filter: str | None = None):
+    """
+    Retrieve the last N lines of the system log.
+    Supports simple text filtering.
+    """
+    log_file = Path("/app/data/logs/system.jsonl")
+    
+    # Handle dev environment path difference
+    if not log_file.exists():
+        if os.path.exists("data/logs/system.jsonl"):
+            log_file = Path("data/logs/system.jsonl")
+
+    if not log_file.exists():
+         return {"logs": []}
+    
+    try:
+        async with aiofiles.open(log_file, mode='r') as f:
+            # Efficiently read last N lines is tricky with async, 
+            # but file is rotated at 10MB, so reading all lines in memory is acceptable for now (~1-2s max)
+            content = await f.readlines()
+            
+            # Filter if requested
+            if filter:
+                filter_lower = filter.lower()
+                content = [line for line in content if filter_lower in line.lower()]
+                
+            # Take last N
+            selection = content[-lines:]
+            
+            # Parse JSON
+            parsed_logs = []
+            for line in selection:
+                try:
+                    parsed_logs.append(json.loads(line))
+                except json.JSONDecodeError:
+                    parsed_logs.append({"ts": "", "level": "RAW", "msg": line.strip(), "service": "unknown"})
+            
+            return {"logs": parsed_logs}
+    except Exception as e:
+        logger.error(f"Failed to read logs: {e}")
+        return {"logs": [], "error": str(e)}
 
 
 # ============================================================================

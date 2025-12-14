@@ -87,15 +87,14 @@ services:
       - ./engine/logs:/app/engine/logs:rw
       - ./data:/app/data:rw
       - ml_models_volume:/app/engine/models:ro
+      - ./shared:/app/shared:ro
     ports:
       - 9103:8003
     networks:
       - trading_net
   engine_binance:
     build: *id002
-    command: '/usr/bin/tini -- uvicorn engine.app:app --host 0.0.0.0 --port 8003 --workers 1 --timeout-keep-alive 10 --limit-concurrency 1024
-
-      '
+    command: '/usr/bin/tini -- python production_main.py'
     logging: *id001
     dns: *id003
     environment:
@@ -142,7 +141,7 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       # Relaxed constraints for dry-run testing
-      - STRATEGY_DRY_RUN=false
+      - STRATEGY_DRY_RUN=true
       - TREND_ATR_TARGET_MULT=2.5
       - TREND_ATR_STOP_MULT=1.0
       - TREND_RISK_PCT=0.01
@@ -176,6 +175,7 @@ services:
       - ./data:/app/data:rw
       - ml_models_volume:/app/engine/models:ro
       - ./config/external_feeds.yaml:/app/config/external_feeds.yaml:ro
+      - ./shared:/app/shared:ro
     ports:
       - 8003:8003
     networks:
@@ -213,10 +213,14 @@ services:
       UI_METRICS_SOURCE: direct
       HMM_URL: http://ml_service:8000
       ENGINE_URL: http://engine_binance:8003
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
     volumes:
       - ./ops:/app/ops:rw
       - ./frontend:/app/frontend:ro
       - ./data:/app/data:rw
+      - ./shared:/app/shared:ro
     ports:
       - ${OPS_PORT:-8002}:8002
     healthcheck:
@@ -421,7 +425,7 @@ services:
     networks:
       - trading_net
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
 networks:
   trading_net:
     external: true

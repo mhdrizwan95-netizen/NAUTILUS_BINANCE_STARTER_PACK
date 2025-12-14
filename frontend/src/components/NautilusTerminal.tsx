@@ -35,6 +35,7 @@ import {
   Zap,
   Wifi,
   TrendingUp,
+  X,
   XCircle,
   List,
   Sliders,
@@ -78,38 +79,30 @@ interface SystemStatus {
 
 // --- Gemini API Integration ---
 
-const apiKey = ""; // API Key provided by environment (Insert your key here or use env var)
-
+// --- Gemini API Integration ---
+// [SECURE] Proxied via Ops API to keep keys server-side
 const generateGeminiResponse = async (prompt: string): Promise<string> => {
-  if (!apiKey) {
-    console.error("Gemini API key is missing.");
-    return "Error: API key missing. Please configure your API key in NautilusTerminal.tsx.";
-  }
-
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-  const payload = {
-    contents: [{ parts: [{ text: prompt }] }]
-  };
-
   try {
-    const response = await fetch(url, {
-      method: 'POST',
+    const response = await fetch("/api/ai/generate", {
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ prompt }),
     });
 
     if (!response.ok) {
+      if (response.status === 503) {
+        return "AI Service Unavailable (Key not configured on server).";
+      }
       throw new Error(`HTTP error! status: ${response.status}`);
     }
 
     const data = await response.json();
     return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response generated.";
   } catch (error) {
-    console.error("Gemini API Error:", error);
-    return "Error connecting to AI service.";
+    console.error("Gemini Proxy Error:", error);
+    return "Error connecting to Nautilus AI service.";
   }
 };
 

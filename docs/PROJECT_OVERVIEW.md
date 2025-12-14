@@ -12,8 +12,9 @@ This brief is for new developers joining the Nautilus trading stack. It captures
 
 | Area | Status | Notes |
 |------|--------|-------|
-| Execution engine | ✅ | `engine/app.py` serves REST APIs for orders, reconciliation, metrics; hardened for **Binance spot/futures only**. |
-| Strategy runtime | ✅ | Built-in MA + HMM ensemble plus unified strategies (`engine/strategy.py`, `engine/strategies/policy_hmm.py`, `engine/strategies/trend_follow.py`, `engine/strategies/listing_sniper.py`). |
+| Execution engine | ✅ | `engine/app.py` (Legacy) replaced by `neuro_symbolic_main.py`. Hardened for **Binance Futures**. |
+| Strategy runtime | ✅ | **Neuro-Symbolic**: Bridge Actor + Supervisor. Dynamic Strategy Rotation enabled. |
+| AI Integration | ✅ | **Non-Blocking**: `AsyncInferenceEngine` uses ProcessPools for HMM/River. |
 | ML service | ✅ | `services/ml_service/app/` - HMM training, model registry, hot-reload. Modules: `model_store.py`, `trainer.py`, `inference.py`. |
 | Param controller | ✅ | `services/param_controller/app/` - LinTS bandit for parameter selection. Modules: `bandit.py`, `store.py`, `config.py`. |
 | Data ingester | ✅ | `services/data_ingester/app/` - CCXT-powered OHLCV fetcher with watermark tracking. |
@@ -29,21 +30,22 @@ This brief is for new developers joining the Nautilus trading stack. It captures
 
 ## 3. System Topology
 
-```
-Strategies / ML  ─┐
-                  │  (signals)
-                  ▼
-             RiskRails
-                  ▼
-           OrderRouterExt ──► Venue client (Binance)
-                  ▼
-            Portfolio / Persistence
-                  ▼
-      Prometheus metrics & Event bus
-                  ▼
-         Ops API / Governance layer
-                  ▼
-     Dashboards, alerts, external tooling
+```mermaid
+graph TD
+    subgraph LegacyShadowSystem ["Legacy Shadow System"]
+        Scanner["SymbolScanner"]
+    end
+
+    subgraph NautilusEngine ["Nautilus Active Engine (Neuro-Symbolic)"]
+        Bridge["BridgeActor"]
+        Supervisor["StrategySupervisor"]
+        AsyncEngine["AsyncInferenceEngine"]
+        
+        Bridge -->|Polls| Scanner
+        Bridge -->|Injects| Supervisor
+        Supervisor -->|Request Inference| AsyncEngine
+        AsyncEngine -->|ProcessPool| Models["HMM/River"]
+    end
 ```
 
 - **Engine services:** Trader/exporter pair for Binance (`hmm_engine_binance`, `hmm_engine_binance_exporter`), each exposing `/orders`, `/metrics`, `/readyz`.
@@ -95,6 +97,9 @@ Strategies / ML  ─┐
 - Observability stack with metrics, dashboards, log ingestion, and validation tooling.
 - Documentation refresh (README, system design, developer guide, ops runbook, incident write-ups).
 - Risk management (exposure caps, breakers, rate limits) and automated reconciliation.
+- **System Observability** - Centralized JSON logging (`shared/logging.py`) with redaction and consistent format across all containers.
+- **Frontend Integration** - Added **Market Scanner Tab** and **Risk Monitor** visualization.
+- **Infrastructure Hardening** - Bound Redis to localhost, audited secrets, and implemented robust import fallbacks.
 
 ### In Progress / Next Priorities
 - **Backtest Suite:** Implement `services/backtest_suite/app/` (see `ROADMAP.md` for detailed checklist).
