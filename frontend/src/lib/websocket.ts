@@ -230,7 +230,7 @@ export function initializeWebSocket(
     // Use port 8002 (Ops) which proxies to Engine, unless overridden
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const port = window.location.port ? `:${window.location.port}` : "";
-    return `${protocol}//${host}${port}/ws`;
+    return `${protocol}//${host}${port}/ws/telemetry`;
   };
   const baseUrl = import.meta.env?.VITE_WS_URL ?? getEngineUrl();
   const wsUrl = buildWebSocketUrl(baseUrl, session);

@@ -426,6 +426,38 @@ services:
       - trading_net
     ports:
       - "127.0.0.1:6379:6379"
+  hmm_worker:
+    build: .
+    container_name: hmm_worker
+    command: python3 -m engine.neuro_optimizer
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - .:/app
+      - data_volume:/app/data
+    networks:
+      - trading_net
+    depends_on:
+      - redis
+
+  hmm_gateway:
+    build: .
+    container_name: hmm_gateway
+    command: uvicorn ops.server:APP --host 0.0.0.0 --port 8005
+    ports:
+      - "8005:8005"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATA_DIR=/app/data
+    volumes:
+      - .:/app
+      - data_volume:/app/data
+    networks:
+      - trading_net
+    depends_on:
+      - redis
+
 networks:
   trading_net:
     external: true
